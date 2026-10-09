@@ -22,18 +22,37 @@
 
 ## Status
 
-Spool runs one household's library day to day. It is young, it is developed and tested on macOS only, and it is built for a single trusted user on a private network. It supports Usenet only (no torrents), Newznab indexers, TMDB for movies and TVmaze for series.
+Spool runs one household's library day to day. It is young, and it is built for a single trusted user on a private network. It runs on macOS and Linux, natively or in a container; the test suite runs on both. It supports Usenet only (no torrents), Newznab indexers, TMDB for movies and TVmaze for series.
 
 ## Getting started
+
+### With Docker
+
+```sh
+git clone https://github.com/rewtraw/spool && cd spool
+mkdir -p data                      # owned by the user in compose.yaml
+$EDITOR compose.yaml               # set the user and the path to your media
+docker compose up -d --build       # http://localhost:7979
+```
+
+The image carries the helper tools Spool calls. Everything Spool keeps lives in `/data`. Mount the library and the downloads folder under one path, so a finished download is moved into the library instead of copied.
+
+On **TrueNAS SCALE**, add it as a custom app with the same settings as [compose.yaml](compose.yaml): port 7979, a dataset for `/data`, your media dataset at `/media`, and the apps user (568) as the user.
+
+### From source
 
 You need Rust, [Bun](https://bun.sh), and the helper tools Spool calls: `par2` for repair, `7zz` for extraction and `ffprobe` for reading media files.
 
 ```sh
-brew install par2 sevenzip ffmpeg
+brew install par2 sevenzip ffmpeg                # macOS
+sudo apt install par2 7zip ffmpeg                # Debian, Ubuntu
+
 git clone https://github.com/rewtraw/spool && cd spool
-(cd web && bun install && bun run build)    # the server embeds web/dist
-cargo run --release -p spool -- serve       # http://localhost:7979
+(cd web && bun install && bun run build)         # the server embeds web/dist
+cargo run --release -p spool -- serve            # http://localhost:7979
 ```
+
+Debian's and Ubuntu's `7zip` cannot open RAR archives. Spool unpacks the common uncompressed kind itself, so most posts are unaffected; for the rest, install 7-Zip from [its own releases](https://github.com/ip7z/7zip/releases), as the container image does.
 
 Then, in Settings:
 
@@ -58,7 +77,7 @@ spool download x.nzb --out DIR      # run one NZB through the engine, outside th
 spool backup DEST                   # write a consistent copy of the database
 ```
 
-Data lives in `~/Library/Application Support/Spool`. The database holds indexer keys and Usenet passwords and is created readable only by its owner.
+Data lives in `~/Library/Application Support/Spool` on macOS, `~/.local/share/spool` on Linux and `/data` in the container; `--data-dir` or `SPOOL_DATA_DIR` puts it elsewhere. The database holds indexer keys and Usenet passwords and is created readable only by its owner.
 
 ## Using it from an AI assistant
 
@@ -70,9 +89,11 @@ claude mcp add --transport http --scope user spool http://localhost:7979/mcp --h
 
 Tools cover status, finding and adding titles, searching and choosing releases, managing downloads, the archive, disk space, Plex, logs, and a `diagnose` tool that answers "why has this not downloaded" in one call. Anything that deletes files needs an explicit confirmation.
 
-## Running it as a service on a Mac
+## Running it as a service
 
-`deploy/deploy.sh` builds Spool, installs it as a LaunchAgent on a Mac over SSH and restarts it. It reads its settings from the environment or from `deploy/local.env`:
+**Linux.** [deploy/spool.service](deploy/spool.service) is a systemd user unit; the steps to install it are at the top of the file.
+
+**macOS.** `deploy/deploy.sh` builds Spool, installs it as a LaunchAgent on a Mac over SSH and restarts it. It reads its settings from the environment or from `deploy/local.env`:
 
 ```sh
 SPOOL_HOST=my-mac deploy/deploy.sh
@@ -94,7 +115,8 @@ cargo test --workspace     # needs ffmpeg, par2 and 7zz for the full suite
 | `crates/spool` | The server: catalog, indexers, search and grab, import journal, scheduler, API, MCP, CLI. |
 | `web` | The Svelte web app. |
 | `tools` | Scripts that generate the ported pattern table and extract upstream test cases. |
-| `deploy` | LaunchAgent template and install script. |
+| `deploy` | Service files and the macOS install script. |
+| `Dockerfile`, `compose.yaml` | The container image and an example of running it. |
 
 The tests run the real application against a fake indexer and a fake Usenet server, end to end. [docs/architecture.md](docs/architecture.md) describes how the pieces fit.
 

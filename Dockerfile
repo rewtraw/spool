@@ -21,10 +21,11 @@ RUN cargo build --release --locked -p spool
 # 7-Zip from its authors: the build in Debian's main archive leaves out RAR support.
 FROM debian:bookworm-slim AS sevenzip
 ARG TARGETARCH
-ARG SEVENZIP_VERSION=2409
+ARG SEVENZIP_VERSION=26.01
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
  && case "$TARGETARCH" in arm64) arch=arm64 ;; *) arch=x64 ;; esac \
- && curl -fsSL "https://www.7-zip.org/a/7z${SEVENZIP_VERSION}-linux-${arch}.tar.xz" | tar -xJ -C /usr/local/bin 7zz
+ && file="7z$(echo "$SEVENZIP_VERSION" | tr -d .)-linux-${arch}.tar.xz" \
+ && curl -fsSL "https://github.com/ip7z/7zip/releases/download/${SEVENZIP_VERSION}/${file}" | tar -xJ -C /usr/local/bin 7zz
 
 FROM debian:bookworm-slim
 RUN apt-get update \

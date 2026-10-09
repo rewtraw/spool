@@ -203,13 +203,15 @@
   <section id="start">
     <p class="eyebrow">Get started</p>
     <h2>Build it and point it at your library.</h2>
-    <p class="sub">Spool is developed and tested on macOS. You need Rust, Bun and three helper tools.</p>
-<pre><span class="c"># helpers: repair, extraction, reading media files</span>
-brew install par2 sevenzip ffmpeg
-
+    <p class="sub">Spool runs on macOS and Linux, natively or in a container, which is also how it goes on TrueNAS and other NAS systems.</p>
+<pre><span class="c"># with Docker</span>
 git clone https://github.com/rewtraw/spool && cd spool
+mkdir -p data && $EDITOR compose.yaml   <span class="c"># set the user and your media path</span>
+docker compose up -d --build            <span class="c"># http://localhost:7979</span>
+
+<span class="c"># or from source: Rust, Bun, and par2, 7zz and ffprobe on the PATH</span>
 (cd web && bun install && bun run build)
-cargo run --release -p spool -- serve   <span class="c"># http://localhost:7979</span></pre>
+cargo run --release -p spool -- serve</pre>
     <p class="note">Add your folders, a Usenet provider and a Newznab indexer in Settings. Spool starts in shadow mode, recording what it would do and changing nothing, until you switch it to active. Coming from Radarr, Sonarr and SABnzbd? <code>spool migrate</code> brings over your catalog, profiles, indexers and servers. The <a href="https://github.com/rewtraw/spool#readme">README</a> has the details.</p>
   </section>
 
