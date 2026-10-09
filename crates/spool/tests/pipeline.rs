@@ -52,7 +52,7 @@ type Shared = Arc<Mutex<IndexerState>>;
 async fn feed(State(s): State<Shared>, headers: axum::http::HeaderMap, axum::extract::RawQuery(query): axum::extract::RawQuery) -> String {
     let host = headers.get("host").and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
     let query = query.unwrap_or_default();
-    let by_id = query.contains("tvdbid=");
+    let by_id = query.contains("tvdbid=") || query.contains("imdbid=");
     let mut st = s.lock();
     st.hits += 1;
     st.queries.push(query);
@@ -1044,4 +1044,30 @@ async fn anime_numbering_and_dubs_are_handled() {
     }
     let tree = tree(&w.root.join("TV Shows"));
     assert!(tree.iter().any(|p| p.contains("S02E01")), "filed under its season and episode: {tree:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_film_the_indexer_never_linked_to_its_id_is_found_by_name() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let movie = w.movie("Legend of the Example Heroes: My Conquest Is the Sea of Stars", 1988, "tt0095512");
+    let name = "Legend.of.the.Example.Heroes.My.Conquest.Is.the.Sea.of.Stars.1988.BD.1080p.HEVC.FLAC";
+    w.release(name, &[("film.mkv", &video)]);
+    w.indexer.lock().untagged.insert(name.to_string());
+
+    let outcome = w.app.search(movie.id, Scope::Movie, false, true).await.unwrap();
+    let queries = w.indexer.lock().queries.clone();
+    assert!(queries[0].contains("imdbid=0095512"), "{queries:?}");
+    // Asked again in words, without the colon, and with the anime category alongside the movie ones.
+    let by_name = queries.iter().find(|q| q.contains("t=search")).expect("a search by name");
+    assert!(by_name.contains("q=Legend%20of%20the%20Example%20Heroes%20My%20Conquest%20Is%20the%20Sea%20of%20Stars%201988") && by_name.contains(",5070"), "{by_name}");
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    w.wait_state(movie.id, AcqState::Imported).await;
+
+    // A film found by its id needs no second question.
+    let other = w.movie("Tagged Example", 2005, "tt0000042");
+    w.release("Tagged.Example.2005.1080p.BluRay.x264-GRP", &[("t.mkv", &video)]);
+    let before = w.indexer.lock().queries.len();
+    w.app.search(other.id, Scope::Movie, false, false).await.unwrap();
+    assert_eq!(w.indexer.lock().queries.len(), before + 1);
 }

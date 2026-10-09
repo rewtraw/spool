@@ -138,4 +138,17 @@ mod tests {
         let p = parse_episode_title("Them.S01E01.1080p.WEB.H264-GRP").unwrap();
         assert_eq!(match_series(&p, &lib).map(|m| m.id), Some(3));
     }
+
+    #[test]
+    fn anime_film_names_as_indexers_write_them() {
+        let lib = [key(1, "Legend of the Galactic Heroes: My Conquest Is the Sea of Stars", 1988), key(2, "Legend of the Galactic Heroes: Golden Wings", 1992)];
+        for name in [
+            "Legend.of.the.Galactic.Heroes.My.Conquest.Is.the.Sea.of.Stars.1988.BD.1080p.HEVC.FLAC",
+            "Legend of the Galactic Heroes - My Conquest Is the Sea of Stars (1988) (BD 1080p HEVC FLAC) [8EA04235] [P9]",
+        ] {
+            let p = parse_movie_title(name, false).unwrap_or_else(|| panic!("unparsed: {name}"));
+            assert_eq!(match_movie(&p, &lib).map(|m| m.id), Some(1), "{name} parsed as {:?} ({})", p.title(), p.year);
+            assert_eq!(p.quality.quality, crate::Quality::Bluray1080p, "{name}");
+        }
+    }
 }

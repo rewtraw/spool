@@ -528,6 +528,30 @@ impl App {
         // posts are not tagged. If the id search leaves wanted episodes without an acceptable
         // release, ask again by name.
         let mut errors = errors;
+        // A film the indexer has not linked to its id is invisible to a search by id, and anime
+        // films sit outside the movie categories altogether. When the first search turns up
+        // nothing acceptable, ask by name: with the year, then without.
+        if t.kind == Kind::Movie && !tc.compact && !judged.iter().any(|j| j.record.accepted) {
+            let plain: String = t.title.chars().map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut texts = vec![];
+            if t.year > 0 {
+                texts.push(format!("{plain} {}", t.year));
+            }
+            texts.push(plain);
+            for text in texts {
+                let (more, errs) = self.query_all(t.kind, &[Query::MovieText { text }], false, user).await;
+                errors.extend(errs);
+                for r in more {
+                    if !releases.iter().any(|x| x.title == r.title && x.indexer_id == r.indexer_id) {
+                        judged.push(self.judge(&tc, &r, source, scope_filter, user));
+                        releases.push(r);
+                    }
+                }
+                if judged.iter().any(|j| j.record.accepted) {
+                    break;
+                }
+            }
+        }
         if t.kind == Kind::Series {
             let wanted: Vec<&Episode> = match scope {
                 Scope::Episode(id) => tc.episodes.iter().filter(|e| e.id == id).collect(),
