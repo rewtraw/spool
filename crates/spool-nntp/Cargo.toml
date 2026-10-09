@@ -1,0 +1,29 @@
+[package]
+name = "spool-nntp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# In-process fake NNTP server and yEnc encoder, for tests here and in the server crate.
+testing = []
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+quick-xml = "0.38"
+crc32fast = "1"
+md-5 = "0.10"
+memchr = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+parking_lot = "0.12"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
+spool-nntp = { path = ".", features = ["testing"] }

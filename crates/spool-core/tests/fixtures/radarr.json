@@ -1,0 +1,4738 @@
+{
+"AnimeVersionFixture": {
+"should_be_able_to_parse_repack": {
+"quality": null,
+"cases": [
+[
+"Anime Title - 2018 - (BD 1080p HEVC FLAC) [Dual Audio] [Group]",
+1
+],
+[
+"Anime Title - 2018v2 - (BD 1080p HEVC FLAC) [Dual Audio] [Group]",
+2
+],
+[
+"Anime Title - 2018 v2 - (BD 1080p HEVC FLAC) [Dual Audio] [Group]",
+2
+],
+[
+"[SubsPlease] Anime Title - 01 (1080p) [B1F227CF]",
+1
+],
+[
+"[SubsPlease] Anime Title - 01v2 (1080p) [B1F227CF]",
+2
+],
+[
+"[SubsPlease] Anime Title - 01 v2 (1080p) [B1F227CF]",
+2
+]
+]
+}
+},
+"CrapParserFixture": {
+"should_not_parse_crap": {
+"quality": null,
+"cases": [
+[
+"76El6LcgLzqb426WoVFg1vVVVGx4uCYopQkfjmLe"
+],
+[
+"Vrq6e1Aba3U amCjuEgV5R2QvdsLEGYF3YQAQkw8"
+],
+[
+"TDAsqTea7k4o6iofVx3MQGuDK116FSjPobMuh8oB"
+],
+[
+"yp4nFodAAzoeoRc467HRh1mzuT17qeekmuJ3zFnL"
+],
+[
+"oxXo8S2272KE1 lfppvxo3iwEJBrBmhlQVK1gqGc"
+],
+[
+"dPBAtu681Ycy3A4NpJDH6kNVQooLxqtnsW1Umfiv"
+],
+[
+"password - \"bdc435cb-93c4-4902-97ea-ca00568c3887.337\" yEnc"
+],
+[
+"185d86a343e39f3341e35c4dad3f9959"
+],
+[
+"ba27283b17c00d01193eacc02a8ba98eeb523a76"
+],
+[
+"45a55debe3856da318cc35882ad07e43cd32fd15"
+],
+[
+"86420f8ee425340d8894bf3bc636b66404b95f18"
+],
+[
+"ce39afb7da6cf7c04eba3090f0a309f609883862"
+],
+[
+"THIS SHOULD NEVER PARSE"
+],
+[
+"Vh1FvU3bJXw6zs8EEUX4bMo5vbbMdHghxHirc.mkv"
+],
+[
+"0e895c37245186812cb08aab1529cf8ee389dd05.mkv"
+],
+[
+"08bbc153931ce3ca5fcafe1b92d3297285feb061.mkv"
+],
+[
+"185d86a343e39f3341e35c4dad3ff159"
+],
+[
+"ah63jka93jf0jh26ahjas961.mkv"
+],
+[
+"qrdSD3rYzWb7cPdVIGSn4E7"
+],
+[
+"QZC4HDl7ncmzyUj9amucWe1ddKU1oFMZDd8r0dEDUsTd"
+],
+[
+"abc.xyz.af6021c37f7852"
+]
+]
+},
+"should_not_parse_random": {
+"quality": null,
+"cases": [
+[
+32
+],
+[
+40
+]
+]
+},
+"should_not_parse_file_name_without_proper_spacing": {
+"quality": null,
+"cases": [
+[
+"thebiggestmovie1618finale"
+]
+]
+},
+"should_not_parse_invalid_release_name": {
+"quality": null,
+"cases": [
+[
+"Big Movie (S01E18) Complete 360p HDTV AAC H.264-NEXT"
+]
+]
+}
+},
+"EditionParserFixture": {
+"should_parse_edition": {
+"quality": null,
+"cases": [
+[
+"Movie Title 2012 Directors Cut",
+"Directors Cut"
+],
+[
+"Movie Title 1999 (Despecialized).mkv",
+"Despecialized"
+],
+[
+"Movie Title.2012.(Special.Edition.Remastered).[Bluray-1080p].mkv",
+"Special Edition Remastered"
+],
+[
+"Movie Title 2012 Extended",
+"Extended"
+],
+[
+"Movie Title 2012 Extended Directors Cut Fan Edit",
+"Extended Directors Cut Fan Edit"
+],
+[
+"Movie Title 2012 Director's Cut",
+"Director's Cut"
+],
+[
+"Movie Title 2012 Directors Cut",
+"Directors Cut"
+],
+[
+"Movie Title.2012.(Extended.Theatrical.Version.IMAX).BluRay.1080p.2012.asdf",
+"Extended Theatrical Version IMAX"
+],
+[
+"2021 A Movie (1968) Director's Cut .mkv",
+"Director's Cut"
+],
+[
+"2021 A Movie 1968 (Extended Directors Cut FanEdit)",
+"Extended Directors Cut FanEdit"
+],
+[
+"A Fake Movie 2035 2012 Directors.mkv",
+"Directors"
+],
+[
+"Movie 2049 Director's Cut.mkv",
+"Director's Cut"
+],
+[
+"Movie Title 2012 50th Anniversary Edition.mkv",
+"50th Anniversary Edition"
+],
+[
+"Movie 2012 2in1.mkv",
+"2in1"
+],
+[
+"Movie 2012 IMAX.mkv",
+"IMAX"
+],
+[
+"Movie 2012 Restored.mkv",
+"Restored"
+],
+[
+"Movie Title.Special.Edition.Fan Edit.2012..BRRip.x264.AAC-m2g",
+"Special Edition Fan Edit"
+],
+[
+"Movie Title (Despecialized) 1999.mkv",
+"Despecialized"
+],
+[
+"Movie Title.(Special.Edition.Remastered).2012.[Bluray-1080p].mkv",
+"Special Edition Remastered"
+],
+[
+"Movie Title Extended 2012",
+"Extended"
+],
+[
+"Movie Title Extended Directors Cut Fan Edit 2012",
+"Extended Directors Cut Fan Edit"
+],
+[
+"Movie Title Director's Cut 2012",
+"Director's Cut"
+],
+[
+"Movie Title Directors Cut 2012",
+"Directors Cut"
+],
+[
+"Movie Title.(Extended.Theatrical.Version.IMAX).2012.BluRay.1080p.asdf",
+"Extended Theatrical Version IMAX"
+],
+[
+"Movie Director's Cut (1968).mkv",
+"Director's Cut"
+],
+[
+"2021 A Movie (Extended Directors Cut FanEdit) 1968 Bluray 1080p",
+"Extended Directors Cut FanEdit"
+],
+[
+"A Fake Movie 2035 Directors 2012.mkv",
+"Directors"
+],
+[
+"Movie Director's Cut 2049.mkv",
+"Director's Cut"
+],
+[
+"Movie Title 50th Anniversary Edition 2012.mkv",
+"50th Anniversary Edition"
+],
+[
+"Movie 2in1 2012.mkv",
+"2in1"
+],
+[
+"Movie IMAX 2012.mkv",
+"IMAX"
+],
+[
+"Fake Movie Final Cut 2016",
+"Final Cut"
+],
+[
+"Fake Movie 2016 Final Cut ",
+"Final Cut"
+],
+[
+"My Movie GERMAN Extended Cut 2016",
+"Extended Cut"
+],
+[
+"My.Movie.GERMAN.Extended.Cut.2016",
+"Extended Cut"
+],
+[
+"My.Movie.GERMAN.Extended.Cut",
+"Extended Cut"
+],
+[
+"My.Movie.Assembly.Cut.1992.REPACK.1080p.BluRay.DD5.1.x264-Group",
+"Assembly Cut"
+],
+[
+"Movie.1987.Ultimate.Hunter.Edition.DTS-HD.DTS.MULTISUBS.1080p.BluRay.x264.HQ-TUSAHD",
+"Ultimate Hunter Edition"
+],
+[
+"Movie.1950.Diamond.Edition.1080p.BluRay.x264-nikt0",
+"Diamond Edition"
+],
+[
+"Movie.Title.1990.Ultimate.Rekall.Edition.NORDiC.REMUX.1080p.BluRay.AVC.DTS-HD.MA5.1-TWA",
+"Ultimate Rekall Edition"
+],
+[
+"Movie.Title.1971.Signature.Edition.1080p.BluRay.FLAC.2.0.x264-TDD",
+"Signature Edition"
+],
+[
+"Movie.1979.The.Imperial.Edition.BluRay.720p.DTS.x264-CtrlHD",
+"Imperial Edition"
+],
+[
+"Movie.1997.Open.Matte.1080p.BluRay.x264.DTS-FGT",
+"Open Matte"
+]
+]
+},
+"should_not_parse_edition": {
+"quality": null,
+"cases": [
+[
+"Movie.Holiday.Special.1978.DVD.REMUX.DD.2.0-ViETNAM"
+],
+[
+"Directors.Cut.German.2006.COMPLETE.PAL.DVDR-LoD"
+],
+[
+"Movie Impossible: Rogue Movie 2012 Bluray"
+],
+[
+"Loving.Movie.2018.TS.FRENCH.MD.x264-DROGUERiE"
+],
+[
+"Uncut.Movie.2019.720p.BluRay.x264-YOL0W"
+],
+[
+"The.Christmas.Edition.1941.720p.HDTV.x264-CRiMSON"
+]
+]
+}
+},
+"ExtendedQualityParserRegex": {
+"should_parse_reality_from_title": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.HDTV.XviD-LOL",
+0
+],
+[
+"Movie.Title.Garnets.or.Gold.REAL.REAL.PROPER.HDTV.x264-W4F",
+2
+],
+[
+"Movie.Title.REAL.PROPER.720p.HDTV.x264-ORENJI-RP",
+1
+],
+[
+"Movie.Title.REAL.PROPER.HDTV.x264-KILLERS",
+1
+],
+[
+"Movie.Title.REAL.PROPER.720p.HDTV.x264-KILLERS",
+1
+],
+[
+"Movie.Title.New.Black.real.proper.720p.webrip.x264-2hd",
+0
+],
+[
+"Movie.Title.Super.Duper.Real.Proper.HDTV.x264-FTP",
+0
+],
+[
+"Movie.Title.PROPER.HDTV.x264-RiVER-RP",
+0
+],
+[
+"Movie.Title.PROPER.REAL.RERIP.1080p.BluRay.x264-TENEIGHTY",
+1
+],
+[
+"[MGS] - Movie.Title - Episode 02v2 - [D8B6C90D]",
+0
+],
+[
+"[Hatsuyuki] Movie Title - 07 [v2][848x480][23D8F455].avi",
+0
+],
+[
+"[DeadFish] Movie Title - 01v3 [720p][AAC]",
+0
+],
+[
+"[DeadFish] Movie Title Sword - 01v4 [720p][AAC]",
+0
+],
+[
+"The Real Movie.Titlewives of Some Place - S01E01 - Why are we doing this?",
+0
+]
+]
+},
+"should_parse_version_from_title": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.HDTV.XviD-LOL",
+1
+],
+[
+"Movie.Title.Garnets.or.Gold.REAL.REAL.PROPER.HDTV.x264-W4F",
+2
+],
+[
+"Movie.Title.REAL.PROPER.720p.HDTV.x264-ORENJI-RP",
+2
+],
+[
+"Movie.Title.REAL.PROPER.HDTV.x264-KILLERS",
+2
+],
+[
+"Movie.Title.REAL.PROPER.720p.HDTV.x264-KILLERS",
+2
+],
+[
+"Movie.Title.New.Black.real.proper.720p.webrip.x264-2hd",
+2
+],
+[
+"Movie.Title.Super.Duper.Real.Proper.HDTV.x264-FTP",
+2
+],
+[
+"Movie.Title.PROPER.HDTV.x264-RiVER-RP",
+2
+],
+[
+"Movie.Title.PROPER.REAL.RERIP.1080p.BluRay.x264-TENEIGHTY",
+2
+]
+]
+},
+"should_parse_ultrahd_from_title": {
+"quality": "Resolution",
+"cases": [
+[
+"Movie 2016 2160p 4K UltraHD BluRay DTS-HD MA 7 1 x264-Whatevs",
+19
+],
+[
+"Movie 2016 2160p 4K UltraHD DTS-HD MA 7 1 x264-Whatevs",
+16
+],
+[
+"Movie 2016 4K 2160p UltraHD BluRay AAC2 0 HEVC x265",
+19
+],
+[
+"The Movie 2015 2160p UHD BluRay DTS x264-Whatevs",
+19
+],
+[
+"The Movie 2015 2160p UHD BluRay FLAC 7 1 x264-Whatevs",
+19
+],
+[
+"The Movie 2015 2160p Ultra HD BluRay DTS-HD MA 7 1 x264-Whatevs",
+19
+],
+[
+"Into the Movie 2016 2160p Netflix WEBRip DD5 1 x264-Whatevs",
+18
+]
+]
+}
+},
+"IsoLanguagesFixture": {
+"should_return_iso_language_for_English": {
+"quality": null,
+"cases": [
+[
+"en"
+],
+[
+"eng"
+],
+[
+"en-US"
+],
+[
+"en-GB"
+]
+]
+},
+"unknown_or_invalid_code_should_return_null": {
+"quality": null,
+"cases": [
+[
+"enus"
+],
+[
+"enusa"
+],
+[
+"wo"
+],
+[
+"fr-CA"
+]
+]
+},
+"should_return_portuguese": {
+"quality": null,
+"cases": [
+[
+"pt"
+],
+[
+"por"
+],
+[
+"pt-PT"
+]
+]
+},
+"should_not_return_portuguese": {
+"quality": null,
+"cases": [
+[
+"de-AU"
+]
+]
+},
+"should_return_telugu": {
+"quality": null,
+"cases": [
+[
+"te"
+],
+[
+"tel"
+],
+[
+"te-IN"
+]
+]
+},
+"should_return_afrikaans": {
+"quality": null,
+"cases": [
+[
+"af"
+],
+[
+"afr"
+],
+[
+"af-ZA"
+]
+]
+},
+"should_return_marathi": {
+"quality": null,
+"cases": [
+[
+"mr"
+],
+[
+"mar"
+],
+[
+"mr-IN"
+]
+]
+},
+"should_return_tagalog": {
+"quality": null,
+"cases": [
+[
+"tl"
+],
+[
+"tgl"
+],
+[
+"tl-PH"
+]
+]
+},
+"should_return_urdu": {
+"quality": null,
+"cases": [
+[
+"ur"
+],
+[
+"urd"
+],
+[
+"ur-PK"
+]
+]
+},
+"should_return_romansh": {
+"quality": null,
+"cases": [
+[
+"rm"
+],
+[
+"roh"
+],
+[
+"rm-CH"
+]
+]
+},
+"should_return_mongolian": {
+"quality": null,
+"cases": [
+[
+"mn"
+],
+[
+"mon"
+],
+[
+"khk"
+],
+[
+"mvf"
+],
+[
+"mn-Cyrl"
+]
+]
+},
+"should_return_bengali": {
+"quality": null,
+"cases": [
+[
+"bn"
+],
+[
+"ben"
+],
+[
+"bn-BD"
+],
+[
+"bn-IN"
+]
+]
+},
+"should_return_georgian": {
+"quality": null,
+"cases": [
+[
+"ka"
+],
+[
+"geo"
+],
+[
+"kat"
+],
+[
+"ka-GE"
+]
+]
+}
+},
+"LanguageParserFixture": {
+"should_parse_language_english": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.English.1080p.XviD-LOL"
+],
+[
+"Movie Title 1994 Eng 1080p XviD-GROUP"
+],
+[
+"Movie Title 1994 EN 1080p XviD-GROUP"
+]
+]
+},
+"should_parse_language_unknown": {
+"quality": null,
+"cases": [
+[
+"The Danish Movie 2015"
+],
+[
+"Movie.Title.2018.2160p.WEBRip.x265.10bit.HDR.DD5.1-GASMASK"
+],
+[
+"Movie.Title.2010.720p.BluRay.x264.-[YTS.LT]"
+],
+[
+"Movie.Title.2010.SUBFRENCH.1080p.WEB.x264-GROUP"
+],
+[
+"Movie.Title.2010.En.1080p.WEB.x264-GROUP"
+]
+]
+},
+"should_parse_subtitle_language_english": {
+"quality": null,
+"cases": [
+[
+"Movie Title - 2022.en.sub"
+],
+[
+"Movie Title - 2022.EN.sub"
+],
+[
+"Movie Title - 2022.eng.sub"
+],
+[
+"Movie Title - 2022.ENG.sub"
+],
+[
+"Movie Title - 2022.English.sub"
+],
+[
+"Movie Title - 2022.english.sub"
+],
+[
+"Movie Title - 2022.en.cc.sub"
+],
+[
+"Movie Title - 2022.en.sdh.sub"
+],
+[
+"Movie Title - 2022.en.forced.sub"
+],
+[
+"Movie Title - 2022.en.sdh.forced.sub"
+]
+]
+},
+"should_parse_language_french": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.French.1080p.XviD-LOL"
+],
+[
+"Movie Title : Other Title 2011 AVC.1080p.Blu-ray HD.VOSTFR.VFF"
+],
+[
+"Movie Title - Other Title 2011 Bluray 4k HDR HEVC AC3 VFF"
+],
+[
+"Movie Title  2019 AVC.1080p.Blu-ray Remux HD.VOSTFR.VFF"
+],
+[
+"Movie Title  : Other Title 2010 x264.720p.Blu-ray Rip HD.VOSTFR.VFF. ONLY"
+],
+[
+"Movie Title  2019 HEVC.2160p.Blu-ray 4K.VOSTFR.VFF. JATO"
+],
+[
+"Movie.Title.1956.MULTi.VF.Bluray.1080p.REMUX.AC3.x264"
+],
+[
+"Movie.Title.2016.ENG-ITA-FRA.AAC.1080p.WebDL.x264"
+],
+[
+"Movie Title 2016 (BDrip 1080p ENG-ITA-FRA) Multisub x264"
+],
+[
+"Movie.Title.2016.ENG-ITA-FRE.AAC.1080p.WebDL.x264"
+],
+[
+"Movie Title 2016 (BDrip 1080p ENG-ITA-FRE) Multisub x264"
+]
+]
+},
+"should_parse_language_french_english": {
+"quality": null,
+"cases": [
+[
+"Movie 1990 1080p Eng Fra [mkvonly]"
+],
+[
+"Movie Directory 25 Anniversary 1990 Eng Fre Multi Subs 720p [H264 mp4]"
+],
+[
+"Foreign-Words-Here-Movie-(1990)-[DVDRip]-H264-Fra-Ac3-2-0-Eng-5-1"
+]
+]
+},
+"should_parse_language_spanish": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Spanish.1080p.XviD-LOL"
+],
+[
+"Movie Title (2020)[BDRemux AVC 1080p][E-AC3 DD Plus 5.1 Castellano-Inglés Subs]"
+],
+[
+"Movie Title (2020) [UHDRemux2160p HDR][DTS-HD MA 5.1 AC3 5.1 Castellano - True-HD 7.1 Atmos Inglés Subs]"
+],
+[
+"Movie Title (2016) [UHDRemux 2160p SDR] [Castellano DD 5.1 - Inglés DTS-HD MA 5.1 Subs]"
+],
+[
+"Movie Title 2022 [HDTV 720p][Cap.101][AC3 5.1 Castellano][www.pctnew.ORG]"
+],
+[
+"Movie Title 2022 [HDTV 720p][Cap.206][AC3 5.1 Español Castellano]"
+],
+[
+"Movie Title 2022 [Remux-1080p 8-bit h264 DTS-HD MA 2.0][ES.EN]-HiFi"
+],
+[
+"Movie Title 2022 [BDRemux 1080p AVC ES DTS-HD MA 5.1 Subs][HDO].mkv"
+],
+[
+"Movie.Name.2022.BluRay.1080p.H264.DTS[EN+ES].[EN+ES+IT]"
+]
+]
+},
+"should_parse_language_german": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.German.1080p.XviD-LOL"
+],
+[
+"Movie.Title.2016.GERMAN.DUBBED.WS.WEBRiP.XviD.REPACK-TVP"
+],
+[
+"Movie Title 2016 - Kampfhaehne - mkv - by Videomann"
+],
+[
+"Movie.Title.2016.Ger.Dub.AAC.1080p.WebDL.x264-TKP21"
+],
+[
+"Movie.Title.2016.Ger.AAC.1080p.WebDL.x264-TKP21"
+],
+[
+"Movie.Title.2016.Hun/Ger/Ita.AAC.1080p.WebDL.x264-TKP21"
+],
+[
+"Movie.Title.2016.1080p.10Bit.HEVC.WEBRip.HIN-ENG-GER.DD5.1.H.265"
+],
+[
+"Movie.Title.2016.HU-IT-DE.AAC.1080p.WebDL.x264"
+],
+[
+"Movie.Title.2016.SwissGerman.WEB-DL.h264-RlsGrp"
+]
+]
+},
+"should_parse_language_italian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Italian.1080p.XviD-LOL"
+],
+[
+"Movie.Title.2016.ENG-FRE-ITA.AAC.1080p.WebDL.x264"
+],
+[
+"Movie Title 2016 (BDrip 1080p ENG-FRE-ITA) Multisub x264"
+]
+]
+},
+"should_parse_language_danish": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Danish.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_dutch": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Dutch.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_japanese": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Japanese.1080p.XviD-LOL"
+],
+[
+"Movie.Title (1988) 2160p HDR 5.1 Eng - Jap x265 10bit"
+],
+[
+"Movie Title (1985) (1080p.AC3 ITA-ENG-JAP)"
+]
+]
+},
+"should_parse_language_icelandic": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Icelandic.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_chinese": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Chinese.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_russian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Russian.1080p.XviD-LOL"
+],
+[
+"Movie.Title.2020.WEB-DLRip.AVC.AC3.EN.RU.ENSub.RUSub-LOL"
+],
+[
+"Movie Title (2020) WEB-DL (720p) Rus-Eng"
+]
+]
+},
+"should_parse_language_romanian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Romanian.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.1080p.XviD.RoDubbed-LOL"
+]
+]
+},
+"should_parse_language_hindi": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Hindi.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_thai": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Thai.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_bulgarian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Bulgarian.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.BGAUDIO.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.BG.AUDIO.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_brazilian_portuguese": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Dublado.1080p.XviD-LOL"
+],
+[
+"Movie.Title.2.2019.1080p.Bluray.Dublado.WWW.TPF.GRATIS"
+],
+[
+"Movie.Title.2014.1080p.Bluray.Brazilian.WWW.TPF.GRATIS"
+],
+[
+"Movie.Title.2014.1080p.AMZN.WEB-DL.DDP2.0.H.264.pt-BR.ENG-LCD"
+]
+]
+},
+"should_parse_language_polish": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Polish.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.PL.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.PLDUB.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.DUBPL.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.PL-DUB.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.DUB-PL.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.PLLEK.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.LEKPL.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.PL-LEK.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_polish_subbed": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.PL-SUB.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.PLSUB.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.SUB-PL.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_vietnamese": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Vietnamese.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.VIE.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_swedish": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Swedish.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_norwegian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Norwegian.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_finnish": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Finnish.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_turkish": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Turkish.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_portuguese": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Portuguese.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_flemish": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Flemish.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_greek": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Greek.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_korean": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Korean.1080p.XviD-LOL"
+],
+[
+"Movie Title [2006] BDRip 720p [Kor Rus] GROUP"
+],
+[
+"Movie.Title.2019.KOR.1080p.HDRip.H264.AAC-GROUP"
+]
+]
+},
+"should_parse_language_hungarian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Hungarian.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_hebrew": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Hebrew.1080p.XviD-LOL"
+],
+[
+"Movie.Title.1994.1080p.BluRay.HebDubbed.Also.English.x264-P2P"
+]
+]
+},
+"should_parse_language_lithuanian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.AC3.LT.EN-CNN"
+]
+]
+},
+"should_parse_language_czech": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.CZ.1080p.XviD-LOL"
+]
+]
+},
+"should_parse_language_arabic": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2019.ARABIC.WEBRip.x264-VXT"
+]
+]
+},
+"should_parse_language_ukrainian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title [1989, BDRip] MVO + DVO + UKR (MVO) + Sub"
+],
+[
+"Movie.Title (2006) BDRemux 1080p 2xUkr | Sub Ukr"
+],
+[
+"Movie.Title [1984, BDRip 720p] MVO + MVO + Dub + AVO + 3xUkr"
+],
+[
+"Movie.Title.2019.UKRAINIAN.WEBRip.x264-VXT"
+]
+]
+},
+"should_parse_language_ukrainian_multi": {
+"quality": null,
+"cases": [
+[
+"Movie.Title [1937, BDRip 1080p] Dub UKR/Eng + Sub rus"
+],
+[
+"Movie.Title.[2003.BDRemux.1080p].Dub.MVO.(2xUkr/Fra).Sub.(Rus/Fra)"
+]
+]
+},
+"should_parse_language_persian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2019.PERSIAN.WEBRip.x264-VXT"
+]
+]
+},
+"should_parse_language_bengali": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2019.BENGALI.WEBRip.x264-VXT"
+]
+]
+},
+"should_parse_language_telugu": {
+"quality": null,
+"cases": [
+[
+"Movie Title (2018) Telugu DVDScr X264 AAC 700 MB"
+],
+[
+"Movie.Title.2022.Tel.WEBRip.x264-VXT"
+],
+[
+"Movie Title (2019) Proper HDRip - 720p - x264 - HQ Line Auds - [Telugu + Tamil + Hindi + English] - 1.1GB"
+]
+]
+},
+"should_parse_language_slovak": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.HDTV.x264.SK-iCZi"
+],
+[
+"Movie.Title.2019.1080p.HDTV.x265.iNTERNAL.SK-iCZi"
+],
+[
+"Movie.Title.2018.SLOVAK.DUAL.2160p.UHD.BluRay.x265-iCZi"
+],
+[
+"Movie.Title.1990.SLOVAK.HDTV.x264-iCZi"
+]
+]
+},
+"should_parse_language_latvian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2022.LV.WEBRip.XviD-LOL"
+],
+[
+"Movie.Title.2022.lv.WEBRip.XviD-LOL"
+],
+[
+"Movie.Title.2022.LATVIAN.WEBRip.XviD-LOL"
+],
+[
+"Movie.Title.2022.Latvian.WEBRip.XviD-LOL"
+],
+[
+"Movie.Title.2022.1080p.WEB-DL.DDP5.1.Atmos.H.264.Lat.Eng"
+],
+[
+"Movie.Title.2022.1080p.WEB-DL.LAV.RUS-NPPK"
+]
+]
+},
+"should_parse_language_spanish_latino": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2019.720p_Eng-Spa(Latino)_MovieClubMx"
+],
+[
+"Movie.Title.1.WEB-DL.720p.Complete.Latino.YG"
+],
+[
+"Movie.Title.1080p.WEB.H264.Latino.YG"
+],
+[
+"Movie Title latino"
+],
+[
+"Movie Title (Temporada 11 Completa) Audio Dual Ingles/Latino 1920x1080"
+],
+[
+"Movie title 7x4 audio latino"
+]
+]
+},
+"should_parse_language_catalan": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Catalan.1080p.XviD-LOL"
+],
+[
+"Movie.Title.2024.Catalán.1080p.XviD-LOL"
+],
+[
+"Movie.Title.(2024).(Catala.Spanish.Subs).WEBRip.1080p.x264-EAC3"
+],
+[
+"Movie.Title.(2024).(Spanish.Catala.English.Subs).BDRip.1080p.x264-EAC3"
+],
+[
+"Movie Title [2024] [BDrip 1080p-x264-AC3 5.1 català-español-english+sub]"
+]
+]
+},
+"should_parse_language_malayalam": {
+"quality": null,
+"cases": [
+[
+"Movie Title (2024) Malayalam BRRip 1080p x264 DTS 5.1 E-subs-MBRHDRG"
+],
+[
+"Movie.Title.2024.Malayalam.1080p.AMZN.WEB-DL.DD+5.1.H.264-Shadow.BonsaiHD"
+],
+[
+"Movie.Title.2024.2160p.Malayalam.WEB-DL.H.265.SDR.DDP5.1-NbT"
+]
+]
+},
+"should_parse_language_kannada": {
+"quality": null,
+"cases": [
+[
+"Movie Title (2024) Kannada 1080p HD AVC MP4 x264 .9.8GB TEAMTR"
+],
+[
+"Movie.Title.2024.Kannada.1080p.AMZN.WEB-DL.DD+2.0.x264-Telly"
+]
+]
+},
+"should_parse_language_albanian": {
+"quality": null,
+"cases": [
+[
+"Movie Title (2024) Albanian 1080p HD AVC MP4 x264 .9.8GB TEAMTR"
+],
+[
+"Movie.Title.2024.Albanian.1080p.AMZN.WEB-DL.DD+2.0.x264-Telly"
+]
+]
+},
+"should_parse_language_afrikaans": {
+"quality": null,
+"cases": [
+[
+"Movie Title (2024) Afrikaans 1080p HD AVC MP4 x264 .9.8GB TEAMTR"
+],
+[
+"Movie.Title.2024.Afrikaans.1080p.AMZN.WEB-DL.DD+2.0.x264-Telly"
+]
+]
+},
+"should_parse_language_marathi": {
+"quality": null,
+"cases": [
+[
+"Movie Title 2015 Marathi 1080p WebRip x264 AC3 5.1 ESubs [TMB]"
+],
+[
+"Movie.Title.(2018).720p.CensorRip.Marathi.x264.AAC.-.LHDm@Telly"
+]
+]
+},
+"should_parse_language_tagalog": {
+"quality": null,
+"cases": [
+[
+"Movie Title 2024 1080p Tagalog WEB-DL HEVC x265 BONE"
+],
+[
+"Movie.Title.2022.720p.Tagalog.WEB-DL.AAC.x264-Mkvking"
+]
+]
+},
+"should_parse_language_urdu": {
+"quality": null,
+"cases": [
+[
+"Movie Title 2024 1080p Urdu WEB-DL HEVC x265 BONE"
+],
+[
+"Movie.Title.2022.720p.Urdu.WEB-DL.AAC.x264-Mkvking"
+]
+]
+},
+"should_parse_language_romansh": {
+"quality": null,
+"cases": [
+[
+"The.Movie.Name.2016.Romansh.WEB-DL.h264-RlsGrp"
+],
+[
+"The.Movie.Name.2016.Rumantsch.WEB.DL.h264-RlsGrp"
+],
+[
+"The Movie Name 2016 Romansch WEB DL h264-RlsGrp"
+]
+]
+},
+"should_parse_language_mongolian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2025.Mongolian.WEB-DL.h264"
+],
+[
+"Movie.Title.2025.Khalkha.WEB-DL.h264"
+]
+]
+},
+"should_parse_language_georgian": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.1994.Georgian.WEB-DL.h264"
+],
+[
+"Movie.Title.2016.Geo.WEB-DL.h264"
+],
+[
+"Movie.Title.2016.KA.WEB-DL.h264"
+],
+[
+"Movie.Title.2016.RU-KA.WEB-DL.h264"
+]
+]
+},
+"should_parse_subtitle_language": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.en.sub"
+],
+[
+"Movie Title.eng.sub"
+],
+[
+"Movie.Title.eng.forced.sub"
+],
+[
+"Movie-Title-eng-forced.sub"
+]
+]
+},
+"should_parse_subtitle_language_unknown": {
+"quality": null,
+"cases": [
+[
+"Movie Title.sub"
+]
+]
+},
+"should_add_original_language_to_german_release_with_dl_tag": {
+"quality": null,
+"cases": [
+[
+"The.Movie.Name.2016.German.DTS.DL.720p.BluRay.x264-RlsGrp"
+]
+]
+},
+"should_not_add_original_language_to_german_release_when_title_contains_web_dl": {
+"quality": null,
+"cases": [
+[
+"The.Movie.Name.2016.GERMAN.WEB-DL.h264-RlsGrp"
+],
+[
+"The.Movie.Name.2016.GERMAN.WEB.DL.h264-RlsGrp"
+],
+[
+"The Movie Name 2016 GERMAN WEB DL h264-RlsGrp"
+],
+[
+"The.Movie.Name.2016.GERMAN.WEBDL.h264-RlsGrp"
+]
+]
+},
+"should_parse_original_title_from_release_name": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2025.Original.1080P.WEB.H264-RlsGrp"
+],
+[
+"Movie.Title.2025.Orig.1080P.WEB.H264-RlsGrp"
+],
+[
+"Movie Title 2025 [HEVC, HDR10, Dolby Vision, WEB-DL 2160p] [Hybrid] 3 XX + Original"
+]
+]
+},
+"should_add_original_language_and_english_to_german_release_with_ml_tag": {
+"quality": null,
+"cases": [
+[
+"The.Movie.Name.2023.German.ML.EAC3.720p.NF.WEB.H264-RlsGrp"
+]
+]
+},
+"should_parse_title_and_tags": {
+"quality": null,
+"cases": [
+[
+"Name (2020) - [AAC 2.0].testtitle.default.eng.forced.ass",
+[
+"default",
+"forced"
+],
+"testtitle",
+"English"
+],
+[
+"Name (2020) - [AAC 2.0].eng.default.testtitle.forced.ass",
+[
+"default",
+"forced"
+],
+"testtitle",
+"English"
+],
+[
+"Name (2020) - [AAC 2.0].default.eng.testtitle.forced.ass",
+[
+"default",
+"forced"
+],
+"testtitle",
+"English"
+],
+[
+"Name (2020) - [AAC 2.0].testtitle.forced.eng.ass",
+[
+"forced"
+],
+"testtitle",
+"English"
+],
+[
+"Name (2020) - [AAC 2.0].eng.forced.testtitle.ass",
+[
+"forced"
+],
+"testtitle",
+"English"
+],
+[
+"Name (2020) - [AAC 2.0].forced.eng.testtitle.ass",
+[
+"forced"
+],
+"testtitle",
+"English"
+],
+[
+"Name (2020) - [AAC 2.0].testtitle.default.fra.forced.ass",
+[
+"default",
+"forced"
+],
+"testtitle",
+"French"
+],
+[
+"Name (2020) - [AAC 2.0].fra.default.testtitle.forced.ass",
+[
+"default",
+"forced"
+],
+"testtitle",
+"French"
+],
+[
+"Name (2020) - [AAC 2.0].default.fra.testtitle.forced.ass",
+[
+"default",
+"forced"
+],
+"testtitle",
+"French"
+],
+[
+"Name (2020) - [AAC 2.0].testtitle.forced.fra.ass",
+[
+"forced"
+],
+"testtitle",
+"French"
+],
+[
+"Name (2020) - [AAC 2.0].fra.forced.testtitle.ass",
+[
+"forced"
+],
+"testtitle",
+"French"
+],
+[
+"Name (2020) - [AAC 2.0].forced.fra.testtitle.ass",
+[
+"forced"
+],
+"testtitle",
+"French"
+]
+]
+},
+"should_not_parse_false_title": {
+"quality": null,
+"cases": [
+[
+"Name (2020) - [AAC 2.0].default.forced.ass"
+],
+[
+"Name (2020) - [AAC 2.0].default.ass"
+],
+[
+"Name (2020) - [AAC 2.0].ass"
+],
+[
+"Name (2020) - [AAC 2.0].testtitle.ass"
+]
+]
+}
+},
+"NormalizeTitleFixture": {
+"should_normalize_series_title": {
+"quality": null,
+"cases": [
+[
+"Conan",
+"conan"
+],
+[
+"Castle (2009)",
+"castle2009"
+],
+[
+"Parenthood.2010",
+"parenthood2010"
+],
+[
+"Law_and_Order_SVU",
+"lawordersvu"
+]
+]
+},
+"should_remove_special_characters_and_casing": {
+"quality": null,
+"cases": [
+[
+"CaPitAl",
+"capital"
+],
+[
+"peri.od",
+"period"
+],
+[
+"this.^&%^**$%@#$!That",
+"thisthat"
+],
+[
+"test/test",
+"testtest"
+],
+[
+"90210",
+"90210"
+],
+[
+"24",
+"24"
+],
+[
+"I'm a cyborg, but that's OK",
+"imcyborgbutthatsok"
+],
+[
+"Im a cyborg, but thats ok",
+"imcyborgbutthatsok"
+],
+[
+"Test: Something à Deux",
+"testsomethingdeux"
+],
+[
+"Parler à",
+"parlera"
+]
+]
+},
+"should_remove_common_words_from_middle_of_title": {
+"quality": null,
+"cases": [
+[
+"the"
+],
+[
+"and"
+],
+[
+"or"
+],
+[
+"an"
+],
+[
+"of"
+]
+]
+},
+"should_not_remove_common_words_from_end_of_title": {
+"quality": null,
+"cases": [
+[
+"the"
+],
+[
+"and"
+],
+[
+"or"
+],
+[
+"an"
+],
+[
+"of"
+]
+]
+},
+"should_not_remove_common_words_in_the_middle_of_word": {
+"quality": null,
+"cases": [
+[
+"the"
+],
+[
+"and"
+],
+[
+"or"
+],
+[
+"a"
+],
+[
+"an"
+],
+[
+"of"
+]
+]
+},
+"should_not_remove_from_the_beginning_of_the_title": {
+"quality": null,
+"cases": [
+[
+"The Office",
+"theoffice"
+],
+[
+"The Tonight Show With Jay Leno",
+"thetonightshowwithjayleno"
+],
+[
+"The.Daily.Show",
+"thedailyshow"
+]
+]
+},
+"should_not_clean_word_from_beginning_of_string": {
+"quality": null,
+"cases": [
+[
+"the"
+],
+[
+"and"
+],
+[
+"or"
+],
+[
+"a"
+],
+[
+"an"
+],
+[
+"of"
+]
+]
+}
+},
+"ParserFixture": {
+"should_parse_movie_title": {
+"quality": null,
+"cases": [
+[
+"The.Movie.from.U.N.C.L.E.2015.1080p.BluRay.x264-SPARKS",
+"The Movie from U.N.C.L.E."
+],
+[
+"1776.1979.EXTENDED.720p.BluRay.X264-AMIABLE",
+"1776"
+],
+[
+"MY MOVIE (2016) [R][Action, Horror][720p.WEB-DL.AVC.8Bit.6ch.AC3].mkv",
+"MY MOVIE"
+],
+[
+"R.I.P.D.2013.720p.BluRay.x264-SPARKS",
+"R.I.P.D."
+],
+[
+"V.H.S.2.2013.LIMITED.720p.BluRay.x264-GECKOS",
+"V.H.S. 2"
+],
+[
+"This Is A Movie (1999) [IMDB #] <Genre, Genre, Genre> {ACTORS} !DIRECTOR +MORE_SILLY_STUFF_NO_ONE_NEEDS ?",
+"This Is A Movie"
+],
+[
+"We Are the Movie!.2013.720p.H264.mkv",
+"We Are the Movie!"
+],
+[
+"(500).Days.Of.Movie.(2009).DTS.1080p.BluRay.x264.NLsubs",
+"(500) Days Of Movie"
+],
+[
+"To.Live.and.Movie.in.L.A.1985.1080p.BluRay",
+"To Live and Movie in L.A."
+],
+[
+"A.I.Artificial.Movie.(2001)",
+"A.I. Artificial Movie"
+],
+[
+"A.Movie.Name.(1998)",
+"A Movie Name"
+],
+[
+"www.Torrenting.com - Movie.2008.720p.X264-DIMENSION",
+"Movie"
+],
+[
+"www.5MovieRulz.tc - Movie (2000) Malayalam HQ HDRip - x264 - AAC - 700MB.mkv",
+"Movie"
+],
+[
+"Movie: The Movie World 2013",
+"Movie: The Movie World"
+],
+[
+"Movie.The.Final.Chapter.2016",
+"Movie The Final Chapter"
+],
+[
+"Der.Movie.James.German.Bluray.FuckYou.Pso.Why.cant.you.follow.scene.rules.1998",
+"Der Movie James"
+],
+[
+"Movie.German.DL.AC3.Dubbed..BluRay.x264-PsO",
+"Movie"
+],
+[
+"Valana la Movie TRUEFRENCH BluRay 720p 2016 kjhlj",
+"Valana la Movie"
+],
+[
+"Mission Movie: Rogue Movie (2015)�[XviD - Ita Ac3 - SoftSub Ita]azione, spionaggio, thriller *Prima Visione* Team mulnic Tom Cruise",
+"Mission Movie: Rogue Movie"
+],
+[
+"Movie.Movie.2000.FRENCH..BluRay.-AiRLiNE",
+"Movie Movie"
+],
+[
+"My Movie 1999 German Bluray",
+"My Movie"
+],
+[
+"Leaving Movie by Movie (1897) [DVD].mp4",
+"Leaving Movie by Movie"
+],
+[
+"Movie.2018.1080p.AMZN.WEB-DL.DD5.1.H.264-NTG",
+"Movie"
+],
+[
+"Movie.Title.Imax.2018.1080p.AMZN.WEB-DL.DD5.1.H.264-NTG",
+"Movie Title"
+],
+[
+"World.Movie.Z.EXTENDED.2013.German.DL.1080p.BluRay.AVC-XANOR",
+"World Movie Z"
+],
+[
+"World.Movie.Z.2.EXTENDED.2013.German.DL.1080p.BluRay.AVC-XANOR",
+"World Movie Z 2"
+],
+[
+"G.I.Movie.Movie.2013.THEATRiCAL.COMPLETE.BLURAY-GLiMMER",
+"G.I. Movie Movie"
+],
+[
+"www.Torrenting.org - Movie.2008.720p.X264-DIMENSION",
+"Movie"
+],
+[
+"The.French.Movie.2013.720p.BluRay.x264 - ROUGH[PublicHD]",
+"The French Movie"
+],
+[
+"The.Good.German.2006.720p.BluRay.x264-RlsGrp",
+"The Good German"
+]
+]
+},
+"should_parse_anime_movie_title": {
+"quality": null,
+"cases": [
+[
+"[MTBB] Kimi no Na wa. (2016) v2 [97681524].mkv",
+"Kimi no Na wa",
+"MTBB",
+2016
+],
+[
+"[sam] Toward the Terra (1980) [BD 1080p TrueHD].mkv",
+"Toward the Terra",
+"sam",
+1980
+],
+[
+"[Inka-Subs] Rokudenashi Blues 1993 (1993) [VHS]",
+"Rokudenashi Blues 1993",
+"Inka-Subs",
+1993
+]
+]
+},
+"should_parse_anime_movie_title_without_year": {
+"quality": null,
+"cases": [
+[
+"[Arid] Cowboy Bebop - Knockin' on Heaven's Door v2 [00F4CDA0].mkv",
+"Cowboy Bebop - Knockin' on Heaven's Door",
+"Arid"
+],
+[
+"[Baws] Evangelion 1.11 - You Are (Not) Alone v2 (1080p BD HEVC FLAC) [BF42B1C8].mkv",
+"Evangelion 1 11 - You Are (Not) Alone",
+"Baws"
+],
+[
+"[Arid] 5 Centimeters per Second (BDRip 1920x1080 Hi10 FLAC) [FD8B6FF2].mkv",
+"5 Centimeters per Second",
+"Arid"
+],
+[
+"[Baws] Evangelion 2.22 - You Can (Not) Advance (1080p BD HEVC FLAC) [56E7A5B8].mkv",
+"Evangelion 2 22 - You Can (Not) Advance",
+"Baws"
+],
+[
+"[sam] Goblin Slayer - Goblin's Crown [BD 1080p FLAC] [CD298D48].mkv",
+"Goblin Slayer - Goblin's Crown",
+"sam"
+],
+[
+"[Kulot] Violet Evergarden Gaiden Eien to Jidou Shuki Ningyou [Dual-Audio][BDRip 1920x804 HEVC FLACx2] [91FC62A8].mkv",
+"Violet Evergarden Gaiden Eien to Jidou Shuki Ningyou",
+"Kulot"
+]
+]
+},
+"should_parse_german_movie": {
+"quality": null,
+"cases": [
+[
+"Movie.Aufbruch.nach.Pandora.Extended.2009.German.DTS.720p.BluRay.x264-SoW",
+"Movie Aufbruch nach Pandora",
+"Extended",
+2009
+],
+[
+"Drop.Movie.1994.German.AC3D.DL.720p.BluRay.x264-KLASSiGERHD",
+"Drop Movie",
+"",
+1994
+],
+[
+"Kick.Movie.2.2013.German.DTS.DL.720p.BluRay.x264-Pate",
+"Kick Movie 2",
+"",
+2013
+],
+[
+"Movie.Hills.2019.German.DL.AC3.Dubbed.1080p.BluRay.x264-muhHD",
+"Movie Hills",
+"",
+2019
+],
+[
+"96.Hours.Movie.3.EXTENDED.2014.German.DL.1080p.BluRay.x264-ENCOUNTERS",
+"96 Hours Movie 3",
+"EXTENDED",
+2014
+],
+[
+"Movie.War.Q.EXTENDED.CUT.2013.German.DL.1080p.BluRay.x264-HQX",
+"Movie War Q",
+"EXTENDED CUT",
+2013
+],
+[
+"Sin.Movie.2005.RECUT.EXTENDED.German.DL.1080p.BluRay.x264-DETAiLS",
+"Sin Movie",
+"RECUT EXTENDED",
+2005
+],
+[
+"2.Movie.in.L.A.1996.GERMAN.DL.720p.WEB.H264-SOV",
+"2 Movie in L.A.",
+"",
+1996
+],
+[
+"8.2019.GERMAN.720p.BluRay.x264-UNiVERSUM",
+"8",
+"",
+2019
+],
+[
+"Life.Movie.2014.German.DL.PAL.DVDR-ETM",
+"Life Movie",
+"",
+2014
+],
+[
+"Joe.Movie.2.EXTENDED.EDITION.2015.German.DL.PAL.DVDR-ETM",
+"Joe Movie 2",
+"EXTENDED EDITION",
+2015
+],
+[
+"Movie.EXTENDED.2011.HDRip.AC3.German.XviD-POE",
+"Movie",
+"EXTENDED",
+2011
+],
+[
+"Movie.Klasse.von.1999.1990.German.720p.HDTV.x264-NORETAiL",
+"Movie Klasse von 1999",
+"",
+1990
+],
+[
+"Movie.Squad.2016.EXTENDED.German.DL.AC3.BDRip.x264-hqc",
+"Movie Squad",
+"EXTENDED",
+2016
+],
+[
+"Movie.and.Movie.2010.Extended.Cut.German.DTS.DL.720p.BluRay.x264-HDS",
+"Movie and Movie",
+"Extended Cut",
+2010
+],
+[
+"Der.Movie.James.German.Bluray.FuckYou.Pso.Why.cant.you.follow.scene.rules.1998",
+"Der Movie James",
+"",
+1998
+],
+[
+"Der.Movie.Eine.Unerwartete.Reise.Extended.German.720p.BluRay.x264-EXQUiSiTE",
+"Der Movie Eine Unerwartete Reise",
+"Extended",
+0
+],
+[
+"Movie.Weg.des.Kriegers.EXTENDED.German.720p.BluRay.x264-EXQUiSiTE",
+"Movie Weg des Kriegers",
+"EXTENDED",
+0
+],
+[
+"Die.Unfassbaren.Movie.Name.EXTENDED.German.DTS.720p.BluRay.x264-RHD",
+"Die Unfassbaren Movie Name",
+"EXTENDED",
+0
+],
+[
+"Die Unfassbaren Movie Name EXTENDED German DTS 720p BluRay x264-RHD",
+"Die Unfassbaren Movie Name",
+"EXTENDED",
+0
+],
+[
+"Passengers.German.DL.AC3.Dubbed..BluRay.x264-PsO",
+"Passengers",
+"",
+0
+],
+[
+"Das.A.Team.Der.Film.Extended.Cut.German.720p.BluRay.x264-ANCIENT",
+"Das A Team Der Film",
+"Extended Cut",
+0
+],
+[
+"Cars.2.German.DL.720p.BluRay.x264-EmpireHD",
+"Cars 2",
+"",
+0
+],
+[
+"Die.fantastische.Reise.des.Dr.Dolittle.2020.German.DL.LD.1080p.WEBRip.x264-PRD",
+"Die fantastische Reise des Dr. Dolittle",
+"",
+2020
+],
+[
+"Der.Film.deines.Lebens.German.2011.PAL.DVDR-ETM",
+"Der Film deines Lebens",
+"",
+2011
+],
+[
+"Kick.Ass.2.2013.German.DTS.DL.720p.BluRay.x264-Pate_",
+"Kick Ass 2",
+"",
+2013
+],
+[
+"The.Good.German.2006.GERMAN.720p.HDTV.x264-RLsGrp",
+"The Good German",
+"",
+2006
+]
+]
+},
+"should_parse_movie_alternative_titles": {
+"quality": null,
+"cases": [
+[
+"L'hypothèse.du.movie.volé.AKA.The.Hypothesis.of.the.Movie.Title.1978.1080p.CINET.WEB-DL.AAC2.0.x264-Cinefeel.mkv",
+[
+"L'hypothèse du movie volé AKA The Hypothesis of the Movie Title",
+"L'hypothèse du movie volé",
+"The Hypothesis of the Movie Title"
+]
+],
+[
+"Skjegg.AKA.Rox.Beard.1965.CD1.CRiTERiON.DVDRip.XviD-KG.avi",
+[
+"Skjegg AKA Rox Beard",
+"Skjegg",
+"Rox Beard"
+]
+],
+[
+"Kjeller.chitai.AKA.Basement.of.Shame.1956.1080p.BluRay.x264.FLAC.1.0.mkv",
+[
+"Kjeller chitai AKA Basement of Shame",
+"Kjeller chitai",
+"Basement of Shame"
+]
+],
+[
+"Radarr.Under.Water.(aka.Beneath.the.Code.Freeze).1997.DVDRip.x264.CG-Grzechsin.mkv",
+[
+"Radarr Under Water (aka Beneath the Code Freeze)",
+"Radarr Under Water",
+"Beneath the Code Freeze"
+]
+],
+[
+"Radarr.prodavet. AKA.Radarr.Shift.2005.DVDRip.x264-HANDJOB.mkv",
+[
+"Radarr prodavet  AKA Radarr Shift",
+"Radarr prodavet",
+"Radarr Shift"
+]
+],
+[
+"AKA.2002.DVDRip.x264-HANDJOB.mkv",
+[
+"AKA"
+]
+],
+[
+"KillRoyWasHere.2000.BluRay.1080p.DTS.x264.dxva-EuReKA.mkv",
+[
+"KillRoyWasHere"
+]
+],
+[
+"Aka Rox (2008).avi",
+[
+"Aka Rox"
+]
+],
+[
+"Return Earth to Normal 'em High aka World 2 (2022) 1080p.mp4",
+[
+"Return Earth to Normal 'em High aka World 2",
+"Return Earth to Normal 'em High",
+"World 2"
+]
+],
+[
+"Енола Голмс / Enola Holmes (2020) UHD WEB-DL 2160p 4K HDR H.265 Ukr/Eng | Sub Ukr/Eng",
+[
+"Енола Голмс / Enola Holmes",
+"Енола Голмс",
+"Enola Holmes"
+]
+],
+[
+"Mon cousin a.k.a. My Cousin 2020 1080p Blu-ray DD 5.1 x264.mkv",
+[
+"Mon cousin AKA My Cousin",
+"Mon cousin",
+"My Cousin"
+]
+],
+[
+"Sydney A.K.A. Hard Eight 1996 1080p AMZN WEB-DL DD+ 2.0 H.264.mkv",
+[
+"Sydney AKA Hard Eight",
+"Sydney",
+"Hard Eight"
+]
+]
+]
+},
+"should_parse_movie_folder_name": {
+"quality": null,
+"cases": [
+[
+"(1995) Movie Name",
+"Movie Name"
+]
+]
+},
+"should_parse_movie_year": {
+"quality": null,
+"cases": [
+[
+"1776.1979.EXTENDED.720p.BluRay.X264-AMIABLE",
+1979
+],
+[
+"Movie Name FRENCH BluRay 720p 2016 kjhlj",
+2016
+],
+[
+"Der.Movie.German.Bluray.FuckYou.Pso.Why.cant.you.follow.scene.rules.1998",
+1998
+],
+[
+"Movie Name (1897) [DVD].mp4",
+1897
+],
+[
+"World Movie Z Movie [2023]",
+2023
+]
+]
+},
+"should_parse_tmdb_id": {
+"quality": null,
+"cases": [
+[
+"Movie Name (2016) {tmdbid-43074}",
+43074
+],
+[
+"Movie Name (2016) [tmdb-43074]",
+43074
+],
+[
+"Movie Name (2016) {tmdb-43074}",
+43074
+],
+[
+"Movie Name (2016) {tmdb-2020}",
+2020
+]
+]
+},
+"should_not_parse_wrong_language_in_title": {
+"quality": null,
+"cases": [
+[
+"The.Italian.Movie.2025.720p.BluRay.X264-AMIABLE"
+],
+[
+"The.French.Movie.2013.720p.BluRay.x264 - ROUGH[PublicHD]"
+],
+[
+"The.German.Doctor.2013.LIMITED.DVDRip.x264-RedBlade"
+],
+[
+"The.Good.German.2006.720p.HDTV.x264-TVP"
+],
+[
+"German.Lancers.2019.720p.BluRay.x264-UNiVERSUM"
+],
+[
+"The.German.2019.720p.BluRay.x264-UNiVERSUM"
+],
+[
+"Movie Name (2016) BluRay 1080p DTS-ES AC3 x264-3Li"
+]
+]
+},
+"should_parse_hardcoded_subs": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2016.1080p.KORSUB.WEBRip.x264.AAC2.0-RADARR",
+"KORSUB"
+],
+[
+"Movie.Title.2016.1080p.KORSUBS.WEBRip.x264.AAC2.0-RADARR",
+"KORSUBS"
+],
+[
+"Movie Title 2017 HC 720p HDRiP DD5 1 x264-LEGi0N",
+"Generic Hardcoded Subs"
+],
+[
+"Movie.Title.2017.720p.SUBBED.HDRip.V2.XViD-26k.avi",
+"Generic Hardcoded Subs"
+],
+[
+"Movie.Title.2000.1080p.BlueRay.x264.DTS.RoSubbed-playHD",
+null
+],
+[
+"Movie Title! 2018 [Web][MKV][h264][480p][AAC 2.0][Softsubs]",
+null
+],
+[
+"Movie Title! 2019 [HorribleSubs][Web][MKV][h264][848x480][AAC 2.0][Softsubs(HorribleSubs)]",
+null
+],
+[
+"Movie Title! 2024 [Web][x265][1080p][EAC3][MultiSubs]",
+null
+]
+]
+},
+"should_parse_imdb_in_title": {
+"quality": null,
+"cases": [
+[
+"That Italian Movie 2008 [tt1234567] 720p BluRay X264",
+"tt1234567"
+],
+[
+"That Italian Movie 2008 [tt12345678] 720p BluRay X264",
+"tt12345678"
+]
+]
+},
+"should_normalize_imdbid": {
+"quality": null,
+"cases": [
+[
+"asfd",
+null
+],
+[
+"123",
+"tt0000123"
+],
+[
+"1234567",
+"tt1234567"
+],
+[
+"tt1234567",
+"tt1234567"
+],
+[
+"tt12345678",
+"tt12345678"
+],
+[
+"12345678",
+"tt12345678"
+]
+]
+}
+},
+"QualityParserFixture": {
+"should_parse_ts": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.3.2017.720p.TSRip.x264.AAC-Ozlem",
+false
+],
+[
+"Movie: Title (2024) TeleSynch 720p | HEVC-FILVOVAN",
+false
+]
+]
+},
+"should_parse_cam": {
+"quality": null,
+"cases": [
+[
+"Movie Name 2018 NEW PROPER 720p HD-CAM X264 HQ-CPG",
+true
+],
+[
+"Movie Name (2022) 1080p HQCAM ENG x264 AAC - QRips",
+false
+],
+[
+"Movie Name (2018) 720p Hindi HQ CAMrip x264 AAC 1.4GB",
+false
+],
+[
+"Movie Name (2022) New HDCAMRip 1080p [Love Rulz]",
+false
+],
+[
+"Movie.Name.2024.NEWCAM.1080p.HEVC.AC3.English-RypS",
+false
+]
+]
+},
+"should_parse_sdtv_quality": {
+"quality": null,
+"cases": [
+[
+"S07E23 .avi ",
+false
+],
+[
+"Movie Name S02E01 HDTV XviD 2HD",
+false
+],
+[
+"Movie Name S05E11 PROPER HDTV XviD 2HD",
+true
+],
+[
+"Movie Name S02E08 HDTV x264 FTP",
+false
+],
+[
+"Movie.Name.2011.S02E01.WS.PDTV.x264-TLA",
+false
+],
+[
+"Movie Name.2011.S02E01.WS.PDTV.x264-REPACK-TLA",
+true
+],
+[
+"Movie Name S01E04 DSR x264 2HD",
+false
+],
+[
+"Movie Name S01E04 Mexicos Death Train DSR x264 MiNDTHEGAP",
+false
+],
+[
+"Movie Name S11E03 has no periods or extension HDTV",
+false
+],
+[
+"Movie Name.S04E05.HDTV.XviD-LOL",
+false
+],
+[
+"Some.Movie.S02E15.avi",
+false
+],
+[
+"Some.Movie.S02E15.xvid",
+false
+],
+[
+"Some.Movie.S02E15.divx",
+false
+],
+[
+"Some.Movie.S03E06.HDTV-WiDE",
+false
+],
+[
+"Movie Name.S10E27.WS.DSR.XviD-2HD",
+false
+],
+[
+"Movie Name.S03.TVRip.XviD-NOGRP",
+false
+]
+]
+},
+"should_parse_dvd_quality": {
+"quality": null,
+"cases": [
+[
+"Some.Movie.S03E06.DVDRip.XviD-WiDE",
+false
+],
+[
+"Some.Movie.S03E06.DVD.Rip.XviD-WiDE",
+false
+],
+[
+"the.Movie Name.1x13.circles.ws.xvidvd-tns",
+false
+],
+[
+"the_movie.9x18.sunshine_days.ac3.ws_dvdrip_xvid-fov.avi",
+false
+],
+[
+"The.Third.Movie Name.2008.DVDRip.360p.H264 iPod -20-40",
+false
+],
+[
+"SomeMovie.2018.DVDRip.ts",
+false
+]
+]
+},
+"should_parse_dvdr_quality": {
+"quality": null,
+"cases": [
+[
+"Some.Movie.Magic.Rainbow.2007.DVD5.NTSC",
+false
+],
+[
+"Some.Movie.Magic.Rainbow.2007.DVD9.NTSC",
+false
+],
+[
+"Some.Movie.Magic.Rainbow.2007.DVDR.NTSC",
+false
+],
+[
+"Some.Movie.Magic.Rainbow.2007.DVD-R.NTSC",
+false
+],
+[
+"Some.Movie.2020.PAL.2xDVD9",
+false
+],
+[
+"Some.Movie.2000.2DVD5",
+false
+],
+[
+"Some.Movie.2005.PAL.MDVDR-SOMegRoUP",
+false
+]
+]
+},
+"should_parse_webdl480p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Name.S01E10.The.Leviathan.480p.WEB-DL.x264-mSD",
+false
+],
+[
+"Movie.Name.S04E10.Glee.Actually.480p.WEB-DL.x264-mSD",
+false
+],
+[
+"Movie.Name.S06E11.The.Santa.Simulation.480p.WEB-DL.x264-mSD",
+false
+],
+[
+"Movie.Name.S02E04.480p.WEB.DL.nSD.x264-NhaNc3",
+false
+],
+[
+"[HorribleSubs] Movie Title! 2018 [Web][MKV][h264][480p][AAC 2.0][Softsubs (HorribleSubs)]",
+false
+],
+[
+"[SubsPlease] Movie Title (540p) [AB649D32].mkv",
+false
+],
+[
+"[Erai-raws] Movie Title [540p][Multiple Subtitle].mkv",
+false
+]
+]
+},
+"should_parse_webrip480p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Name.1x04.ITA.WEBMux.x264-NovaRip",
+false
+]
+]
+},
+"should_parse_bluray480p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Name (BD)(640x480(RAW) (BATCH 1) (1-13)",
+false
+],
+[
+"Movie.Name.S01E05.480p.BluRay.DD5.1.x264-HiSD",
+false
+],
+[
+"Movie.Name.S03E01-06.DUAL.BDRip.AC3.-HELLYWOOD",
+false
+],
+[
+"Movie.Name.2011.LIMITED.BluRay.360p.H264-20-40",
+false
+],
+[
+"Movie.Name.2011.BluRay.480i.DD.2.0.AVC.REMUX-FraMeSToR",
+false
+],
+[
+"Movie.Name.2011.480i.DD.2.0.AVC.REMUX-FraMeSToR",
+false
+]
+]
+},
+"should_parse_hdtv720p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie Name - S01E01 - Title [HDTV]",
+false
+],
+[
+"Movie Name - S01E01 - Title [HDTV-720p]",
+false
+],
+[
+"Movie.Name S04E87 REPACK 720p HDTV x264 aAF",
+true
+],
+[
+"S07E23 - [HDTV-720p].mkv ",
+false
+],
+[
+"Movie.Name - S22E03 - MoneyBART - HD TV.mkv",
+false
+],
+[
+"Movie.Name.S08E05.720p.HDTV.X264-DIMENSION",
+false
+],
+[
+"E:\\Downloads\\tv\\Movie.Name.S01E01.720p.HDTV\\ajifajjjeaeaeqwer_eppj.avi",
+false
+],
+[
+"Movie.Name.S01E08.Tourmaline.Nepal.720p.HDTV.x264-DHD",
+false
+],
+[
+"Movie.Name.US.S12E17.HR.WS.PDTV.X264-DIMENSION",
+false
+],
+[
+"Movie.Name.The.Lost.Pilots.Movie.HR.WS.PDTV.x264-DHD",
+false
+],
+[
+"Movie.Name.The.Lost.Pilots.Movie.HR.WS.PDTV.x264-DHD-Remux.mkv",
+false
+]
+]
+},
+"should_parse_hdtv1080p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie Name.S07E01.ARE.YOU.1080P.HDTV.X264-QCF",
+false
+],
+[
+"Movie Name.S07E01.ARE.YOU.1080P.HDTV.x264-QCF",
+false
+],
+[
+"Movie Name.S07E01.ARE.YOU.1080P.HDTV.proper.X264-QCF",
+true
+],
+[
+"Movie Name - S01E01 - Title [HDTV-1080p]",
+false
+],
+[
+"Movie.Name.2020.1080i.HDTV.DD5.1.H.264-NOGRP",
+false
+]
+]
+},
+"should_parse_hdtv2160p_quality": {
+"quality": null,
+"cases": [
+[
+"[NOGRP][国漫][诛仙][Movie Title 2022][19][HEVC][GB][4K]",
+false
+]
+]
+},
+"should_parse_webdl720p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie Name S01E04 Mexicos Death Train 720p WEB DL",
+false
+],
+[
+"Movie Name S02E21 720p WEB DL DD5 1 H 264",
+false
+],
+[
+"Movie Name S04E22 720p WEB DL DD5 1 H 264 NFHD",
+false
+],
+[
+"Movie Name - S11E06 - D-Yikes! - 720p WEB-DL.mkv",
+false
+],
+[
+"Some.Movie.S02E15.720p.WEB-DL.DD5.1.H.264-SURFER",
+false
+],
+[
+"S07E23 - [WEBDL].mkv ",
+false
+],
+[
+"Movie Name S04E22 720p WEB-DL DD5.1 H264-EbP.mkv",
+false
+],
+[
+"Movie Name.S04.720p.Web-Dl.Dd5.1.h264-P2PACK",
+false
+],
+[
+"Movie Name.S02E04.720p.WEB.DL.nSD.x264-NhaNc3",
+false
+],
+[
+"Movie Name.S04E25.720p.iTunesHD.AVC-TVS",
+false
+],
+[
+"Movie Name.S06E23.720p.WebHD.h264-euHD",
+false
+],
+[
+"Movie Name.2016.03.14.720p.WEB.x264-spamTV",
+false
+],
+[
+"Movie Name.2016.03.14.720p.WEB.h264-spamTV",
+false
+],
+[
+"Movie Name.S01E01.The.Insanity.Principle.720p.WEB-DL.DD5.1.H.264-BD",
+false
+],
+[
+"[HorribleSubs] Movie Title! 2018 [Web][MKV][h264][720p][AAC 2.0][Softsubs (HorribleSubs)]",
+false
+],
+[
+"[HorribleSubs] Movie Title! 2018 [Web][MKV][h264][AAC 2.0][Softsubs (HorribleSubs)]",
+false
+],
+[
+"Movie.Title.2013.960p.WEB-DL.AAC2.0.H.264-squalor",
+false
+],
+[
+"Movie.Title.2021.DP.WEB.720p.DDP.5.1.H.264.PLEX",
+false
+]
+]
+},
+"should_parse_webrip720p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.ITA.720p.WEBMux.x264-NovaRip",
+false
+],
+[
+"Movie Name.S04E01.720p.WEBRip.AAC2.0.x264-NFRiP",
+false
+]
+]
+},
+"should_parse_webdl1080p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie Name S09E03 1080p WEB DL DD5 1 H264 NFHD",
+false
+],
+[
+"Movie Name S10E03 1080p WEB DL DD5 1 H 264 NFHD",
+false
+],
+[
+"Movie.Name.S08E01.1080p.WEB-DL.DD5.1.H264-NFHD",
+false
+],
+[
+"Movie.Name.S08E01.1080p.WEB-DL.proper.AAC2.0.H.264",
+true
+],
+[
+"Movie Name S10E03 1080p WEB DL DD5 1 H 264 REPACK NFHD",
+true
+],
+[
+"Movie.Name.S04E09.Swan.Song.1080p.WEB-DL.DD5.1.H.264-ECI",
+false
+],
+[
+"Movie.Name.S06E11.The.Santa.Simulation.1080p.WEB-DL.DD5.1.H.264",
+false
+],
+[
+"Movie.Name.Baby.S01E02.Night.2.[WEBDL-1080p].mkv",
+false
+],
+[
+"Movie.Name.2016.03.14.1080p.WEB.x264-spamTV",
+false
+],
+[
+"Movie.Name.2016.03.14.1080p.WEB.h264-spamTV",
+false
+],
+[
+"Movie.Name.S01.1080p.WEB-DL.AAC2.0.AVC-TrollHD",
+false
+],
+[
+"Series Title S06E08 1080p WEB h264-EXCLUSIVE",
+false
+],
+[
+"Series Title S06E08 No One PROPER 1080p WEB DD5 1 H 264-EXCLUSIVE",
+true
+],
+[
+"Series Title S06E08 No One PROPER 1080p WEB H 264-EXCLUSIVE",
+true
+],
+[
+"The.Movie.Name.S25E21.Pay.Pal.1080p.WEB-DL.DD5.1.H.264-NTb",
+false
+],
+[
+"The.Movie.Name.2017.1080p.WEB-DL.DD5.1.H.264.Remux.-NTb",
+false
+],
+[
+"Movie.Name.2019.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTG",
+false
+],
+[
+"Movie.Name.2020.1080p.AMZN.WEB...",
+false
+],
+[
+"Movie.Name.2020.1080p.AMZN.WEB.",
+false
+],
+[
+"Movie Title - 2020 1080p Viva MKV WEB",
+false
+],
+[
+"[HorribleSubs] Movie Title! 2018 [Web][MKV][h264][1080p][AAC 2.0][Softsubs (HorribleSubs)]",
+false
+],
+[
+"Movie.Title.2020.MULTi.1080p.WEB.H264-ALLDAYiN (S:285/L:11)",
+false
+],
+[
+"Movie Title (2020) MULTi WEB 1080p x264-JiHEFF (S:317/L:28)",
+false
+],
+[
+"Movie.Titles.2020.1080p.NF.WEB.DD2.0.x264-SNEAkY",
+false
+],
+[
+"The.Movie.2022.NORDiC.1080p.DV.HDR.WEB.H 265-NiDHUG",
+false
+],
+[
+"Movie Title 2018 [WEB 1080p HEVC Opus] [Netaro]",
+false
+],
+[
+"Movie Title 2018 (WEB 1080p HEVC Opus) [Netaro]",
+false
+],
+[
+"Movie.Title.2024.German.Dubbed.DL.AAC.1080p.WEB.AVC-GROUP",
+false
+]
+]
+},
+"should_parse_webrip1080p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Name.S04E01.iNTERNAL.1080p.WEBRip.x264-QRUS",
+false
+],
+[
+"Movie.Name.1x04.ITA.1080p.WEBMux.x264-NovaRip",
+false
+],
+[
+"Movie.Name.2019.S02E07.Chapter.15.The.Believer.4Kto1080p.DSNYP.Webrip.x265.10bit.EAC3.5.1.Atmos.GokiTAoE",
+false
+],
+[
+"Movie.Title.2019.1080p.AMZN.WEB-Rip.DDP.5.1.HEVC",
+false
+]
+]
+},
+"should_parse_webdl2160p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Name.2016.03.14.2160p.WEB.x264-spamTV",
+false
+],
+[
+"Movie.Name.2016.03.14.2160p.WEB.h264-spamTV",
+false
+],
+[
+"Movie.Name.2016.03.14.2160p.WEB.PROPER.h264-spamTV",
+true
+],
+[
+"[HorribleSubs] Movie Title! 2018 [Web][MKV][h264][2160p][AAC 2.0][Softsubs (HorribleSubs)]",
+false
+],
+[
+"Movie Name 2020 WEB-DL 4K H265 10bit HDR DDP5.1 Atmos-PTerWEB",
+false
+],
+[
+"The.Movie.2022.NORDiC.2160p.DV.HDR.WEB.H.265-NiDHUG",
+false
+],
+[
+"Movie.Name.2024.German.Dubbed.DL.AAC.2160p.DV.HDR.WEB.HEVC-GROUP",
+false
+],
+[
+"Movie.Name.2024.German.AC3D.DL.2160p.Hybrid.WEB.DV.HDR10Plus.HEVC-GROUP",
+false
+],
+[
+"Movie.Name.2024.German.Atmos.Dubbed.DL.2160p.Hybrid.WEB.DV.HDR10Plus.HEVC-GROUP",
+false
+],
+[
+"Movie.Name.2024.German.EAC3D.DL.2160p.Hybrid.WEB.DV.HDR10Plus.HEVC-GROUP",
+false
+]
+]
+},
+"should_parse_webrip2160p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie Name S01E01.2160P AMZN WEBRIP DD2.0 HI10P X264-TROLLUHD",
+false
+],
+[
+"Movie ADD Name S01E01.2160P AMZN WEBRIP DD2.0 X264-TROLLUHD",
+false
+],
+[
+"Movie.Name.S01E01.2160p.AMZN.WEBRip.DD2.0.Hi10p.X264-TrollUHD",
+false
+],
+[
+"Movie Name S01E01 2160p AMZN WEBRip DD2.0 Hi10P x264-TrollUHD",
+false
+]
+]
+},
+"should_parse_bluray720p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Name.S03E01-06.DUAL.Bluray.AC3.-HELLYWOOD.avi",
+false
+],
+[
+"Movie Name - S01E03 - Come Fly With Me - 720p BluRay.mkv",
+false
+],
+[
+"Movie Name.S03E01.The Electric Can Opener Fluctuation.m2ts",
+false
+],
+[
+"Movie.Name.S01E02.Chained.Heat.[Bluray720p].mkv",
+false
+],
+[
+"[FFF] Movie Name - 01 [BD][720p-AAC][0601BED4]",
+false
+],
+[
+"[coldhell] Movie v3 [BD720p][03192D4C]",
+false
+],
+[
+"[RandomRemux] Movie - 01 [720p BD][043EA407].mkv",
+false
+],
+[
+"[Kaylith] Movie Friends Movies - 01 [BD 720p AAC][B7EEE164].mkv",
+false
+],
+[
+"Movie.Name.S03E01-06.DUAL.Blu-ray.AC3.-HELLYWOOD.avi",
+false
+],
+[
+"Movie.Name.S03E01-06.DUAL.720p.Blu-ray.AC3.-HELLYWOOD.avi",
+false
+],
+[
+"[Elysium]Movie.Name.01(BD.720p.AAC.DA)[0BB96AD8].mkv",
+false
+],
+[
+"Movie.Name.S01E01.33.720p.HDDVD.x264-SiNNERS.mkv",
+false
+],
+[
+"Movie.Name.S01E07.RERIP.720p.BluRay.x264-DEMAND",
+true
+],
+[
+"Movie.Name.2016.2018.720p.MBluRay.x264-CRUELTY.mkv",
+false
+],
+[
+"Movie.Name.2019.720p.MBLURAY.x264-MBLURAYFANS.mkv",
+false
+],
+[
+"Movie.Name2017.720p.MBluRay.x264-TREBLE.mkv",
+false
+],
+[
+"Movie.Name.2.Parte.2.ITA-ENG.720p.BDMux.DD5.1.x264-DarkSideMux",
+false
+],
+[
+"Movie.Hunter.2018.720p.Blu-ray.Remux.AVC.FLAC.2.0-SiCFoI",
+false
+],
+[
+"Movie.Name.2011.720p.DD.2.0.AVC.REMUX-FraMeSToR",
+false
+]
+]
+},
+"should_parse_bluray1080p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie Title - S01E03 - Come Fly With Me - 1080p BluRay.mkv",
+false
+],
+[
+"Movie.Title.S02E13.1080p.BluRay.x264-AVCDVD",
+false
+],
+[
+"Movie.S01E02.Chained.Heat.[Bluray1080p].mkv",
+false
+],
+[
+"[FFF] Movie no Muromi-san - 10 [BD][1080p-FLAC][0C4091AF]",
+false
+],
+[
+"[coldhell] Movie v2 [BD1080p][5A45EABE].mkv",
+false
+],
+[
+"[Kaylith] Movie Friends Specials - 01 [BD 1080p FLAC][429FD8C7].mkv",
+false
+],
+[
+"[Zurako] Log Movie - 01 - The Movie (BD 1080p AAC) [7AE12174].mkv",
+false
+],
+[
+"Movie.S03E01-06.DUAL.1080p.Blu-ray.AC3.-HELLYWOOD.avi",
+false
+],
+[
+"[Coalgirls]_Movie!!_01_(1920x1080_Blu-ray_FLAC)_[8370CB8F].mkv",
+false
+],
+[
+"Movie.Name.2016.2018.1080p.MBluRay.x264-CRUELTY.mkv",
+false
+],
+[
+"Movie.Name.2019.1080p.MBLURAY.x264-MBLURAYFANS.mkv",
+false
+],
+[
+"Movie.Name2017.1080p.MBluRay.x264-TREBLE.mkv",
+false
+],
+[
+"Movie.Name.2011.UHD.BluRay.DD5.1.HDR.x265-CtrlHD/ctrlhd-rotpota-1080p.mkv",
+false
+],
+[
+"Movie Name 2005 1080p UHD BluRay DD+7.1 x264-LoRD.mkv",
+false
+],
+[
+"Movie.Name.2011.1080p.UHD.BluRay.DD5.1.HDR.x265-CtrlHD.mkv",
+false
+],
+[
+"Movie.Name.2016.German.DTS.DL.1080p.UHDBD.x265-TDO.mkv",
+false
+],
+[
+"Movie.Name.2021.1080p.BDLight.x265-AVCDVD",
+false
+],
+[
+"Movie.Title.2012.German.DL.1080p.UHD2BD.x264-QfG",
+false
+],
+[
+"Movie.Title.2005.1080p.HDDVDRip.x264",
+false
+],
+[
+"Movie.Title.2019.German.DL.1080p.HDR.UHDBDRip.AV1-GROUP",
+false
+],
+[
+"Movie.Title.2014.German.OPUS.DL.1080p.UHDBDRiP.HDR.AV1-GROUP",
+false
+],
+[
+"Movie.Title.1999.German.DL.1080p.HDR.UHDBDRip.AV1-GROUP",
+false
+],
+[
+"Movie.Title.1993.Uncut.German.DL.1080p.HDR.UHDBDRip.h265-GROUP",
+false
+]
+]
+},
+"should_parse_bluray2160p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.S01E02.Chained.Heat.[Bluray2160p].mkv",
+false
+],
+[
+"[FFF] Movie no Movie-san - 10 [BD][2160p-FLAC][0C4091AF]",
+false
+],
+[
+"[coldhell] Movie v2 [BD2160p][5A45EABE].mkv",
+false
+],
+[
+"[Kaylith] Movie Friends Specials - 01 [BD 2160p FLAC][429FD8C7].mkv",
+false
+],
+[
+"[Zurako] Log Movie - 01 - The Movie (BD 2160p AAC) [7AE12174].mkv",
+false
+],
+[
+"Movie.Title.S03E01-06.DUAL.2160p.Blu-ray.AC3.-HELLYWOOD.avi",
+false
+],
+[
+"[Coalgirls]_Movie!!_01_(3840x2160_Blu-ray_FLAC)_[8370CB8F].mkv",
+false
+],
+[
+"Movie.Title.2016.2018.2160p.MBluRay.x264-CRUELTY.mkv",
+false
+],
+[
+"Movie.Title.2019.2160p.MBLURAY.x264-MBLURAYFANS.mkv",
+false
+],
+[
+"Movie.Title.2017.2160p.MBluRay.x264-TREBLE.mkv",
+false
+],
+[
+"Movie.Name.2020.German.UHDBD.2160p.HDR10.HEVC.EAC3.DL-pmHD.mkv",
+false
+],
+[
+"Movie.Title.2014.2160p.UHD.BluRay.X265-IAMABLE.mkv",
+false
+],
+[
+"Movie.Title.2014.2160p.BDRip.AAC.7.1.HDR10.x265.10bit-Markll",
+false
+],
+[
+"Movie.Title.1956.German.DL.2160p.HDR.UHDBDRip.h266-GROUP",
+false
+],
+[
+"Movie.Title.2021.4K.HDR.2160P.UHDBDRip.HEVC-10bit.GROUP",
+false
+]
+]
+},
+"should_parse_bluray576p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Name.2004.576p.BDRip.x264-HANDJOB"
+],
+[
+"Movie.Title.S01E05.576p.BluRay.DD5.1.x264-HiSD"
+]
+]
+},
+"should_parse_remux720p_as_bluray720p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.1993.720p.BluRay.REMUX.AVC.FLAC.2.0-BLURANiUM"
+]
+]
+},
+"should_parse_remux1080p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2016.REMUX.1080p.BluRay.AVC.DTS-HD.MA.5.1-iFT"
+],
+[
+"Movie.Name.2008.REMUX.1080p.Bluray.AVC.DTS-HR.MA.5.1-LEGi0N"
+],
+[
+"Movie.Name.2008.BDREMUX.1080p.Bluray.AVC.DTS-HR.MA.5.1-LEGi0N"
+],
+[
+"Movie.Title.M.2008.USA.BluRay.Remux.1080p.MPEG-2.DD.5.1-TDD"
+],
+[
+"Movie.Title.2018.1080p.BluRay.REMUX.MPEG-2.DTS-HD.MA.5.1-EPSiLON"
+],
+[
+"Movie.Title.II.2003.4K.BluRay.Remux.1080p.AVC.DTS-HD.MA.5.1-BMF"
+],
+[
+"Movie Title 2022 (BDRemux 1080p HEVC FLAC) [Netaro]"
+],
+[
+"[Vodes] Movie Title - Other Title (2020) [BDRemux 1080p HEVC Dual-Audio]"
+],
+[
+"This.Wonderful.Movie.1991.German.ML.1080p.BluRay.AVC-GeRMaNSCeNEGRoUP"
+],
+[
+"Movie.Name.2011.1080p.DD.2.0.AVC.REMUX-FraMeSToR"
+],
+[
+"Movie Name 2018 1080p BluRay Hybrid-REMUX AVC TRUEHD 5.1 Dual Audio-ZR-"
+],
+[
+"Movie.Name.2018.1080p.BluRay.Hybrid-REMUX.AVC.TRUEHD.5.1.Dual.Audio-ZR-"
+]
+]
+},
+"should_parse_remux2160p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2016.REMUX.2160p.BluRay.AVC.DTS-HD.MA.5.1-iFT"
+],
+[
+"Movie.Name.2008.REMUX.2160p.Bluray.AVC.DTS-HR.MA.5.1-LEGi0N"
+],
+[
+"Movie.Title.1980.2160p.UHD.BluRay.Remux.HDR.HEVC.DTS-HD.MA.5.1-PmP.mkv"
+],
+[
+"Movie.Title.2016.T1.UHDRemux.2160p.HEVC.Dual.AC3.5.1-TrueHD.5.1.Sub"
+],
+[
+"[Dolby Vision] Movie.Title.S07.MULTi.UHD.BLURAY.REMUX.DV-NoTag"
+],
+[
+"Movie.Name.2020.German.UHDBD.2160p.HDR10.HEVC.EAC3.DL.Remux-pmHD.mkv"
+],
+[
+"Movie Name (2021) [Remux-2160p x265 HDR 10-BIT DTS-HD MA 7.1]-FraMeSToR.mkv"
+],
+[
+"This.Wonderful.Movie.1991.German.ML.2160p.BluRay.HEVC-GeRMaNSCeNEGRoUP"
+],
+[
+"Movie.Name.2011.2160p.DD.2.0.AVC.REMUX-FraMeSToR"
+],
+[
+"Movie Name 2018 2160p BluRay Hybrid-REMUX AVC TRUEHD 5.1 Dual Audio-ZR-"
+],
+[
+"Movie.Name.2018.2160p.BluRay.Hybrid-REMUX.AVC.TRUEHD.5.1.Dual.Audio-ZR-"
+]
+]
+},
+"should_parse_brdisk_1080p_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2013.BDISO"
+],
+[
+"Movie.Title.2005.MULTi.COMPLETE.BLURAY-VLS"
+],
+[
+"Movie Name (2012) Bluray ISO [USENET-TURK]"
+],
+[
+"Movie Name.1993..BD25.ISO"
+],
+[
+"Movie.Title.2012.Bluray.1080p.3D.AVC.DTS-HD.MA.5.1.iso"
+],
+[
+"Movie.Title.1996.Bluray.ISO"
+],
+[
+"Random.Title.2010.1080p.HD.DVD.AVC.DDP.5.1-GRouP"
+],
+[
+"Movie Title 2005 1080p USA Blu-ray AVC DTS-HD MA 5.1-PTP"
+],
+[
+"Movie Title 2014 1080p Blu-ray AVC DTS-HD MA 5.1-PTP"
+],
+[
+"Movie Title 1976 2160p UHD Blu-ray DTS-HD MA 5.1 DV HDR HEVC-UNTOUCHED"
+],
+[
+"Movie Title 2004 1080p FRA Blu-ray VC-1 TrueHD 5.1-HDBEE"
+],
+[
+"BD25.Movie.Title.1994.1080p.DTS-HD"
+],
+[
+"Movie.Title.1997.1080p.NL.BD-50"
+],
+[
+"Movie Title 2009 3D BD 2009 UNTOUCHED"
+],
+[
+"Movie.Title.1982.1080p.HD.DVD.VC-1.DD+.5.1"
+],
+[
+"Movie.Title.2007.1080p.HD.DVD.DD+.AVC"
+],
+[
+"Movie.Title.2008.1080i.XXX.Blu-ray.MPEG-2.LPCM2.0.ISO"
+],
+[
+"Movie.Title.2008.BONUS.GERMAN.SUBBED.COMPLETE.BLURAY"
+],
+[
+"The German 2021 Bluray AVC"
+],
+[
+"German.Only.Movie.2021.French.1080p.BluRay.AVC-UNTAVC"
+],
+[
+"Movie.Title.2008.US.Directors.Cut.UHD.BD66.Blu-ray"
+],
+[
+"Movie.2009.Blu.ray.AVC.DTS.HD.MA.5.1"
+],
+[
+"[BD]Movie.Title.2008.2023.1080p.COMPLETE.BLURAY-RlsGrp"
+]
+]
+},
+"should_parse_raw_quality": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2015.Open.Matte.1080i.HDTV.DD5.1.MPEG2",
+false
+],
+[
+"Movie.Title.2009.1080i.HDTV.AAC2.0.MPEG2-PepelefuF",
+false
+]
+]
+},
+"quality_parse": {
+"quality": null,
+"cases": [
+[
+"Some.Movie.S02E15",
+false
+],
+[
+"Movie Name - 11x11 - Quickie",
+false
+],
+[
+"Movie.Name.S01E01.webm",
+false
+],
+[
+"Movie.Title.S01E01.The.Web.MT-dd",
+false
+]
+]
+},
+"should_parse_full_quality_from_name": {
+"quality": null,
+"cases": [
+[
+"Movie - 2018 [HDTV-1080p]"
+],
+[
+"Movie.Title.S10E09.Eddie.Murphy.The.Honeydrippers.1080i.UPSCALE.HDTV.DD5.1.MPEG2-zebra"
+],
+[
+"Movie.Title.2018.Bluray720p"
+],
+[
+"Movie.Title.2018.Bluray1080p"
+],
+[
+"Movie.Title.2018.Bluray2160p"
+],
+[
+"Movie.Title.2018.848x480.dvd"
+],
+[
+"Movie.Title.2018.848x480.Bluray"
+],
+[
+"Movie.Title.2018.1280x720.Bluray"
+],
+[
+"Movie.Title.2018.1920x1080.Bluray"
+]
+]
+},
+"should_parse_resolution_from_name": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2018.848x480"
+],
+[
+"Movie.Title.2018.1280x720"
+],
+[
+"Movie.Title.2018.1920x1080"
+]
+]
+},
+"should_parse_source_from_name": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.2011.S02E01.WS.PDTV.x264-REPACK-TLA"
+],
+[
+"Movie.Title.S01E01.Bluray"
+],
+[
+"Movie.Title.S01E01.HD.TV"
+],
+[
+"Movie.Title.S01E01.SD.TV"
+]
+]
+},
+"should_parse_quality_from_extension": {
+"quality": null,
+"cases": [
+[
+"Movie.Title.S01E02.Chained.Heat.mkv"
+],
+[
+"Movie Name - S01E01 - Title.avi"
+],
+[
+"Movie.Title..9x18.sunshine_days.avi"
+],
+[
+"[CR] Movie Title - 004 [48CE2D0F].avi"
+]
+]
+},
+"should_parse_resolution_from_name_and_source_from_extension": {
+"quality": null,
+"cases": [
+[
+"Movie.Name.S01E02.Chained.Heat.1080p.mkv"
+],
+[
+"Movie Name - S01E01 - Title.720p.avi"
+]
+]
+},
+"should_be_able_to_parse_repack": {
+"quality": "Resolution",
+"cases": [
+[
+"Movie Title 2018 REPACK 720p HDTV x264 aAF",
+true,
+2
+],
+[
+"Movie.Title.2018.REPACK.720p.HDTV.x264-aAF",
+true,
+2
+],
+[
+"Movie.Title.2018.REPACK2.720p.HDTV.x264-aAF",
+true,
+3
+],
+[
+"Movie.Title.2018.PROPER.720p.HDTV.x264-aAF",
+false,
+2
+],
+[
+"Movie.Title.2018.RERIP.720p.BluRay.x264-DEMAND",
+true,
+2
+],
+[
+"Movie.Title.2018.RERIP2.720p.BluRay.x264-DEMAND",
+true,
+3
+]
+]
+}
+},
+"ReleaseGroupParserFixture": {
+"should_parse_release_group": {
+"quality": null,
+"cases": [
+[
+"Movie.2009.S01E14.English.HDTV.XviD-LOL",
+"LOL"
+],
+[
+"Movie 2009 S01E14 English HDTV XviD LOL",
+null
+],
+[
+"Acropolis Now S05 EXTRAS DVDRip XviD RUNNER",
+null
+],
+[
+"Punky.Brewster.S01.EXTRAS.DVDRip.XviD-RUNNER",
+"RUNNER"
+],
+[
+"2020.NZ.2011.12.02.PDTV.XviD-C4TV",
+"C4TV"
+],
+[
+"Some.Movie.S03E115.DVDRip.XviD-OSiTV",
+"OSiTV"
+],
+[
+"Some Movie - S01E01 - Pilot [HTDV-480p]",
+null
+],
+[
+"Some Movie - S01E01 - Pilot [HTDV-720p]",
+null
+],
+[
+"Some Movie - S01E01 - Pilot [HTDV-1080p]",
+null
+],
+[
+"Movie.Name.S04E13.720p.WEB-DL.AAC2.0.H.264-Cyphanix",
+"Cyphanix"
+],
+[
+"Movie.Name.S02E01.720p.WEB-DL.DD5.1.H.264.mkv",
+null
+],
+[
+"Series Title S01E01 Episode Title",
+null
+],
+[
+"Movie.Name- 2014-06-02 - Some Movie.mkv",
+null
+],
+[
+"Movie.Name S12E17 May 23, 2014.mp4",
+null
+],
+[
+"Movie.Name - S01E08 - Transistrië, Zuid-Ossetië en Abchazië SDTV.avi",
+null
+],
+[
+"Movie.Name 10x11 - Wild Movies Cant Be Broken [rl].avi",
+"rl"
+],
+[
+"[ www.Torrenting.com ] - Movie.Name.S03E14.720p.HDTV.X264-DIMENSION",
+"DIMENSION"
+],
+[
+"Movie.Name S02E09 HDTV x264-2HD [eztv]-[rarbg.com]",
+"2HD"
+],
+[
+"7s-Movie.Name-s02e01-720p.mkv",
+null
+],
+[
+"The.Movie.Name.720p.HEVC.x265-MeGusta-Pre",
+"MeGusta"
+],
+[
+"Blue.Movie.Name.S08E05.The.Movie.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb-Rakuv",
+"NTb"
+],
+[
+"Movie.Name.S01E13.720p.BluRay.x264-SiNNERS-Rakuvfinhel",
+"SiNNERS"
+],
+[
+"Movie.Name.S01E01.INTERNAL.720p.HDTV.x264-aAF-RakuvUS-Obfuscated",
+"aAF"
+],
+[
+"Movie.Name.2018.720p.WEBRip.DDP5.1.x264-NTb-postbot",
+"NTb"
+],
+[
+"Movie.Name.2018.720p.WEBRip.DDP5.1.x264-NTb-xpost",
+"NTb"
+],
+[
+"Movie.Name.S02E24.1080p.AMZN.WEBRip.DD5.1.x264-CasStudio-AsRequested",
+"CasStudio"
+],
+[
+"Movie.Name.S04E11.Lamster.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb-AlternativeToRequested",
+"NTb"
+],
+[
+"Movie.Name.S16E04.Third.Wheel.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb-GEROV",
+"NTb"
+],
+[
+"Movie.NameS10E06.Kid.n.Play.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb-Z0iDS3N",
+"NTb"
+],
+[
+"Movie.Name.S02E06.The.House.of.Lords.DVDRip.x264-MaG-Chamele0n",
+"MaG"
+],
+[
+"Some.Movie.2013.1080p.BluRay.REMUX.AVC.DTS-X.MA.5.1",
+null
+],
+[
+"Some.Movie.2013.1080p.BluRay.REMUX.AVC.DTS-MA.5.1",
+null
+],
+[
+"Movie.Name.2013.1080p.BluRay.REMUX.AVC.DTS-ES.MA.5.1",
+null
+],
+[
+"SomeMovie.1080p.BluRay.DTS-X.264.-D-Z0N3.mkv",
+"D-Z0N3"
+],
+[
+"SomeMovie.1080p.BluRay.DTS.x264.-Blu-bits.mkv",
+"Blu-bits"
+],
+[
+"SomeMovie.1080p.BluRay.DTS.x264.-DX-TV.mkv",
+"DX-TV"
+],
+[
+"SomeMovie.1080p.BluRay.DTS.x264.-FTW-HS.mkv",
+"FTW-HS"
+],
+[
+"SomeMovie.1080p.BluRay.DTS.x264.-VH-PROD.mkv",
+"VH-PROD"
+],
+[
+"Some.Dead.Movie.2006.1080p.BluRay.DTS.x264.D-Z0N3",
+"D-Z0N3"
+],
+[
+"Movie.Title.2010.720p.BluRay.x264.-[YTS.LT]",
+"YTS.LT"
+],
+[
+"The.Movie.Title.2013.720p.BluRay.x264-ROUGH [PublicHD]",
+"ROUGH"
+],
+[
+"Some.Really.Bad.Movie.Title.[2021].1080p.WEB-HDRip.Dual.Audio.[Hindi.[Clean]. .English].x264.AAC.DD.2.0.By.Full4Movies.mkv-xpost",
+null
+],
+[
+"The.Movie.Title.2013.1080p.10bit.AMZN.WEB-DL.DDP5.1.HEVC-Vyndros",
+"Vyndros"
+],
+[
+"Movie.Name.2022.1080p.BluRay.x264-[YTS.AG]",
+"YTS.AG"
+],
+[
+"Movie.Name.2022.1080p.BluRay.x264-VARYG",
+"VARYG"
+],
+[
+"Movie.Title.2019.1080p.AMZN.WEB-Rip.DDP.5.1.HEVC",
+null
+],
+[
+"Movie Name (2017) [2160p REMUX] [HEVC DV HYBRID HDR10+ Dolby TrueHD Atmos 7 1 24-bit Audio English] [Data Lass]",
+null
+],
+[
+"Movie Name (2017) [2160p REMUX] [HEVC DV HYBRID HDR10+ Dolby TrueHD Atmos 7 1 24-bit Audio English]-DataLass",
+"DataLass"
+],
+[
+"Movie Name (2017) (Showtime) (1080p.BD.DD5.1.x265-TheSickle[TAoE])",
+"TAoE"
+]
+]
+},
+"should_parse_exception_release_group": {
+"quality": null,
+"cases": [
+[
+"Movie Name (2020) [2160p x265 10bit S82 Joy]",
+"Joy"
+],
+[
+"Movie Name (2003) (2160p BluRay X265 HEVC 10bit HDR AAC 7.1 Tigole) [QxR]",
+"QxR"
+],
+[
+"Ode To Joy (2009) (2160p BluRay x265 10bit HDR Joy)",
+"Joy"
+],
+[
+"Movie Name (2001) 1080p NF WEB-DL DDP2.0 x264-E.N.D",
+"E.N.D"
+],
+[
+"Movie Name (2020) [1080p] [WEBRip] [5.1] [YTS.MX]",
+"YTS.MX"
+],
+[
+"Movie Name.2018.1080p.Blu-ray.Remux.AVC.DTS-HD.MA.5.1.KRaLiMaRKo",
+"KRaLiMaRKo"
+],
+[
+"Ode To Joy (2009) (2160p BluRay x265 10bit HDR FreetheFish)",
+"FreetheFish"
+],
+[
+"Ode To Joy (2009) (2160p BluRay x265 10bit HDR afm72)",
+"afm72"
+],
+[
+"Ode To Joy (2009) (2160p BluRay x265 10bit HDR)",
+null
+],
+[
+"Movie Name (2012) (1080p BluRay x265 HEVC 10bit AC3 2.0 Anna)",
+"Anna"
+],
+[
+"Movie Name (2019) (1080p BluRay x265 HEVC 10bit AAC 7.1 Q22 Joy)",
+"Joy"
+],
+[
+"Movie Name (2019) (2160p BluRay x265 HEVC 10bit HDR AAC 7.1 Bandi)",
+"Bandi"
+],
+[
+"Movie Name (2009) (1080p HDTV x265 HEVC 10bit AAC 2.0 Ghost)",
+"Ghost"
+],
+[
+"Movie Name in the Movie (2017) (1080p BluRay x265 HEVC 10bit AAC 7.1 Tigole)",
+"Tigole"
+],
+[
+"Mission - Movie Name - Movie Protocol (2011) (1080p BluRay x265 HEVC 10bit AAC 7.1 Tigole)",
+"Tigole"
+],
+[
+"Movie Name (1990) (1080p BluRay x265 HEVC 10bit AAC 5.1 Silence)",
+"Silence"
+],
+[
+"Happy Movie Name (1999) (1080p BluRay x265 HEVC 10bit AAC 5.1 Korean Kappa)",
+"Kappa"
+],
+[
+"Movie Name (2007) Open Matte (1080p AMZN WEB-DL x265 HEVC 10bit AAC 5.1 MONOLITH)",
+"MONOLITH"
+],
+[
+"Movie-Name (2019) (1080p BluRay x265 HEVC 10bit DTS 7.1 Qman)",
+"Qman"
+],
+[
+"Movie Name - Hell to Ticket (2018) + Extras (1080p BluRay x265 HEVC 10bit AAC 5.1 RZeroX)",
+"RZeroX"
+],
+[
+"Movie Name (2013) (Diamond Luxe Edition) + Extras (1080p BluRay x265 HEVC 10bit EAC3 7.1 SAMPA)",
+"SAMPA"
+],
+[
+"Movie Name 1984 (2020) (1080p AMZN WEB-DL x265 HEVC 10bit EAC3 5.1 Silence)",
+"Silence"
+],
+[
+"The.Movie.of.the.Name.1991.REMASTERED.720p.10bit.BluRay.6CH.x265.HEVC-PSA",
+"PSA"
+],
+[
+"Movie Name 2016 (1080p BluRay x265 HEVC 10bit DDP 5.1 theincognito)",
+"theincognito"
+],
+[
+"Movie Name - A History of Movie (2017) (1080p AMZN WEB-DL x265 HEVC 10bit EAC3 2.0 t3nzin)",
+"t3nzin"
+],
+[
+"Movie Name (2019) (1080p BluRay x265 HEVC 10bit AAC 7.1 Vyndros)",
+"Vyndros"
+],
+[
+"Movie Name (2015) [BDRemux 1080p AVC ES-CAT-EN DTS-HD MA 5.1 Subs][HDO]",
+"HDO"
+],
+[
+"Movie Name (2015) [BDRemux 1080p AVC EN-CAT-ES DTS-HD MA 5.1 Subs][HDO]",
+"HDO"
+],
+[
+"Movie Name (2017) [BDRemux 1080p AVC ES DTS 5.1 - EN DTS-HD MA 7.1 Subs][HDO]",
+"HDO"
+],
+[
+"Movie Name (2006) [BDRemux 1080p AVC ES DTS-HD MA 2.0 - EN DTS-HD MA 5.1 Sub][HDO]",
+"HDO"
+],
+[
+"Movie Name (2015) [BDRemux 1080p AVC ES-CAT-EN DTS-HD MA 5.1 Subs]",
+null
+],
+[
+"Movie Name (2015) [BDRemux 1080p AVC EN-CAT-ES DTS-HD MA 5.1 Subs]",
+null
+],
+[
+"Movie Name (2015) [BDRemux 1080p AVC EN-ES-CAT DTS-HD MA 5.1 Subs]",
+null
+],
+[
+"Another Crappy Anime Movie Name 1999 [DusIctv] [Blu-ray][MKV][h264][1080p][DTS-HD MA 5.1][Dual Audio][Softsubs (DusIctv)",
+"DusIctv"
+],
+[
+"Another Crappy Anime Movie Name 1999 [DHD] [Blu-ray][MKV][h264][1080p][AAC 5.1][Dual Audio][Softsubs (DHD)]",
+"DHD"
+],
+[
+"Another Crappy Anime Movie Name 1999 [SEV] [Blu-ray][MKV][h265 10-bit][1080p][FLAC 5.1][Dual Audio][Softsubs (SEV)]",
+"SEV"
+],
+[
+"Another Crappy Anime Movie Name 1999 [CtrlHD] [Blu-ray][MKV][h264][720p][AC3 2.0][Dual Audio][Softsubs (CtrlHD)]",
+"CtrlHD"
+],
+[
+"Crappy Anime Movie Name 2017 [-ZR-] [Blu-ray][MKV][h264][1080p][TrueHD 5.1][Dual Audio][Softsubs (-ZR-)]",
+"-ZR-"
+],
+[
+"Crappy Anime Movie Name 2017 [XZVN] [Blu-ray][MKV][h264][1080p][TrueHD 5.1][Dual Audio][Softsubs (XZVN)]",
+"XZVN"
+],
+[
+"Crappy Anime Movie Name 2017 [ADC] [Blu-ray][M2TS (A)][16:9][h264][1080p][TrueHD 5.1][Dual Audio][Softsubs (ADC)]",
+"ADC"
+],
+[
+"Crappy Anime Movie Name 2017 [Koten_Gars] [Blu-ray][MKV][h264][1080p][TrueHD 5.1][Dual Audio][Softsubs (Koten_Gars)]",
+"Koten_Gars"
+],
+[
+"Crappy Anime Movie Name 2017 [RH] [Blu-ray][MKV][h264 10-bit][1080p][FLAC 5.1][Dual Audio][Softsubs (RH)]",
+"RH"
+],
+[
+"Yet Another Anime Movie 2012 [Kametsu] [Blu-ray][MKV][h264 10-bit][1080p][FLAC 5.1][Dual Audio][Softsubs (Kametsu)]",
+"Kametsu"
+],
+[
+"Another.Anime.Film.Name.2016.JPN.Blu-Ray.Remux.AVC.DTS-MA.BluDragon",
+"BluDragon"
+],
+[
+"A Movie in the Name (1964) (1080p BluRay x265 r00t)",
+"r00t"
+],
+[
+"Movie Title (2022) (2160p ATV WEB-DL Hybrid H265 DV HDR DDP Atmos 5.1 English - HONE)",
+"HONE"
+],
+[
+"Movie Title (2009) (2160p PMTP WEB-DL Hybrid H265 DV HDR10+ DDP Atmos 5.1 English - HONE)",
+"HONE"
+],
+[
+"Movie Title (2022) (1080p PCOK WEB-DL H265 DV HDR DDP Atmos 5.1 English - GiLG)",
+"GiLG"
+],
+[
+"Movie Title (2022) Extended (2160p PCOK WEB-DL H265 DV HDR DDP Atmos 5.1 English - GiLG)",
+"GiLG"
+],
+[
+"Why.Cant.You.Use.Normal.Characters.2021.2160p.UHD.HDR10+.BluRay.TrueHD.Atmos.7.1.x265-ZØNEHD",
+"ZØNEHD"
+],
+[
+"Movie.Should.Not.Use.Dots.2022.1080p.BluRay.x265.10bit.Tigole)",
+"Tigole"
+],
+[
+"Movie.Should.Not.Use.Dots.2022.1080p.BluRay.x265.10bit.Tigole",
+null
+],
+[
+"Movie.Title.2005.2160p.UHD.BluRay.TrueHD 7.1.Atmos.x265 - HQMUX",
+"HQMUX"
+],
+[
+"Movie.Name.2022.1080p.BluRay.x264-VARYG (Blue Lock, Multi-Subs)",
+"VARYG"
+],
+[
+"Movie Title (2023) (1080p BluRay x265 SDR AAC 2.0 English Vyndros)",
+"Vyndros"
+],
+[
+"Movie Title (2010) 1080p BrRip x264 - YIFY",
+"YIFY"
+],
+[
+"Movie Title (2011) [BluRay] [1080p] [YTS.MX] [YIFY]",
+"YIFY"
+],
+[
+"Movie Title (2014) [BluRay] [1080p] [YIFY] [YTS]",
+"YTS"
+],
+[
+"Movie Title (2018) [BluRay] [1080p] [YIFY] [YTS.LT]",
+"YTS.LT"
+],
+[
+"Movie Title (2016) (1080p AMZN WEB-DL x265 HEVC 10bit EAC3 5 1 RZeroX) QxR",
+"QxR"
+],
+[
+"Movie Title (2016) (1080p AMZN WEB-DL x265 HEVC 10bit EAC3 5 1 Garshasp) QxR",
+"QxR"
+],
+[
+"Movie Title 2024 mUHD 10Bits DoVi HDR10 2160p BluRay DD 5 1 x265 - TMd",
+"TMd"
+],
+[
+"Movie Title 2024 mUHD 10Bits DoVi HDR10 2160p BluRay DD 5 1 x265 TMd",
+"TMd"
+],
+[
+"Movie Title (2024) 2160p WEB-DL ESP DD+ 5.1 ING DD+ 5.1 Atmos DV HDR H.265-Eml HDTeam",
+"Eml HDTeam"
+],
+[
+"Movie Title(2023) 1080p SkySHO WEB-DL ESP DD+ 5.1 H.264-EML HDTeam",
+"EML HDTeam"
+],
+[
+"Movie Title (2022) BDFull 1080p DTS-HD MA 5.1 AVC LMain",
+"LMain"
+],
+[
+"Movie Title (2024) (1080p BluRay x265 SDR DDP 5.1 English - DarQ)",
+"DarQ"
+],
+[
+"Movie Title (2024) (1080p BluRay x265 SDR DDP 5.1 English -BEN THE MEN",
+"BEN THE MEN"
+],
+[
+"Movie Title 2024 2160p WEB-DL DoVi HDR10+ H265 DDP 5.1 Atmos-126811",
+"126811"
+],
+[
+"Movie Title (2025) (1080p BluRay x265 SDR DDP Atmos 7.1 English - Celdra QxR)",
+"QxR"
+],
+[
+"Movie Title (2025) (1080p BluRay x265 Celdra)",
+"Celdra"
+]
+]
+},
+"should_not_include_extension_in_release_group": {
+"quality": null,
+"cases": [
+[
+"C:\\Test\\Doctor.Series.2005.s01e01.internal.bdrip.x264-archivist.mkv",
+"archivist"
+]
+]
+},
+"should_not_include_language_in_release_group": {
+"quality": null,
+"cases": [
+[
+"Some.Movie.S02E04.720p.WEBRip.x264-SKGTV English",
+"SKGTV"
+],
+[
+"Some.Movie.S02E04.720p.WEBRip.x264-SKGTV_English",
+"SKGTV"
+],
+[
+"Some.Movie.S02E04.720p.WEBRip.x264-SKGTV.English",
+"SKGTV"
+]
+]
+},
+"should_not_include_bad_suffix_in_release_group": {
+"quality": null,
+"cases": [
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-RP",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-RP-RP",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Obfuscation",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-NZBgeek",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-1",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-sample.mkv",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Scrambled",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-postbot",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-xpost",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Rakuv",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Rakuv02",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Rakuvfinhel",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Obfuscated",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-WhiteRev",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-BUYMORE",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-AsRequested",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-AlternativeToRequested",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-GEROV",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Z0iDS3N",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-Chamele0n",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-4P",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-EVO-4Planet",
+"EVO"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-DON-AlteZachen",
+"DON"
+],
+[
+"Some.Movie.2019.1080p.BDRip.X264.AC3-HarrHD-RePACKPOST",
+"HarrHD"
+]
+]
+},
+"should_parse_anime_release_groups": {
+"quality": null,
+"cases": [
+[
+"[FFF] Invaders of the Movies!! - S01E11 - Someday, With Movies",
+"FFF"
+],
+[
+"[HorribleSubs] Invaders of the Movies!! - S01E12 - Movies Going Well!!",
+"HorribleSubs"
+],
+[
+"[Anime-Koi] Movies - S01E06 - Guys From Movies",
+"Anime-Koi"
+],
+[
+"[Anime-Koi] Movies - S01E07 - A High-Grade Movies",
+"Anime-Koi"
+],
+[
+"[Anime-Koi] Kami-sama Movies 2 - 01 [h264-720p][28D54E2C]",
+"Anime-Koi"
+]
+]
+},
+"should_not_parse_anime_hash_as_release_group": {
+"quality": null,
+"cases": [
+[
+"Terrible.Anime.Title.2020.DBOX.480p.x264-iKaos [v3] [6AFFEF6B]"
+]
+]
+}
+},
+"SceneCheckerFixture": {
+"should_return_true_for_scene_names": {
+"quality": null,
+"cases": [
+[
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-Pate"
+]
+]
+},
+"should_return_false_for_non_scene_names": {
+"quality": null,
+"cases": [
+[
+"S08E05 - Virtual In-Stanity [WEBDL-720p]"
+],
+[
+"S08E05 - Virtual In-Stanity.With.Dots [WEBDL-720p]"
+],
+[
+"Something"
+],
+[
+"86de66b7ef385e2fa56a3e41b98481ea1658bfab"
+],
+[
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-"
+],
+[
+"Some.Movie.2..2013.German.DTS.DL-Pate"
+],
+[
+"2013.German.DTS.DL.BluRay.x264-Pate"
+]
+]
+},
+"should_correctly_parse_scene_names": {
+"quality": null,
+"cases": [
+[
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-Pate_",
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-Pate"
+],
+[
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-Pate.mkv",
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-Pate"
+],
+[
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-Pate.nzb",
+"Some.Movie.2..2013.German.DTS.DL.720p.BluRay.x264-Pate"
+],
+[
+"Some.Movie.2..2013.German.DTS.DL.【720p】.BluRay.x264-Pate.nzb",
+"Some.Movie.2..2013.German.DTS.DL.[720p].BluRay.x264-Pate"
+]
+]
+}
+},
+"SlugParserFixture": {
+"should_replace_accents": {
+"quality": null,
+"cases": [
+[
+"tèst",
+"test"
+],
+[
+"têst",
+"test"
+],
+[
+"tëst",
+"test"
+],
+[
+"tËst",
+"test"
+],
+[
+"áccent",
+"accent"
+],
+[
+"àccent",
+"accent"
+],
+[
+"âccent",
+"accent"
+],
+[
+"Äccent",
+"accent"
+],
+[
+"åccent",
+"accent"
+],
+[
+"acceñt",
+"accent"
+],
+[
+"ßtest",
+"test"
+],
+[
+"œtest",
+"test"
+],
+[
+"Œtest",
+"test"
+],
+[
+"Øtest",
+"test"
+]
+]
+},
+"should_replace_special_characters": {
+"quality": null,
+"cases": [
+[
+"Test'Result"
+],
+[
+"Test$Result"
+],
+[
+"Test(Result"
+],
+[
+"Test)Result"
+],
+[
+"Test*Result"
+],
+[
+"Test?Result"
+],
+[
+"Test/Result"
+],
+[
+"Test=Result"
+],
+[
+"Test\\Result"
+]
+]
+},
+"should_lowercase_capitals": {
+"quality": null,
+"cases": [
+[
+"ThIS IS A MiXeD CaSe SensItIvE ValUe"
+]
+]
+},
+"should_trim_trailing_dashes_and_underscores": {
+"quality": null,
+"cases": [
+[
+"test----"
+],
+[
+"test____"
+],
+[
+"test-_--_"
+]
+]
+},
+"should_replace_spaces_with_dash": {
+"quality": null,
+"cases": [
+[
+"test result"
+],
+[
+"test     result"
+]
+]
+},
+"should_replace_double_occurence": {
+"quality": null,
+"cases": [
+[
+"test     result",
+"test-result"
+],
+[
+"test-----result",
+"test-result"
+],
+[
+"test_____result",
+"test_result"
+]
+]
+},
+"should_replace_special_characters_with_dash_when_enabled": {
+"quality": null,
+"cases": [
+[
+"Test'Result"
+],
+[
+"Test$Result"
+],
+[
+"Test(Result"
+],
+[
+"Test)Result"
+],
+[
+"Test*Result"
+],
+[
+"Test?Result"
+],
+[
+"Test/Result"
+],
+[
+"Test=Result"
+],
+[
+"Test\\Result"
+]
+]
+},
+"should__not_replace_special_characters_with_dash_when_disabled": {
+"quality": null,
+"cases": [
+[
+"Test'Result"
+],
+[
+"Test$Result"
+],
+[
+"Test(Result"
+],
+[
+"Test)Result"
+],
+[
+"Test*Result"
+],
+[
+"Test?Result"
+],
+[
+"Test/Result"
+],
+[
+"Test=Result"
+],
+[
+"Test\\Result"
+]
+]
+},
+"should_trim_trailing_dashes_and_underscores_based_on_list": {
+"quality": null,
+"cases": [
+[
+"test----",
+"-_",
+"test"
+],
+[
+"test____",
+"-_",
+"test"
+],
+[
+"test-_-_",
+"-_",
+"test"
+],
+[
+"test----",
+"-",
+"test"
+],
+[
+"test____",
+"-",
+"test____"
+],
+[
+"test-_-_",
+"-",
+"test-_-_"
+],
+[
+"test----",
+"_",
+"test----"
+],
+[
+"test____",
+"_",
+"test"
+],
+[
+"test-_-_",
+"_",
+"test-_-"
+],
+[
+"test----",
+"",
+"test----"
+],
+[
+"test____",
+"",
+"test____"
+],
+[
+"test-_-_",
+"",
+"test-_-_"
+]
+]
+},
+"should_replace_duplicate_characters_based_on_list": {
+"quality": null,
+"cases": [
+[
+"test----result",
+"-_",
+"test-result"
+],
+[
+"test____result",
+"-_",
+"test_result"
+],
+[
+"test_-_-result",
+"-_",
+"test-result"
+],
+[
+"test-_-_result",
+"-_",
+"test_result"
+],
+[
+"test----result",
+"-",
+"test-result"
+],
+[
+"test____result",
+"-",
+"test____result"
+],
+[
+"test-_-_result",
+"-",
+"test-_-_result"
+],
+[
+"test----result",
+"_",
+"test----result"
+],
+[
+"test____result",
+"_",
+"test_result"
+],
+[
+"test-_-_result",
+"_",
+"test-_-_result"
+],
+[
+"test----result",
+"",
+"test----result"
+],
+[
+"test____result",
+"",
+"test____result"
+],
+[
+"test-_-_result",
+"",
+"test-_-_result"
+]
+]
+}
+},
+"UrlFixture": {
+"should_not_parse_url_in_name": {
+"quality": null,
+"cases": [
+[
+"[www.test.com] - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"test.net - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"[www.test-hyphen.com] - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"www.test123.org - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"[test.co.uk] - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"www.test-hyphen.net.au - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"[www.test123.co.nz] - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"test-hyphen123.org.au - Movie.Title.2023.720p.HDTV.X264-DIMENSION",
+"Movie Title"
+],
+[
+"[www.test123.de] - Mad Movie Title 2023 [Bluray720p]",
+"Mad Movie Title"
+],
+[
+"www.test-hyphen.de - Mad Movie Title 2023 [Bluray1080p]",
+"Mad Movie Title"
+],
+[
+"www.test123.co.za - The Movie Title Bros. (2023)",
+"The Movie Title Bros."
+],
+[
+"[www.test-hyphen.ca] - Movie Title (2023)",
+"Movie Title"
+],
+[
+"test123.ca - Movie Time 2023 720p HDTV x264 CRON",
+"Movie Time"
+],
+[
+"[www.test-hyphen123.co.za] - Movie Title 2023",
+"Movie Title"
+],
+[
+"(movieawake.com) Movie Title 2023 [720p] [English Subbed]",
+"Movie Title"
+]
+]
+},
+"should_not_parse_url_in_group": {
+"quality": null,
+"cases": [
+[
+"Movie.2023.English.HDTV.XviD-LOL[www.abb.com]",
+"LOL"
+],
+[
+"Movie Title 2023 English HDTV XviD LOL[www.academy.org]",
+null
+],
+[
+"Movie Title Now 2023 DVDRip XviD RUNNER[www.aetna.net]",
+null
+],
+[
+"Movie.Title.2023.DVDRip.XviD-RUNNER[www.alfaromeo.io]",
+"RUNNER"
+],
+[
+"Movie.Title.2023.English.HDTV.XviD-LOL[www.abbott.gov]",
+"LOL"
+],
+[
+"Movie Title 2023 English HDTV XviD LOL[www.actor.org]",
+null
+],
+[
+"Movie Title Future 2023 DVDRip XviD RUNNER[www.allstate.net]",
+null
+]
+]
+}
+}
+}

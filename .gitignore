@@ -1,0 +1,8 @@
+/target
+/references
+/web/node_modules
+/web/dist
+.DS_Store
+/PLAN.md
+/PROPOSAL.md
+/deploy/local.env
