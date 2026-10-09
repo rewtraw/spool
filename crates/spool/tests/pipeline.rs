@@ -1064,6 +1064,20 @@ async fn a_film_the_indexer_never_linked_to_its_id_is_found_by_name() {
     assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
     w.wait_state(movie.id, AcqState::Imported).await;
 
+    // Fan releases often leave the year out. The full title is enough to know the film, and
+    // the quality is still read from the name; a different film in the same series is not it.
+    let wings = w.movie("Legend of the Example Heroes: Golden Wings", 1992, "tt0000077");
+    for name in ["[Fan Group] Legend of the Example Heroes - Golden Wings [BD][720p]", "A-FanRips.Legend.of.the.Example.Heroes.-.Golden.Wings.BD.1080p.A233F476", "Legend of the Example Heroes - Overture to a New War [BD][720p]", "Legend.of.the.Example.Heroes.Golden.Wings.S01E02.1080p.WEB.H264-GRP"] {
+        w.release(name, &[("w.mkv", &video)]);
+        w.indexer.lock().untagged.insert(name.to_string());
+    }
+    let found = w.app.search(wings.id, Scope::Movie, true, false).await.unwrap();
+    let verdict: HashMap<&str, (bool, String)> = found.decisions.iter().map(|d| (d.release.title.as_str(), (d.accepted, format!("{:?} {:?}", d.quality.quality, d.rejections.iter().map(|r| r.code.as_str()).collect::<Vec<_>>())))).collect();
+    assert!(verdict["[Fan Group] Legend of the Example Heroes - Golden Wings [BD][720p]"].1.starts_with("Bluray720p"), "{verdict:?}");
+    assert!(verdict["A-FanRips.Legend.of.the.Example.Heroes.-.Golden.Wings.BD.1080p.A233F476"].0, "{verdict:?}");
+    assert!(!verdict["Legend of the Example Heroes - Overture to a New War [BD][720p]"].0, "{verdict:?}");
+    assert!(!verdict["Legend.of.the.Example.Heroes.Golden.Wings.S01E02.1080p.WEB.H264-GRP"].0, "{verdict:?}");
+
     // A film found by its id needs no second question.
     let other = w.movie("Tagged Example", 2005, "tt0000042");
     w.release("Tagged.Example.2005.1080p.BluRay.x264-GRP", &[("t.mkv", &video)]);

@@ -105,23 +105,36 @@ impl App {
         };
 
         let (quality, languages, group, covered, covers, full_season, multi_season, pre): (QualityModel, Vec<String>, Option<String>, Vec<&Episode>, String, bool, bool, Option<Rejection>) = match t.kind {
-            Kind::Movie => {
-                let Some(p) = parse_movie_title(&release.title, false) else {
-                    return blank(rej("unparseable", "the release name could not be understood"), unknown);
-                };
-                let by_id = release.imdb_id.is_some() && release.imdb_id == t.imdb_id;
-                let mut pre = None;
-                if matching::match_movie(&p, &[t.key()]).is_none() {
-                    // The indexer tagged this release with the movie's own id. Radarr trusts that; Spool
-                    // does too, unless the release names a clearly different year (a remake or a mis-tag).
-                    // Only a tag on the release itself counts, never the fact that we searched by id.
-                    let year_close = p.year == 0 || p.year.abs_diff(t.year) <= 1 || t.alt_years.contains(&p.year);
-                    if !(by_id && year_close) {
-                        pre = Some(rej("wrong_title", format!("looks like \"{}\"{}, not {} ({})", p.title(), if p.year > 0 { format!(" ({})", p.year) } else { String::new() }, t.title, t.year)));
+            Kind::Movie => match parse_movie_title(&release.title, false) {
+                Some(p) => {
+                    let by_id = release.imdb_id.is_some() && release.imdb_id == t.imdb_id;
+                    let mut pre = None;
+                    if matching::match_movie(&p, &[t.key()]).is_none() {
+                        // The indexer tagged this release with the movie's own id. Radarr trusts that; Spool
+                        // does too, unless the release names a clearly different year (a remake or a mis-tag).
+                        // Only a tag on the release itself counts, never the fact that we searched by id.
+                        let year_close = p.year == 0 || p.year.abs_diff(t.year) <= 1 || t.alt_years.contains(&p.year);
+                        if !(by_id && year_close) {
+                            pre = Some(rej("wrong_title", format!("looks like \"{}\"{}, not {} ({})", p.title(), if p.year > 0 { format!(" ({})", p.year) } else { String::new() }, t.title, t.year)));
+                        }
                     }
+                    (p.quality, p.languages, p.release_group, vec![], String::new(), false, false, pre)
                 }
-                (p.quality, p.languages, p.release_group, vec![], String::new(), false, false, pre)
-            }
+                // The parser wants a year in a film's release name, and some posts, fan releases of
+                // anime above all, leave it out. If the name plainly carries this film's full title,
+                // take it as this film and read the rest of the name as usual.
+                None if names_film_without_year(t, &release.title) => (
+                    spool_core::quality::parse_quality(&release.title, flavor),
+                    spool_core::parser::parse_languages(&release.title),
+                    spool_core::parser::parse_release_group(&release.title, flavor),
+                    vec![],
+                    String::new(),
+                    false,
+                    false,
+                    None,
+                ),
+                None => return blank(rej("unparseable", "the release name could not be understood"), unknown),
+            },
             Kind::Series => {
                 let Some(p) = parse_episode_title(&release.title) else {
                     return blank(rej("unparseable", "the release name could not be understood"), unknown);
@@ -938,6 +951,19 @@ fn runner_ups(judged: &[Judged], grabbed: &[Acquisition], profile: &QualityProfi
     let mut accepted: Vec<&Judged> = judged.iter().filter(|j| j.record.accepted && !grabbed.iter().any(|g| g.release.title == j.record.release.title)).collect();
     accepted.sort_by(|a, b| decision::compare(&a.candidate, &b.candidate, profile, policy));
     accepted.into_iter().take(n).map(|j| j.record.clone()).collect()
+}
+
+/// Whether a release name with no year in it is plainly this film: it contains the film's whole
+/// title (or a known alternative), and is not an episode of something. Short titles are left
+/// out, since "Alien" is inside "Aliens" and a year is the only thing that tells them apart.
+fn names_film_without_year(t: &Title, release: &str) -> bool {
+    let name = spool_core::parser::clean_movie_title(release);
+    let is_episode = parse_episode_title(release).is_some_and(|p| !p.episode_numbers.is_empty() || p.full_season);
+    !is_episode
+        && std::iter::once(&t.title).chain(t.alt_titles.iter()).any(|title| {
+            let key = spool_core::parser::clean_movie_title(title);
+            key.chars().count() >= 14 && title.split_whitespace().count() >= 3 && name.contains(&key)
+        })
 }
 
 /// Choose what to grab from a judged batch.
