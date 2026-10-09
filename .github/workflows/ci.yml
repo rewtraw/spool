@@ -1,0 +1,25 @@
+name: CI
+
+# macOS is the supported platform. Runs on pull requests and on demand.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Helper tools
+        run: brew install par2 sevenzip ffmpeg
+      - name: Web app
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bun run check
+          bun run build
+      - name: Tests
+        run: cargo test --workspace
