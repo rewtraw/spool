@@ -1,0 +1,20 @@
+# Spool with Docker Compose. Also the shape to use for a custom app on TrueNAS SCALE,
+# Unraid and similar.
+#
+# Put the library and the downloads folder under ONE mount (here /media), so a finished
+# download is moved into the library instantly instead of being copied.
+services:
+  spool:
+    build: .
+    # image: ghcr.io/rewtraw/spool:latest
+    container_name: spool
+    restart: unless-stopped
+    # Run as the user that owns the media. On TrueNAS SCALE the apps user is 568:568.
+    user: "1000:1000"
+    ports:
+      - "7979:7979"
+    volumes:
+      - ./data:/data
+      - /path/to/media:/media
+    environment:
+      TZ: Etc/UTC

@@ -1,20 +1,28 @@
 name: CI
 
-# macOS is the supported platform. Runs on pull requests and on demand.
+# Runs on pull requests and on demand.
 on:
   pull_request:
   workflow_dispatch:
 
 jobs:
   test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Helper tools
+      - name: Helper tools (macOS)
+        if: runner.os == 'macOS'
         run: brew install par2 sevenzip ffmpeg
+      - name: Helper tools (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y par2 7zip ffmpeg
       - name: Web app
         working-directory: web
         run: |
@@ -23,3 +31,18 @@ jobs:
           bun run build
       - name: Tests
         run: cargo test --workspace
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the container image
+        run: docker build -t spool .
+      - name: The image starts and answers
+        run: |
+          docker run -d --name spool -p 7979:7979 spool
+          for i in $(seq 1 30); do curl -fsS localhost:7979/api/status && break; sleep 1; done
+          curl -fsS localhost:7979/api/status | grep -q '"mode":"shadow"'
+          curl -fsS localhost:7979/ | grep -qi '<title>'
+          docker exec spool sh -c 'par2 -V >/dev/null && 7zz i | grep -qi rar && ffprobe -version >/dev/null && test -f /data/spool.db && test -f /data/spool.log'
+          docker logs spool | tail -5

@@ -252,14 +252,9 @@ fn redact(line: &str) -> String {
     line.split(' ').map(|w| if w.contains("://") || w.to_lowercase().contains("apikey=") { "[address removed]" } else { w }).collect::<Vec<_>>().join(" ")
 }
 
-fn log_path() -> std::path::PathBuf {
-    std::env::var("SPOOL_LOG").map(Into::into).unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/Logs/spool.log"))
-}
-
-fn log_lines(contains: Option<&str>, level: Option<&str>, limit: usize) -> Result<Vec<String>, String> {
+fn log_lines(path: &std::path::Path, contains: Option<&str>, level: Option<&str>, limit: usize) -> Result<Vec<String>, String> {
     use std::io::{Read, Seek, SeekFrom};
-    let path = log_path();
-    let mut f = std::fs::File::open(&path).map_err(|e| format!("the log at {} could not be read: {e}", path.display()))?;
+    let mut f = std::fs::File::open(path).map_err(|e| format!("the log at {} could not be read: {e}", path.display()))?;
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
     // The tail is enough; a filter that needs older history is better answered by title_detail.
     let window = 4 << 20;
@@ -457,7 +452,7 @@ impl Mcp {
                 let name = t["title"].as_str().unwrap_or("").to_string();
                 // Release names use dots where titles use spaces.
                 let needle = name.split_whitespace().next().unwrap_or("").to_string();
-                let logs = if needle.len() >= 4 { log_lines(Some(&needle), Some("warn"), 15).unwrap_or_default() } else { vec![] };
+                let logs = if needle.len() >= 4 { log_lines(&crate::app::log_path(&self.app.data_dir), Some(&needle), Some("warn"), 15).unwrap_or_default() } else { vec![] };
                 let has_file = t["file_count"].as_u64().unwrap_or(0) > 0;
                 let accepted = decisions.iter().filter(|d| d["accepted"] == true).count();
                 let mut findings: Vec<String> = vec![];
@@ -503,7 +498,8 @@ impl Mcp {
             "logs" => {
                 let limit = (a["lines"].as_u64().unwrap_or(60) as usize).clamp(1, 300);
                 let (contains, level) = (a["contains"].as_str().map(str::to_string), a["level"].as_str().map(str::to_string));
-                let lines = tokio::task::spawn_blocking(move || log_lines(contains.as_deref(), level.as_deref(), limit)).await.map_err(|e| e.to_string())??;
+                let path = crate::app::log_path(&self.app.data_dir);
+                let lines = tokio::task::spawn_blocking(move || log_lines(&path, contains.as_deref(), level.as_deref(), limit)).await.map_err(|e| e.to_string())??;
                 Ok(json!({"times_are": "UTC", "lines": lines}))
             }
             "archive" => {

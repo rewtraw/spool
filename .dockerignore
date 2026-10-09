@@ -1,0 +1,10 @@
+target
+references
+web/node_modules
+web/dist
+docs
+.git
+.github
+deploy/local.env
+PLAN.md
+PROPOSAL.md

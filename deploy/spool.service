@@ -1,0 +1,22 @@
+# systemd unit for Spool on Linux. Install for one user:
+#
+#   install -Dm755 target/release/spool ~/.local/bin/spool
+#   install -Dm644 deploy/spool.service ~/.config/systemd/user/spool.service
+#   systemctl --user daemon-reload && systemctl --user enable --now spool
+#   loginctl enable-linger "$USER"     # keep it running when you are logged out
+#
+# Data goes to ~/.local/share/spool (or $XDG_DATA_HOME/spool); the log is spool.log there.
+[Unit]
+Description=Spool media library service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/spool serve --bind 0.0.0.0:7979
+Restart=on-failure
+RestartSec=10
+# Finishing a checkpoint of downloads in progress can take a few seconds.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

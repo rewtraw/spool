@@ -158,7 +158,7 @@ impl App {
             if ok {
                 tracing::info!(volume = %path, "media volume is readable");
             } else {
-                tracing::warn!(volume = %path, "macOS refused access to the media volume");
+                tracing::warn!(volume = %path, "the media volume is mounted but cannot be read");
             }
             let _ = tx.send(ok);
         });
@@ -175,9 +175,13 @@ impl App {
         if !is_mount_point(Path::new(&required)) {
             return Some(format!("{required} is not mounted. Downloads and imports are waiting."));
         }
-        Some(match self.volume_access.load(std::sync::atomic::Ordering::Relaxed) {
-            3 => format!("macOS has refused Spool access to {required}. Allow it under System Settings, Privacy & Security, Files and Folders, then restart Spool."),
-            _ => format!("Spool is waiting for permission to read {required}. Approve the prompt on this Mac's screen."),
+        let refused = self.volume_access.load(std::sync::atomic::Ordering::Relaxed) == 3;
+        Some(if !cfg!(target_os = "macos") {
+            format!("{required} is mounted but Spool cannot read it. Check that the user Spool runs as has access to it.")
+        } else if refused {
+            format!("macOS has refused Spool access to {required}. Allow it under System Settings, Privacy & Security, Files and Folders, then restart Spool.")
+        } else {
+            format!("Spool is waiting for permission to read {required}. Approve the prompt on this Mac's screen.")
         })
     }
 
@@ -205,6 +209,33 @@ impl App {
         }
         self.emit(Event::Task { name: name.into(), running: false, message: message.into() });
     }
+}
+
+/// Where Spool keeps its database when not told otherwise: the platform's usual place.
+pub fn default_data_dir() -> PathBuf {
+    let home = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()));
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/Spool")
+    } else {
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".local/share")).join("spool")
+    }
+}
+
+/// The log file Spool writes itself, or None where something else already captures its output
+/// (the LaunchAgent on macOS) or `SPOOL_LOG` says where the log is.
+pub fn own_log_path(data_dir: &Path) -> Option<PathBuf> {
+    if cfg!(target_os = "macos") || std::env::var_os("SPOOL_LOG").is_some() {
+        return None;
+    }
+    Some(data_dir.join("spool.log"))
+}
+
+/// Where to read the service log from.
+pub fn log_path(data_dir: &Path) -> PathBuf {
+    if let Some(p) = std::env::var_os("SPOOL_LOG") {
+        return p.into();
+    }
+    own_log_path(data_dir).unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("Library/Logs/spool.log"))
 }
 
 /// Free bytes on the filesystem holding `p`, or None if it cannot be read.

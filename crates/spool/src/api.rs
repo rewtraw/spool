@@ -113,13 +113,7 @@ async fn status(State(app): State<App>) -> R<Value> {
     let g = app.settings.general();
     let titles = app.db.titles(None)?;
     let files = app.db.file_counts()?;
-    let free = |p: &str| -> Option<u64> {
-        if p.is_empty() {
-            return None;
-        }
-        let out = std::process::Command::new("df").args(["-k", p]).output().ok()?;
-        String::from_utf8_lossy(&out.stdout).lines().nth(1)?.split_whitespace().nth(3)?.parse::<u64>().ok().map(|k| k * 1024)
-    };
+    let free = |p: &str| -> Option<u64> { (!p.is_empty()).then(|| crate::app::free_space(std::path::Path::new(p))).flatten() };
     let mut warnings: Vec<String> = vec![];
     if let Some(problem) = app.volume_problem() {
         warnings.push(problem);

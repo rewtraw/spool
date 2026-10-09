@@ -72,10 +72,41 @@ enum Command {
 }
 
 fn data_dir(cli: &Cli) -> PathBuf {
-    cli.data_dir.clone().unwrap_or_else(|| {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        PathBuf::from(home).join("Library/Application Support/Spool")
-    })
+    cli.data_dir.clone().unwrap_or_else(spool::app::default_data_dir)
+}
+
+/// Standard output, and a file as well when Spool keeps its own log.
+#[derive(Clone)]
+struct LogWriter(Option<std::sync::Arc<std::sync::Mutex<std::fs::File>>>);
+
+impl std::io::Write for LogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(f) = &self.0 {
+            if let Ok(mut f) = f.lock() {
+                let _ = f.write_all(buf);
+            }
+        }
+        std::io::stdout().write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::stdout().flush()
+    }
+}
+
+/// Where the service writes its own log, if it should. On macOS the LaunchAgent already sends
+/// standard output to a file; elsewhere (systemd, a container) nothing does, and the log reader
+/// behind the MCP `logs` tool needs one.
+fn own_log_file(cli: &Cli) -> Option<std::fs::File> {
+    if !matches!(cli.command, Command::Serve { .. }) {
+        return None;
+    }
+    let path = spool::app::own_log_path(&data_dir(cli))?;
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    // One generation of history is plenty for looking into a recent problem.
+    if std::fs::metadata(&path).map(|m| m.len() > 20 << 20).unwrap_or(false) {
+        let _ = std::fs::rename(&path, path.with_extension("log.1"));
+    }
+    std::fs::OpenOptions::new().create(true).append(true).open(path).ok()
 }
 
 fn pair(url: Option<String>, key: Option<String>) -> Option<(String, String)> {
@@ -88,7 +119,8 @@ fn pair(url: Option<String>, key: Option<String>) -> Option<(String, String)> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).with_target(false).init();
+    let log = LogWriter(own_log_file(&cli).map(|f| std::sync::Arc::new(std::sync::Mutex::new(f))));
+    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).with_target(false).with_writer(move || log.clone()).init();
     let dir = data_dir(&cli);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     let db = Db::open(&dir.join("spool.db"))?;
