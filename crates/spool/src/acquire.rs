@@ -42,6 +42,18 @@ impl std::fmt::Display for Gone {
 
 impl std::error::Error for Gone {}
 
+/// A release the disk has no room for right now. Nothing is wrong with the release itself.
+#[derive(Debug)]
+pub struct NoSpace(pub String);
+
+impl std::fmt::Display for NoSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NoSpace {}
+
 struct Judged {
     record: DecisionRecord,
     candidate: Candidate,
@@ -625,6 +637,7 @@ impl App {
             // A chosen release that turns out to be gone from Usenet is set aside and the choice
             // made again from what is left, a few times at most.
             let mut dead: HashSet<String> = HashSet::new();
+            let mut no_room = false;
             for _ in 0..4 {
                 let claimed: HashSet<i64> = grabbed.iter().flat_map(|a| a.episode_ids.iter().copied()).collect();
                 let live: Vec<&Judged> = judged
@@ -637,6 +650,14 @@ impl App {
                     match self.grab(&j.record, &tc.title, if tc.compact { COMPACT_REASON } else { "best acceptable release from search" }, may_queue).await {
                         Ok(Some(a)) => grabbed.push(a),
                         Ok(None) => {}
+                        Err(e) if e.downcast_ref::<NoSpace>().is_some() => {
+                            // Not a fault, and the next release in line may be small enough.
+                            tracing::debug!(release = %j.record.release.title, "{e}");
+                            grab_errors.push(format!("Could not start {}: {e}", j.record.release.title));
+                            blocked.push((j.record.release.size, e.to_string()));
+                            dead.insert(j.record.release.title.clone());
+                            no_room = true;
+                        }
                         Err(e) if e.downcast_ref::<Gone>().is_some() => {
                             tracing::info!(release = %j.record.release.title, "{e}; choosing again");
                             dead.insert(j.record.release.title.clone());
@@ -653,6 +674,17 @@ impl App {
                 if !any_gone {
                     break;
                 }
+            }
+            // Remember a title turned away only for space, so the backlog leaves it alone until
+            // the disk has more to give.
+            if no_room && grabbed.is_empty() {
+                if let Some(headroom) = self.space_headroom() {
+                    if self.space_blocked.lock().insert(title_id, headroom).is_none() {
+                        tracing::info!(title = %tc.title.title, "nothing for this title fits on the disk right now; leaving it until space frees up");
+                    }
+                }
+            } else {
+                self.space_blocked.lock().remove(&title_id);
             }
         }
         if !grabbed.is_empty() {
@@ -720,6 +752,7 @@ impl App {
                             self.archive_runner_ups(&tc.title, runner_ups(&judged, std::slice::from_ref(&a), &tc.profile, g.proper_policy, g.archive_runner_ups as usize));
                         }
                         Ok(None) => {}
+                        Err(e) if e.downcast_ref::<NoSpace>().is_some() => tracing::debug!(release = %j.record.release.title, "{e}"),
                         Err(e) => tracing::warn!(release = %j.record.release.title, error = %e, "grab failed"),
                     }
                 }
@@ -883,7 +916,7 @@ impl App {
         // Room to download it, plus half again while a packed release is unpacked.
         let alone = release_bytes + release_bytes / 2;
         if free < alone + reserve {
-            bail!("not enough free space: {:.0} GB free, and this {:.0} GB release needs about {:.0} GB while unpacking, with {} GB kept free", gb(free), gb(release_bytes), gb(alone), g.min_free_gb);
+            return Err(NoSpace(format!("not enough free space: {:.0} GB free, and this {:.0} GB release needs about {:.0} GB while unpacking, with {} GB kept free", gb(free), gb(release_bytes), gb(alone), g.min_free_gb)).into());
         }
         // Otherwise it may join the queue and wait there for room. What Spool queues on its own
         // account is bounded, so a long backlog cannot pile up behind a full disk.
@@ -892,10 +925,27 @@ impl App {
             let pending: u64 = jobs.iter().filter(|j| !j.state.is_terminal()).map(|j| j.total_bytes.saturating_sub(j.done_bytes)).sum();
             let cap = g.space_wait_gb as u64 * (1 << 30);
             if free < alone + reserve + pending && pending + release_bytes > free.saturating_sub(reserve) + cap {
-                bail!("not enough free space: {:.0} GB free, {:.0} GB already queued, and this release is {:.0} GB", gb(free), gb(pending), gb(release_bytes));
+                return Err(NoSpace(format!("not enough free space: {:.0} GB free, {:.0} GB already queued, and this release is {:.0} GB", gb(free), gb(pending), gb(release_bytes))).into());
             }
         }
         Ok(())
+    }
+
+    /// Room left for new downloads: what is free, less the reserve and what the queue still has
+    /// to fetch. Negative when the queue already wants more than the disk has.
+    pub fn space_headroom(&self) -> Option<i128> {
+        let free = crate::app::free_space(&self.engine.config().incomplete_dir)? as i128;
+        let reserve = self.settings.general().min_free_gb as i128 * (1 << 30);
+        let pending: i128 = self.engine.jobs().iter().filter(|j| !j.state.is_terminal()).map(|j| j.total_bytes.saturating_sub(j.done_bytes) as i128).sum();
+        Some(free - reserve - pending)
+    }
+
+    /// Whether a title last refused for lack of space is still no better off. Searching it again
+    /// would find the same releases and refuse them again.
+    pub fn still_short_of_space(&self, title_id: i64) -> bool {
+        const WORTH_ANOTHER_LOOK: i128 = 5 << 30;
+        let Some(then) = self.space_blocked.lock().get(&title_id).copied() else { return false };
+        self.space_headroom().is_some_and(|now| now < then + WORTH_ANOTHER_LOOK)
     }
 
     /// Download a release from the archive for the title it was saved for.

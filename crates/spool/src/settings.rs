@@ -43,6 +43,8 @@ pub struct General {
     pub api_key: String,
     /// A second key that may only use the read-only MCP tools. Empty disables it.
     pub mcp_read_key: String,
+    /// A second folder, ideally on another disk, that also gets each nightly database backup.
+    pub backup_dir: String,
     /// Spool stops starting downloads when the downloads disk would drop below this many
     /// gigabytes free once the download has finished.
     pub min_free_gb: u32,
@@ -82,6 +84,7 @@ impl Default for General {
             password: String::new(),
             api_key: String::new(),
             mcp_read_key: String::new(),
+            backup_dir: String::new(),
             min_free_gb: 20,
             space_wait_gb: 100,
             direct_unpack: true,

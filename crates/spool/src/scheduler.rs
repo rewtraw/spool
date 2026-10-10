@@ -18,6 +18,7 @@ impl App {
             "refresh" => self.refresh_due(true).await,
             "scan" => self.scan_all().await.map(|r| format!("{} files on disk, {} added, {} missing, {} unmatched", r.files_found, r.files_added, r.files_missing, r.unmatched.len())),
             "housekeeping" => self.housekeeping().await,
+            "compact" => self.compact_library().await,
             "plex" if self.settings.general().plex_token.is_empty() => Ok("skipped: Plex is not set up".into()),
             "plex" => self.plex_sync().await,
             other => Err(anyhow::anyhow!("unknown task {other}")),
@@ -56,6 +57,10 @@ impl App {
                 wanted.push(t);
             }
         }
+        // Titles already turned away for space would only be turned away again.
+        let before = wanted.len();
+        wanted.retain(|t| !self.still_short_of_space(t.id));
+        let short = before - wanted.len();
         wanted.sort_by_key(|t| t.last_search_at);
         let total = wanted.len();
         let mut grabbed = 0;
@@ -68,7 +73,38 @@ impl App {
                 Err(e) => tracing::warn!(title = %t.title, error = %e, "backlog search failed"),
             }
         }
-        Ok(format!("{total} titles missing, searched {searched}, grabbed {grabbed}"))
+        Ok(format!("{} titles missing, searched {searched}, grabbed {grabbed}{}", total + short, if short > 0 { format!(", {short} waiting for disk space") } else { String::new() }))
+    }
+
+    /// Look for smaller copies of the titles furthest over their profile's size target. Only ever
+    /// run by hand: it replaces files, and a few titles at a time keeps it within what the disk
+    /// and the indexers can take.
+    async fn compact_library(&self) -> anyhow::Result<String> {
+        const PER_RUN: usize = 8;
+        if !self.is_active() {
+            return Ok("skipped in shadow mode".into());
+        }
+        let profiles = self.db.profiles()?;
+        let mut over: Vec<(u64, crate::models::Title)> = vec![];
+        for t in self.db.titles(None)? {
+            let Some(ceiling) = profiles.iter().find(|p| p.id == t.profile_id).and_then(|p| p.size_ceiling()) else { continue };
+            let excess: u64 = self.db.files(t.id)?.iter().map(|f| f.size.saturating_sub(ceiling)).sum();
+            if excess > 0 && !self.db.title_acquisitions(t.id)?.iter().any(|a| a.state.is_active()) {
+                over.push((excess, t));
+            }
+        }
+        over.sort_by_key(|o| std::cmp::Reverse(o.0));
+        let total = over.len();
+        let (mut searched, mut started) = (0, 0);
+        for (_, t) in over.into_iter().filter(|o| !self.still_short_of_space(o.1.id)).take(PER_RUN) {
+            searched += 1;
+            match self.search(t.id, Scope::Compact, false, true).await {
+                Ok(o) => started += o.grabbed.len(),
+                Err(e) => tracing::warn!(title = %t.title, error = %e, "compacting search failed"),
+            }
+        }
+        let left = total.saturating_sub(searched);
+        Ok(format!("{total} titles over their size target, searched {searched}, {started} smaller {} started{}", if started == 1 { "copy" } else { "copies" }, if left > 0 { format!("; run again for the other {left}") } else { String::new() }))
     }
 
     /// Refresh metadata that is due: continuing series daily, everything else weekly.
@@ -105,8 +141,61 @@ impl App {
         while backups.len() > 14 {
             let _ = std::fs::remove_file(backups.remove(0));
         }
+        // A copy on another disk is what survives this one failing.
+        let second = self.settings.general().backup_dir.trim().to_string();
+        let mut copied = String::new();
+        if !second.is_empty() {
+            let dest = std::path::PathBuf::from(&second);
+            match std::fs::create_dir_all(&dest).and_then(|_| std::fs::copy(dir.join(&name), dest.join(&name))) {
+                Ok(_) => {
+                    let mut old: Vec<_> = std::fs::read_dir(&dest)?.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("spool-")) && p.extension().is_some_and(|e| e == "db")).collect();
+                    old.sort();
+                    while old.len() > 14 {
+                        let _ = std::fs::remove_file(old.remove(0));
+                    }
+                    copied = format!(" and copied to {second}");
+                }
+                Err(e) => {
+                    tracing::warn!(folder = %second, error = %e, "could not copy the backup to the second folder");
+                    copied = format!("; the copy to {second} failed: {e}");
+                }
+            }
+        }
+        self.trim_log();
         self.db.with(|c| c.execute("DELETE FROM history WHERE ts < ?1 AND kind = 'would_grab'", [now() - 60 * 86400]))?;
-        Ok(format!("backup {name} written, {recycled} MB of recycled files deleted"))
+        Ok(format!("backup {name} written{copied}, {recycled} MB of recycled files deleted"))
+    }
+
+    /// Keep the service log from growing for ever where the system writes it for us and never
+    /// trims it: past 20 MB, the last few megabytes are kept and the rest dropped.
+    fn trim_log(&self) {
+        const LIMIT: u64 = 20 << 20;
+        const KEEP: u64 = 4 << 20;
+        if crate::app::own_log_path(&self.data_dir).is_some() {
+            return; // Spool writes this one itself and rolls it over at start.
+        }
+        let path = crate::app::log_path(&self.data_dir);
+        let Ok(len) = std::fs::metadata(&path).map(|m| m.len()) else { return };
+        if len <= LIMIT {
+            return;
+        }
+        use std::io::{Read, Seek, SeekFrom, Write};
+        let tail = (|| -> std::io::Result<Vec<u8>> {
+            let mut f = std::fs::File::open(&path)?;
+            f.seek(SeekFrom::Start(len - KEEP))?;
+            let mut buf = Vec::with_capacity(KEEP as usize);
+            f.read_to_end(&mut buf)?;
+            // Start at a whole line.
+            let cut = buf.iter().position(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
+            Ok(buf.split_off(cut))
+        })();
+        // The system holds the file open for appending, so it is emptied in place, not replaced.
+        if let Ok(tail) = tail {
+            if let Ok(mut f) = std::fs::OpenOptions::new().write(true).truncate(true).open(&path) {
+                let _ = f.write_all(&tail);
+                tracing::info!("trimmed the log to its last {} MB", KEEP >> 20);
+            }
+        }
     }
 
     pub fn spawn_scheduler(&self) {

@@ -43,6 +43,10 @@ pub struct Inner {
     /// first read blocks until they give it.
     pub volume_access: std::sync::atomic::AtomicU8,
     pub sessions: Mutex<HashSet<String>>,
+    /// Wrong passwords lately: (how many, when the last one was).
+    pub login_failures: Mutex<(u32, i64)>,
+    /// Titles last turned away for lack of disk space, with the headroom there was at the time.
+    pub space_blocked: Mutex<HashMap<i64, i128>>,
     /// Releases being sent to the downloader right now, keyed by title and release name.
     pub grabbing: Mutex<HashSet<(i64, String)>>,
     /// Jobs the user resumed by hand after Spool held them for lack of disk space.
@@ -79,6 +83,7 @@ pub fn http_client() -> reqwest::Client {
 
 impl App {
     pub async fn start(data_dir: &Path, db: Db) -> anyhow::Result<App> {
+        let sessions: HashSet<String> = db.get_setting::<Vec<String>>("sessions").into_iter().collect();
         let settings = Settings::new(db.clone());
         // API and MCP access always go through a key, so there is always one.
         let mut g = settings.general();
@@ -102,7 +107,9 @@ impl App {
             indexer_backoff: Mutex::new(HashMap::new()),
             tasks: Mutex::new(HashMap::new()),
             volume_access: std::sync::atomic::AtomicU8::new(0),
-            sessions: Mutex::new(HashSet::new()),
+            sessions: Mutex::new(sessions),
+            login_failures: Mutex::new((0, 0)),
+            space_blocked: Mutex::new(HashMap::new()),
             grabbing: Mutex::new(HashSet::new()),
             waiting_for_space: Mutex::new(HashSet::new()),
             art_fetches: tokio::sync::Semaphore::new(6),

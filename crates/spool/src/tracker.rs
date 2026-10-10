@@ -156,7 +156,7 @@ impl App {
                         waiting_bytes += job.total_bytes;
                         short += needed;
                         if !held && self.engine.pause_because(&job.id, WAITING).is_ok() {
-                            tracing::warn!(job = %job.name, "holding a download until there is room for it");
+                            tracing::info!(job = %job.name, "holding a download until there is room for it");
                         }
                     }
                 }

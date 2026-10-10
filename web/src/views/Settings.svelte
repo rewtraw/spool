@@ -58,6 +58,17 @@
     loadSpace();
     loadStatus();
   }
+  const overTarget = $derived.by(() => {
+    const rows = (space?.titles ?? []).filter((t: any) => t.over_target > 0);
+    return { count: rows.length, bytes: rows.reduce((s: number, t: any) => s + t.over_target, 0) };
+  });
+  async function compactLibrary() {
+    await act(() => api.post('/tasks/compact'), 'Looking for smaller copies of the titles furthest over target. Downloads appear in Activity.');
+  }
+  async function signOut() {
+    await api.post('/logout').catch(() => {});
+    location.reload();
+  }
   async function compactTitle(t: any) {
     const r = await act(() => api.post<any>(`/titles/${t.title_id}/search`, { compact: true, grab: true }));
     if (r) toast(r.grabbed?.length ? `Downloading a smaller copy of ${t.title}; it replaces the file when it arrives` : r.message.startsWith('Nothing') ? r.message : `No smaller copy of ${t.title} that fits was found`);
@@ -303,7 +314,9 @@
         <label class="field">Plex address<input class="input mono" bind:value={general.plex_url} placeholder="http://127.0.0.1:32400" /></label>
         <label class="field">Plex token<input class="input mono" bind:value={general.plex_token} autocomplete="off" /></label>
       </div>
-      <label class="field narrow">Password for this app<input class="input" type="password" bind:value={general.password} autocomplete="new-password" /><span class="hint">Empty means anyone who can reach this address can use it.</span></label>
+      <label class="field narrow">Password for this app<input class="input" type="password" bind:value={general.password} autocomplete="new-password" /><span class="hint">Empty means anyone who can reach this address can use it. Setting or changing it signs every other browser out.</span></label>
+      {#if general.password}<div><button class="btn ghost" type="button" onclick={signOut}>Sign out of this browser</button></div>{/if}
+      <label class="field">Second backup folder<input class="input mono" bind:value={general.backup_dir} autocomplete="off" placeholder="None" /><span class="hint">The nightly database backup is also copied here. Choose a folder on a different disk from the one Spool's data is on.</span></label>
     </fieldset>
     <fieldset class="card">
       <legend>AI access</legend>
@@ -560,6 +573,13 @@
           <legend>Recycle folder</legend>
           <p class="muted">{space.recycled.files} replaced or deleted {space.recycled.files === 1 ? 'file is' : 'files are'} still on disk, using {bytes(space.recycled.bytes)}. {#if space.recycled.days > 0}They are removed after {space.recycled.days} {space.recycled.days === 1 ? 'day' : 'days'}.{/if}</p>
           <div><button class="btn" onclick={emptyFromSpace}>Delete them now</button></div>
+        </fieldset>
+      {/if}
+      {#if overTarget.count}
+        <fieldset class="card">
+          <legend>Over their size target</legend>
+          <p class="muted">{overTarget.count} {overTarget.count === 1 ? 'title is' : 'titles are'} larger than the profile asks for, by {bytes(overTarget.bytes)} in all. Spool can look for smaller copies of the worst few at a time, accepting lower quality, and replace each file when its smaller copy arrives.</p>
+          <div><button class="btn" onclick={compactLibrary}>Find smaller copies</button></div>
         </fieldset>
       {/if}
       <div class="row wrap">

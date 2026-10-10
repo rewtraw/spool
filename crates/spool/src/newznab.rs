@@ -151,7 +151,7 @@ pub fn parse_feed(xml: &str, ix: &Indexer) -> Result<Vec<Release>> {
                 } else if let (Some(r), true) = (cur.as_mut(), name == tag) {
                     let v = text.trim();
                     match name.as_str() {
-                        "title" => r.title = v.to_string(),
+                        "title" => r.title = unscramble(&v),
                         "guid" => r.guid = v.to_string(),
                         "link" if r.link.is_empty() => r.link = v.to_string(),
                         "comments" => r.info_url = v.to_string(),
@@ -207,6 +207,54 @@ pub async fn fetch(http: &reqwest::Client, ix: &Indexer, q: &Query) -> Result<(V
     Ok((parse_feed(&body, ix)?, parse_limits(&body)))
 }
 
+/// Undo text that was UTF-8, read as Latin-1 and encoded again, sometimes more than once. Some
+/// indexers hand out Chinese and Japanese release names this way, and may cut them off partway
+/// through a character. A name that is honestly Latin-1 is not valid UTF-8 when read back as
+/// bytes, so it is left as it is.
+fn unscramble(s: &str) -> String {
+    let high = |c: char| (0x80..=0xFF).contains(&(c as u32));
+    let mut out = s.to_string();
+    for _ in 0..3 {
+        if !out.chars().any(high) {
+            break;
+        }
+        let mut next = String::with_capacity(out.len());
+        let mut changed = false;
+        let chars: Vec<char> = out.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if !high(chars[i]) {
+                next.push(chars[i]);
+                i += 1;
+                continue;
+            }
+            // One stretch of high characters at a time, so a clean part of the name survives
+            // a damaged one.
+            let end = (i..chars.len()).find(|j| !high(chars[*j])).unwrap_or(chars.len());
+            let bytes: Vec<u8> = chars[i..end].iter().map(|c| *c as u8).collect();
+            let good = match std::str::from_utf8(&bytes) {
+                Ok(_) => bytes.len(),
+                Err(e) => e.valid_up_to(),
+            };
+            if good > 0 {
+                next.push_str(std::str::from_utf8(&bytes[..good]).unwrap_or_default());
+                changed = true;
+            }
+            // Whatever does not read as UTF-8 stays as it came, unless it is the stub of a
+            // character the indexer cut in half.
+            if good < bytes.len() && !(changed && end == chars.len()) {
+                next.extend(chars[i + good..end].iter());
+            }
+            i = end;
+        }
+        if !changed {
+            break;
+        }
+        out = next;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +308,19 @@ mod tests {
         assert_eq!(parse_limits("<rss><channel></channel></rss>"), None);
         // An account without a cap reports what it has used and no maximum.
         assert_eq!(parse_limits(r#"<newznab:apilimits apiCurrent="92" grabCurrent="103"/>"#), Some(Limits { api_current: Some(92), api_max: None, grab_current: Some(103), grab_max: None }));
+    }
+    #[test]
+    fn unscrambles_doubly_encoded_names() {
+        let once: String = "機動戦士".bytes().map(|b| b as char).collect();
+        let twice: String = once.as_bytes().iter().map(|b| *b as char).collect();
+        assert_eq!(unscramble(&once), "機動戦士");
+        assert_eq!(unscramble(&twice), "機動戦士");
+        assert_eq!(unscramble("Amélie.2001.1080p"), "Amélie.2001.1080p");
+        assert_eq!(unscramble("機動戦士 0080"), "機動戦士 0080");
+        assert_eq!(unscramble("Plain.Name.2001"), "Plain.Name.2001");
+        // Cut off mid-character by the indexer, with a clean part before it.
+        let cut = format!("[Grp] {}", &twice[..twice.len() - 2]);
+        assert_eq!(unscramble(&cut), "[Grp] 機動戦");
+        assert_eq!(unscramble(&format!("{once}/Mobile Suit [1080p]")), "機動戦士/Mobile Suit [1080p]");
     }
 }

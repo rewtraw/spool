@@ -16,7 +16,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use spool_core::profile::QualityProfile;
 use spool_core::{Flavor, Quality};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
@@ -75,11 +75,22 @@ fn authorized(app: &App, headers: &HeaderMap) -> bool {
         return true;
     }
     if let Some(key) = headers.get("x-api-key").and_then(|k| k.to_str().ok()) {
-        if !g.api_key.is_empty() && key == g.api_key {
+        if !g.api_key.is_empty() && same(key, &g.api_key) {
             return true;
         }
     }
     session_cookie(headers).is_some_and(|c| app.sessions.lock().contains(&c))
+}
+
+/// Compare two secrets without the time taken giving away how much of a guess was right.
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
+}
+
+/// Sessions outlive a restart, so signing in is not needed again after every upgrade.
+fn save_sessions(app: &App) {
+    let all: Vec<String> = app.sessions.lock().iter().cloned().collect();
+    let _ = app.db.set_setting("sessions", &all);
 }
 
 async fn guard(State(app): State<App>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
@@ -93,14 +104,50 @@ async fn guard(State(app): State<App>, req: axum::extract::Request, next: axum::
 }
 
 async fn login(State(app): State<App>, Json(body): Json<Value>) -> Response {
+    const TRIES: u32 = 5;
+    const LOCKED_FOR: i64 = 60;
     let g = app.settings.general();
-    if g.password.is_empty() || body["password"].as_str() == Some(g.password.as_str()) {
-        let token = format!("{:x}{:x}", crate::db::now(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0) as u64 * 0x9E3779B97F4A7C15);
-        app.sessions.lock().insert(token.clone());
+    let now = crate::db::now();
+    {
+        // A run of wrong guesses shuts the door for a minute, which makes guessing hopeless.
+        let mut f = app.login_failures.lock();
+        if now - f.1 >= LOCKED_FOR {
+            f.0 = 0;
+        }
+        if f.0 >= TRIES {
+            return ApiError(StatusCode::TOO_MANY_REQUESTS, "too many wrong passwords; wait a minute and try again".into()).into_response();
+        }
+    }
+    if g.password.is_empty() || body["password"].as_str().is_some_and(|p| same(p, &g.password)) {
+        *app.login_failures.lock() = (0, 0);
+        let token = crate::settings::new_key();
+        {
+            let mut s = app.sessions.lock();
+            // A household has a handful of browsers; past that, the oldest are not worth keeping.
+            if s.len() >= 40 {
+                s.clear();
+            }
+            s.insert(token.clone());
+        }
+        save_sessions(&app);
         ([(header::SET_COOKIE, format!("spool_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"))], Json(json!({"ok": true}))).into_response()
     } else {
+        {
+            let mut f = app.login_failures.lock();
+            *f = (f.0 + 1, now);
+        }
+        tracing::warn!("wrong password at sign-in");
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         ApiError(StatusCode::UNAUTHORIZED, "wrong password".into()).into_response()
     }
+}
+
+async fn logout(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Some(c) = session_cookie(&headers) {
+        app.sessions.lock().remove(&c);
+        save_sessions(&app);
+    }
+    ([(header::SET_COOKIE, "spool_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string())], Json(json!({"ok": true}))).into_response()
 }
 
 async fn session(State(app): State<App>, headers: HeaderMap) -> Json<Value> {
@@ -525,13 +572,21 @@ async fn get_general(State(app): State<App>) -> Json<General> {
     Json(g)
 }
 
-async fn put_general(State(app): State<App>, Json(mut g): Json<General>) -> R<Value> {
+async fn put_general(State(app): State<App>, headers: HeaderMap, Json(mut g): Json<General>) -> Result<Response, ApiError> {
     let old = app.settings.general();
     g.tmdb_api_key = unmask(g.tmdb_api_key, &old.tmdb_api_key);
     g.plex_token = unmask(g.plex_token, &old.plex_token);
     g.password = unmask(g.password, &old.password);
-    if g.api_key.is_empty() {
-        g.api_key = old.api_key;
+    let mut cookie = None;
+    if g.password != old.password {
+        // A new password signs every other browser out; the one that set it stays in.
+        let mine = session_cookie(&headers).filter(|c| app.sessions.lock().contains(c)).unwrap_or_else(|| {
+            let token = crate::settings::new_key();
+            cookie = Some(format!("spool_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"));
+            token
+        });
+        *app.sessions.lock() = HashSet::from([mine]);
+        save_sessions(&app);
     }
     if g.mode == crate::settings::Mode::Active && old.mode != g.mode {
         if !app.volume_ok() {
@@ -541,7 +596,10 @@ async fn put_general(State(app): State<App>, Json(mut g): Json<General>) -> R<Va
     }
     app.settings.set_general(&g)?;
     app.apply_engine_config();
-    Ok(Json(json!({"ok": true})))
+    Ok(match cookie {
+        Some(c) => ([(header::SET_COOKIE, c)], Json(json!({"ok": true}))).into_response(),
+        None => Json(json!({"ok": true})).into_response(),
+    })
 }
 
 async fn get_naming(State(app): State<App>) -> Json<spool_core::naming::NamingConfig> {
@@ -693,7 +751,7 @@ async fn test_indexer(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
 }
 
 async fn run_task(State(app): State<App>, Path(name): Path<String>) -> R<Value> {
-    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex"].contains(&name.as_str()) {
+    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact"].contains(&name.as_str()) {
         return Err(not_found("task"));
     }
     let app2 = app.clone();
@@ -916,6 +974,7 @@ async fn assets(uri: Uri) -> Response {
 fn api_routes() -> Router<App> {
     Router::new()
         .route("/api/login", post(login))
+        .route("/api/logout", post(logout))
         .route("/api/session", get(session))
         .route("/api/status", get(status))
         .route("/api/titles", get(list_titles).post(add_title))

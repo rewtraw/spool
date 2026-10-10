@@ -141,6 +141,9 @@ pub(crate) struct Job {
     speed: AtomicU64,
     /// Bytes actually received, for speed. Progress also counts segments given up on.
     fetched: AtomicU64,
+    /// Set while the job is being checked, repaired and unpacked. That work fetches recovery
+    /// data under the downloading state, and the queue must not take the job for a new download.
+    in_post: AtomicBool,
 }
 
 impl Job {
@@ -256,7 +259,7 @@ impl Job {
 pub(crate) fn sanitize_name(raw: &str) -> Option<String> {
     let base = raw.rsplit(['/', '\\']).next().unwrap_or("");
     let cleaned: String = base.chars().filter(|c| !c.is_control() && !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect();
-    let cleaned = cleaned.trim().trim_start_matches('.').to_string();
+    let cleaned = fit_name(cleaned.trim().trim_start_matches('.'));
     if cleaned.is_empty() || cleaned == ".." {
         None
     } else {
@@ -264,9 +267,32 @@ pub(crate) fn sanitize_name(raw: &str) -> Option<String> {
     }
 }
 
+/// Shorten a name to what a filesystem accepts for one path component, which is counted in
+/// bytes, so a long name in Chinese or Japanese runs out far sooner than it looks. The
+/// extension is kept; the cut falls between characters.
+pub(crate) fn fit_name(name: &str) -> String {
+    const LIMIT: usize = 200;
+    if name.len() <= LIMIT {
+        return name.to_string();
+    }
+    let ext = name.rfind('.').map(|i| &name[i..]).filter(|e| e.len() <= 12 && e.is_ascii()).unwrap_or("");
+    let stem = &name[..name.len() - ext.len()];
+    let mut cut = LIMIT - ext.len();
+    while !stem.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{ext}", stem[..cut].trim_end())
+}
+
 pub(crate) fn safe_dir_name(name: &str) -> String {
     let s: String = name.chars().map(|c| if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { ' ' } else { c }).collect();
-    let s = s.trim().trim_matches('.').trim().to_string();
+    let s = s.trim().trim_matches('.').trim();
+    // A folder name has no extension to keep.
+    let mut cut = s.len().min(200);
+    while !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let s = s[..cut].trim().to_string();
     if s.is_empty() {
         "download".into()
     } else {
@@ -733,7 +759,7 @@ impl Engine {
                 rec.state = JobState::Queued;
                 rec.message = "Resuming after restart".into();
             }
-            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0) }));
+            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false) }));
         }
         loaded.sort_by_key(|j| j.rec.lock().added_at);
         *inner.jobs.lock() = loaded;
@@ -753,7 +779,7 @@ impl Engine {
             let next = if inner.paused.load(Ordering::Relaxed) {
                 None
             } else {
-                inner.jobs.lock().iter().find(|j| matches!(j.rec.lock().state, JobState::Queued | JobState::Downloading)).cloned()
+                inner.jobs.lock().iter().find(|j| !j.in_post.load(Ordering::Relaxed) && matches!(j.rec.lock().state, JobState::Queued | JobState::Downloading)).cloned()
             };
             let Some(job) = next else {
                 let _ = tokio::time::timeout(Duration::from_secs(2), inner.wake.notified()).await;
@@ -798,6 +824,7 @@ impl Engine {
                     let _ = job.save();
                     inner.publish(&job);
                     let (inner2, job2) = (inner.clone(), job.clone());
+                    job.in_post.store(true, Ordering::Relaxed);
                     tokio::spawn(async move {
                         let _slot = inner2.post_slots.acquire().await;
                         if let Some(u) = unpacker {
@@ -816,7 +843,10 @@ impl Engine {
                         }
                         crate::post::process(&inner2, &job2).await;
                         let _ = job2.save();
+                        job2.in_post.store(false, Ordering::Relaxed);
                         inner2.publish(&job2);
+                        // Cut short while fetching recovery data, it goes back to the queue.
+                        inner2.wake.notify_one();
                     });
                 }
                 FetchOutcome::Stopped => {
@@ -886,7 +916,7 @@ impl Engine {
             direct_done: false,
             direct_off: false,
         };
-        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0) });
+        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false) });
         job.save()?;
         self.0.jobs.lock().push(job.clone());
         self.0.publish(&job);
