@@ -1,6 +1,6 @@
 //! Title metadata: TMDB for movies, TVmaze for television.
 
-use crate::models::{Episode, Kind, SeasonInfo, Title};
+use crate::models::{Collection, Episode, Kind, Person, SeasonInfo, Title};
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
@@ -94,6 +94,17 @@ impl Metadata {
             first_aired: None,
             last_search_at: 0,
             last_refresh_at: 0,
+            tagline: s(m, "tagline"),
+            rating: score(m.get("vote_average")),
+            certification: None,
+            people: movie_people(m),
+            collection: m.get("belongs_to_collection").filter(|c| c.is_object()).map(|c| Collection {
+                id: c.get("id").and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+                name: s(c, "name"),
+                poster: opt(c, "poster_path").map(|p| format!("{TMDB_IMG}/w342{p}")),
+                fanart: opt(c, "backdrop_path").map(|p| format!("{TMDB_IMG}/w1280{p}")),
+            }),
+            details_at: 0,
         };
         let original = s(m, "original_title");
         if !original.is_empty() && original != t.title {
@@ -112,6 +123,14 @@ impl Metadata {
             let mut earliest: [Option<String>; 6] = Default::default();
             for country in countries {
                 for rd in country.get("release_dates").and_then(|r| r.as_array()).into_iter().flatten() {
+                    // The age rating is the American one: the theatrical release's, else any.
+                    if s(country, "iso_3166_1") == "US" {
+                        let cert = s(rd, "certification");
+                        let theatrical = rd.get("type").and_then(|x| x.as_u64()) == Some(3);
+                        if !cert.is_empty() && (t.certification.is_none() || theatrical) {
+                            t.certification = Some(cert);
+                        }
+                    }
                     let ty = rd.get("type").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
                     let d = s(rd, "release_date").get(..10).unwrap_or("").to_string();
                     if ty < 6 && !d.is_empty() && earliest[ty].as_ref().is_none_or(|e| d < *e) {
@@ -165,8 +184,10 @@ impl Metadata {
         if key.is_empty() {
             bail!("add a TMDB API key in Settings to fetch movie details");
         }
-        let v = self.get(&format!("{}/movie/{tmdb_id}?api_key={key}&append_to_response=release_dates,alternative_titles,external_ids", self.tmdb_base)).await?;
-        Ok(self.movie_from(&v))
+        let v = self.get(&format!("{}/movie/{tmdb_id}?api_key={key}&append_to_response=release_dates,alternative_titles,external_ids,credits", self.tmdb_base)).await?;
+        let mut t = self.movie_from(&v);
+        t.details_at = crate::db::now();
+        Ok(t)
     }
 
     fn series_from(&self, show: &Value) -> Title {
@@ -209,6 +230,12 @@ impl Metadata {
             first_aired: premiered,
             last_search_at: 0,
             last_refresh_at: 0,
+            tagline: String::new(),
+            rating: score(show.get("rating").and_then(|r| r.get("average"))),
+            certification: None,
+            people: series_people(show),
+            collection: None,
+            details_at: 0,
         }
     }
 
@@ -222,10 +249,12 @@ impl Metadata {
 
     /// Series details and every episode, specials included.
     pub async fn series(&self, tvmaze_id: u32) -> Result<(Title, Vec<Episode>)> {
-        let show = self.get(&format!("{}/shows/{tvmaze_id}", self.tvmaze_base)).await?;
+        let show = self.get(&format!("{}/shows/{tvmaze_id}?embed[]=cast&embed[]=images", self.tvmaze_base)).await?;
         let eps = self.get(&format!("{}/shows/{tvmaze_id}/episodes?specials=1", self.tvmaze_base)).await?;
         let aka = self.get(&format!("{}/shows/{tvmaze_id}/akas", self.tvmaze_base)).await.unwrap_or(Value::Null);
         let mut title = self.series_from(&show);
+        title.details_at = crate::db::now();
+        title.fanart = backdrop(&show);
         for a in aka.as_array().into_iter().flatten() {
             let english = a.get("country").is_none_or(|c| c.is_null() || matches!(s(c, "code").as_str(), "US" | "GB" | "CA" | "AU"));
             let name = s(a, "name");
@@ -259,6 +288,8 @@ impl Metadata {
                 runtime: e.get("runtime").and_then(|x| x.as_u64()).unwrap_or(title.runtime as u64) as u32,
                 monitored: season > 0,
                 file_id: None,
+                still: e.get("image").and_then(|i| opt(i, "original").or_else(|| opt(i, "medium"))),
+                rating: score(e.get("rating").and_then(|r| r.get("average"))),
             });
         }
         let mut seasons: Vec<u32> = episodes.iter().map(|e| e.season).collect();
@@ -273,6 +304,62 @@ impl Metadata {
         let id = show.get("id").and_then(|x| x.as_u64()).ok_or_else(|| anyhow!("not found"))? as u32;
         self.series(id).await
     }
+}
+
+/// A score out of ten, when the source has one.
+fn score(v: Option<&Value>) -> Option<f32> {
+    v.and_then(|x| x.as_f64()).filter(|x| *x > 0.0).map(|x| (x * 10.0).round() as f32 / 10.0)
+}
+
+/// The leading cast, then the director and writers.
+fn movie_people(m: &Value) -> Vec<Person> {
+    let photo = |p: &Value| opt(p, "profile_path").map(|path| format!("{TMDB_IMG}/w185{path}"));
+    let id = |p: &Value| p.get("id").and_then(|x| x.as_u64()).unwrap_or(0);
+    let mut out: Vec<Person> = vec![];
+    let credits = m.get("credits");
+    for p in credits.and_then(|c| c.get("cast")).and_then(|c| c.as_array()).into_iter().flatten().take(20) {
+        out.push(Person { id: id(p), name: s(p, "name"), role: s(p, "character"), kind: "actor".into(), photo: photo(p) });
+    }
+    for p in credits.and_then(|c| c.get("crew")).and_then(|c| c.as_array()).into_iter().flatten() {
+        let kind = match s(p, "job").as_str() {
+            "Director" => "director",
+            "Screenplay" | "Writer" | "Story" => "writer",
+            _ => continue,
+        };
+        if !out.iter().any(|o| o.id == id(p) && o.kind == kind) {
+            out.push(Person { id: id(p), name: s(p, "name"), role: s(p, "job"), kind: kind.into(), photo: photo(p) });
+        }
+    }
+    out.retain(|p| !p.name.is_empty());
+    out
+}
+
+fn series_people(show: &Value) -> Vec<Person> {
+    let cast = show.get("_embedded").and_then(|e| e.get("cast")).and_then(|c| c.as_array());
+    let mut out: Vec<Person> = vec![];
+    for c in cast.into_iter().flatten().take(20) {
+        let (Some(p), character) = (c.get("person"), c.get("character")) else { continue };
+        let id = p.get("id").and_then(|x| x.as_u64()).unwrap_or(0);
+        if out.iter().any(|o| o.id == id) || s(p, "name").is_empty() {
+            continue;
+        }
+        out.push(Person {
+            id,
+            name: s(p, "name"),
+            role: character.map(|ch| s(ch, "name")).unwrap_or_default(),
+            kind: "actor".into(),
+            photo: p.get("image").and_then(|i| opt(i, "medium").or_else(|| opt(i, "original"))),
+        });
+    }
+    out
+}
+
+/// The show's main wide image, when TVmaze has one.
+fn backdrop(show: &Value) -> Option<String> {
+    let images = show.get("_embedded").and_then(|e| e.get("images")).and_then(|i| i.as_array())?;
+    let of = |i: &Value| i.get("resolutions").and_then(|r| r.get("original")).and_then(|o| opt(o, "url"));
+    let wide = |i: &&Value| s(i, "type") == "background";
+    images.iter().filter(wide).find(|i| i.get("main").and_then(|m| m.as_bool()) == Some(true)).or_else(|| images.iter().find(wide)).and_then(of)
 }
 
 /// "Dune 2021" -> ("Dune", Some(2021)).

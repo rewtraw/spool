@@ -44,7 +44,7 @@ impl Art {
 }
 
 /// Short stable tag for a source address, used to name the cached file and version its URL.
-fn tag(url: &str) -> String {
+pub fn tag(url: &str) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
     for b in url.bytes() {
         h ^= b as u64;
@@ -88,7 +88,29 @@ impl App {
             return Ok(bytes);
         }
         let prefix = format!("{}-{}-", t.id, art.name());
-        self.art_fetch(&path, &src, art, &prefix).await
+        let (url, presized) = sized_source(&src, art);
+        self.art_fetch(&path, &url, presized, art.width(), &prefix).await
+    }
+
+    /// Any image by its address, kept under `name`: cast photos, episode stills, and posters
+    /// and backdrops at the size a television wants.
+    pub async fn art_any(&self, name: &str, src: &str, width: u32) -> Result<Vec<u8>> {
+        let path = self.data_dir.join("art").join(format!("{name}-{}.jpg", tag(src)));
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            return Ok(bytes);
+        }
+        let (url, presized) = match src.split("image.tmdb.org/t/p/").nth(1).and_then(|rest| rest.split_once('/')) {
+            Some((_, file)) => {
+                let size = match width {
+                    0..=185 => "w185",
+                    186..=780 => "w780",
+                    _ => "original",
+                };
+                (format!("https://image.tmdb.org/t/p/{size}/{file}"), true)
+            }
+            None => (src.to_string(), false),
+        };
+        self.art_fetch(&path, &url, presized, width, &format!("{name}-")).await
     }
 
     /// Poster for a saved release whose title may no longer be in the library.
@@ -100,24 +122,23 @@ impl App {
             return Ok(bytes);
         }
         // Named by its source alone: nothing older to clear away.
-        self.art_fetch(&path, &src, Art::Poster, "\u{0}").await
+        let (url, presized) = sized_source(&src, Art::Poster);
+        self.art_fetch(&path, &url, presized, Art::Poster.width(), "\u{0}").await
     }
 
-    /// Fetch an image, shrink it to display size and keep it at `path`, replacing cached files
-    /// whose names start with `prefix`.
-    async fn art_fetch(&self, path: &std::path::Path, src: &str, art: Art, prefix: &str) -> Result<Vec<u8>> {
+    /// Fetch an image, shrink it to `width` and keep it at `path`, replacing cached files whose
+    /// names start with `prefix`.
+    async fn art_fetch(&self, path: &std::path::Path, url: &str, presized: bool, width: u32, prefix: &str) -> Result<Vec<u8>> {
         let _permit = self.art_fetches.acquire().await?;
         // Another request may have fetched it while this one waited.
         if let Ok(bytes) = tokio::fs::read(path).await {
             return Ok(bytes);
         }
-        let (url, presized) = sized_source(src, art);
-        let resp = self.http.get(&url).timeout(std::time::Duration::from_secs(30)).send().await.map_err(|e| anyhow!("{}", e.without_url()))?;
+        let resp = self.http.get(url).timeout(std::time::Duration::from_secs(30)).send().await.map_err(|e| anyhow!("{}", e.without_url()))?;
         if !resp.status().is_success() {
             bail!("artwork source answered HTTP {}", resp.status().as_u16());
         }
         let raw = resp.bytes().await.map_err(|e| anyhow!("{}", e.without_url()))?.to_vec();
-        let width = art.width();
         let out = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
             let img = image::load_from_memory(&raw)?;
             // Already the right size and already JPEG: keep the source's own encoding.

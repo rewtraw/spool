@@ -49,6 +49,16 @@ pub struct Inner {
     pub space_blocked: Mutex<HashMap<i64, i128>>,
     /// The OpenSubtitles sign-in in use, and when it was made.
     pub subtitle_login: Mutex<Option<(String, i64)>>,
+    /// Players that have signed in, by the token each was given. Oldest first.
+    pub player_tokens: Mutex<Vec<String>>,
+    /// Wrong passwords from players lately: (how many, when the last one was).
+    pub player_failures: Mutex<(u32, i64)>,
+    /// The last few hundred requests players made, for working out what one of them wants.
+    pub player_requests: Mutex<std::collections::VecDeque<String>>,
+    /// The library as last read for players, and the database's change count at the time.
+    pub player_library: Mutex<Option<(u64, Arc<crate::jellyfin::items::Library>)>>,
+    /// Where players are being served, or why they are not.
+    pub player_status: Mutex<String>,
     /// Releases being sent to the downloader right now, keyed by title and release name.
     pub grabbing: Mutex<HashSet<(i64, String)>>,
     /// Jobs the user resumed by hand after Spool held them for lack of disk space.
@@ -86,6 +96,7 @@ pub fn http_client() -> reqwest::Client {
 impl App {
     pub async fn start(data_dir: &Path, db: Db) -> anyhow::Result<App> {
         let sessions: HashSet<String> = db.get_setting::<Vec<String>>("sessions").into_iter().collect();
+        let player_tokens: Vec<String> = db.get_setting("player_tokens");
         let settings = Settings::new(db.clone());
         // API and MCP access always go through a key, so there is always one.
         let mut g = settings.general();
@@ -94,7 +105,7 @@ impl App {
             settings.set_general(&g)?;
         }
         // A password saved in the clear by an earlier version is hashed where it sits.
-        if !g.password.is_empty() && !crate::settings::is_hashed(&g.password) {
+        if [&g.password, &g.players_password].into_iter().any(|p| !p.is_empty() && !crate::settings::is_hashed(p)) {
             settings.set_general(&g)?;
             tracing::info!("the app password is now stored as a hash");
         }
@@ -118,6 +129,11 @@ impl App {
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),
             subtitle_login: Mutex::new(None),
+            player_tokens: Mutex::new(player_tokens),
+            player_failures: Mutex::new((0, 0)),
+            player_requests: Mutex::new(Default::default()),
+            player_library: Mutex::new(None),
+            player_status: Mutex::new(String::new()),
             grabbing: Mutex::new(HashSet::new()),
             waiting_for_space: Mutex::new(HashSet::new()),
             art_fetches: tokio::sync::Semaphore::new(6),

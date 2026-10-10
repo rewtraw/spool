@@ -143,6 +143,20 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (day, indexer_id)
     );
     "#,
+    r#"
+    -- What has been watched, and how far: kind is movie, series or episode.
+    CREATE TABLE watched (
+        kind TEXT NOT NULL,
+        ref_id INTEGER NOT NULL,
+        position REAL NOT NULL DEFAULT 0,
+        played INTEGER NOT NULL DEFAULT 0,
+        play_count INTEGER NOT NULL DEFAULT 0,
+        favorite INTEGER NOT NULL DEFAULT 0,
+        last_played_at INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (kind, ref_id)
+    );
+    "#,
 ];
 
 impl Db {

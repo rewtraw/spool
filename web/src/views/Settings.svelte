@@ -133,8 +133,15 @@
     loadPlex();
   }
 
+  let players = $state<any>(null);
+  async function loadPlayers() {
+    players = await api.get('/players').catch(() => null);
+  }
   async function load() {
-    if (tab === 'general') general = await api.get('/settings/general');
+    if (tab === 'general') {
+      general = await api.get('/settings/general');
+      loadPlayers();
+    }
     if (tab === 'naming') naming = await api.get('/settings/naming');
     if (tab === 'usenet') {
       const r = await api.get('/settings/servers');
@@ -162,9 +169,11 @@
       return;
     }
     confirmActive = false;
-    await act(() => api.put('/settings/general', { ...general, recycle_days: Number(general.recycle_days), retention_days: Number(general.retention_days), rss_interval_minutes: Number(general.rss_interval_minutes), backlog_batch: Number(general.backlog_batch), backlog_interval_minutes: Number(general.backlog_interval_minutes), min_free_gb: Number(general.min_free_gb), post_parallel: Number(general.post_parallel), space_wait_gb: Number(general.space_wait_gb), archive_runner_ups: Number(general.archive_runner_ups), default_movie_profile: Number(general.default_movie_profile), default_series_profile: Number(general.default_series_profile) }), 'Saved');
+    await act(() => api.put('/settings/general', { ...general, recycle_days: Number(general.recycle_days), retention_days: Number(general.retention_days), rss_interval_minutes: Number(general.rss_interval_minutes), backlog_batch: Number(general.backlog_batch), backlog_interval_minutes: Number(general.backlog_interval_minutes), min_free_gb: Number(general.min_free_gb), post_parallel: Number(general.post_parallel), space_wait_gb: Number(general.space_wait_gb), archive_runner_ups: Number(general.archive_runner_ups), default_movie_profile: Number(general.default_movie_profile), default_series_profile: Number(general.default_series_profile), players_port: Number(general.players_port) }), 'Saved');
     loadStatus();
     load();
+    // The players' door follows the settings within a few seconds.
+    setTimeout(loadPlayers, 4000);
   }
 
   // ---- usenet
@@ -359,6 +368,19 @@
       </div>
       <label class="check"><input type="checkbox" bind:checked={general.subtitles_auto} /> Look for missing subtitles automatically</label>
       <span class="hint">A few files every six hours, newest first, to stay inside the account's daily download allowance. Each file is tried again after a week.</span>
+    </fieldset>
+    <fieldset class="card">
+      <legend>Players</legend>
+      <p class="muted">Spool can serve the library to a player on a television or a phone, such as Infuse on Apple TV. It answers as a Jellyfin server would: the player shows Spool's posters and details, plays each file as it is, and tells Spool what has been watched. Nothing is converted, so the player has to be able to play the files itself.</p>
+      <label class="check"><input type="checkbox" bind:checked={general.players_enabled} /> Serve the library to players</label>
+      {#if general.players_enabled}
+        <div class="cols">
+          <label class="field">Name to sign in with<input class="input" bind:value={general.players_username} autocomplete="off" /></label>
+          <label class="field">Password<input class="input" type="password" bind:value={general.players_password} autocomplete="new-password" /><span class="hint">Empty lets anyone on the network who knows the name play from the library. Changing either signs every player out.</span></label>
+        </div>
+        <label class="field narrow">Port<input class="input mono" type="number" min="1024" max="65535" bind:value={general.players_port} /><span class="hint">8096 is the one players expect.</span></label>
+        <p class="muted">In the player, add a media server of the Jellyfin kind. On the same network it should appear by itself as <b>Spool</b>; otherwise give it the address <code>{location.hostname}:{general.players_port}</code>.{#if players?.status} {players.status}{/if}{#if players?.signed_in} {players.signed_in === 1 ? 'One player is' : `${players.signed_in} players are`} signed in.{/if}</p>
+      {/if}
     </fieldset>
     <fieldset class="card">
       <legend>AI access</legend>

@@ -8,6 +8,7 @@ pub mod art;
 pub mod catalog;
 pub mod db;
 pub mod import;
+pub mod jellyfin;
 pub mod mcp;
 pub mod metadata;
 pub mod migrate;

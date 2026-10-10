@@ -740,6 +740,7 @@ async fn get_general(State(app): State<App>) -> Json<General> {
     g.password = mask(&g.password);
     g.opensubtitles_api_key = mask(&g.opensubtitles_api_key);
     g.opensubtitles_password = mask(&g.opensubtitles_password);
+    g.players_password = mask(&g.players_password);
     Json(g)
 }
 
@@ -750,6 +751,11 @@ async fn put_general(State(app): State<App>, headers: HeaderMap, Json(mut g): Js
     g.password = unmask(g.password, &old.password);
     g.opensubtitles_api_key = unmask(g.opensubtitles_api_key, &old.opensubtitles_api_key);
     g.opensubtitles_password = unmask(g.opensubtitles_password, &old.opensubtitles_password);
+    g.players_password = unmask(g.players_password, &old.players_password);
+    if g.players_password != old.players_password || g.players_username != old.players_username {
+        // New sign-in details: every player has to sign in again.
+        crate::jellyfin::sign_out_all(&app);
+    }
     if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password {
         *app.subtitle_login.lock() = None;
     }
@@ -1123,6 +1129,18 @@ async fn art(State(app): State<App>, Path((id, kind)): Path<(i64, String)>) -> R
     }
 }
 
+/// How the players' door stands, and what players have been asking for lately.
+async fn players(State(app): State<App>) -> Json<Value> {
+    let g = app.settings.general();
+    Json(json!({
+        "enabled": g.players_enabled,
+        "port": g.players_port,
+        "status": *app.player_status.lock(),
+        "signed_in": app.player_tokens.lock().len(),
+        "requests": app.player_requests.lock().iter().cloned().collect::<Vec<_>>(),
+    }))
+}
+
 async fn events(State(app): State<App>) -> Sse<impl Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
     let stream = BroadcastStream::new(app.events.subscribe()).filter_map(|e| match e {
         Ok(ev) => serde_json::to_string(&ev).ok().map(|s| Ok(SseEvent::default().data(s))),
@@ -1209,6 +1227,7 @@ fn api_routes() -> Router<App> {
         .route("/api/plex/sync", post(plex_sync))
         .route("/api/plex/track", post(plex_track))
         .route("/api/art/{id}/{kind}", get(art))
+        .route("/api/players", get(players))
         .route("/api/events", get(events))
 }
 

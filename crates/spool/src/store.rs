@@ -154,6 +154,67 @@ impl Db {
         self.with(|c| c.query_row("SELECT id, data FROM files WHERE id = ?1", [id], file_row).optional())
     }
 
+    pub fn all_files(&self) -> Result<Vec<MediaFile>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT id, data FROM files ORDER BY title_id, rel_path")?;
+            let rows = s.query_map([], file_row)?;
+            rows.collect()
+        })
+    }
+
+    pub fn all_episodes(&self) -> Result<Vec<Episode>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT id, monitored, file_id, data FROM episodes ORDER BY title_id, season, episode")?;
+            let rows = s.query_map([], episode_row)?;
+            rows.collect()
+        })
+    }
+
+    /// Replace what is recorded about a file, keeping its place in the library.
+    pub fn save_file(&self, f: &MediaFile) -> Result<()> {
+        let data = serde_json::to_string(f)?;
+        self.with(|c| c.execute("UPDATE files SET rel_path = ?2, size = ?3, data = ?4 WHERE id = ?1", params![f.id, f.rel_path, f.size as i64, data]))?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ watched
+
+    /// Everything watched or part-watched, keyed by kind ("movie", "series", "episode") and id.
+    pub fn watched_all(&self) -> Result<std::collections::HashMap<(String, i64), Watched>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT kind, ref_id, position, played, play_count, favorite, last_played_at, updated_at FROM watched")?;
+            let rows = s.query_map([], |r| {
+                Ok((
+                    (r.get::<_, String>(0)?, r.get::<_, i64>(1)?),
+                    Watched { position: r.get(2)?, played: r.get(3)?, play_count: r.get(4)?, favorite: r.get(5)?, last_played_at: r.get(6)?, updated_at: r.get(7)? },
+                ))
+            })?;
+            rows.collect()
+        })
+    }
+
+    pub fn watched(&self, kind: &str, id: i64) -> Result<Watched> {
+        Ok(self
+            .with(|c| {
+                c.query_row("SELECT position, played, play_count, favorite, last_played_at, updated_at FROM watched WHERE kind = ?1 AND ref_id = ?2", params![kind, id], |r| {
+                    Ok(Watched { position: r.get(0)?, played: r.get(1)?, play_count: r.get(2)?, favorite: r.get(3)?, last_played_at: r.get(4)?, updated_at: r.get(5)? })
+                })
+                .optional()
+            })?
+            .unwrap_or_default())
+    }
+
+    pub fn save_watched(&self, kind: &str, id: i64, w: &Watched) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO watched(kind, ref_id, position, played, play_count, favorite, last_played_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+                 ON CONFLICT(kind, ref_id) DO UPDATE SET position = ?3, played = ?4, play_count = ?5, favorite = ?6, last_played_at = ?7, updated_at = ?8",
+                params![kind, id, w.position, w.played, w.play_count, w.favorite, w.last_played_at, now()],
+            )
+        })?;
+        Ok(())
+    }
+
     /// Every file path in the library, keyed for "does this title have a file" checks.
     pub fn file_counts(&self) -> Result<std::collections::HashMap<i64, (u32, u64)>> {
         self.with(|c| {

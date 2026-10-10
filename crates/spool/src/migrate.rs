@@ -100,6 +100,7 @@ fn media_info(v: &Value) -> Option<MediaInfo> {
         audio_languages: list("audioLanguages"),
         subtitles: list("subtitles"),
         is_3d: false,
+        ..Default::default()
     })
 }
 
@@ -420,6 +421,12 @@ impl App {
                     first_aired: None,
                     last_search_at: existing.as_ref().map(|e| e.last_search_at).unwrap_or(0),
                     last_refresh_at: now(),
+                    tagline: existing.as_ref().map(|e| e.tagline.clone()).unwrap_or_default(),
+                    rating: existing.as_ref().and_then(|e| e.rating),
+                    certification: existing.as_ref().and_then(|e| e.certification.clone()),
+                    people: existing.as_ref().map(|e| e.people.clone()).unwrap_or_default(),
+                    collection: existing.as_ref().and_then(|e| e.collection.clone()),
+                    details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
                 };
                 self.db.save_title(&mut t)?;
                 report.movies += 1;
@@ -536,6 +543,12 @@ impl App {
                     first_aired: date(sr, "firstAired"),
                     last_search_at: existing.as_ref().map(|e| e.last_search_at).unwrap_or(0),
                     last_refresh_at: now(),
+                    tagline: existing.as_ref().map(|e| e.tagline.clone()).unwrap_or_default(),
+                    rating: existing.as_ref().and_then(|e| e.rating),
+                    certification: existing.as_ref().and_then(|e| e.certification.clone()),
+                    people: existing.as_ref().map(|e| e.people.clone()).unwrap_or_default(),
+                    collection: existing.as_ref().and_then(|e| e.collection.clone()),
+                    details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
                 };
                 self.db.save_title(&mut t)?;
                 report.series += 1;
@@ -582,6 +595,8 @@ impl App {
                         runtime: num(e, "runtime") as u32,
                         monitored: e["monitored"].as_bool().unwrap_or(false),
                         file_id,
+                        still: None,
+                        rating: None,
                     };
                     let id = self.db.upsert_episode(&ep)?;
                     self.db.with(|c| c.execute("UPDATE episodes SET monitored = ?2, file_id = ?3 WHERE id = ?1", rusqlite::params![id, ep.monitored, file_id]))?;

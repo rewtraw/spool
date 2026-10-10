@@ -54,6 +54,13 @@ pub struct General {
     pub opensubtitles_password: String,
     /// Where the OpenSubtitles API is, when not the usual place.
     pub opensubtitles_url: String,
+    /// Serve the library to players that speak Jellyfin's protocol, such as Infuse.
+    pub players_enabled: bool,
+    /// The port players connect to. Jellyfin's own is 8096.
+    pub players_port: u32,
+    /// What a player signs in with. The password is kept as a hash, like the app's.
+    pub players_username: String,
+    pub players_password: String,
     /// Spool stops starting downloads when the downloads disk would drop below this many
     /// gigabytes free once the download has finished.
     pub min_free_gb: u32,
@@ -100,6 +107,10 @@ impl Default for General {
             opensubtitles_username: String::new(),
             opensubtitles_password: String::new(),
             opensubtitles_url: String::new(),
+            players_enabled: false,
+            players_port: 8096,
+            players_username: "spool".into(),
+            players_password: String::new(),
             min_free_gb: 20,
             space_wait_gb: 100,
             direct_unpack: true,
@@ -126,15 +137,16 @@ impl Settings {
     pub fn general(&self) -> General {
         self.db.get_setting("general")
     }
-    /// Save the general settings. The app's password is never stored as typed: whatever
-    /// arrives in the clear is replaced by a salted hash on the way in.
+    /// Save the general settings. Passwords are never stored as typed: whatever arrives in
+    /// the clear is replaced by a salted hash on the way in.
     pub fn set_general(&self, g: &General) -> anyhow::Result<()> {
-        if !g.password.is_empty() && !is_hashed(&g.password) {
-            let mut hashed = g.clone();
-            hashed.password = hash_password(&g.password)?;
-            return self.db.set_setting("general", &hashed);
+        let mut g = g.clone();
+        for password in [&mut g.password, &mut g.players_password] {
+            if !password.is_empty() && !is_hashed(password) {
+                *password = hash_password(password)?;
+            }
         }
-        self.db.set_setting("general", g)
+        self.db.set_setting("general", &g)
     }
     pub fn naming(&self) -> NamingConfig {
         self.db.get_setting("naming")

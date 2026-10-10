@@ -136,7 +136,7 @@ impl World {
             .map(|(s, e, name)| {
                 self.app
                     .db
-                    .upsert_episode(&Episode { id: 0, title_id: t.id, season: *s, episode: *e, absolute: None, title: name.to_string(), overview: String::new(), air_date: Some("2016-10-02".into()), air_date_utc: None, runtime: 0, monitored: true, file_id: None })
+                    .upsert_episode(&Episode { id: 0, title_id: t.id, season: *s, episode: *e, absolute: None, title: name.to_string(), overview: String::new(), air_date: Some("2016-10-02".into()), air_date_utc: None, runtime: 0, monitored: true, file_id: None, still: None, rating: None })
                     .unwrap()
             })
             .collect();
@@ -1292,4 +1292,199 @@ async fn subtitles_come_with_the_release_and_can_be_found_and_checked() {
     let paths: Vec<_> = file.subtitles.iter().map(|s| folder.join(&s.rel_path)).collect();
     w.app.delete_file(file.id).unwrap();
     assert!(paths.iter().all(|p| !p.exists()));
+}
+
+/// One request as a player makes them, with the header a player signs its requests with.
+async fn player(router: &axum::Router, method: &str, uri: &str, token: Option<&str>, body: serde_json::Value) -> (u16, axum::http::HeaderMap, Vec<u8>) {
+    use tower::ServiceExt;
+    let mut req = axum::http::Request::builder().method(method).uri(uri).header("content-type", "application/json").header("user-agent", "Infuse-Direct/8.5");
+    let mut auth = r#"MediaBrowser Client="Infuse-Direct", Device="Apple TV", DeviceId="test-device", Version="8.5""#.to_string();
+    if let Some(t) = token {
+        auth.push_str(&format!(r#", Token="{t}""#));
+    }
+    req = req.header("x-emby-authorization", auth);
+    let body = if body.is_null() { axum::body::Body::empty() } else { axum::body::Body::from(body.to_string()) };
+    let resp = router.clone().oneshot(req.body(body).unwrap()).await.unwrap();
+    let (status, headers) = (resp.status().as_u16(), resp.headers().clone());
+    (status, headers, axum::body::to_bytes(resp.into_body(), 64 << 20).await.unwrap().to_vec())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
+    use serde_json::{json, Value};
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let srt = "1\n00:00:00,500 --> 00:00:01,500\nHello\n";
+
+    // A film with a subtitle file beside it and the details a player shows, and a short series.
+    let mut movie = w.movie("The Signal", 2019, "tt4444444");
+    movie.rating = Some(7.4);
+    movie.certification = Some("PG-13".into());
+    movie.overview = "A signal arrives.".into();
+    movie.genres = vec!["Science Fiction".into()];
+    movie.people = vec![Person { id: 31, name: "Ada Vale".into(), role: "The Listener".into(), kind: "actor".into(), photo: None }];
+    w.app.db.save_title(&mut movie).unwrap();
+    w.release("The.Signal.2019.1080p.BluRay.x264-GRP", &[("signal.mkv", &video), ("signal.eng.srt", srt.as_bytes())]);
+    assert_eq!(w.app.search(movie.id, Scope::Movie, false, true).await.unwrap().grabbed.len(), 1);
+    w.wait_state(movie.id, AcqState::Imported).await;
+    let (show, _) = w.series("Example World", 296762, &[(1, 1, "The Original"), (1, 2, "Chestnut")]);
+    w.release("Example.World.S01.1080p.BluRay.x264-PACK", &[("Example.World.S01E01.1080p.BluRay.x264-PACK.mkv", &video), ("Example.World.S01E02.1080p.BluRay.x264-PACK.mkv", &video)]);
+    assert_eq!(w.app.search(show.id, Scope::Missing, false, true).await.unwrap().grabbed.len(), 1);
+    w.wait_state(show.id, AcqState::Imported).await;
+    // A title with nothing to play is not shown to players.
+    w.movie("Not Here Yet", 2030, "tt5555555");
+
+    let mut g = w.app.settings.general();
+    g.players_enabled = true;
+    g.players_password = "tv-pass".into();
+    w.app.settings.set_general(&g).unwrap();
+    assert!(spool::settings::is_hashed(&w.app.settings.general().players_password));
+    let jf = spool::jellyfin::router(w.app.clone());
+    let read = |bytes: &[u8]| serde_json::from_slice::<Value>(bytes).unwrap_or(Value::Null);
+
+    // Before signing in a player can ask who is here, and nothing more.
+    let (status, _, body) = player(&jf, "GET", "/System/Info/Public", None, Value::Null).await;
+    let info = read(&body);
+    assert_eq!((status, info["ServerName"].as_str(), info["Id"].as_str().map(str::len)), (200, Some("Spool"), Some(32)));
+    assert_eq!(player(&jf, "GET", "/Users/Me", None, Value::Null).await.0, 401);
+    assert_eq!(player(&jf, "GET", "/Items", Some("made-up"), Value::Null).await.0, 401);
+    assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "spool", "Pw": "wrong"})).await.0, 401);
+    let (status, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Spool", "Pw": "tv-pass"})).await;
+    let signed = read(&body);
+    assert_eq!(status, 200, "{signed}");
+    let token = signed["AccessToken"].as_str().unwrap().to_string();
+    let user = signed["User"]["Id"].as_str().unwrap().to_string();
+    assert_eq!(signed["SessionInfo"]["Client"], "Infuse-Direct");
+    let t = Some(token.as_str());
+    // A player's token opens the library and nothing of Spool's own.
+    let app_api = spool::api::router(w.app.clone());
+    let mut g = w.app.settings.general();
+    g.password = "house".into();
+    w.app.settings.set_general(&g).unwrap();
+    assert_eq!(player(&app_api, "GET", &format!("/api/settings/general?api_key={token}"), t, Value::Null).await.0, 401);
+
+    // The two libraries, then the films in one: names and paths in whatever capitals.
+    let (_, _, body) = player(&jf, "GET", &format!("/Users/{user}/Views"), t, Value::Null).await;
+    let views = read(&body);
+    assert_eq!(views["Items"].as_array().unwrap().iter().map(|v| v["CollectionType"].as_str().unwrap()).collect::<Vec<_>>(), ["movies", "tvshows"]);
+    let movies_view = views["Items"][0]["Id"].as_str().unwrap().to_string();
+    let (status, _, body) = player(&jf, "GET", &format!("/emby/users/{user}/items?parentId={movies_view}&includeItemTypes=Movie&fields=MediaSources,Overview,People,Genres&sortBy=SortName"), t, Value::Null).await;
+    let list = read(&body);
+    assert_eq!((status, list["TotalRecordCount"].as_u64()), (200, Some(1)), "{list}");
+    let film = &list["Items"][0];
+    let film_id = film["Id"].as_str().unwrap().to_string();
+    assert_eq!((film["Name"].as_str(), film["Type"].as_str(), film["ProductionYear"].as_u64()), (Some("The Signal"), Some("Movie"), Some(2019)));
+    assert_eq!((film["CommunityRating"].as_f64().map(|r| (r * 10.0).round()), film["OfficialRating"].as_str(), film["Overview"].as_str()), (Some(74.0), Some("PG-13"), Some("A signal arrives.")));
+    assert_eq!((film["People"][0]["Name"].as_str(), film["People"][0]["Role"].as_str(), film["Genres"][0].as_str()), (Some("Ada Vale"), Some("The Listener"), Some("Science Fiction")));
+    let source = &film["MediaSources"][0];
+    assert_eq!((source["Id"].as_str(), source["Container"].as_str(), source["SupportsDirectPlay"].as_bool()), (Some(film_id.as_str()), Some("mkv"), Some(true)));
+    let streams = source["MediaStreams"].as_array().unwrap();
+    assert_eq!(streams.iter().map(|s| (s["Type"].as_str().unwrap(), s["Codec"].as_str().unwrap())).collect::<Vec<_>>(), [("Video", "h264"), ("Audio", "aac"), ("Subtitle", "subrip")], "{streams:?}");
+    assert_eq!(streams.iter().enumerate().all(|(i, s)| s["Index"] == i), true);
+    // A list without the costly parts asked for does not carry them.
+    let (_, _, body) = player(&jf, "GET", &format!("/Items?ParentId={movies_view}"), t, Value::Null).await;
+    assert!(read(&body)["Items"][0].get("MediaSources").is_none());
+    // One item is always given whole.
+    let (_, _, body) = player(&jf, "GET", &format!("/Items/{film_id}"), t, Value::Null).await;
+    assert!(read(&body)["MediaSources"][0]["RunTimeTicks"].as_i64().unwrap() > 10_000_000);
+    let (_, _, body) = player(&jf, "POST", &format!("/Items/{film_id}/PlaybackInfo?userId={user}"), t, json!({"DeviceProfile": {}})).await;
+    assert_eq!(read(&body)["MediaSources"][0]["Id"], film_id.as_str());
+
+    // The film itself: whole, in part, and never squeezed on the way.
+    let on_disk = std::fs::read(Path::new(&w.app.db.title(movie.id).unwrap().unwrap().path).join(&w.app.db.files(movie.id).unwrap()[0].rel_path)).unwrap();
+    let (status, headers, body) = player(&jf, "GET", &format!("/Videos/{film_id}/stream.mkv?static=true&MediaSourceId={film_id}"), t, Value::Null).await;
+    assert_eq!((status, body.len(), headers.get("accept-ranges").unwrap().to_str().unwrap()), (200, on_disk.len(), "bytes"));
+    assert!(headers.get("content-encoding").is_none() && body == on_disk);
+    use tower::ServiceExt;
+    let part = axum::http::Request::builder().uri(format!("/Videos/{film_id}/stream?api_key={token}")).header("range", "bytes=100-299").header("accept-encoding", "gzip").body(axum::body::Body::empty()).unwrap();
+    let resp = jf.clone().oneshot(part).await.unwrap();
+    assert_eq!((resp.status().as_u16(), resp.headers().get("content-range").unwrap().to_str().unwrap().to_string()), (206, format!("bytes 100-299/{}", on_disk.len())));
+    assert!(resp.headers().get("content-encoding").is_none());
+    assert_eq!(axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap().to_vec(), on_disk[100..300]);
+    assert_eq!(player(&jf, "GET", &format!("/Videos/{film_id}/stream"), None, Value::Null).await.0, 401);
+    let past = axum::http::Request::builder().uri(format!("/Videos/{film_id}/stream?api_key={token}")).header("range", format!("bytes={}-", on_disk.len())).body(axum::body::Body::empty()).unwrap();
+    assert_eq!(jf.clone().oneshot(past).await.unwrap().status().as_u16(), 416);
+    // The subtitle file beside it, at the address the item gave.
+    let (status, _, body) = player(&jf, "GET", streams[2]["DeliveryUrl"].as_str().unwrap(), t, Value::Null).await;
+    assert_eq!((status, String::from_utf8_lossy(&body).contains("Hello")), (200, true));
+    let (_, _, body) = player(&jf, "GET", &streams[2]["DeliveryUrl"].as_str().unwrap().replace(".srt", ".vtt"), t, Value::Null).await;
+    assert!(String::from_utf8_lossy(&body).starts_with("WEBVTT"));
+
+    // The series: its seasons, its episodes in order.
+    let shows_view = views["Items"][1]["Id"].as_str().unwrap().to_string();
+    let (_, _, body) = player(&jf, "GET", &format!("/Items?ParentId={shows_view}&IncludeItemTypes=Series&Recursive=true"), t, Value::Null).await;
+    let series = read(&body)["Items"][0].clone();
+    let series_id = series["Id"].as_str().unwrap().to_string();
+    assert_eq!((series["Name"].as_str(), series["Type"].as_str(), series["ChildCount"].as_u64(), series["UserData"]["UnplayedItemCount"].as_u64()), (Some("Example World"), Some("Series"), Some(1), Some(2)));
+    let (_, _, body) = player(&jf, "GET", &format!("/Shows/{series_id}/Seasons?userId={user}"), t, Value::Null).await;
+    let seasons = read(&body);
+    assert_eq!((seasons["TotalRecordCount"].as_u64(), seasons["Items"][0]["Name"].as_str(), seasons["Items"][0]["IndexNumber"].as_u64()), (Some(1), Some("Season 1"), Some(1)));
+    let season_id = seasons["Items"][0]["Id"].as_str().unwrap().to_string();
+    let (_, _, body) = player(&jf, "GET", &format!("/Shows/{series_id}/Episodes?seasonId={season_id}&fields=MediaSources"), t, Value::Null).await;
+    let episodes = read(&body)["Items"].as_array().unwrap().clone();
+    assert_eq!(episodes.iter().map(|e| (e["IndexNumber"].as_u64().unwrap(), e["ParentIndexNumber"].as_u64().unwrap(), e["Name"].as_str().unwrap().to_string())).collect::<Vec<_>>(), [(1, 1, "The Original".to_string()), (2, 1, "Chestnut".to_string())]);
+    assert_eq!((episodes[0]["SeriesId"].as_str(), episodes[0]["SeasonId"].as_str(), episodes[0]["Type"].as_str()), (Some(series_id.as_str()), Some(season_id.as_str()), Some("Episode")));
+    let (first, second) = (episodes[0]["Id"].as_str().unwrap().to_string(), episodes[1]["Id"].as_str().unwrap().to_string());
+    assert_eq!(player(&jf, "HEAD", &format!("/Videos/{first}/stream.mkv"), t, Value::Null).await.0, 200);
+    // The same children, asked for the other way players do.
+    let (_, _, body) = player(&jf, "GET", &format!("/Items?ParentId={season_id}"), t, Value::Null).await;
+    assert_eq!(read(&body)["Items"].as_array().unwrap().len(), 2);
+
+    // Part-way through the film: it is offered to resume. Stopped near the end: watched.
+    assert_eq!(player(&jf, "POST", "/Sessions/Playing/Progress", t, json!({"ItemId": film_id, "PositionTicks": 10_000_000, "IsPaused": false})).await.0, 204);
+    let (_, _, body) = player(&jf, "GET", "/UserItems/Resume", t, Value::Null).await;
+    let resume = read(&body);
+    assert_eq!((resume["Items"][0]["Id"].as_str(), resume["Items"][0]["UserData"]["PlaybackPositionTicks"].as_i64()), (Some(film_id.as_str()), Some(10_000_000)));
+    assert_eq!(player(&jf, "POST", "/Sessions/Playing/Stopped", t, json!({"ItemId": film_id, "PositionTicks": 19_500_000})).await.0, 204);
+    let seen = w.app.db.watched("movie", movie.id).unwrap();
+    assert_eq!((seen.played, seen.play_count, seen.position), (true, 1, 0.0));
+    let (_, _, body) = player(&jf, "GET", "/UserItems/Resume", t, Value::Null).await;
+    assert_eq!(read(&body)["TotalRecordCount"], 0);
+    let (_, _, body) = player(&jf, "GET", &format!("/Items?ParentId={movies_view}&Filters=IsUnplayed"), t, Value::Null).await;
+    assert_eq!(read(&body)["TotalRecordCount"], 0);
+
+    // Marking the first episode watched puts the second up next; un-marking takes it back.
+    let (_, _, body) = player(&jf, "GET", "/Shows/NextUp", t, Value::Null).await;
+    assert_eq!(read(&body)["TotalRecordCount"], 0);
+    let (status, _, body) = player(&jf, "POST", &format!("/UserPlayedItems/{first}"), t, Value::Null).await;
+    assert_eq!((status, read(&body)["Played"].as_bool()), (200, Some(true)));
+    let (_, _, body) = player(&jf, "GET", &format!("/Shows/NextUp?seriesId={series_id}"), t, Value::Null).await;
+    assert_eq!(read(&body)["Items"][0]["Id"], second.as_str());
+    let (_, _, body) = player(&jf, "GET", &format!("/Items/{series_id}"), t, Value::Null).await;
+    assert_eq!(read(&body)["UserData"]["UnplayedItemCount"], 1);
+    let (_, _, body) = player(&jf, "POST", &format!("/Users/{user}/PlayedItems/{series_id}"), t, Value::Null).await;
+    assert_eq!(read(&body)["Played"], true);
+    let (_, _, body) = player(&jf, "DELETE", &format!("/Users/{user}/PlayedItems/{series_id}"), t, Value::Null).await;
+    assert_eq!((read(&body)["Played"].as_bool(), read(&body)["UnplayedItemCount"].as_u64()), (Some(false), Some(2)));
+    let (_, _, body) = player(&jf, "POST", &format!("/UserFavoriteItems/{series_id}"), t, Value::Null).await;
+    assert_eq!(read(&body)["IsFavorite"], true);
+    let (_, _, body) = player(&jf, "GET", "/Items?Recursive=true&IsFavorite=true", t, Value::Null).await;
+    assert_eq!(read(&body)["Items"][0]["Id"], series_id.as_str());
+
+    // What Spool does not offer is answered quietly where Jellyfin has such a thing, and
+    // plainly refused where it has not, so a player does not think a plugin is installed.
+    let (status, _, body) = player(&jf, "GET", &format!("/Items/{film_id}/Similar"), t, Value::Null).await;
+    assert_eq!((status, read(&body)["TotalRecordCount"].as_u64()), (200, Some(0)));
+    assert_eq!(player(&jf, "POST", "/InfuseSync/Checkpoint", t, Value::Null).await.0, 404);
+    let (_, _, body) = player(&jf, "GET", "/Search/Hints?searchTerm=signal", t, Value::Null).await;
+    assert_eq!(read(&body)["SearchHints"][0]["Name"], "The Signal");
+
+    // What players asked for is kept for a while, without their tokens.
+    let log = w.app.player_requests.lock().iter().cloned().collect::<Vec<_>>().join("\n");
+    assert!(log.contains("/Shows/NextUp") && log.contains("Infuse-Direct/8.5") && !log.contains(&token), "{log}");
+
+    // A new password signs every player out.
+    let mut g = w.app.settings.general();
+    g.password = String::new();
+    w.app.settings.set_general(&g).unwrap();
+    assert_eq!(player(&jf, "GET", "/Users/Me", t, Value::Null).await.0, 200);
+    let (_, shown) = call(&app_api, "GET", "/api/settings/general", Value::Null).await;
+    assert_eq!(shown["players_password"], "********");
+    let mut changed = shown.clone();
+    changed["players_password"] = json!("another");
+    assert_eq!(call(&app_api, "PUT", "/api/settings/general", changed).await.0, 200);
+    assert_eq!(player(&jf, "GET", "/Users/Me", t, Value::Null).await.0, 401);
+    assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "spool", "Pw": "another"})).await.0, 200);
+    let (_, status) = call(&app_api, "GET", "/api/players", Value::Null).await;
+    assert_eq!((status["enabled"].as_bool(), status["signed_in"].as_u64()), (Some(true), Some(1)));
 }

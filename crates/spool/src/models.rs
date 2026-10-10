@@ -46,6 +46,30 @@ pub struct SeasonInfo {
     pub monitored: bool,
 }
 
+/// Someone who worked on a title, for a player's detail page.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Person {
+    /// The metadata source's id for the person: TMDB for films, TVmaze for series.
+    pub id: u64,
+    pub name: String,
+    /// The character played, or the job done.
+    pub role: String,
+    /// actor, director or writer.
+    pub kind: String,
+    pub photo: Option<String>,
+}
+
+/// The set a film belongs to: a trilogy, a franchise.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Collection {
+    pub id: u32,
+    pub name: String,
+    pub poster: Option<String>,
+    pub fanart: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Title {
     #[serde(default)]
@@ -119,6 +143,22 @@ pub struct Title {
     pub last_search_at: i64,
     #[serde(default)]
     pub last_refresh_at: i64,
+    // Shown by players, not used in deciding anything.
+    #[serde(default)]
+    pub tagline: String,
+    /// Audience score out of ten.
+    #[serde(default)]
+    pub rating: Option<f32>,
+    /// Age rating: "PG-13", "R".
+    #[serde(default)]
+    pub certification: Option<String>,
+    #[serde(default)]
+    pub people: Vec<Person>,
+    #[serde(default)]
+    pub collection: Option<Collection>,
+    /// When the fields above were last fetched. Zero for titles added before they were kept.
+    #[serde(default)]
+    pub details_at: i64,
 }
 
 fn yes() -> bool {
@@ -187,6 +227,11 @@ pub struct Episode {
     pub monitored: bool,
     #[serde(default)]
     pub file_id: Option<i64>,
+    /// A frame from the episode.
+    #[serde(default)]
+    pub still: Option<String>,
+    #[serde(default)]
+    pub rating: Option<f32>,
 }
 
 impl Episode {
@@ -231,6 +276,19 @@ pub struct MediaFile {
     /// Subtitle files kept beside the video.
     #[serde(default)]
     pub subtitles: Vec<crate::subs::Sidecar>,
+}
+
+/// How far someone has got with a film or an episode.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Watched {
+    /// Seconds in, when stopped part-way.
+    pub position: f64,
+    pub played: bool,
+    pub play_count: u32,
+    pub favorite: bool,
+    pub last_played_at: i64,
+    pub updated_at: i64,
 }
 
 /// One release as an indexer reported it.

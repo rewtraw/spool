@@ -71,6 +71,13 @@ impl App {
                 t.in_cinemas = m.in_cinemas.or(t.in_cinemas);
                 t.digital_release = m.digital_release.or(t.digital_release);
                 t.physical_release = m.physical_release.or(t.physical_release);
+                t.studio = m.studio.or(t.studio);
+                t.tagline = m.tagline;
+                t.rating = m.rating.or(t.rating);
+                t.certification = m.certification.or(t.certification);
+                t.people = m.people;
+                t.collection = m.collection;
+                t.details_at = m.details_at;
                 for a in m.alt_titles {
                     if !t.alt_titles.contains(&a) {
                         t.alt_titles.push(a);
@@ -89,7 +96,13 @@ impl App {
                 t.status = m.status;
                 t.network = m.network.or(t.network);
                 t.poster = t.poster.or(m.poster);
+                t.fanart = t.fanart.or(m.fanart);
                 t.genres = m.genres;
+                t.rating = m.rating.or(t.rating);
+                if !m.people.is_empty() {
+                    t.people = m.people;
+                }
+                t.details_at = m.details_at;
                 for a in m.alt_titles {
                     if !t.alt_titles.contains(&a) {
                         t.alt_titles.push(a);
@@ -107,6 +120,7 @@ impl App {
                             e.monitored = old.monitored;
                             e.file_id = old.file_id;
                             e.absolute = old.absolute;
+                            e.still = e.still.or(old.still.clone());
                             if e.title.is_empty() {
                                 e.title = old.title.clone();
                             }

@@ -18,6 +18,86 @@ pub struct MediaInfo {
     pub audio_languages: Vec<String>,
     pub subtitles: Vec<String>,
     pub is_3d: bool,
+    /// Overall bits per second.
+    pub bit_rate: u64,
+    /// Every video, audio and subtitle stream in the file, in order. Empty for files probed
+    /// before this was recorded.
+    pub streams: Vec<Stream>,
+}
+
+/// One stream of a file, as a player's track list shows it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Stream {
+    pub index: u32,
+    /// video, audio or subtitle.
+    pub kind: String,
+    /// ffprobe's codec name: "hevc", "eac3", "subrip".
+    pub codec: String,
+    pub profile: String,
+    pub language: String,
+    pub title: String,
+    pub channels: u32,
+    pub channel_layout: String,
+    pub sample_rate: u32,
+    pub bit_rate: u64,
+    pub width: u32,
+    pub height: u32,
+    pub frame_rate: f64,
+    pub bit_depth: u32,
+    pub pix_fmt: String,
+    pub color_transfer: String,
+    pub default: bool,
+    pub forced: bool,
+}
+
+fn num(v: &Value, k: &str) -> u64 {
+    v.get(k).and_then(|x| x.as_u64().or_else(|| x.as_str().and_then(|s| s.parse().ok()))).unwrap_or(0)
+}
+
+/// "24000/1001" -> 23.976.
+fn rate(text: &str) -> f64 {
+    match text.split_once('/') {
+        Some((a, b)) => match (a.parse::<f64>(), b.parse::<f64>()) {
+            (Ok(a), Ok(b)) if b > 0.0 => (a / b * 1000.0).round() / 1000.0,
+            _ => 0.0,
+        },
+        None => text.parse().unwrap_or(0.0),
+    }
+}
+
+fn streams_of(streams: &[Value], is_cover: impl Fn(&Value) -> bool) -> Vec<Stream> {
+    let flag = |s: &Value, k: &str| s.get("disposition").and_then(|d| d.get(k)).and_then(|x| x.as_i64()) == Some(1);
+    streams
+        .iter()
+        .filter(|s| matches!(str_of(s, "codec_type"), "video" | "audio" | "subtitle") && !is_cover(s))
+        .map(|s| {
+            let kind = str_of(s, "codec_type");
+            Stream {
+                index: num(s, "index") as u32,
+                kind: kind.to_string(),
+                codec: str_of(s, "codec_name").to_string(),
+                profile: str_of(s, "profile").to_string(),
+                language: tag(s, "language").to_string(),
+                title: tag(s, "title").to_string(),
+                channels: num(s, "channels") as u32,
+                channel_layout: str_of(s, "channel_layout").to_string(),
+                sample_rate: num(s, "sample_rate") as u32,
+                bit_rate: match num(s, "bit_rate") {
+                    0 => tag(s, "BPS").parse().unwrap_or(0),
+                    n => n,
+                },
+                width: num(s, "width") as u32,
+                height: num(s, "height") as u32,
+                frame_rate: if kind == "video" { rate(str_of(s, "avg_frame_rate")) } else { 0.0 },
+                bit_depth: if kind == "video" { bit_depth(s) } else { 0 },
+                pix_fmt: str_of(s, "pix_fmt").to_string(),
+                color_transfer: str_of(s, "color_transfer").to_string(),
+                default: flag(s, "default"),
+                forced: flag(s, "forced"),
+            }
+        })
+        .collect()
 }
 
 fn scene_match(scene_name: &str, tokens: &[&str]) -> String {
@@ -246,6 +326,8 @@ impl MediaInfo {
                 .filter(|l| !l.is_empty())
                 .collect(),
             is_3d: false,
+            bit_rate: probe.get("format").map(|f| num(f, "bit_rate")).unwrap_or(0),
+            streams: streams_of(streams, is_cover),
         })
     }
 
