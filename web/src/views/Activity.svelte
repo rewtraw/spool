@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api';
-  import { app, act, route, go } from '../lib/state.svelte';
+  import { app, act, route, go, toast } from '../lib/state.svelte';
   import { ago, bytes, duration, pct, qualityName, STATE_LABEL } from '../lib/format';
   import JobLine from '../components/JobLine.svelte';
 
@@ -57,6 +57,38 @@
     await act(() => api.post(`/activity/${id}/${a}`), msg);
     load();
   }
+  // ---- acting on several downloads at once
+  let picked = $state<Record<number, boolean>>({});
+  const chosen = $derived(queue.filter((i: any) => picked[i.acquisition.id]));
+  const allPicked = $derived(queue.length > 0 && queue.every((i: any) => picked[i.acquisition.id]));
+  function pickAll() {
+    const on = !allPicked;
+    picked = {};
+    if (on) for (const i of queue) picked[i.acquisition.id] = true;
+  }
+  async function bulk(a: string, label: string, ask?: string) {
+    const items = chosen.filter((i: any) => {
+      const s = live(i)?.state;
+      if (a === 'pause') return i.acquisition.state === 'downloading' && s !== 'paused';
+      if (a === 'resume') return s === 'paused';
+      return true;
+    });
+    if (!items.length) return toast(`None of the selected downloads can be ${label}`);
+    if (ask && !confirm(ask.replace('{n}', `${items.length} ${items.length === 1 ? 'download' : 'downloads'}`))) return;
+    let ok = 0;
+    for (const i of items) {
+      if (await api.post(`/activity/${i.acquisition.id}/${a}`).then(() => true).catch(() => false)) ok++;
+    }
+    toast(`${ok} ${ok === 1 ? 'download' : 'downloads'} ${label}`);
+    if (a.startsWith('cancel')) picked = {};
+    load();
+  }
+  async function clearBlocklist() {
+    if (!confirm(`Allow all ${blocklist.length} blocklisted releases again?`)) return;
+    await act(() => api.post('/blocklist/clear'), 'Blocklist cleared');
+    load();
+  }
+
   async function toggleQueue() {
     const r = await act(() => api.post(`/queue/${data.paused ? 'resume' : 'pause'}`));
     if (r) data.paused = r.paused;
@@ -107,11 +139,15 @@
   {#if !queue.length && loaded}
     <div class="card empty">Nothing is downloading.</div>
   {/if}
+  {#if queue.length > 1}
+    <label class="row pickall"><input class="tick" type="checkbox" checked={allPicked} onchange={pickAll} /> <span class="muted">Select all {queue.length}</span></label>
+  {/if}
   <div class="stack">
     {#each queue as i (i.acquisition.id)}
       {@const a = i.acquisition}
       {@const j = live(i)}
-      <div class="card item" class:blocked={a.state === 'import_blocked'}>
+      <div class="card item" class:blocked={a.state === 'import_blocked'} class:picked={picked[a.id]}>
+        {#if queue.length > 1}<input class="tick" type="checkbox" aria-label="Select {i.title ?? 'download'}" bind:checked={picked[a.id]} />{/if}
         <div class="grow">
           <div class="row wrap top">
             <a class="t" href="#/title/{a.title_id}">{i.title ?? 'Unknown title'}</a>
@@ -183,6 +219,7 @@
   {/if}
 {:else}
   {#if !blocklist.length && loaded}<div class="card empty">No releases are blocklisted.</div>{:else}
+    {#if blocklist.length > 1}<div class="row" style="justify-content:flex-end;margin-bottom:10px"><button class="btn small" onclick={clearBlocklist}>Allow all {blocklist.length} again</button></div>{/if}
     <div class="card scroll-x">
       <table class="table">
         <tbody>
@@ -199,7 +236,28 @@
   {/if}
 {/if}
 
+{#if tab === 'queue' && chosen.length}
+  <div class="bulkbar" role="toolbar" aria-label="Actions for selected downloads">
+    <span class="n">{chosen.length} selected</span>
+    <button class="btn small ghost" onclick={() => (picked = {})}>Select none</button>
+    <span class="sep"></span>
+    <button class="btn small" onclick={() => bulk('pause', 'paused')}>Pause</button>
+    <button class="btn small" onclick={() => bulk('resume', 'resumed')}>Resume</button>
+    <button class="btn small" onclick={() => bulk('cancel_blocklist', 'removed; looking for other releases', 'Remove {n} and look for other releases?')}>Remove and find another</button>
+    <button class="btn small ghost danger" onclick={() => bulk('cancel', 'removed', 'Remove {n}?')}>Remove</button>
+  </div>
+{/if}
+
 <style>
+  .pickall {
+    gap: 8px;
+    margin: 0 0 10px 2px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .item.picked {
+    border-color: var(--accent);
+  }
   .head {
     display: flex;
     align-items: center;

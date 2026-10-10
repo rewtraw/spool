@@ -1085,3 +1085,62 @@ async fn a_film_the_indexer_never_linked_to_its_id_is_found_by_name() {
     w.app.search(other.id, Scope::Movie, false, false).await.unwrap();
     assert_eq!(w.indexer.lock().queries.len(), before + 1);
 }
+
+/// One call to the web API, as the app makes them.
+async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
+    use tower::ServiceExt;
+    let req = axum::http::Request::builder().method(method).uri(uri).header("content-type", "application/json");
+    let resp = router.clone().oneshot(req.body(axum::body::Body::from(body.to_string())).unwrap()).await.unwrap();
+    let status = resp.status().as_u16();
+    let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bulk_actions_cover_many_titles_and_respect_kind() {
+    use serde_json::json;
+    let w = World::new(Mode::Active).await;
+    let a = w.movie("Alpha", 2001, "tt0000001");
+    let b = w.movie("Beta", 2002, "tt0000002");
+    let (s, _) = w.series("Gamma", 1001, &[(1, 1, "2016-01-01")]);
+    let router = spool::api::router(w.app.clone());
+    let ids = json!([a.id, b.id, s.id]);
+    let monitored = |id: i64| w.app.db.title(id).unwrap().unwrap().monitored;
+
+    let (status, r) = call(&router, "POST", "/api/titles/bulk", json!({"ids": ids, "action": "unmonitor"})).await;
+    assert_eq!((status, r["done"].as_i64()), (200, Some(3)));
+    assert!(!monitored(a.id) && !monitored(b.id) && !monitored(s.id));
+    call(&router, "POST", "/api/titles/bulk", json!({"ids": [a.id], "action": "monitor"})).await;
+    assert!(monitored(a.id) && !monitored(b.id));
+
+    // A film profile is applied to the films and passed over for the series.
+    let mut other = QualityProfile::default_hd("movie");
+    other.name = "Other".into();
+    w.app.db.save_profile(&mut other).unwrap();
+    let (_, r) = call(&router, "POST", "/api/titles/bulk", json!({"ids": ids, "action": "profile", "profile_id": other.id})).await;
+    assert_eq!(r["done"].as_i64(), Some(2));
+    assert_eq!(w.app.db.title(b.id).unwrap().unwrap().profile_id, other.id);
+    assert_eq!(w.app.db.title(s.id).unwrap().unwrap().profile_id, s.profile_id);
+    assert_eq!(call(&router, "POST", "/api/titles/bulk", json!({"ids": ids, "action": "profile", "profile_id": 99999})).await.0, 400);
+
+    assert_eq!(call(&router, "POST", "/api/titles/bulk", json!({"ids": [], "action": "monitor"})).await.0, 400);
+    assert_eq!(call(&router, "POST", "/api/titles/bulk", json!({"ids": ids, "action": "nonsense"})).await.0, 400);
+
+    // Removing takes the titles out and leaves the rest alone.
+    let (_, r) = call(&router, "POST", "/api/titles/bulk", json!({"ids": [b.id, s.id], "action": "remove"})).await;
+    assert_eq!(r["done"].as_i64(), Some(2));
+    assert!(w.app.db.title(b.id).unwrap().is_none() && w.app.db.title(s.id).unwrap().is_none());
+    assert!(w.app.db.title(a.id).unwrap().is_some());
+
+    // A search runs in the background and reports through the task.
+    let (status, r) = call(&router, "POST", "/api/titles/bulk", json!({"ids": [a.id], "action": "search"})).await;
+    assert_eq!((status, r["started"].as_i64()), (200, Some(1)));
+    for _ in 0..100 {
+        if w.app.tasks.lock().get("bulk").is_some_and(|t| !t.running) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let task = w.app.tasks.lock().get("bulk").cloned().unwrap();
+    assert!(!task.running && task.last_message.starts_with("searched 1 of 1"), "{}", task.last_message);
+}

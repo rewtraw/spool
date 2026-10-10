@@ -363,3 +363,39 @@ table.table tr:last-child td {
     scroll-behavior: auto !important;
   }
 }
+
+/* A bar of actions for whatever is ticked, kept in view at the foot of the page. */
+.bulkbar {
+  position: sticky;
+  bottom: 14px;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+.bulkbar .n {
+  font-weight: 600;
+  margin-right: 4px;
+}
+.bulkbar .sep {
+  flex: 1 1 0;
+}
+.tick {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: none;
+}
+@media (max-width: 760px) {
+  .bulkbar {
+    bottom: 74px;
+  }
+}

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { app, go } from '../lib/state.svelte';
+  import { app, go, act, toast, loadTitles } from '../lib/state.svelte';
+  import { api } from '../lib/api';
   import type { Title } from '../lib/api';
   import { bytes } from '../lib/format';
   import Poster from '../components/Poster.svelte';
@@ -71,6 +72,63 @@
     return () => io.disconnect();
   });
 
+  // ---- acting on several titles at once
+  let selecting = $state(false);
+  let picked = $state<Record<number, boolean>>({});
+  let lastPicked = -1;
+  const chosen = $derived(app.titles.filter((t) => picked[t.id]));
+  const chosenBytes = $derived(chosen.reduce((s, t) => s + (t.size || 0), 0));
+  let bulkProfile = $state('');
+
+  function stopSelecting() {
+    selecting = false;
+    picked = {};
+    lastPicked = -1;
+  }
+  // A click ticks one; a shift-click ticks everything between it and the last one ticked.
+  function pick(e: MouseEvent | KeyboardEvent, t: Title) {
+    e.preventDefault();
+    const at = filtered.findIndex((x) => x.id === t.id);
+    const on = !picked[t.id];
+    if (e.shiftKey && lastPicked >= 0 && at >= 0) {
+      const [a, b] = at < lastPicked ? [at, lastPicked] : [lastPicked, at];
+      for (const x of filtered.slice(a, b + 1)) picked[x.id] = on;
+    } else {
+      picked[t.id] = on;
+    }
+    lastPicked = at;
+  }
+  function pickAll() {
+    const all = filtered.every((t) => picked[t.id]);
+    for (const t of filtered) picked[t.id] = !all;
+  }
+  const many = (n: number) => `${n} ${n === 1 ? 'title' : 'titles'}`;
+  async function bulk(action: string, extra: Record<string, unknown> = {}, done?: (r: any) => string) {
+    const ids = chosen.map((t) => t.id);
+    if (!ids.length) return;
+    const r = await act(() => api.post<any>('/titles/bulk', { ids, action, ...extra }));
+    if (!r) return;
+    toast(done ? done(r) : `Done for ${many(r.done ?? ids.length)}`);
+    await loadTitles();
+    if (action === 'remove' || action === 'free') stopSelecting();
+  }
+  function bulkFree() {
+    const withFiles = chosen.filter((t) => t.size > 0).length;
+    if (!withFiles) return toast('None of these have files on disk');
+    if (!confirm(`Delete the files of ${many(withFiles)} (${bytes(chosenBytes)})? They stay in the library, unmonitored, so Spool does not fetch them again.`)) return;
+    bulk('free', {}, (r) => `Deleted the files of ${many(r.done)}, ${bytes(r.bytes)}`);
+  }
+  function bulkRemove(deleteFiles: boolean) {
+    const n = chosen.length;
+    if (!confirm(deleteFiles ? `Remove ${many(n)} from the library and delete their files (${bytes(chosenBytes)})?` : `Remove ${many(n)} from the library? Their files stay on disk.`)) return;
+    bulk('remove', { delete_files: deleteFiles }, (r) => `Removed ${many(r.done)}`);
+  }
+  function bulkSetProfile() {
+    if (!bulkProfile) return;
+    bulk('profile', { profile_id: Number(bulkProfile) }, (r) => (r.done ? `Profile changed for ${many(r.done)}` : 'That profile does not apply to any of the selected titles'));
+    bulkProfile = '';
+  }
+
   const counts = $derived({
     all: app.titles.length,
     movie: app.titles.filter((t) => t.kind === 'movie').length,
@@ -80,7 +138,10 @@
 
 <header class="head">
   <h1>Library</h1>
-  <button class="btn primary" onclick={() => go('discover')}>Add</button>
+  <div class="row">
+    <button class="btn" onclick={() => (selecting ? stopSelecting() : (selecting = true))} aria-pressed={selecting}>{selecting ? 'Done' : 'Select'}</button>
+    <button class="btn primary" onclick={() => go('discover')}>Add</button>
+  </div>
 </header>
 
 <div class="bar">
@@ -117,9 +178,10 @@
   <div class="grid">
     {#each shown as t (t.id)}
       {@const s = statusOf(t)}
-      <a class="tile" href="#/title/{t.id}" class:dim={!t.monitored && !(t.file_count || t.episodes_have)}>
+      <a class="tile" href="#/title/{t.id}" class:dim={!t.monitored && !(t.file_count || t.episodes_have)} class:picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
         <div class="art">
           <Poster src={t.poster} title={t.title} kind={t.kind} />
+          {#if selecting}<span class="check" class:on={picked[t.id]} aria-hidden="true">{picked[t.id] ? '✓' : ''}</span>{/if}
           <span class="chip {s.tone} pin">{s.label}</span>
         </div>
         <div class="name truncate">{t.title}</div>
@@ -130,11 +192,12 @@
 {:else}
   <div class="card scroll-x">
     <table class="table">
-      <thead><tr><th>Title</th><th>Year</th><th>Type</th><th>Status</th><th>Profile</th><th>Size</th></tr></thead>
+      <thead><tr>{#if selecting}<th style="width:1%"><input class="tick" type="checkbox" aria-label="Select all" checked={filtered.length > 0 && filtered.every((t) => picked[t.id])} onchange={pickAll} /></th>{/if}<th>Title</th><th>Year</th><th>Type</th><th>Status</th><th>Profile</th><th>Size</th></tr></thead>
       <tbody>
         {#each shown as t (t.id)}
           {@const s = statusOf(t)}
-          <tr onclick={() => go(`title/${t.id}`)}>
+          <tr onclick={(e) => (selecting ? pick(e, t) : go(`title/${t.id}`))} class:picked={picked[t.id]}>
+            {#if selecting}<td><input class="tick" type="checkbox" aria-label="Select {t.title}" checked={!!picked[t.id]} /></td>{/if}
             <td><a href="#/title/{t.id}"><b>{t.title}</b></a></td>
             <td class="muted">{t.year || ''}</td>
             <td class="muted">{t.kind === 'movie' ? 'Movie' : 'Series'}</td>
@@ -150,6 +213,28 @@
 <div bind:this={sentinel}></div>
 {#if filtered.length}
   <p class="faint count">{filtered.length} {filtered.length === 1 ? 'title' : 'titles'}</p>
+{/if}
+{#if selecting}
+  <div class="bulkbar" role="toolbar" aria-label="Actions for selected titles">
+    <span class="n">{chosen.length} selected{chosenBytes ? ` · ${bytes(chosenBytes)}` : ''}</span>
+    <button class="btn small ghost" onclick={pickAll}>{filtered.every((t) => picked[t.id]) ? 'Select none' : `Select all ${filtered.length}`}</button>
+    <span class="sep"></span>
+    {#if chosen.length}
+      <button class="btn small" onclick={() => bulk('monitor', {}, (r) => `Monitoring ${many(r.done)}`)}>Monitor</button>
+      <button class="btn small" onclick={() => bulk('unmonitor', {}, (r) => `Stopped monitoring ${many(r.done)}`)}>Stop monitoring</button>
+      <select class="input small-select" bind:value={bulkProfile} onchange={bulkSetProfile} aria-label="Change profile">
+        <option value="">Change profile…</option>
+        {#each app.profiles as p}<option value={p.id}>{p.name} ({p.kind === 'movie' ? 'movies' : 'series'})</option>{/each}
+      </select>
+      <button class="btn small" onclick={() => bulk('search', {}, (r) => `Searching ${many(r.started)} in the background. Downloads appear in Activity.`)}>Search</button>
+      <button class="btn small" onclick={() => bulk('refresh', {}, (r) => `Refreshing ${many(r.started)} in the background`)}>Refresh</button>
+      <button class="btn small ghost danger" onclick={bulkFree}>Delete files</button>
+      <button class="btn small ghost danger" onclick={() => bulkRemove(false)}>Remove</button>
+      <button class="btn small ghost danger" onclick={() => bulkRemove(true)}>Remove and delete files</button>
+    {:else}
+      <span class="faint">Click titles to select them. Shift-click selects a run.</span>
+    {/if}
+  </div>
 {/if}
 
 <style>
@@ -211,6 +296,39 @@
     display: grid;
     gap: 4px;
     min-width: 0;
+  }
+  .tile.picked .art {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 10px;
+  }
+  .check {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .check.on {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  tr.picked {
+    background: var(--accent-soft);
+  }
+  .small-select {
+    width: auto;
+    height: 30px;
+    padding: 0 8px;
+    font-size: 13.5px;
   }
   .tile.dim .art {
     opacity: 0.55;

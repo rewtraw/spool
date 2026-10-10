@@ -41,6 +41,12 @@
     load();
   }
 
+  async function dismissAll() {
+    if (!confirm(`Dismiss all ${attention.length} notices? Nothing is deleted; anything still wrong will be raised again.`)) return;
+    await act(() => api.post('/attention/dismiss-all'), 'Dismissed');
+    load();
+  }
+
   const stats = $derived(app.status ? [
     { label: 'Movies', value: app.status.movies },
     { label: 'Series', value: app.status.series },
@@ -68,7 +74,7 @@
 
 {#if attention.length}
   <section>
-    <div class="section-title">Needs attention</div>
+    <div class="row"><div class="section-title grow">Needs attention</div>{#if attention.length > 1}<button class="btn small ghost" onclick={dismissAll}>Dismiss all {attention.length}</button>{/if}</div>
     <div class="stack">
       {#each attention as a (a.item.id)}
         <div class="card attention">

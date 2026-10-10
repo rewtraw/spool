@@ -50,6 +50,35 @@
   async function loadSpace() {
     space = await api.get('/space').catch(() => space);
   }
+  // ---- several titles at once
+  let spacePicked = $state<Record<number, boolean>>({});
+  const spaceChosen = $derived(spaceRows.filter((t: any) => spacePicked[t.title_id]));
+  const spaceChosenBytes = $derived(spaceChosen.reduce((s: number, t: any) => s + t.size, 0));
+  const spaceAllPicked = $derived(spaceRows.length > 0 && spaceRows.slice(0, 80).every((t: any) => spacePicked[t.title_id]));
+  function spacePickAll() {
+    const on = !spaceAllPicked;
+    spacePicked = {};
+    if (on) for (const t of spaceRows.slice(0, 80)) spacePicked[t.title_id] = true;
+  }
+  async function freeChosen() {
+    const n = spaceChosen.length;
+    const lost = spaceChosen.filter((t: any) => !t.can_download_again).length;
+    const note = lost ? `${lost} of them ${lost === 1 ? 'has' : 'have'} no saved release, so getting ${lost === 1 ? 'it' : 'them'} back would need a new search.` : 'Each has a saved release, so it can be downloaded again later.';
+    if (!confirm(`Delete the files of ${n} ${n === 1 ? 'title' : 'titles'} (${bytes(spaceChosenBytes)})? ${note} They stay in the library, unmonitored.`)) return;
+    const r = await act(() => api.post<any>('/titles/bulk', { ids: spaceChosen.map((t: any) => t.title_id), action: 'free' }));
+    if (r) toast(`Freed ${bytes(r.bytes)} from ${r.done} ${r.done === 1 ? 'title' : 'titles'}`);
+    spacePicked = {};
+    loadSpace();
+    loadStatus();
+  }
+  async function compactChosen() {
+    const ids = spaceChosen.filter((t: any) => t.over_target > 0).map((t: any) => t.title_id);
+    if (!ids.length) return toast('None of the selected titles is over its size target');
+    const r = await act(() => api.post<any>('/titles/bulk', { ids, action: 'compact' }));
+    if (r) toast(`Looking for smaller copies of ${r.started} ${r.started === 1 ? 'title' : 'titles'} in the background. Downloads appear in Activity.`);
+    spacePicked = {};
+  }
+
   async function freeTitle(t: any) {
     const note = t.can_download_again ? 'A saved release is kept, so it can be downloaded again later.' : 'No saved release is kept for it; getting it back would need a new search.';
     if (!confirm(`Delete the ${t.files === 1 ? 'file' : `${t.files} files`} of ${t.title} (${bytes(t.size)})? ${note} The title stays in the library, unmonitored.`)) return;
@@ -595,10 +624,11 @@
       {:else}
         <div class="card scroll-x">
           <table class="table">
-            <thead><tr><th>Title</th><th>Size</th><th>Plex</th><th>Saved release</th><th></th></tr></thead>
+            <thead><tr><th style="width:1%"><input class="tick" type="checkbox" aria-label="Select all shown" checked={spaceAllPicked} onchange={spacePickAll} /></th><th>Title</th><th>Size</th><th>Plex</th><th>Saved release</th><th></th></tr></thead>
             <tbody>
               {#each spaceRows.slice(0, 80) as t (t.title_id)}
                 <tr>
+                  <td><input class="tick" type="checkbox" aria-label="Select {t.title}" bind:checked={spacePicked[t.title_id]} /></td>
                   <td><a class="link" href="#/title/{t.title_id}"><b>{t.title}</b></a> <span class="muted">{t.year || ''}</span><div class="faint small">{t.kind === 'movie' ? 'Film' : `Series · ${t.files} files`}{t.monitored ? '' : ' · not monitored'}</div></td>
                   <td style="white-space:nowrap"><b>{bytes(t.size)}</b>{#if t.over_target > 0}<div class="faint small">{bytes(t.over_target)} over target</div>{/if}</td>
                   <td style="white-space:nowrap">
@@ -614,6 +644,15 @@
             </tbody>
           </table>
         </div>
+        {#if spaceChosen.length}
+          <div class="bulkbar" role="toolbar" aria-label="Actions for selected titles">
+            <span class="n">{spaceChosen.length} selected · {bytes(spaceChosenBytes)}</span>
+            <button class="btn small ghost" onclick={() => (spacePicked = {})}>Select none</button>
+            <span class="sep"></span>
+            <button class="btn small" onclick={compactChosen}>Find smaller copies</button>
+            <button class="btn small ghost danger" onclick={freeChosen}>Delete files</button>
+          </div>
+        {/if}
         <p class="faint small">"Find smaller" looks for a copy that fits the title's profile size target and is at least a fifth smaller, accepting lower quality, and replaces the file when it arrives. Deleting files keeps the title in the library, unmonitored, so Spool does not fetch it again. "Kept" means its release is in the <a class="link" href="#/archive">Archive</a> and one click brings it back.</p>
       {/if}
     {/if}

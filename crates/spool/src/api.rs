@@ -309,6 +309,103 @@ async fn delete_title(State(app): State<App>, Path(id): Path<i64>, Query(q): Que
     Ok(Json(json!({"deleted": t.title})))
 }
 
+/// One action over many titles. Quick changes happen before the reply; searches and refreshes
+/// carry on in the background, one title at a time, and report through the "bulk" task.
+async fn bulk_titles(State(app): State<App>, Json(b): Json<Value>) -> R<Value> {
+    let ids: Vec<i64> = b["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default();
+    let action = b["action"].as_str().unwrap_or_default().to_string();
+    if ids.is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "no titles chosen".into()));
+    }
+    let mut done = 0;
+    let mut bytes = 0u64;
+    match action.as_str() {
+        "monitor" | "unmonitor" | "profile" => {
+            let profile = app.db.profiles()?.into_iter().find(|p| Some(p.id) == b["profile_id"].as_i64());
+            if action == "profile" && profile.is_none() {
+                return Err(ApiError(StatusCode::BAD_REQUEST, "no such profile".into()));
+            }
+            for id in &ids {
+                let Some(mut t) = app.db.title(*id)? else { continue };
+                match (action.as_str(), &profile) {
+                    ("monitor", _) => t.monitored = true,
+                    ("unmonitor", _) => t.monitored = false,
+                    // A film profile means nothing to a series, and the other way round.
+                    (_, Some(p)) if (p.kind == "movie") == (t.kind == Kind::Movie) => t.profile_id = p.id,
+                    _ => continue,
+                }
+                app.db.save_title(&mut t)?;
+                app.emit(Event::Title { id: *id });
+                done += 1;
+            }
+        }
+        "free" | "remove" => {
+            let delete_files = action == "free" || b["delete_files"].as_bool().unwrap_or(false);
+            for id in &ids {
+                let Some(mut t) = app.db.title(*id)? else { continue };
+                for a in app.db.title_acquisitions(*id)?.into_iter().filter(|a| a.state.is_active()) {
+                    app.cancel_acquisition(a.id, false).await?;
+                }
+                if delete_files {
+                    for f in app.db.files(*id)? {
+                        bytes += f.size;
+                        app.delete_file(f.id)?;
+                    }
+                }
+                if action == "remove" {
+                    app.db.delete_title(*id)?;
+                } else {
+                    // Left monitored, Spool would only fetch it again.
+                    t.monitored = false;
+                    app.db.save_title(&mut t)?;
+                }
+                app.emit(Event::Title { id: *id });
+                done += 1;
+            }
+        }
+        "search" | "compact" | "refresh" => {
+            if action != "refresh" && !app.is_active() {
+                return Err(ApiError(StatusCode::CONFLICT, "Spool is in shadow mode and does not download".into()));
+            }
+            let n = ids.len();
+            let what = match action.as_str() {
+                "search" => "Searching",
+                "compact" => "Looking for smaller copies of",
+                _ => "Refreshing",
+            };
+            if !app.task_start("bulk", &format!("{what} {n} titles")) {
+                return Err(ApiError(StatusCode::CONFLICT, "an earlier bulk search or refresh is still running".into()));
+            }
+            let app2 = app.clone();
+            tokio::spawn(async move {
+                let (mut ok, mut started) = (0, 0);
+                for id in ids {
+                    let Ok(Some(t)) = app2.db.title(id) else { continue };
+                    let r = match action.as_str() {
+                        "refresh" => app2.refresh_title(id).await.map(|_| 0),
+                        // Under the automatic rules for disk space, so a long list cannot queue
+                        // more than the disk has room to wait for.
+                        "compact" => app2.search_with(id, Scope::Compact, true, true, false).await.map(|o| o.grabbed.len()),
+                        _ => app2.search_with(id, if t.kind == Kind::Movie { Scope::Movie } else { Scope::Missing }, true, true, false).await.map(|o| o.grabbed.len()),
+                    };
+                    match r {
+                        Ok(g) => {
+                            ok += 1;
+                            started += g;
+                        }
+                        Err(e) => tracing::warn!(title = %t.title, error = %e, "bulk {action} failed"),
+                    }
+                }
+                let message = if action == "refresh" { format!("refreshed {ok} of {n} titles") } else { format!("searched {ok} of {n} titles, {started} {} started", if started == 1 { "download" } else { "downloads" }) };
+                app2.task_end("bulk", &message);
+            });
+            return Ok(Json(json!({"started": n})));
+        }
+        _ => return Err(ApiError(StatusCode::BAD_REQUEST, "unknown action".into())),
+    }
+    Ok(Json(json!({"done": done, "bytes": bytes})))
+}
+
 async fn patch_season(State(app): State<App>, Path((id, season)): Path<(i64, u32)>, Json(b): Json<Value>) -> R<Value> {
     let mut t = app.db.title(id)?.ok_or_else(|| not_found("title"))?;
     let monitored = b["monitored"].as_bool().unwrap_or(true);
@@ -523,6 +620,23 @@ async fn dismiss_attention(State(app): State<App>, Path(id): Path<i64>) -> R<Val
     app.db.resolve_attention(id)?;
     app.emit(Event::Attention);
     Ok(Json(json!({"ok": true})))
+}
+
+async fn dismiss_all_attention(State(app): State<App>) -> R<Value> {
+    let rows = app.db.attention(false)?;
+    for a in &rows {
+        app.db.resolve_attention(a.id)?;
+    }
+    app.emit(Event::Attention);
+    Ok(Json(json!({"dismissed": rows.len()})))
+}
+
+async fn clear_blocklist(State(app): State<App>) -> R<Value> {
+    let rows = app.db.blocklist()?;
+    for id in rows.iter().filter_map(|b| b["id"].as_i64()) {
+        app.db.delete_blocklist(id)?;
+    }
+    Ok(Json(json!({"cleared": rows.len()})))
 }
 
 async fn blocklist(State(app): State<App>) -> R<Vec<Value>> {
@@ -978,6 +1092,9 @@ fn api_routes() -> Router<App> {
         .route("/api/session", get(session))
         .route("/api/status", get(status))
         .route("/api/titles", get(list_titles).post(add_title))
+        .route("/api/titles/bulk", post(bulk_titles))
+        .route("/api/blocklist/clear", post(clear_blocklist))
+        .route("/api/attention/dismiss-all", post(dismiss_all_attention))
         .route("/api/titles/{id}", get(get_title).patch(patch_title).delete(delete_title))
         .route("/api/titles/{id}/search", post(search_title))
         .route("/api/titles/{id}/refresh", post(refresh_title))
