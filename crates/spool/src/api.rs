@@ -451,14 +451,69 @@ async fn search_title(State(app): State<App>, Path(id): Path<i64>, Json(b): Json
     Ok(Json(app.search(id, scope, true, b.grab).await?))
 }
 
-async fn grab_decision(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+async fn grab_decision(State(app): State<App>, Path(id): Path<i64>, body: Option<Json<Value>>) -> R<Value> {
     let d = app.db.decision(id)?.ok_or_else(|| not_found("release"))?;
     let t = app.db.title(d.title_id)?.ok_or_else(|| not_found("title"))?;
     if !app.is_active() {
         return Err(ApiError(StatusCode::CONFLICT, "Spool is in shadow mode and does not download".into()));
     }
-    let a = app.grab(&d, &t, crate::acquire::BY_HAND_REASON, true).await?;
+    // A film can keep a second version beside the one it has; a series cannot.
+    let another = t.kind == Kind::Movie && body.is_some_and(|b| b.0["another_version"].as_bool().unwrap_or(false));
+    let a = app.grab(&d, &t, if another { crate::acquire::ANOTHER_VERSION_REASON } else { crate::acquire::BY_HAND_REASON }, true).await?;
     Ok(Json(json!({"acquisition": a})))
+}
+
+// ---------------------------------------------------------------- subtitles
+
+/// What a file has: the languages inside it and the subtitle files beside it.
+async fn file_subtitles(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+    let app2 = app.clone();
+    let beside = tokio::task::spawn_blocking(move || app2.find_sidecars(id)).await??;
+    let f = app.db.file(id)?.ok_or_else(|| not_found("file"))?;
+    let g = app.settings.general();
+    Ok(Json(json!({
+        "embedded": crate::subs::embedded_languages(&f),
+        "beside": beside,
+        "wanted": crate::subs::wanted_languages(&g.subtitle_languages),
+        "can_search": !g.opensubtitles_api_key.is_empty(),
+        "can_check": app.ffmpeg_path().is_some(),
+    })))
+}
+
+async fn search_file_subtitles(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
+    let language = b["language"].as_str().and_then(crate::subs::language_code).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "which language?".into()))?;
+    Ok(Json(json!(app.search_subtitles(id, language).await?)))
+}
+
+async fn add_file_subtitle(State(app): State<App>, Path(id): Path<i64>, Json(c): Json<crate::subs::Candidate>) -> R<Value> {
+    let (subtitle, report) = app.add_subtitle(id, &c, None).await?;
+    Ok(Json(json!({"subtitle": subtitle, "report": report})))
+}
+
+/// Find and keep the first subtitles that prove to be in time, without choosing by hand.
+async fn auto_file_subtitle(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
+    let language = b["language"].as_str().and_then(crate::subs::language_code).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "which language?".into()))?;
+    Ok(Json(json!({"subtitle": app.auto_subtitle(id, language).await?})))
+}
+
+async fn check_file_subtitle(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
+    let rel = b["rel_path"].as_str().unwrap_or_default();
+    Ok(Json(json!(app.check_sidecar(id, rel, b["correct"].as_bool().unwrap_or(false)).await?)))
+}
+
+async fn delete_file_subtitle(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
+    app.delete_sidecar(id, b["rel_path"].as_str().unwrap_or_default())?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn patch_file(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
+    let mut f = app.db.file(id)?.ok_or_else(|| not_found("file"))?;
+    if let Some(extra) = b["extra"].as_bool() {
+        f.extra = extra;
+    }
+    app.db.with(|c| c.execute("UPDATE files SET data = ?2 WHERE id = ?1", rusqlite::params![id, serde_json::to_string(&f).unwrap_or_default()]))?;
+    app.emit(Event::Title { id: f.title_id });
+    Ok(Json(json!({"ok": true})))
 }
 
 async fn refresh_title(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
@@ -683,6 +738,8 @@ async fn get_general(State(app): State<App>) -> Json<General> {
     g.tmdb_api_key = mask(&g.tmdb_api_key);
     g.plex_token = mask(&g.plex_token);
     g.password = mask(&g.password);
+    g.opensubtitles_api_key = mask(&g.opensubtitles_api_key);
+    g.opensubtitles_password = mask(&g.opensubtitles_password);
     Json(g)
 }
 
@@ -691,6 +748,11 @@ async fn put_general(State(app): State<App>, headers: HeaderMap, Json(mut g): Js
     g.tmdb_api_key = unmask(g.tmdb_api_key, &old.tmdb_api_key);
     g.plex_token = unmask(g.plex_token, &old.plex_token);
     g.password = unmask(g.password, &old.password);
+    g.opensubtitles_api_key = unmask(g.opensubtitles_api_key, &old.opensubtitles_api_key);
+    g.opensubtitles_password = unmask(g.opensubtitles_password, &old.opensubtitles_password);
+    if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password {
+        *app.subtitle_login.lock() = None;
+    }
     let mut cookie = None;
     if g.password != old.password {
         // A new password signs every other browser out; the one that set it stays in.
@@ -865,7 +927,7 @@ async fn test_indexer(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
 }
 
 async fn run_task(State(app): State<App>, Path(name): Path<String>) -> R<Value> {
-    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact"].contains(&name.as_str()) {
+    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles"].contains(&name.as_str()) {
         return Err(not_found("task"));
     }
     let app2 = app.clone();
@@ -1103,7 +1165,12 @@ fn api_routes() -> Router<App> {
         .route("/api/titles/{id}/seasons/{season}", patch(patch_season))
         .route("/api/episodes/{id}", patch(patch_episode))
         .route("/api/decisions/{id}/grab", post(grab_decision))
-        .route("/api/files/{id}", delete(delete_file))
+        .route("/api/files/{id}", delete(delete_file).patch(patch_file))
+        .route("/api/files/{id}/subtitles", get(file_subtitles).delete(delete_file_subtitle))
+        .route("/api/files/{id}/subtitles/search", post(search_file_subtitles))
+        .route("/api/files/{id}/subtitles/add", post(add_file_subtitle))
+        .route("/api/files/{id}/subtitles/auto", post(auto_file_subtitle))
+        .route("/api/files/{id}/subtitles/check", post(check_file_subtitle))
         .route("/api/lookup", get(lookup))
         .route("/api/activity", get(activity))
         .route("/api/activity/{id}/{action}", post(activity_action))

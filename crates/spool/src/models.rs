@@ -224,6 +224,13 @@ pub struct MediaFile {
     pub languages: Vec<String>,
     #[serde(default)]
     pub added_at: i64,
+    /// A further version of a film, kept beside the main one on purpose: a different cut, or
+    /// a 4K copy next to a small one. Upgrades replace the main file and leave these alone.
+    #[serde(default)]
+    pub extra: bool,
+    /// Subtitle files kept beside the video.
+    #[serde(default)]
+    pub subtitles: Vec<crate::subs::Sidecar>,
 }
 
 /// One release as an indexer reported it.
@@ -308,6 +315,9 @@ pub struct Acquisition {
     /// release picked by hand. The import does not question it.
     #[serde(default)]
     pub replace_better: bool,
+    /// Kept beside the film's existing file as another version, replacing nothing.
+    #[serde(default)]
+    pub extra_version: bool,
     #[serde(default)]
     pub created_at: i64,
     #[serde(default)]

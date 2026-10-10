@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 
 pub const COMPACT_REASON: &str = "smaller copy that fits the profile's size target";
 pub const BY_HAND_REASON: &str = "chosen by hand";
+pub const ANOTHER_VERSION_REASON: &str = "chosen by hand, to keep as another version";
 
 /// What a search is for.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -262,7 +263,9 @@ impl App {
         let today = chrono::Local::now().date_naive();
         let (existing, monitored, available, season_complete, runtime): (Vec<ExistingFile>, bool, bool, bool, u32) = match t.kind {
             Kind::Movie => (
-                tc.files.iter().map(|f| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size }).collect(),
+                // The main file is what an upgrade is measured against; versions kept beside it
+                // on purpose do not count, unless they are all there is.
+                tc.files.iter().filter(|f| !f.extra || tc.files.iter().all(|x| x.extra)).map(|f| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size }).collect(),
                 t.monitored,
                 t.movie_available(today),
                 true,
@@ -894,7 +897,8 @@ impl App {
             output_path: None,
             error: None,
             reason: reason.to_string(),
-            replace_better: reason == COMPACT_REASON || reason == BY_HAND_REASON,
+            replace_better: reason == COMPACT_REASON || reason == BY_HAND_REASON || reason == ANOTHER_VERSION_REASON,
+            extra_version: reason == ANOTHER_VERSION_REASON,
             created_at: 0,
             updated_at: 0,
         };
@@ -987,6 +991,7 @@ impl App {
             error: None,
             reason: "added by hand".into(),
             replace_better: true,
+            extra_version: false,
             created_at: 0,
             updated_at: 0,
         };

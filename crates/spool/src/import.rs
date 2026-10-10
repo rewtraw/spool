@@ -379,13 +379,18 @@ impl App {
                 scene_name: Some(acq.release.title.clone()),
                 languages: parsed_movie.map(|p| p.languages).unwrap_or_default(),
                 added_at: now(),
+                extra: false,
+                subtitles: vec![],
             };
-            let rel = self.library_rel_path(title, &eps, &file, &ext);
-            let dst = Path::new(&title.path).join(&rel);
+            let file = MediaFile { extra: acq.extra_version && title.kind == Kind::Movie && !files.is_empty(), ..file };
+            let mut rel = self.library_rel_path(title, &eps, &file, &ext);
 
-            // What does this replace?
+            // What does this replace? Another version of a film replaces nothing; an ordinary
+            // download replaces the main file and leaves the versions kept beside it.
             let old: Vec<&MediaFile> = match title.kind {
-                Kind::Movie => files.iter().collect(),
+                Kind::Movie if file.extra => vec![],
+                Kind::Movie if files.iter().all(|f| f.extra) => files.iter().collect(),
+                Kind::Movie => files.iter().filter(|f| !f.extra).collect(),
                 Kind::Series => {
                     let ids: Vec<i64> = eps.iter().filter_map(|e| e.file_id).collect();
                     files.iter().filter(|f| ids.contains(&f.id)).collect()
@@ -401,6 +406,17 @@ impl App {
                     )));
                 }
             }
+            // Two versions cannot share a name. Plex shows files as versions of one film when
+            // each is the film's name followed by " - " and a label.
+            if title.kind == Kind::Movie {
+                let taken = |r: &str| files.iter().any(|f| f.rel_path.eq_ignore_ascii_case(r) && !old.iter().any(|o| o.id == f.id));
+                if taken(&rel) {
+                    let stem = rel[..rel.len() - ext.len()].to_string();
+                    let label = version_label(&file, flavor);
+                    rel = (1..50).map(|n| if n == 1 { format!("{stem} - {label}{ext}") } else { format!("{stem} - {label} {n}{ext}") }).find(|r| !taken(r)).unwrap_or(rel);
+                }
+            }
+            let dst = Path::new(&title.path).join(&rel);
             let replaces = old
                 .iter()
                 .map(|o| {
@@ -482,12 +498,32 @@ impl App {
         for op in &ops {
             let id = self.journal(op)?;
             let (app, op2) = (self.clone(), op.clone());
+            // Subtitle files timed for a video go when the video does.
+            let old_subs: Vec<PathBuf> = op.replaces.iter().filter_map(|r| self.db.file(r.0).ok().flatten()).flat_map(|f| f.subtitles.into_iter().map(|s| Path::new(&title.path).join(s.rel_path))).collect();
             let res = tokio::task::spawn_blocking(move || app.execute(id, &op2)).await?;
             if let Err(e) = res {
                 self.db.with(|c| c.execute("UPDATE journal SET state = 'failed' WHERE id = ?1", [id]))?;
                 return block(self, &mut acq, format!("could not move the file into the library: {e:#}"));
             }
+            for p in old_subs {
+                let _ = std::fs::remove_file(p);
+            }
             imported.push(op);
+        }
+        // Subtitles that came with the release go in beside the video.
+        for op in &imported {
+            if self.carry_subtitles(&root, Path::new(&op.src), Path::new(&op.dst), ops.len() == 1) > 0 {
+                let file_id: Option<i64> = self.db.files(title.id)?.into_iter().find(|f| f.rel_path == op.file.rel_path).map(|f| f.id);
+                if let Some(id) = file_id {
+                    if let Ok(found) = self.find_sidecars(id) {
+                        // They came with this release, so they were made for it.
+                        if let Some(mut f) = self.db.file(id)? {
+                            f.subtitles = found.into_iter().map(|s| crate::subs::Sidecar { source: "download".into(), release: acq.release.title.clone(), ..s }).collect();
+                            self.db.with(|c| c.execute("UPDATE files SET data = ?2 WHERE id = ?1", params![id, serde_json::to_string(&f).unwrap_or_default()]))?;
+                        }
+                    }
+                }
+            }
         }
 
         let upgraded = ops.iter().any(|o| !o.replaces.is_empty());
@@ -537,6 +573,9 @@ impl App {
             bail!("the media volume is not mounted");
         }
         let abs = Path::new(&title.path).join(&file.rel_path);
+        for s in &file.subtitles {
+            let _ = std::fs::remove_file(Path::new(&title.path).join(&s.rel_path));
+        }
         if abs.exists() {
             let recycle = self.recycle_path(&title, &abs);
             if recycle.as_os_str().is_empty() {
@@ -643,4 +682,21 @@ impl App {
         }
         Ok(())
     }
+}
+
+/// A short name that tells one version of a film from another: its cut if it has one, else its
+/// resolution.
+fn version_label(file: &MediaFile, flavor: Flavor) -> String {
+    let label = if !file.edition.trim().is_empty() {
+        file.edition.trim().to_string()
+    } else {
+        match file.media_info.as_ref().map(|m| (m.width, m.height)) {
+            Some((w, h)) if w >= 3800 || h >= 2000 => "4K".to_string(),
+            Some((w, h)) if w >= 1900 || h >= 1000 => "1080p".to_string(),
+            Some((w, h)) if w >= 1200 || h >= 700 => "720p".to_string(),
+            Some((_, h)) if h > 0 => format!("{h}p"),
+            _ => file.quality.quality.name(flavor).to_string(),
+        }
+    };
+    label.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect()
 }

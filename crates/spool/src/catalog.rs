@@ -175,6 +175,8 @@ impl App {
                 scene_name: None,
                 languages: vec![],
                 added_at: now(),
+                extra: false,
+                subtitles: vec![],
             };
             let episode_ids: Vec<i64> = match title.kind {
                 Kind::Movie => {

@@ -47,6 +47,8 @@ pub struct Inner {
     pub login_failures: Mutex<(u32, i64)>,
     /// Titles last turned away for lack of disk space, with the headroom there was at the time.
     pub space_blocked: Mutex<HashMap<i64, i128>>,
+    /// The OpenSubtitles sign-in in use, and when it was made.
+    pub subtitle_login: Mutex<Option<(String, i64)>>,
     /// Releases being sent to the downloader right now, keyed by title and release name.
     pub grabbing: Mutex<HashSet<(i64, String)>>,
     /// Jobs the user resumed by hand after Spool held them for lack of disk space.
@@ -110,6 +112,7 @@ impl App {
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),
+            subtitle_login: Mutex::new(None),
             grabbing: Mutex::new(HashSet::new()),
             waiting_for_space: Mutex::new(HashSet::new()),
             art_fetches: tokio::sync::Semaphore::new(6),

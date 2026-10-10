@@ -262,6 +262,7 @@
     ['scan', 'Rescan library folders', 'Finds files added or removed outside Spool. Changes the catalog only.'],
     ['housekeeping', 'Back up and tidy', 'Writes a database backup and empties old recycle folders.'],
     ['plex', 'Read Plex', 'Matches Plex\'s films and shows to titles in Spool.'],
+    ['subtitles', 'Find missing subtitles', 'Looks for subtitles in the languages you chose for a few files that lack them, and keeps only ones in time with the film.'],
   ];
   async function runTask(name: string) {
     await act(() => api.post(`/tasks/${name}`), 'Started');
@@ -346,6 +347,18 @@
       <label class="field narrow">Password for this app<input class="input" type="password" bind:value={general.password} autocomplete="new-password" /><span class="hint">Empty means anyone who can reach this address can use it. Setting or changing it signs every other browser out.</span></label>
       {#if general.password}<div><button class="btn ghost" type="button" onclick={signOut}>Sign out of this browser</button></div>{/if}
       <label class="field">Second backup folder<input class="input mono" bind:value={general.backup_dir} autocomplete="off" placeholder="None" /><span class="hint">The nightly database backup is also copied here. Choose a folder on a different disk from the one Spool's data is on.</span></label>
+    </fieldset>
+    <fieldset class="card">
+      <legend>Subtitles</legend>
+      <p class="muted">Spool keeps the subtitle files that come with a release, and can look for more on OpenSubtitles. Every subtitle file it fetches is checked against the speech in the film: one that is out by a fixed amount is retimed, and one that does not fit is thrown away and the next tried.</p>
+      <label class="field narrow">Languages wanted<input class="input" bind:value={general.subtitle_languages} placeholder="en" autocomplete="off" /><span class="hint">Codes or names, separated by commas: <code>en</code>, or <code>en, es</code>. A file with that language inside it or beside it needs nothing more.</span></label>
+      <label class="field">OpenSubtitles API key<input class="input mono" bind:value={general.opensubtitles_api_key} autocomplete="off" /><span class="hint">Free from opensubtitles.com, under API consumers in your profile.</span></label>
+      <div class="cols">
+        <label class="field">OpenSubtitles username<input class="input" bind:value={general.opensubtitles_username} autocomplete="off" /></label>
+        <label class="field">OpenSubtitles password<input class="input" type="password" bind:value={general.opensubtitles_password} autocomplete="new-password" /></label>
+      </div>
+      <label class="check"><input type="checkbox" bind:checked={general.subtitles_auto} /> Look for missing subtitles automatically</label>
+      <span class="hint">A few files every six hours, newest first, to stay inside the account's daily download allowance. Each file is tried again after a week.</span>
     </fieldset>
     <fieldset class="card">
       <legend>AI access</legend>

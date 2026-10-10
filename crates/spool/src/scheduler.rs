@@ -19,6 +19,7 @@ impl App {
             "scan" => self.scan_all().await.map(|r| format!("{} files on disk, {} added, {} missing, {} unmatched", r.files_found, r.files_added, r.files_missing, r.unmatched.len())),
             "housekeeping" => self.housekeeping().await,
             "compact" => self.compact_library().await,
+            "subtitles" => self.subtitle_sweep().await,
             "plex" if self.settings.general().plex_token.is_empty() => Ok("skipped: Plex is not set up".into()),
             "plex" => self.plex_sync().await,
             other => Err(anyhow::anyhow!("unknown task {other}")),
@@ -238,7 +239,11 @@ impl App {
                     ("refresh", 6 * 60),
                     ("housekeeping", 24 * 60),
                     ("plex", 60),
+                    ("subtitles", 6 * 60),
                 ] {
+                    if name == "subtitles" && !g.subtitles_auto {
+                        continue;
+                    }
                     if due(name, every, &last) {
                         last.insert(name, now());
                         if name == "refresh" {

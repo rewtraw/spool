@@ -45,6 +45,14 @@ enum Command {
     },
     /// Compare where every library file is with where Spool would put it.
     CheckPaths,
+    /// Check a subtitle file against a video's speech: is it in time, and if not, by how much.
+    CheckSubtitles {
+        video: PathBuf,
+        subtitles: PathBuf,
+        /// Write the corrected times back to the subtitle file.
+        #[arg(long)]
+        fix: bool,
+    },
     /// Compare Spool's reading of releases with Radarr's and Sonarr's grab history.
     ShadowReport {
         #[arg(long)]
@@ -168,6 +176,25 @@ async fn main() -> Result<()> {
                 for u in &report.unsupported {
                     println!("  - {u}");
                 }
+            }
+        }
+        Command::CheckSubtitles { video, subtitles, fix } => {
+            use spool::subs::{align, decode, parse_srt, retime, write_srt, Verdict};
+            let app = App::start(&dir, db).await?;
+            let channels = app.probe(&video, "").await.ok().flatten().map(|m| m.audio_channels).unwrap_or(2.0);
+            let cues = parse_srt(&decode(&std::fs::read(&subtitles)?));
+            let shape = app.listen(&video, channels).await?;
+            let r = align(&shape, &cues);
+            match r.verdict {
+                Verdict::InSync => println!("In time with the speech (confidence {}).", r.confidence),
+                Verdict::Shifted if r.rate == 1.0 => println!("Out by {:+.2} seconds (confidence {}).", -r.offset, r.confidence),
+                Verdict::Shifted => println!("Timed for a different frame rate: times need multiplying by {:.4}, then {:+.2} seconds (confidence {}).", r.rate, r.offset, r.confidence),
+                Verdict::NoMatch => println!("Does not line up with this soundtrack anywhere (confidence {}).", r.confidence),
+                Verdict::Unsure => println!("Cannot tell (confidence {}).", r.confidence),
+            }
+            if fix && r.verdict == Verdict::Shifted {
+                std::fs::write(&subtitles, write_srt(&retime(&cues, r.rate, r.offset)))?;
+                println!("Corrected {}", subtitles.display());
             }
         }
         Command::CheckPaths => {

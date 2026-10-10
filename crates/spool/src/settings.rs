@@ -45,6 +45,15 @@ pub struct General {
     pub mcp_read_key: String,
     /// A second folder, ideally on another disk, that also gets each nightly database backup.
     pub backup_dir: String,
+    /// Languages every file should have subtitles in, as codes or names: "en", "en, es".
+    pub subtitle_languages: String,
+    /// Look for missing subtitles without being asked.
+    pub subtitles_auto: bool,
+    pub opensubtitles_api_key: String,
+    pub opensubtitles_username: String,
+    pub opensubtitles_password: String,
+    /// Where the OpenSubtitles API is, when not the usual place.
+    pub opensubtitles_url: String,
     /// Spool stops starting downloads when the downloads disk would drop below this many
     /// gigabytes free once the download has finished.
     pub min_free_gb: u32,
@@ -85,6 +94,12 @@ impl Default for General {
             api_key: String::new(),
             mcp_read_key: String::new(),
             backup_dir: String::new(),
+            subtitle_languages: String::new(),
+            subtitles_auto: false,
+            opensubtitles_api_key: String::new(),
+            opensubtitles_username: String::new(),
+            opensubtitles_password: String::new(),
+            opensubtitles_url: String::new(),
             min_free_gb: 20,
             space_wait_gb: 100,
             direct_unpack: true,

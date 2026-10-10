@@ -2,6 +2,7 @@
   import { api, type Decision, type Episode, type MediaFile, type Title } from '../lib/api';
   import { app, act, go, loadTitles } from '../lib/state.svelte';
   import { age, ago, bytes, fullDate, pct, qualityName, STATE_LABEL } from '../lib/format';
+  import Subtitles from '../components/Subtitles.svelte';
   import Poster from '../components/Poster.svelte';
   import JobLine from '../components/JobLine.svelte';
 
@@ -111,8 +112,12 @@
     }
   }
 
-  async function grab(d: Decision) {
-    await act(() => api.post(`/decisions/${d.id}/grab`), 'Sent to download');
+  let openSubs = $state<Record<number, boolean>>({});
+  async function setExtra(f: any, extra: boolean) {
+    await act(() => api.patch(`/files/${f.id}`, { extra }));
+  }
+  async function grab(d: Decision, anotherVersion = false) {
+    await act(() => api.post(`/decisions/${d.id}/grab`, { another_version: anotherVersion }), anotherVersion ? 'Sent to download. It will be kept beside the file you have.' : 'Sent to download');
     load();
   }
 
@@ -223,17 +228,20 @@
 
   {#if t.kind === 'movie'}
     <section>
-      <div class="section-title">File</div>
+      <div class="section-title">{t.files.length > 1 ? 'Versions' : 'File'}</div>
       {#if t.files.length}
         {#each t.files as f (f.id)}
           <div class="card pad file">
             <div class="grow">
-              <div class="row wrap"><span class="chip ok">{qualityName(f.quality, 'movie')}</span>{#if f.edition}<span class="chip">{f.edition}</span>{/if}<span class="muted">{bytes(f.size)}</span><span class="muted">{media(f)}</span></div>
+              <div class="row wrap"><span class="chip ok">{qualityName(f.quality, 'movie')}</span>{#if f.edition}<span class="chip">{f.edition}</span>{/if}{#if t.files.length > 1}<span class="chip {f.extra ? '' : 'accent'}">{f.extra ? 'Extra version' : 'Main'}</span>{/if}<span class="muted">{bytes(f.size)}</span><span class="muted">{media(f)}</span></div>
               <div class="mono faint break" style="margin-top:6px">{t.path}/{f.rel_path}</div>
+              <Subtitles fileId={f.id} />
             </div>
+            {#if t.files.length > 1}<button class="btn small ghost" title={f.extra ? 'Upgrades and smaller copies will replace this file' : 'Keep this file whatever else is downloaded; upgrades replace only the main file'} onclick={() => setExtra(f, !f.extra)}>{f.extra ? 'Make main' : 'Keep as extra'}</button>{/if}
             <button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>
           </div>
         {/each}
+        {#if t.files.length > 1}<p class="faint small" style="margin-top:8px">Upgrades and smaller copies replace the main file. Extra versions stay until you delete them. To add one, use "Keep both" on a release below.</p>{/if}
       {:else}
         <div class="card empty">
           {#if !t.available}Not released yet{#if t.digital_release || t.physical_release || t.in_cinemas}. {t.digital_release ? `Digital release ${fullDate(t.digital_release)}` : t.physical_release ? `Physical release ${fullDate(t.physical_release)}` : `In cinemas ${fullDate(t.in_cinemas)}`}{/if}.
@@ -275,8 +283,10 @@
                     {:else if !f && !aired(e)}<span class="chip">Not aired</span>
                     {:else if !f && e.monitored}<span class="chip warn">Missing</span>{/if}
                     {#if aired(e)}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
+                    {#if f}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}
                   </div>
+                  {#if f && openSubs[e.id]}<div class="epsubs"><Subtitles fileId={f.id} /></div>{/if}
                 {/each}
               </div>
             {/if}
@@ -309,7 +319,7 @@
                   {#if d.accepted}<span class="chip ok">{d.id === accepted[0]?.id ? 'Best choice' : 'Acceptable'}</span>{#if ceiling && d.release.size > ceiling}<div class="faint small">Over the profile's size target; used only if nothing smaller fits.</div>{/if}
                   {:else}{#each d.rejections as r}<div class="reason">{r.message}</div>{/each}{/if}
                 </td>
-                <td>{#if isActive}<button class="btn small" onclick={() => grab(d)}>{d.accepted ? 'Download' : 'Download anyway'}</button>{/if}</td>
+                <td>{#if isActive}<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn small" onclick={() => grab(d)}>{d.accepted ? 'Download' : 'Download anyway'}</button>{#if t.kind === 'movie' && t.files.length}<button class="btn small ghost" title="Download this and keep it beside the file you already have, as another version of the film" onclick={() => grab(d, true)}>Keep both</button>{/if}</div>{/if}</td>
               </tr>
             {/each}
           </tbody>
@@ -523,6 +533,10 @@
     align-items: center;
     gap: 12px;
     padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .epsubs {
+    padding: 0 14px 12px 52px;
     border-bottom: 1px solid var(--line);
   }
   .ep:last-child {

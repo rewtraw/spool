@@ -1144,3 +1144,131 @@ async fn bulk_actions_cover_many_titles_and_respect_kind() {
     let task = w.app.tasks.lock().get("bulk").cloned().unwrap();
     assert!(!task.running && task.last_message.starts_with("searched 1 of 1"), "{}", task.last_message);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_film_can_keep_another_version_that_upgrades_leave_alone() {
+    use serde_json::json;
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let mut movie = w.movie("Keep Both", 2018, "tt2222222");
+    movie.path = w.root.join("Movies/Keep Both (2018)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut movie).unwrap();
+    std::fs::create_dir_all(&movie.path).unwrap();
+    std::fs::write(Path::new(&movie.path).join("old.mkv"), b"old file").unwrap();
+    let old: MediaFile = serde_json::from_value(json!({"title_id": movie.id, "rel_path": "old.mkv", "size": 8, "quality": {"quality": "hdtv-1080p"}})).unwrap();
+    w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, 'old.mkv', 8, ?2)", rusqlite::params![movie.id, serde_json::to_string(&old).unwrap()])).unwrap();
+    let router = spool::api::router(w.app.clone());
+
+    // A lesser copy, wanted all the same: taken as another version, it replaces nothing.
+    w.release("Keep.Both.2018.720p.BluRay.x264-SMALL", &[("small.mkv", &video)]);
+    let outcome = w.app.search(movie.id, Scope::Movie, true, false).await.unwrap();
+    let d = outcome.decisions.iter().find(|d| d.release.title.contains("SMALL")).expect("the release was seen");
+    let (status, _) = call(&router, "POST", &format!("/api/decisions/{}/grab", d.id), json!({"another_version": true})).await;
+    assert_eq!(status, 200);
+    w.wait_state(movie.id, AcqState::Imported).await;
+    let files = w.app.db.files(movie.id).unwrap();
+    assert_eq!(files.len(), 2, "{files:?}");
+    assert!(files.iter().any(|f| f.rel_path == "old.mkv" && !f.extra));
+    let extra = files.iter().find(|f| f.extra).expect("the new file is an extra version").clone();
+    assert_eq!(extra.quality, QualityModel::new(Quality::Bluray720p));
+    assert!(Path::new(&movie.path).join("old.mkv").exists() && Path::new(&movie.path).join(&extra.rel_path).exists());
+
+    // An upgrade replaces the main file and leaves the extra version where it is.
+    w.release("Keep.Both.2018.1080p.BluRay.x264-NEW", &[("new.mkv", &video)]);
+    let outcome = w.app.search(movie.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    for _ in 0..400 {
+        if w.app.db.files(movie.id).unwrap().iter().any(|f| f.quality == QualityModel::new(Quality::Bluray1080p)) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let files = w.app.db.files(movie.id).unwrap();
+    assert_eq!(files.len(), 2, "{files:?}");
+    assert!(files.iter().any(|f| f.quality == QualityModel::new(Quality::Bluray1080p) && !f.extra));
+    assert!(files.iter().any(|f| f.id == extra.id && f.extra));
+    assert!(!Path::new(&movie.path).join("old.mkv").exists() && Path::new(&movie.path).join(&extra.rel_path).exists());
+
+    // Marking the extra as main again puts it back in line for replacement.
+    let (status, _) = call(&router, "PATCH", &format!("/api/files/{}", extra.id), json!({"extra": false})).await;
+    assert_eq!(status, 200);
+    assert!(w.app.db.files(movie.id).unwrap().iter().all(|f| !f.extra));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subtitles_come_with_the_release_and_can_be_found_and_checked() {
+    use axum::routing::post;
+    use serde_json::json;
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let movie = w.movie("Subbed", 2019, "tt3333333");
+    let srt = "1\n00:00:00,500 --> 00:00:01,500\nHello\n\n2\n00:00:02,000 --> 00:00:03,000\nGoodbye\n";
+
+    // A stand-in for OpenSubtitles: one result timed for this exact file, one that is not.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hits = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (h1, h2) = (hits.clone(), hits.clone());
+    let router = axum::Router::new()
+        .route(
+            "/subtitles",
+            get(move |headers: axum::http::HeaderMap, axum::extract::RawQuery(q): axum::extract::RawQuery| async move {
+                h1.lock().push(format!("search {} key={}", q.unwrap_or_default(), headers.get("api-key").and_then(|v| v.to_str().ok()).unwrap_or("")));
+                axum::Json(json!({"data": [
+                    {"attributes": {"language": "en", "release": "Subbed.2019.DVDRip-OTHER", "download_count": 5000, "files": [{"file_id": 11}]}},
+                    {"attributes": {"language": "en", "release": "Subbed.2019.1080p.BluRay.x264-GRP", "download_count": 12, "moviehash_match": true, "files": [{"file_id": 22}]}},
+                ]}))
+            }),
+        )
+        .route(
+            "/download",
+            post(move |axum::Json(b): axum::Json<serde_json::Value>| async move {
+                h2.lock().push(format!("download {}", b["file_id"]));
+                axum::Json(json!({"link": format!("http://{addr}/file.srt")}))
+            }),
+        )
+        .route("/file.srt", get(move || async move { srt }));
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut g = w.app.settings.general();
+    g.opensubtitles_api_key = "os-key".into();
+    g.opensubtitles_url = format!("http://{addr}");
+    g.subtitle_languages = "en, es".into();
+    w.app.settings.set_general(&g).unwrap();
+
+    // The release brings Spanish subtitles of its own; they land beside the film.
+    w.release("Subbed.2019.1080p.BluRay.x264-GRP", &[("subbed.mkv", &video), ("subbed.spa.srt", srt.as_bytes())]);
+    let outcome = w.app.search(movie.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    w.wait_state(movie.id, AcqState::Imported).await;
+    let file = w.app.db.files(movie.id).unwrap().remove(0);
+    assert_eq!(file.subtitles.len(), 1, "{:?}", file.subtitles);
+    assert_eq!((file.subtitles[0].language.as_str(), file.subtitles[0].source.as_str()), ("es", "download"));
+    let folder = Path::new(&w.app.db.title(movie.id).unwrap().unwrap().path).to_path_buf();
+    assert!(folder.join(&file.subtitles[0].rel_path).exists());
+    assert!(file.subtitles[0].rel_path.ends_with(".es.srt"));
+
+    // English is still wanted. The result timed for this exact file is put first, whatever
+    // its popularity.
+    assert_eq!(w.app.missing_subtitles().unwrap(), vec![(file.id, vec!["en".to_string()])]);
+    let found = w.app.search_subtitles(file.id, "en").await.unwrap();
+    assert_eq!(found.iter().map(|c| c.file_id).collect::<Vec<_>>(), vec![22, 11]);
+    let asked = hits.lock()[0].clone();
+    // (The sample clip is too small to have a checksum; a real film sends one as well.)
+    assert!(asked.contains("languages=en") && asked.contains("imdb_id=3333333") && asked.ends_with("key=os-key"), "{asked}");
+
+    // The clip is too short to judge timing by, so only the exact match is trusted.
+    let kept = w.app.auto_subtitle(file.id, "en").await.unwrap().expect("the exact match is kept");
+    assert_eq!((kept.language.as_str(), kept.source.as_str()), ("en", "opensubtitles"));
+    assert_eq!(kept.sync.as_ref().unwrap().verdict, spool::subs::Verdict::Unsure);
+    assert_eq!(hits.lock().iter().filter(|h| h.starts_with("download")).cloned().collect::<Vec<_>>(), vec!["download 22"]);
+    let file = w.app.db.files(movie.id).unwrap().remove(0);
+    assert_eq!(file.subtitles.len(), 2);
+    assert!(w.app.missing_subtitles().unwrap().is_empty());
+    let english = file.subtitles.iter().find(|s| s.language == "en").unwrap();
+    assert_eq!(spool::subs::parse_srt(&std::fs::read_to_string(folder.join(&english.rel_path)).unwrap()).len(), 2);
+
+    // Deleting the film takes its subtitle files with it.
+    let paths: Vec<_> = file.subtitles.iter().map(|s| folder.join(&s.rel_path)).collect();
+    w.app.delete_file(file.id).unwrap();
+    assert!(paths.iter().all(|p| !p.exists()));
+}

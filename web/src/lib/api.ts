@@ -89,7 +89,7 @@ export const api = {
   post: <T = any>(p: string, b?: unknown) => request<T>('POST', p, b ?? {}),
   put: <T = any>(p: string, b?: unknown) => request<T>('PUT', p, b ?? {}),
   patch: <T = any>(p: string, b?: unknown) => request<T>('PATCH', p, b ?? {}),
-  del: <T = any>(p: string) => request<T>('DELETE', p),
+  del: <T = any>(p: string, b?: unknown) => request<T>('DELETE', p, b),
   upload: <T = any>(p: string, file: Blob) => request<T>('POST', p, undefined, file),
 };
 
@@ -160,6 +160,7 @@ export interface MediaFile {
   media_info?: { video_codec: string; audio_codec: string; audio_channels: number; dynamic_range_type: string; width: number; height: number; runtime_secs: number } | null;
   scene_name?: string | null;
   added_at: number;
+  extra?: boolean;
 }
 
 export interface Release {

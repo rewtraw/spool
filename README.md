@@ -12,6 +12,9 @@
 - **An archive of every NZB it fetches**, so something deleted to make room can be downloaded again later, and a search still has something to offer when an indexer is down.
 - **Plex aware.** Matches titles to Plex items, links to them, asks Plex to rescan after imports, and knows what has been watched.
 - **Disk space as a first-class concern.** Shows what is using space, what has been watched and what could be fetched again, and can replace an oversized file with a smaller copy.
+- **Subtitles that are checked, not just fetched.** Keeps the subtitle files a release brings, finds missing ones on OpenSubtitles, and listens to the film to confirm each one is in time with the speech. One that is out by a fixed amount, or timed for a different frame rate, is corrected; one that does not fit is discarded.
+- **More than one version of a film**, when you want it: a 4K copy beside a small one, or two cuts. Upgrades replace the main file and leave the others alone.
+- **Bulk actions** across the library, the queue and the disk-space view.
 - **An MCP endpoint**, so an AI assistant can look things up, explain why a title has not downloaded, and operate Spool.
 - **Careful with your library.** Starts in a mode that changes nothing, journals every import, keeps replaced files in a recycle folder, and refuses to write when the media volume is not mounted.
 
@@ -41,7 +44,7 @@ On **TrueNAS SCALE**, add it as a custom app with the same settings as [compose.
 
 ### From source
 
-You need Rust, [Bun](https://bun.sh), and the helper tools Spool calls: `par2` for repair, `7zz` for extraction and `ffprobe` for reading media files.
+You need Rust, [Bun](https://bun.sh), and the helper tools Spool calls: `par2` for repair, `7zz` for extraction and `ffprobe` and `ffmpeg` for reading media files and checking subtitles.
 
 ```sh
 brew install par2 sevenzip ffmpeg                # macOS
