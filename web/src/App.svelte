@@ -58,7 +58,7 @@
 {#if app.signedOut}
   <main class="signin">
     <form class="card" onsubmit={signIn}>
-      <div class="brand"><span class="mark"></span>Spool</div>
+      <div class="brand"><img class="mark" src="/mark.svg" alt="" />Spool</div>
       <label class="field">Password<input class="input" type="password" bind:value={password} autocomplete="current-password" /></label>
       {#if loginError}<p class="error">{loginError}</p>{/if}
       <button class="btn primary" type="submit">Sign in</button>
@@ -67,7 +67,7 @@
 {:else}
   <div class="shell">
     <nav aria-label="Main">
-      <a class="brand" href="#/home"><span class="mark"></span><span class="word">Spool</span></a>
+      <a class="brand" href="#/home"><img class="mark" src="/mark.svg" alt="" /><span class="word">Spool</span></a>
       <div class="links">
         {#each nav as n}
           <a href="#/{n.id}" class:active={active === n.id} aria-current={active === n.id ? 'page' : undefined}>
@@ -133,19 +133,9 @@
     letter-spacing: -0.01em;
   }
   .mark {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 3px solid var(--text);
-    position: relative;
+    width: 26px;
+    height: 26px;
     flex: none;
-  }
-  .mark::after {
-    content: '';
-    position: absolute;
-    inset: 4.5px;
-    border-radius: 50%;
-    background: var(--accent);
   }
   .links {
     display: grid;
