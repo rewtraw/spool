@@ -36,7 +36,7 @@
 
   header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
   .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
-  .brand img { width: 30px; height: 30px; }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(assets/mark.svg) center / contain no-repeat; mask: url(assets/mark.svg) center / contain no-repeat; }
   nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
   nav a:hover { color: var(--text); }
 
@@ -106,7 +106,7 @@
 <body>
 <div class="wrap">
   <header>
-    <a class="brand" href="#"><img src="assets/mark.svg" alt="">Spool</a>
+    <a class="brand" href="#"><span class="mark"></span>Spool</a>
     <nav>
       <a class="hide" href="#how">How it works</a>
       <a class="hide" href="#start">Get started</a>
@@ -139,7 +139,7 @@
       </div>
       <div class="arrow" aria-hidden="true">→</div>
       <div class="one">
-        <div class="brand"><img src="assets/mark.svg" alt="">Spool</div>
+        <div class="brand"><span class="mark"></span>Spool</div>
         <p>One catalog for movies and series, one downloader built in, one place that can say why a release was chosen, what failed and what it is doing about it.</p>
       </div>
     </div>

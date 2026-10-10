@@ -58,7 +58,7 @@
 {#if app.signedOut}
   <main class="signin">
     <form class="card" onsubmit={signIn}>
-      <div class="brand"><img class="mark" src="/mark.svg" alt="" />Spool</div>
+      <div class="brand"><span class="mark"></span>Spool</div>
       <label class="field">Password<input class="input" type="password" bind:value={password} autocomplete="current-password" /></label>
       {#if loginError}<p class="error">{loginError}</p>{/if}
       <button class="btn primary" type="submit">Sign in</button>
@@ -67,7 +67,7 @@
 {:else}
   <div class="shell">
     <nav aria-label="Main">
-      <a class="brand" href="#/home"><img class="mark" src="/mark.svg" alt="" /><span class="word">Spool</span></a>
+      <a class="brand" href="#/home"><span class="mark"></span><span class="word">Spool</span></a>
       <div class="links">
         {#each nav as n}
           <a href="#/{n.id}" class:active={active === n.id} aria-current={active === n.id ? 'page' : undefined}>
@@ -136,6 +136,10 @@
     width: 26px;
     height: 26px;
     flex: none;
+    /* Drawn through a mask so the mark takes the accent of whichever theme is showing. */
+    background: var(--accent);
+    -webkit-mask: url(/mark.svg) center / contain no-repeat;
+    mask: url(/mark.svg) center / contain no-repeat;
   }
   .links {
     display: grid;
