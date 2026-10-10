@@ -1005,7 +1005,7 @@ async fn archive_list(State(app): State<App>) -> R<Value> {
             let owner = titles.iter().find(|t| t.kind == n.kind && ((n.tmdb_id.is_some() && t.tmdb_id == n.tmdb_id) || (n.tvdb_id.is_some() && t.tvdb_id == n.tvdb_id)));
             let poster = match owner {
                 Some(t) => crate::art::small_url(t),
-                None => n.poster.as_deref().map(|src| crate::art::saved_url(n.id, src)),
+                None => n.poster.as_deref().map(|src| crate::art::saved_small_url(n.id, src)),
             };
             groups.push(json!({"kind": n.kind, "name": owner.map(|t| t.title.clone()).unwrap_or_else(|| n.name.clone()), "year": n.year, "tmdb_id": n.tmdb_id, "tvdb_id": n.tvdb_id,
                 "title_id": owner.map(|t| t.id), "poster": poster, "releases": [], "size": 0u64, "latest": 0i64}));
@@ -1032,8 +1032,9 @@ async fn archive_list(State(app): State<App>) -> R<Value> {
     Ok(Json(json!({"groups": groups, "count": count, "stored_bytes": bytes})))
 }
 
-async fn archive_art(State(app): State<App>, Path(id): Path<i64>) -> Response {
-    match app.archive_art(id).await {
+async fn archive_art(State(app): State<App>, Path(id): Path<i64>, Query(q): Query<HashMap<String, String>>) -> Response {
+    let image = if q.get("size").is_some_and(|s| s == "small") { app.archive_art_small(id).await } else { app.archive_art(id).await };
+    match image {
         Ok(bytes) => ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], bytes).into_response(),
         Err(_) => ([(header::CACHE_CONTROL, "public, max-age=600")], StatusCode::NOT_FOUND).into_response(),
     }

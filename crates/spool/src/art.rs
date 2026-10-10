@@ -58,6 +58,11 @@ pub fn saved_url(nzb_id: i64, src: &str) -> String {
     format!("/api/archive/{nzb_id}/art?v={}", &tag(src)[..10])
 }
 
+/// The same poster at the size a list shows it.
+pub fn saved_small_url(nzb_id: i64, src: &str) -> String {
+    format!("{}&size=small", saved_url(nzb_id, src))
+}
+
 /// The address the web app should use for a title's artwork, or None if it has none.
 pub fn local_url(t: &Title, art: Art) -> Option<String> {
     art.source(t).map(|src| format!("/api/art/{}/{}?v={}", t.id, art.name(), &tag(src)[..10]))
@@ -80,6 +85,21 @@ fn sized_source(src: &str, art: Art) -> (String, bool) {
         }
     }
     (src.to_string(), false)
+}
+
+/// An image brought down to the small width, or as it was if it is already no wider.
+async fn shrink(full: Vec<u8>) -> Result<Vec<u8>> {
+    tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+        let img = image::load_from_memory(&full)?;
+        if img.width() <= SMALL {
+            return Ok(full);
+        }
+        let img = img.resize(SMALL, u32::MAX, image::imageops::FilterType::Lanczos3);
+        let mut buf = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 80).encode_image(&img.to_rgb8())?;
+        Ok(buf)
+    })
+    .await?
 }
 
 impl App {
@@ -109,18 +129,7 @@ impl App {
         if let Ok(bytes) = tokio::fs::read(&path).await {
             return Ok(bytes);
         }
-        let full = self.art(title_id, Art::Poster).await?;
-        let out = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
-            let img = image::load_from_memory(&full)?;
-            if img.width() <= SMALL {
-                return Ok(full);
-            }
-            let img = img.resize(SMALL, u32::MAX, image::imageops::FilterType::Lanczos3);
-            let mut buf = Vec::new();
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 80).encode_image(&img.to_rgb8())?;
-            Ok(buf)
-        })
-        .await??;
+        let out = shrink(self.art(title_id, Art::Poster).await?).await?;
         self.art_keep(&path, &out, &format!("{}-small-", t.id)).await?;
         Ok(out)
     }
@@ -148,6 +157,19 @@ impl App {
             None => (src.to_string(), false),
         };
         self.art_fetch(&path, &url, presized, width, &format!("{name}-")).await
+    }
+
+    /// That poster at list size, made from the full one, which is kept.
+    pub async fn archive_art_small(&self, nzb_id: i64) -> Result<Vec<u8>> {
+        let n = self.archive_get(nzb_id)?.ok_or_else(|| anyhow!("no such saved release"))?;
+        let src = n.poster.ok_or_else(|| anyhow!("no artwork"))?;
+        let path = self.data_dir.join("art").join(format!("saved-small-{}.jpg", tag(&src)));
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            return Ok(bytes);
+        }
+        let out = shrink(self.archive_art(nzb_id).await?).await?;
+        self.art_keep(&path, &out, "\u{0}").await?;
+        Ok(out)
     }
 
     /// Poster for a saved release whose title may no longer be in the library.

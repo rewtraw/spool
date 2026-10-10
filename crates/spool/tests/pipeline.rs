@@ -1626,4 +1626,18 @@ async fn grids_get_a_small_poster_and_the_full_one_is_kept() {
     w.app.db.save_title(&mut film).unwrap();
     w.app.art_small(film.id).await.unwrap();
     assert_eq!(tree(&w.app.data_dir.join("art")).len(), 2);
+
+    // A saved release keeps its poster after the title has gone, and lists get that small too.
+    const NZB: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?><nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"><file poster="p" date="1" subject="alpha.mkv (1/1)"><groups><group>alt.binaries.test</group></groups><segments><segment bytes="100" number="1">a@b</segment></segments></file></nzb>"#;
+    let release: Release = serde_json::from_value(serde_json::json!({"guid": "g", "title": "Alpha.2001.1080p.BluRay.x264-GRP"})).unwrap();
+    let quality = serde_json::from_value(serde_json::json!({"quality": "bluray-1080p"})).unwrap();
+    let saved = w.app.archive_save(&film, &release, quality, "movie", "grabbed", NZB).unwrap();
+    w.app.db.delete_title(film.id).unwrap();
+    let (_, archive) = call(&api, "GET", "/api/archive", Value::Null).await;
+    let listed = archive.to_string();
+    assert!(listed.contains(&format!("/api/archive/{saved}/art?v=")) && listed.contains("&size=small"), "{listed}");
+    assert_eq!(width(&w.app.archive_art_small(saved).await.unwrap()), 300);
+    assert_eq!(width(&w.app.archive_art(saved).await.unwrap()), 400);
+    let kept = tree(&w.app.data_dir.join("art"));
+    assert_eq!(kept.iter().filter(|f| f.starts_with("saved-")).count(), 2, "{kept:?}");
 }
