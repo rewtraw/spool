@@ -65,6 +65,7 @@
   .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 14px 16px; }
   .chip b { display: block; font-weight: 600; }
   .chip span { color: var(--muted); font-size: 14.5px; }
+  .chip.maybe { border-style: dashed; background: none; }
   .arrow { color: var(--faint); font-size: 30px; }
   .one { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 14px; padding: 26px; }
   .one .brand { font-size: 28px; margin-bottom: 10px; }
@@ -136,11 +137,12 @@
         <div class="chip"><b>Radarr</b><span>Movies: what to get and where it goes</span></div>
         <div class="chip"><b>Sonarr</b><span>Series: the same, again, for episodes</span></div>
         <div class="chip"><b>SABnzbd</b><span>Downloads, repairs and unpacks</span></div>
+        <div class="chip maybe"><b>Plex or Jellyfin</b><span>If you like: serves the library to the television</span></div>
       </div>
       <div class="arrow" aria-hidden="true">→</div>
       <div class="one">
         <div class="brand"><span class="mark"></span>Spool</div>
-        <p>One catalog for movies and series, one downloader built in, one place that can say why a release was chosen, what failed and what it is doing about it.</p>
+        <p>One catalog for movies and series, one downloader built in, one place that can say why a release was chosen, what failed and what it is doing about it. It can serve the television too, or keep working beside the Plex you already have.</p>
       </div>
     </div>
   </section>
