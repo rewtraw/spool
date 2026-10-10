@@ -215,6 +215,49 @@ impl Db {
         Ok(())
     }
 
+    // ------------------------------------------------------------ changes
+
+    /// How many changes the library has seen. It only goes up.
+    pub fn revision(&self) -> Result<i64> {
+        self.with(|c| c.query_row("SELECT n FROM revision", [], |r| r.get(0)))
+    }
+
+    /// Where each changed row stands now, oldest change first: one entry per title, episode or
+    /// file however often it changed. `kinds` narrows it; empty means everything.
+    pub fn changes_since(&self, since: i64, kinds: &[&str], limit: u32) -> Result<Vec<Change>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT kind, ref_id, title_id, rev, removed, at FROM changes WHERE rev > ?1 ORDER BY rev LIMIT ?2")?;
+            let rows = s.query_map(params![since, if kinds.is_empty() { limit as i64 } else { -1 }], |r| {
+                Ok(Change { kind: r.get(0)?, id: r.get(1)?, title_id: r.get(2)?, rev: r.get(3)?, removed: r.get::<_, i64>(4)? != 0, at: r.get(5)? })
+            })?;
+            let mut out = vec![];
+            for row in rows {
+                let row = row?;
+                if kinds.is_empty() || kinds.contains(&row.kind.as_str()) {
+                    out.push(row);
+                    if out.len() as u32 >= limit {
+                        break;
+                    }
+                }
+            }
+            Ok(out)
+        })
+    }
+
+    /// The oldest count a caller can still ask from and be told everything, removals included.
+    pub fn changes_floor(&self) -> Result<i64> {
+        Ok(self.get_setting::<i64>("changes_floor"))
+    }
+
+    /// Forget removals older than `before`. Anyone who last looked before the newest of them
+    /// is told to read the whole library again.
+    pub fn prune_changes(&self, before: i64) -> Result<usize> {
+        let newest: Option<i64> = self.with(|c| c.query_row("SELECT MAX(rev) FROM changes WHERE removed = 1 AND at < ?1", [before], |r| r.get(0)))?;
+        let Some(newest) = newest else { return Ok(0) };
+        self.set_setting("changes_floor", &newest.max(self.changes_floor()?))?;
+        self.with(|c| c.execute("DELETE FROM changes WHERE removed = 1 AND at < ?1", [before]))
+    }
+
     /// Every file path in the library, keyed for "does this title have a file" checks.
     pub fn file_counts(&self) -> Result<std::collections::HashMap<i64, (u32, u64)>> {
         self.with(|c| {

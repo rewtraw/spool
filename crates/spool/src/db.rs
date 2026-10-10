@@ -157,6 +157,141 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (kind, ref_id)
     );
     "#,
+    r#"
+    -- What changed in the library, and in what order. Every write to a title, episode or file
+    -- moves the count on by one and notes where that row now stands, so anything that keeps a
+    -- copy of the library can ask for what is new since the count it last saw. The database
+    -- does this itself, whichever part of Spool made the change.
+    --
+    -- kind is title, episode or file; activity for a title whose downloads or profile name
+    -- changed, which alters how it is listed but not what it is; watched_movie, watched_series
+    -- or watched_episode for what a player reported.
+    CREATE TABLE revision (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL);
+    INSERT INTO revision VALUES (1, 0);
+    CREATE TABLE changes (
+        kind TEXT NOT NULL,
+        ref_id INTEGER NOT NULL,
+        title_id INTEGER NOT NULL,
+        rev INTEGER NOT NULL,
+        removed INTEGER NOT NULL DEFAULT 0,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (kind, ref_id)
+    );
+    CREATE INDEX changes_rev ON changes(rev);
+    -- A title saved with nothing new but the time it was last searched or refreshed has not
+    -- changed, and neither has a file or episode written back as it was. (A title's own id
+    -- inside its data is zero until its first save and means nothing; the column is the id.)
+    CREATE TRIGGER titles_added AFTER INSERT ON titles
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', NEW.id, NEW.id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER titles_changed AFTER UPDATE ON titles
+    WHEN json_remove(OLD.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at') IS NOT json_remove(NEW.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at')
+        OR OLD.monitored IS NOT NEW.monitored OR OLD.profile_id IS NOT NEW.profile_id OR OLD.path IS NOT NEW.path
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', NEW.id, NEW.id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER titles_removed AFTER DELETE ON titles
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', OLD.id, OLD.id, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER files_added AFTER INSERT ON files
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('file', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER files_changed AFTER UPDATE ON files
+    WHEN OLD.data IS NOT NEW.data OR OLD.rel_path IS NOT NEW.rel_path OR OLD.size IS NOT NEW.size OR OLD.title_id IS NOT NEW.title_id
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('file', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER files_removed AFTER DELETE ON files
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('file', OLD.id, OLD.title_id, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER episodes_added AFTER INSERT ON episodes
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('episode', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER episodes_changed AFTER UPDATE ON episodes
+    WHEN OLD.data IS NOT NEW.data OR OLD.monitored IS NOT NEW.monitored OR OLD.file_id IS NOT NEW.file_id OR OLD.air_date IS NOT NEW.air_date
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('episode', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER episodes_removed AFTER DELETE ON episodes
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('episode', OLD.id, OLD.title_id, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER acquisitions_added AFTER INSERT ON acquisitions
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('activity', NEW.title_id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER acquisitions_changed AFTER UPDATE ON acquisitions
+    WHEN OLD.state IS NOT NEW.state
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('activity', NEW.title_id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER acquisitions_removed AFTER DELETE ON acquisitions
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('activity', OLD.title_id, OLD.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER profiles_renamed AFTER UPDATE ON profiles
+    WHEN OLD.name IS NOT NEW.name
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at)
+            SELECT 'activity', id, id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER) FROM titles WHERE profile_id = NEW.id
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER profiles_removed AFTER DELETE ON profiles
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at)
+            SELECT 'activity', id, id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER) FROM titles WHERE profile_id = OLD.id
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER watched_added AFTER INSERT ON watched
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || NEW.kind, NEW.ref_id, CASE NEW.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = NEW.ref_id), 0) ELSE NEW.ref_id END, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER watched_changed AFTER UPDATE ON watched
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || NEW.kind, NEW.ref_id, CASE NEW.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = NEW.ref_id), 0) ELSE NEW.ref_id END, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    CREATE TRIGGER watched_removed AFTER DELETE ON watched
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || OLD.kind, OLD.ref_id, CASE OLD.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = OLD.ref_id), 0) ELSE OLD.ref_id END, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    "#,
 ];
 
 impl Db {

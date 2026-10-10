@@ -26,6 +26,19 @@ Spool is one process. It holds the catalog, talks to indexers, downloads from Us
 
 One SQLite database in WAL mode holds everything, in a "columns plus JSON document" shape: the columns that are queried are real columns and the rest of each record is JSON. Saved NZBs are gzip files beside it. The database contains indexer keys and Usenet passwords and is created readable only by its owner.
 
+## Knowing what changed
+
+The database keeps a count of changes to the library. Triggers move it on by one for every write to a title, episode or file that alters it, and note in a `changes` table where that row now stands: one entry per row, holding its latest position, with removals kept for three months. Because the database does this itself, no part of Spool can change the library without it being recorded. Saving a row as it already was does not count, and neither does a title whose only news is when it was last searched or refreshed.
+
+Anything that keeps a copy of the library asks for what moved after the count it last saw:
+
+- The web app's title list (`GET /api/titles?since=N`) receives only the titles that changed and the ids of those that went.
+- The players' server rebuilds its picture of the library only when the count has moved.
+- The Plex task asks Plex to rescan the folders whose files changed since its last reading.
+- `GET /api/changes?since=N` gives the same record to other programs.
+
+A caller whose count is older than the oldest removal still remembered, or is one this database never gave out, is told to read everything again.
+
 ## Safety rules the code enforces
 
 - If the required volume is not mounted or not readable, nothing is downloaded, imported or created. Spool never makes stand-in folders on another disk.

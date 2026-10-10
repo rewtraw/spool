@@ -56,7 +56,7 @@ pub struct Inner {
     /// The last few hundred requests players made, for working out what one of them wants.
     pub player_requests: Mutex<std::collections::VecDeque<String>>,
     /// The library as last read for players, and the database's change count at the time.
-    pub player_library: Mutex<Option<(u64, Arc<crate::jellyfin::items::Library>)>>,
+    pub player_library: Mutex<Option<(i64, Arc<crate::jellyfin::items::Library>)>>,
     /// Where players are being served, or why they are not.
     pub player_status: Mutex<String>,
     /// Releases being sent to the downloader right now, keyed by title and release name.

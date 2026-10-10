@@ -278,6 +278,18 @@ pub struct MediaFile {
     pub subtitles: Vec<crate::subs::Sidecar>,
 }
 
+/// Where one row of the library stands in the order of changes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Change {
+    /// title, episode, file, activity, or watched_movie, watched_series, watched_episode.
+    pub kind: String,
+    pub id: i64,
+    pub title_id: i64,
+    pub rev: i64,
+    pub removed: bool,
+    pub at: i64,
+}
+
 /// How far someone has got with a film or an episode.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

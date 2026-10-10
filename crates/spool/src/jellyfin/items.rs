@@ -102,18 +102,18 @@ fn container(f: &MediaFile) -> String {
 
 impl Library {
     /// The library as it stands. Reading it takes a moment and a player asks many things at
-    /// once, so one reading serves every request until something in the database changes.
+    /// once, so one reading serves every request until the library or what has been watched changes.
     pub fn shared(app: &App) -> Result<std::sync::Arc<Library>> {
-        let changes = app.db.with(|c| Ok(c.total_changes()))?;
+        // Read the count before the library: a change that lands meanwhile then shows as a
+        // newer count next time, and the library is read again.
+        let revision = app.db.revision()?;
         if let Some((at, lib)) = app.player_library.lock().as_ref() {
-            if *at == changes {
+            if *at == revision {
                 return Ok(lib.clone());
             }
         }
         let lib = std::sync::Arc::new(Library::load(app)?);
-        // Reading may itself have written (the server's id, the first time).
-        let changes = app.db.with(|c| Ok(c.total_changes()))?;
-        *app.player_library.lock() = Some((changes, lib.clone()));
+        *app.player_library.lock() = Some((revision, lib.clone()));
         Ok(lib)
     }
 

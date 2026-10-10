@@ -122,7 +122,7 @@ cargo test --workspace     # needs ffmpeg, par2 and 7zz for the full suite
 | `deploy` | Service files and the macOS install script. |
 | `Dockerfile`, `compose.yaml` | The container image and an example of running it. |
 
-The tests run the real application against a fake indexer and a fake Usenet server, end to end. [docs/architecture.md](docs/architecture.md) describes how the pieces fit.
+The tests run the real application against a fake indexer and a fake Usenet server, end to end. [docs/architecture.md](docs/architecture.md) describes how the pieces fit. [docs/ideas.md](docs/ideas.md) lists what has been thought of and not built.
 
 ## Credits and license
 

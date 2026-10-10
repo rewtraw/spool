@@ -63,13 +63,41 @@ export async function loadStatus() {
   }
 }
 
-export async function loadTitles() {
+type Listing = { revision: number; full: boolean; titles: Title[]; removed: number[] };
+/** The library's change count as of the list held here; zero until there is one. */
+let revision = 0;
+let listedAt = 0;
+let loading: Promise<void> = Promise.resolve();
+
+async function fetchTitles(full: boolean) {
   try {
-    app.titles = await api.get<Title[]>('/titles');
+    // Whether a film is out yet turns on the date, which no change marks, so now and then
+    // the whole list is read again.
+    const whole = full || Date.now() - listedAt > 3600_000;
+    const r = await api.get<Listing>(`/titles?since=${whole ? 0 : revision}`);
+    if (r.full) {
+      app.titles = r.titles;
+      listedAt = Date.now();
+    } else if (r.titles.length || r.removed.length) {
+      const gone = new Set(r.removed);
+      const fresh = new Map(r.titles.map((t) => [t.id, t]));
+      const next = app.titles.filter((t) => !gone.has(t.id)).map((t) => fresh.get(t.id) ?? t);
+      const known = new Set(next.map((t) => t.id));
+      for (const t of r.titles) if (!known.has(t.id)) next.push(t);
+      app.titles = next.sort((a, b) => a.id - b.id);
+    }
+    revision = r.revision;
     app.titlesLoaded = true;
   } catch {
     /* handled by status */
   }
+}
+
+/** Bring the title list up to date: only what changed, unless `full` asks for all of it. */
+export function loadTitles(full = false) {
+  // One at a time, so an older answer never lands on top of a newer one.
+  loading = loading.then(() => fetchTitles(full));
+  return loading;
 }
 
 export async function loadProfiles() {
@@ -94,6 +122,8 @@ export function connect() {
   source?.close();
   source = new EventSource('/api/events');
   source.onopen = () => {
+    // Anything missed while the connection was down arrives now.
+    if (!app.online && app.titlesLoaded) loadTitles();
     app.online = true;
   };
   source.onerror = () => {
@@ -131,7 +161,8 @@ export function connect() {
         break;
       case 'resync':
         app.tick++;
-        titlesSoon();
+        loadTitles(true);
+        loadStatus();
         break;
     }
   };
@@ -145,7 +176,7 @@ export async function boot() {
   }
   app.signedOut = false;
   api.get('/qualities').then(setQualities).catch(() => {});
-  await Promise.all([loadStatus(), loadTitles(), loadProfiles()]);
+  await Promise.all([loadStatus(), loadTitles(true), loadProfiles()]);
   connect();
 }
 
@@ -160,7 +191,7 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && !app.signedOut) {
     loadStatus();
-    loadTitles();
+    loadTitles(true);
     app.tick++;
   }
 });

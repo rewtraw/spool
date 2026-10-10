@@ -218,24 +218,71 @@ fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashMap<i64, (u3
     v
 }
 
-async fn list_titles(State(app): State<App>) -> R<Vec<Value>> {
+/// Titles as the grids and tables show them; long text stays on the title's own page.
+/// `only` narrows the list to those ids.
+fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<Vec<Value>> {
     let (files, eps, profiles, active) = (app.db.file_counts()?, app.db.episode_counts()?, app.db.profiles()?, app.db.active_acquisitions()?);
-    // The list feeds grids and tables; long text stays on the title's own page.
-    Ok(Json(
-        app.db
-            .titles(None)?
-            .iter()
-            .map(|t| {
-                let mut v = summarize(t, &files, &eps, &profiles, &active);
-                if let Some(o) = v.as_object_mut() {
-                    for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at"] {
-                        o.remove(k);
-                    }
+    let titles = match only {
+        // A few are quicker fetched one by one than read with everything else.
+        Some(ids) if ids.len() <= 20 => {
+            let mut some = vec![];
+            for id in ids {
+                some.extend(app.db.title(*id)?);
+            }
+            some.sort_by_key(|t| t.id);
+            some
+        }
+        _ => app.db.titles(None)?,
+    };
+    Ok(titles
+        .iter()
+        .filter(|t| only.is_none_or(|ids| ids.contains(&t.id)))
+        .map(|t| {
+            let mut v = summarize(t, &files, &eps, &profiles, &active);
+            if let Some(o) = v.as_object_mut() {
+                for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at", "people", "tagline", "collection", "details_at"] {
+                    o.remove(k);
                 }
-                v
-            })
-            .collect(),
-    ))
+            }
+            v
+        })
+        .collect())
+}
+
+/// What a row in the title list is made from. Watched state is not part of it.
+const LISTED: &[&str] = &["title", "episode", "file", "activity"];
+
+/// The title list. With `since`, the answer carries the library's change count, and when that
+/// count is one this server handed out before, only the titles that changed after it and the
+/// ids of those that went. `full` says the list is everything and replaces what the caller had.
+async fn list_titles(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
+    let Some(since) = q.get("since").map(|s| s.parse::<i64>().unwrap_or(0)) else {
+        return Ok(Json(json!(listed(&app, None)?)));
+    };
+    // Read the count first: a change that lands while the list is being put together is then
+    // sent again next time, not missed.
+    let revision = app.db.revision()?;
+    if since <= 0 || since > revision || since < app.db.changes_floor()? {
+        return Ok(Json(json!({"revision": revision, "full": true, "titles": listed(&app, None)?, "removed": []})));
+    }
+    let touched: HashSet<i64> = app.db.changes_since(since, LISTED, u32::MAX)?.iter().map(|c| c.title_id).collect();
+    let titles = if touched.is_empty() { vec![] } else { listed(&app, Some(&touched))? };
+    let still: HashSet<i64> = titles.iter().filter_map(|t| t["id"].as_i64()).collect();
+    let mut removed: Vec<i64> = touched.difference(&still).copied().collect();
+    removed.sort();
+    Ok(Json(json!({"revision": revision, "full": false, "titles": titles, "removed": removed})))
+}
+
+/// What changed in the library after `since`, oldest first, for anything that keeps a copy.
+async fn changes(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
+    let since = q.get("since").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+    let limit = q.get("limit").and_then(|s| s.parse::<u32>().ok()).unwrap_or(500).clamp(1, 5000);
+    let kinds: Vec<&str> = q.get("kinds").map(|k| k.split(',').map(str::trim).filter(|k| !k.is_empty()).collect()).unwrap_or_default();
+    let (revision, floor) = (app.db.revision()?, app.db.changes_floor()?);
+    let list = app.db.changes_since(since, &kinds, limit)?;
+    // Removals older than the floor have been forgotten, so a caller behind it cannot be told
+    // what went and should read everything again.
+    Ok(Json(json!({"revision": revision, "floor": floor, "complete": since >= floor && since <= revision, "more": list.len() as u32 == limit, "changes": list})))
 }
 
 async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
@@ -1228,6 +1275,7 @@ fn api_routes() -> Router<App> {
         .route("/api/plex/track", post(plex_track))
         .route("/api/art/{id}/{kind}", get(art))
         .route("/api/players", get(players))
+        .route("/api/changes", get(changes))
         .route("/api/events", get(events))
 }
 

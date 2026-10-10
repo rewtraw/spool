@@ -1488,3 +1488,102 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     let (_, status) = call(&app_api, "GET", "/api/players", Value::Null).await;
     assert_eq!((status["enabled"].as_bool(), status["signed_in"].as_u64()), (Some(true), Some(1)));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_change_to_the_library_is_counted_and_can_be_asked_for() {
+    use rusqlite::params;
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let db = &w.app.db;
+    let at = |kind: &str, id: i64| db.changes_since(0, &[kind], u32::MAX).unwrap().into_iter().find(|c| c.id == id);
+    let start = db.revision().unwrap();
+
+    // Adding a title counts once; saving it as it was, or with only its search time moved, does not.
+    let mut film = w.movie("Alpha", 2001, "tt0000001");
+    let added = db.revision().unwrap();
+    assert_eq!(added, start + 1);
+    db.save_title(&mut film).unwrap();
+    film.last_search_at = 99;
+    film.last_refresh_at = 99;
+    film.details_at = 99;
+    db.save_title(&mut film).unwrap();
+    assert_eq!(db.revision().unwrap(), added, "nothing a listing shows has changed");
+    film.overview = "Now with words.".into();
+    db.save_title(&mut film).unwrap();
+    assert_eq!(db.revision().unwrap(), added + 1);
+    // However often it changes, a title has one place in the order: its latest.
+    assert_eq!(db.changes_since(0, &["title"], u32::MAX).unwrap().iter().filter(|c| c.id == film.id).count(), 1);
+    assert_eq!(at("title", film.id).unwrap().rev, added + 1);
+
+    // Files and episodes, written from anywhere, even by a statement that names its own way
+    // of settling conflicts.
+    let (show, eps) = w.series("Gamma", 1001, &[(1, 1, "One"), (1, 2, "Two")]);
+    let file_data = json!({"title_id": show.id, "rel_path": "one.mkv", "quality": {"quality": "bluray-1080p"}}).to_string();
+    let file_id = db
+        .with(|c| {
+            c.execute("INSERT OR REPLACE INTO files(title_id, rel_path, size, data) VALUES (?1, 'one.mkv', 10, ?2)", params![show.id, file_data])?;
+            Ok(c.last_insert_rowid())
+        })
+        .unwrap();
+    assert_eq!(at("file", file_id).map(|c| (c.title_id, c.removed)), Some((show.id, false)));
+    let before = db.revision().unwrap();
+    db.with(|c| c.execute("UPDATE files SET data = data WHERE id = ?1", [file_id])).unwrap();
+    assert_eq!(db.revision().unwrap(), before, "a file written back as it was has not changed");
+    db.with(|c| c.execute("UPDATE episodes SET file_id = ?2 WHERE id = ?1", params![eps[0], file_id])).unwrap();
+    assert_eq!(at("episode", eps[0]).unwrap().rev, before + 1);
+    // Deleting the file unlinks the episode, and both are noted.
+    db.with(|c| c.execute("DELETE FROM files WHERE id = ?1", [file_id])).unwrap();
+    assert!(at("file", file_id).unwrap().removed);
+    assert!(at("episode", eps[0]).unwrap().rev > before + 1);
+    assert!(!at("episode", eps[0]).unwrap().removed);
+
+    // What a player reports is counted too, under the title it belongs to.
+    db.save_watched("episode", eps[1], &Watched { position: 30.0, ..Default::default() }).unwrap();
+    assert_eq!(at("watched_episode", eps[1]).map(|c| c.title_id), Some(show.id));
+
+    // The web app's list: everything the first time, then only what moved.
+    let api = spool::api::router(w.app.clone());
+    let (_, plain) = call(&api, "GET", "/api/titles", Value::Null).await;
+    assert_eq!(plain.as_array().map(Vec::len), Some(2), "without a count the list is as it always was");
+    let (_, first) = call(&api, "GET", "/api/titles?since=0", Value::Null).await;
+    assert_eq!((first["full"].as_bool(), first["titles"].as_array().map(Vec::len)), (Some(true), Some(2)));
+    let seen = first["revision"].as_i64().unwrap();
+    let (_, quiet) = call(&api, "GET", &format!("/api/titles?since={seen}"), Value::Null).await;
+    assert_eq!(quiet, json!({"revision": seen, "full": false, "titles": [], "removed": []}));
+
+    // A download starting changes how its title is listed; renaming a profile changes every
+    // title that uses it; a deleted title is named as gone, with its episodes.
+    let release = json!({"guid": "g", "title": "Alpha.2001.1080p.BluRay.x264-GRP"});
+    let mut acq: Acquisition = serde_json::from_value(json!({"title_id": film.id, "state": "downloading", "release": release, "quality": {"quality": "bluray-1080p"}})).unwrap();
+    db.save_acquisition(&mut acq).unwrap();
+    let (_, moved) = call(&api, "GET", &format!("/api/titles?since={seen}"), Value::Null).await;
+    assert_eq!(moved["titles"].as_array().unwrap().iter().map(|t| (t["id"].as_i64().unwrap(), t["active"].as_str())).collect::<Vec<_>>(), [(film.id, Some("downloading"))]);
+    let seen = moved["revision"].as_i64().unwrap();
+    let mut tv = db.profiles().unwrap().into_iter().find(|p| p.id == show.profile_id).unwrap();
+    tv.name = "Television".into();
+    db.save_profile(&mut tv).unwrap();
+    db.delete_title(film.id).unwrap();
+    let (_, after) = call(&api, "GET", &format!("/api/titles?since={seen}"), Value::Null).await;
+    assert_eq!(after["titles"].as_array().unwrap().iter().map(|t| (t["id"].as_i64().unwrap(), t["profile"].as_str())).collect::<Vec<_>>(), [(show.id, Some("Television"))]);
+    assert_eq!(after["removed"], json!([film.id]));
+    db.delete_title(show.id).unwrap();
+    assert!(eps.iter().all(|e| at("episode", *e).unwrap().removed));
+
+    // The same record, for anything else that keeps a copy.
+    let (_, log) = call(&api, "GET", "/api/changes?since=0&kinds=title", Value::Null).await;
+    assert_eq!(log["complete"], true);
+    assert_eq!(log["changes"].as_array().unwrap().iter().map(|c| (c["id"].as_i64().unwrap(), c["removed"].as_bool().unwrap())).collect::<Vec<_>>(), [(film.id, true), (show.id, true)]);
+    let (_, paged) = call(&api, "GET", "/api/changes?since=0&limit=1", Value::Null).await;
+    assert_eq!((paged["changes"].as_array().map(Vec::len), paged["more"].as_bool()), (Some(1), Some(true)));
+
+    // Removals are forgotten in time. Someone who last looked before then is told to start over.
+    let latest = db.revision().unwrap();
+    assert!(db.prune_changes(spool::db::now() + 10).unwrap() > 0);
+    assert_eq!(db.changes_floor().unwrap(), latest);
+    let (_, stale) = call(&api, "GET", &format!("/api/titles?since={seen}"), Value::Null).await;
+    assert_eq!(stale["full"], true);
+    let (_, stale) = call(&api, "GET", &format!("/api/changes?since={seen}"), Value::Null).await;
+    assert_eq!(stale["complete"], false);
+    let (_, ahead) = call(&api, "GET", &format!("/api/titles?since={}", latest + 50), Value::Null).await;
+    assert_eq!(ahead["full"], true, "a count this database never gave out");
+}

@@ -177,7 +177,9 @@ impl App {
         let idx = self.plex_index()?;
         let (files, episodes) = (self.db.file_counts()?, self.db.episode_counts()?);
         let mut nudged = 0;
-        for t in self.db.titles(None)? {
+        let mut asked: std::collections::HashSet<i64> = Default::default();
+        let titles = self.db.titles(None)?;
+        for t in &titles {
             let have = match t.kind {
                 Kind::Movie => files.get(&t.id).map(|f| f.0.min(1)).unwrap_or(0),
                 Kind::Series => episodes.get(&t.id).map(|e| e.1).unwrap_or(0),
@@ -186,10 +188,31 @@ impl App {
             if have > in_plex && !t.path.is_empty() && nudged < 20 {
                 if self.plex_refresh(&t.path).await.is_ok() {
                     nudged += 1;
+                    asked.insert(t.id);
                 }
             }
         }
-        Ok(if nudged > 0 { format!("{count} items read from Plex; asked it to rescan {nudged} folders it was behind on") } else { format!("{count} items read from Plex") })
+        // A count does not show a file that was replaced, renamed, deleted or given a subtitle.
+        // Wherever a file changed since the last reading, ask Plex to look at that folder too.
+        let mut seen: i64 = self.db.get_setting("plex_revision");
+        let revision = self.db.revision()?;
+        if seen > revision {
+            seen = 0;
+        }
+        let mut reached = revision;
+        for c in self.db.changes_since(seen, &["file"], u32::MAX)? {
+            if nudged >= 20 {
+                // The rest wait for the next reading.
+                reached = c.rev - 1;
+                break;
+            }
+            let Some(t) = titles.iter().find(|t| t.id == c.title_id && !t.path.is_empty()) else { continue };
+            if asked.insert(t.id) && self.plex_refresh(&t.path).await.is_ok() {
+                nudged += 1;
+            }
+        }
+        self.db.set_setting("plex_revision", &reached)?;
+        Ok(if nudged > 0 { format!("{count} items read from Plex; asked it to rescan {nudged} folders that changed or that it was behind on") } else { format!("{count} items read from Plex") })
     }
 
     pub fn plex_index(&self) -> Result<PlexIndex> {
