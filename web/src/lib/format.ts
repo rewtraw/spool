@@ -55,6 +55,7 @@ export function ago(ts: number): string {
   if (s < 60) return 'just now';
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} hr ago`;
+  if (s < 86400 * 2) return 'yesterday';
   if (s < 86400 * 30) return `${Math.floor(s / 86400)} days ago`;
   return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }

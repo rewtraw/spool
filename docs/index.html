@@ -154,6 +154,9 @@
       <div><h3>Unpacks as it downloads</h3><p>Uncompressed RAR posts are unpacked volume by volume while they arrive, so they need about half the room and no extraction step.</p></div>
       <div><h3>Whole seasons, one source</h3><p>For series it prefers a pack or one group's complete run over a scatter of episodes, and searches by name when an indexer's ids fall short.</p></div>
       <div><h3>Sizes you choose</h3><p>Profiles carry a size target. Oversized releases are a last resort, and a file that is too big can be swapped for a smaller copy.</p></div>
+      <div><h3>More than one version</h3><p>Keep a 4K copy beside a small one, or two cuts of the same film. Upgrades replace the main file and leave the others alone.</p></div>
+      <div><h3>Original language first</h3><p>It knows what language a title was made in, ranks dubs last, and follows anime's own episode numbering.</p></div>
+      <div><h3>Reads awkward names</h3><p>Releases named without a year, never linked to an id, or handed over with garbled non-Latin text are still recognised for what they are.</p></div>
       <div><h3>Cautious by default</h3><p>It starts in a mode that changes nothing, journals every import, recycles replaced files and will not write when the media disk is missing.</p></div>
     </div>
   </section>
@@ -188,6 +191,35 @@
 
   <section class="show">
     <div class="copy">
+      <p class="eyebrow">Subtitles</p>
+      <h2>Subtitles it has listened to.</h2>
+      <p class="sub">Fetching a subtitle file is easy. Knowing it is in time with your copy of the film is the hard part, so Spool checks.</p>
+      <ul>
+        <li><b>Keeps what the release brings</b>, and finds missing languages on OpenSubtitles.</li>
+        <li><b>Listens to the film.</b> It compares when people speak with when the subtitles say they do.</li>
+        <li><b>Corrects what it can.</b> A file that is late, early or timed for another frame rate is retimed.</li>
+        <li><b>Discards what does not fit</b> and tries the next, so a subtitle for a different cut never stays.</li>
+      </ul>
+    </div>
+    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/subtitles.png" alt="A film with two versions; its subtitle files are marked in time or corrected" width="1440" height="960"></div>
+  </section>
+
+  <section class="show flip">
+    <div class="copy">
+      <p class="eyebrow">In bulk</p>
+      <h2>Tidy a whole shelf at once.</h2>
+      <p class="sub">Select as many titles as you like and act on them together.</p>
+      <ul>
+        <li><b>Monitor, change profile, search or refresh</b> a selection, with searches running in the background.</li>
+        <li><b>Free space in one go</b>: delete the files of everything you have watched, or look for smaller copies.</li>
+        <li><b>The same for the queue</b>: pause, resume or remove several downloads together.</li>
+      </ul>
+    </div>
+    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/select.png" alt="The library with several titles selected and a bar of actions for them" width="1440" height="960"></div>
+  </section>
+
+  <section class="show">
+    <div class="copy">
       <p class="eyebrow">For assistants</p>
       <h2>Ask an AI why something hasn't arrived.</h2>
       <p class="sub">Spool speaks the Model Context Protocol, so an assistant such as Claude can look at your library and operate it.</p>
@@ -209,7 +241,7 @@ git clone https://github.com/rewtraw/spool && cd spool
 mkdir -p data && $EDITOR compose.yaml   <span class="c"># set the user and your media path</span>
 docker compose up -d --build            <span class="c"># http://localhost:7979</span>
 
-<span class="c"># or from source: Rust, Bun, and par2, 7zz and ffprobe on the PATH</span>
+<span class="c"># or from source: Rust, Bun, and par2, 7zz and ffmpeg on the PATH</span>
 (cd web && bun install && bun run build)
 cargo run --release -p spool -- serve</pre>
     <p class="note">Add your folders, a Usenet provider and a Newznab indexer in Settings. Spool starts in shadow mode, recording what it would do and changing nothing, until you switch it to active. Coming from Radarr, Sonarr and SABnzbd? <code>spool migrate</code> brings over your catalog, profiles, indexers and servers. The <a href="https://github.com/rewtraw/spool#readme">README</a> has the details.</p>
