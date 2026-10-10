@@ -63,6 +63,14 @@ pub fn local_url(t: &Title, art: Art) -> Option<String> {
     art.source(t).map(|src| format!("/api/art/{}/{}?v={}", t.id, art.name(), &tag(src)[..10]))
 }
 
+/// The address of a title's poster at the size a grid or a list shows it.
+pub fn small_url(t: &Title) -> Option<String> {
+    t.poster.as_deref().map(|src| format!("/api/art/{}/small?v={}", t.id, &tag(src)[..10]))
+}
+
+/// How wide the small poster is. A phone draws a grid tile about 330 of its own pixels across.
+const SMALL: u32 = 300;
+
 /// TMDB serves ready-made sizes; asking for one is cheaper than shrinking the original ourselves.
 fn sized_source(src: &str, art: Art) -> (String, bool) {
     if let Some(rest) = src.split("image.tmdb.org/t/p/").nth(1) {
@@ -90,6 +98,35 @@ impl App {
         let prefix = format!("{}-{}-", t.id, art.name());
         let (url, presized) = sized_source(&src, art);
         self.art_fetch(&path, &url, presized, art.width(), &prefix).await
+    }
+
+    /// The poster again, smaller, for grids and lists where the full one is more than the screen
+    /// can show. It is made from the full poster, which stays as it is beside it.
+    pub async fn art_small(&self, title_id: i64) -> Result<Vec<u8>> {
+        let t = self.db.title(title_id)?.ok_or_else(|| anyhow!("no such title"))?;
+        let src = t.poster.clone().ok_or_else(|| anyhow!("no artwork"))?;
+        let path = self.small_path(&t, &src);
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            return Ok(bytes);
+        }
+        let full = self.art(title_id, Art::Poster).await?;
+        let out = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            let img = image::load_from_memory(&full)?;
+            if img.width() <= SMALL {
+                return Ok(full);
+            }
+            let img = img.resize(SMALL, u32::MAX, image::imageops::FilterType::Lanczos3);
+            let mut buf = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 80).encode_image(&img.to_rgb8())?;
+            Ok(buf)
+        })
+        .await??;
+        self.art_keep(&path, &out, &format!("{}-small-", t.id)).await?;
+        Ok(out)
+    }
+
+    fn small_path(&self, t: &Title, src: &str) -> PathBuf {
+        self.data_dir.join("art").join(format!("{}-small-{}.jpg", t.id, tag(src)))
     }
 
     /// Any image by its address, kept under `name`: cast photos, episode stills, and posters
@@ -152,9 +189,15 @@ impl App {
         })
         .await??;
 
+        self.art_keep(path, &out, prefix).await?;
+        Ok(out)
+    }
+
+    /// Write an image to the cache at `path`, clearing cached files whose names start with
+    /// `prefix`: copies made from an earlier source address for the same thing.
+    async fn art_keep(&self, path: &std::path::Path, bytes: &[u8], prefix: &str) -> Result<()> {
         let dir = self.data_dir.join("art");
         tokio::fs::create_dir_all(&dir).await?;
-        // Drop copies made from an earlier source address for this title.
         if let Ok(mut rd) = tokio::fs::read_dir(&dir).await {
             while let Ok(Some(e)) = rd.next_entry().await {
                 if e.file_name().to_string_lossy().starts_with(prefix) {
@@ -163,23 +206,26 @@ impl App {
             }
         }
         let tmp = path.with_extension("tmp");
-        tokio::fs::write(&tmp, &out).await?;
+        tokio::fs::write(&tmp, bytes).await?;
         tokio::fs::rename(&tmp, path).await?;
-        Ok(out)
+        Ok(())
     }
 
-    /// Fetch every poster that is not cached yet, a few at a time, so the library opens quickly.
+    /// Fetch every poster that is not cached yet, a few at a time, and make its small copy, so
+    /// the library opens quickly.
     pub async fn warm_art(&self) -> usize {
         let mut fetched = 0;
         for t in self.db.titles(None).unwrap_or_default() {
             let Some(src) = t.poster.clone() else { continue };
-            if self.art_path(&t, Art::Poster, &src).exists() {
+            let had = self.art_path(&t, Art::Poster, &src).exists();
+            if had && self.small_path(&t, &src).exists() {
                 continue;
             }
-            if self.art(t.id, Art::Poster).await.is_ok() {
+            // The small one is made from the full one, so asking for it brings both.
+            if self.art_small(t.id).await.is_ok() && !had {
                 fetched += 1;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(if had { 5 } else { 60 })).await;
         }
         fetched
     }

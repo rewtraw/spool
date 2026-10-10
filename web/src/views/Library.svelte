@@ -180,7 +180,7 @@
       {@const s = statusOf(t)}
       <a class="tile" href="#/title/{t.id}" class:dim={!t.monitored && !(t.file_count || t.episodes_have)} class:picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
         <div class="art">
-          <Poster src={t.poster} title={t.title} kind={t.kind} />
+          <Poster src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} />
           {#if selecting}<span class="check" class:on={picked[t.id]} aria-hidden="true">{picked[t.id] ? '✓' : ''}</span>{/if}
           <span class="chip {s.tone} pin">{s.label}</span>
         </div>

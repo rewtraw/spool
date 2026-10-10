@@ -1587,3 +1587,43 @@ async fn every_change_to_the_library_is_counted_and_can_be_asked_for() {
     let (_, ahead) = call(&api, "GET", &format!("/api/titles?since={}", latest + 50), Value::Null).await;
     assert_eq!(ahead["full"], true, "a count this database never gave out");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grids_get_a_small_poster_and_the_full_one_is_kept() {
+    use serde_json::Value;
+    // A stand-in for the artwork source: one tall poster, larger than any grid shows it.
+    let mut big = Vec::new();
+    let picture = image::RgbImage::from_fn(500, 750, |x, y| image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8]));
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut big, 90).encode_image(&picture).unwrap();
+    let served = big.clone();
+    let source = axum::Router::new().route("/poster.jpg", get(move || { let b = served.clone(); async move { b } }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, source).await.unwrap() });
+
+    let w = World::new(Mode::Active).await;
+    let mut film = w.movie("Alpha", 2001, "tt0000001");
+    film.poster = Some(format!("http://{addr}/poster.jpg"));
+    w.app.db.save_title(&mut film).unwrap();
+    let api = spool::api::router(w.app.clone());
+    let (_, list) = call(&api, "GET", "/api/titles", Value::Null).await;
+    let (small_url, full_url) = (list[0]["poster_small"].as_str().unwrap().to_string(), list[0]["poster"].as_str().unwrap().to_string());
+    assert!(small_url.starts_with(&format!("/api/art/{}/small?v=", film.id)) && full_url.starts_with(&format!("/api/art/{}/poster?v=", film.id)));
+
+    let width = |bytes: &[u8]| image::load_from_memory(bytes).unwrap().width();
+    let small = w.app.art_small(film.id).await.unwrap();
+    assert_eq!(width(&small), 300);
+    assert!(small.len() < big.len() / 2, "{} against {}", small.len(), big.len());
+    // Asking for the small one fetched the full one too, and both stay on disk.
+    let full = w.app.art(film.id, spool::art::Art::Poster).await.unwrap();
+    assert_eq!(width(&full), 400);
+    let kept = tree(&w.app.data_dir.join("art"));
+    assert_eq!(kept.iter().filter(|f| f.contains("-poster-")).count(), 1, "{kept:?}");
+    assert_eq!(kept.iter().filter(|f| f.contains("-small-")).count(), 1, "{kept:?}");
+
+    // A new poster replaces each copy and leaves no old ones behind.
+    film.poster = Some(format!("http://{addr}/poster.jpg?again"));
+    w.app.db.save_title(&mut film).unwrap();
+    w.app.art_small(film.id).await.unwrap();
+    assert_eq!(tree(&w.app.data_dir.join("art")).len(), 2);
+}

@@ -125,7 +125,7 @@
       {#each arrivals as h (h.id)}
         {@const t = titleOf(h.title_id)}
         <a class="tile" href="#/title/{h.title_id}">
-          <Poster src={t?.poster} title={h.title ?? ''} kind={t?.kind} />
+          <Poster src={t?.poster_small ?? t?.poster} title={h.title ?? ''} kind={t?.kind} />
           <div class="truncate name">{h.title}</div>
           <div class="faint small">{ago(h.ts)}{h.kind === 'upgraded' ? ' · upgraded' : ''}</div>
         </a>

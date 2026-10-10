@@ -111,6 +111,8 @@ export interface Title {
   status: string;
   runtime: number;
   poster?: string | null;
+  /** The poster at the size grids and lists show it. */
+  poster_small?: string | null;
   fanart?: string | null;
   genres: string[];
   monitored: boolean;

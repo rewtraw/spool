@@ -206,6 +206,7 @@ fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashMap<i64, (u3
     v["sort_title"] = json!(crate::store::sort_title(&t.title));
     v["poster"] = json!(crate::art::local_url(t, crate::art::Art::Poster));
     v["fanart"] = json!(crate::art::local_url(t, crate::art::Art::Fanart));
+    v["poster_small"] = json!(crate::art::small_url(t));
     let f = files.get(&t.id).copied().unwrap_or((0, 0));
     let e = eps.get(&t.id).copied().unwrap_or((0, 0));
     v["file_count"] = json!(f.0);
@@ -635,7 +636,7 @@ async fn activity(State(app): State<App>) -> R<Value> {
                 "acquisition": a,
                 "title": t.map(|t| t.title.clone()),
                 "kind": t.map(|t| t.kind),
-                "poster": t.and_then(|t| crate::art::local_url(t, crate::art::Art::Poster)),
+                "poster": t.and_then(crate::art::small_url),
                 "job": a.job_id.as_ref().and_then(|id| jobs.iter().find(|j| j.id == *id)),
             })
         })
@@ -714,7 +715,7 @@ async fn attention(State(app): State<App>) -> R<Value> {
     let rows = app.db.attention(false)?;
     Ok(Json(json!(rows.into_iter().map(|a| {
         let t = a.title_id.and_then(|i| titles.get(&i));
-        json!({"item": a, "title": t.map(|t| t.title.clone()), "kind": t.map(|t| t.kind), "poster": t.and_then(|t| crate::art::local_url(t, crate::art::Art::Poster))})
+        json!({"item": a, "title": t.map(|t| t.title.clone()), "kind": t.map(|t| t.kind), "poster": t.and_then(crate::art::small_url)})
     }).collect::<Vec<_>>())))
 }
 
@@ -761,7 +762,7 @@ async fn calendar(State(app): State<App>, Query(q): Query<HashMap<String, String
         .into_iter()
         .filter_map(|e| {
             let t = titles.get(&e.title_id)?;
-            Some(json!({"date": e.air_date, "kind": "episode", "title_id": t.id, "title": t.title, "poster": crate::art::local_url(t, crate::art::Art::Poster), "label": format!("S{:02}E{:02} · {}", e.season, e.episode, e.title),
+            Some(json!({"date": e.air_date, "kind": "episode", "title_id": t.id, "title": t.title, "poster": crate::art::small_url(t), "label": format!("S{:02}E{:02} · {}", e.season, e.episode, e.title),
                 "have": e.file_id.is_some(), "monitored": e.monitored && t.monitored}))
         })
         .collect();
@@ -769,7 +770,7 @@ async fn calendar(State(app): State<App>, Query(q): Query<HashMap<String, String
         for (d, label) in [(&t.in_cinemas, "In cinemas"), (&t.digital_release, "Digital release"), (&t.physical_release, "Physical release")] {
             if let Some(d) = d.as_deref().and_then(|d| d.get(..10)) {
                 if d >= from.as_str() && d <= to.as_str() {
-                    items.push(json!({"date": d, "kind": "movie", "title_id": t.id, "title": t.title, "poster": crate::art::local_url(t, crate::art::Art::Poster), "label": label, "have": false, "monitored": t.monitored}));
+                    items.push(json!({"date": d, "kind": "movie", "title_id": t.id, "title": t.title, "poster": crate::art::small_url(t), "label": label, "have": false, "monitored": t.monitored}));
                 }
             }
         }
@@ -1003,7 +1004,7 @@ async fn archive_list(State(app): State<App>) -> R<Value> {
         let at = *index.entry(key).or_insert_with(|| {
             let owner = titles.iter().find(|t| t.kind == n.kind && ((n.tmdb_id.is_some() && t.tmdb_id == n.tmdb_id) || (n.tvdb_id.is_some() && t.tvdb_id == n.tvdb_id)));
             let poster = match owner {
-                Some(t) => crate::art::local_url(t, crate::art::Art::Poster),
+                Some(t) => crate::art::small_url(t),
                 None => n.poster.as_deref().map(|src| crate::art::saved_url(n.id, src)),
             };
             groups.push(json!({"kind": n.kind, "name": owner.map(|t| t.title.clone()).unwrap_or_else(|| n.name.clone()), "year": n.year, "tmdb_id": n.tmdb_id, "tvdb_id": n.tvdb_id,
@@ -1106,7 +1107,7 @@ async fn space(State(app): State<App>) -> R<Value> {
             let mine: Vec<&crate::archive::SavedNzb> = saved.iter().filter(|n| n.kind == t.kind && ((n.tmdb_id.is_some() && n.tmdb_id == t.tmdb_id) || (n.tvdb_id.is_some() && n.tvdb_id == t.tvdb_id))).collect();
             Some((bytes, json!({
                 "title_id": t.id, "title": t.title, "year": t.year, "kind": t.kind, "monitored": t.monitored, "files": count, "size": bytes,
-                "poster": crate::art::local_url(t, crate::art::Art::Poster),
+                "poster": crate::art::small_url(t),
                 // Bytes above the profile's size target: roughly what a smaller copy would save.
                 "over_target": over,
                 "in_plex": item.is_some(),
@@ -1168,8 +1169,12 @@ async fn check_paths(State(app): State<App>) -> R<Value> {
 }
 
 async fn art(State(app): State<App>, Path((id, kind)): Path<(i64, String)>) -> Response {
-    let Some(kind) = crate::art::Art::parse(&kind) else { return StatusCode::NOT_FOUND.into_response() };
-    match app.art(id, kind).await {
+    let image = match (kind.as_str(), crate::art::Art::parse(&kind)) {
+        ("small", _) => app.art_small(id).await,
+        (_, Some(kind)) => app.art(id, kind).await,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    match image {
         // The address carries a version tag, so the image behind it never changes.
         Ok(bytes) => ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], bytes).into_response(),
         Err(_) => ([(header::CACHE_CONTROL, "public, max-age=600")], StatusCode::NOT_FOUND).into_response(),
