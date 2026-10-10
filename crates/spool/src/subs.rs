@@ -80,6 +80,54 @@ pub struct SyncReport {
     /// The file was rewritten with the correction, and the figures above are from before it.
     #[serde(default)]
     pub corrected: bool,
+    /// What it was checked against: "subtitles" inside the video, or its "sound".
+    #[serde(default)]
+    pub method: String,
+}
+
+/// What a subtitle file is checked against, worked out once per video and only as far as is
+/// needed. Subtitles already inside the video are the better witness: they are exact, where
+/// sound is only a strong hint. The film is listened to when there are none, or when they
+/// cannot settle it.
+pub struct Reference {
+    video: PathBuf,
+    channels: f64,
+    seconds: f64,
+    written: Option<Option<Vec<f32>>>,
+    heard: Option<Option<Vec<f32>>>,
+}
+
+impl Reference {
+    pub fn new(video: &Path, channels: f64, seconds: f64) -> Reference {
+        Reference { video: video.to_path_buf(), channels, seconds, written: None, heard: None }
+    }
+}
+
+/// A set of cues as the same kind of shape the soundtrack gives: high while someone speaks.
+/// As with sound, what matters is each moment against its surroundings. Talk comes in scenes,
+/// and without taking the local average away a busy scene matches any other busy scene.
+pub fn cue_shape(cues: &[Cue], seconds: f64) -> Vec<f32> {
+    let end = cues.iter().map(|c| c.end).fold(seconds, f64::max) + 30.0;
+    let n = (end / FRAME) as usize;
+    let mut on = vec![0f32; n];
+    for c in cues {
+        let (a, b) = ((c.start.max(0.0) / FRAME) as usize, ((c.end / FRAME) as usize).min(n));
+        for v in &mut on[a.min(b)..b] {
+            *v = 1.0;
+        }
+    }
+    let mut total: Vec<f64> = Vec::with_capacity(n + 1);
+    total.push(0.0);
+    for v in &on {
+        total.push(total.last().unwrap() + *v as f64);
+    }
+    let half = (10.0 / FRAME) as usize;
+    (0..n)
+        .map(|i| {
+            let (a, b) = (i.saturating_sub(half), (i + half).min(n));
+            on[i] - ((total[b] - total[a]) / (b - a).max(1) as f64) as f32
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------- subtitle files
@@ -205,7 +253,7 @@ pub fn speech_shape(energy: &[f32]) -> Vec<f32> {
 /// Find where a set of cues sits best against the film's speech.
 pub fn align(shape: &[f32], cues: &[Cue]) -> SyncReport {
     let n = shape.len();
-    let unsure = SyncReport { verdict: Verdict::Unsure, offset: 0.0, rate: 1.0, confidence: 0.0, checked_at: now(), corrected: false };
+    let unsure = SyncReport { verdict: Verdict::Unsure, offset: 0.0, rate: 1.0, confidence: 0.0, checked_at: now(), corrected: false, method: String::new() };
     if n < (120.0 / FRAME) as usize || cues.len() < 20 {
         return unsure;
     }
@@ -249,7 +297,7 @@ pub fn align(shape: &[f32], cues: &[Cue]) -> SyncReport {
     } else {
         Verdict::Unsure
     };
-    SyncReport { verdict, offset: (offset * 100.0).round() / 100.0, rate, confidence: (confidence * 10.0).round() / 10.0, checked_at: now(), corrected: false }
+    SyncReport { verdict, offset: (offset * 100.0).round() / 100.0, rate, confidence: (confidence * 10.0).round() / 10.0, checked_at: now(), corrected: false, method: String::new() }
 }
 
 /// The checksum OpenSubtitles knows files by: the size plus the first and last 64 KiB read as
@@ -573,32 +621,96 @@ impl App {
         self.save_file_data(&file)
     }
 
-    /// Check one subtitle file against the film's speech, correcting it when it is out by a
-    /// known amount and `correct` is set.
-    pub async fn check_sidecar(&self, file_id: i64, rel_path: &str, correct: bool) -> Result<SyncReport> {
-        let (file, title) = self.file_and_title(file_id)?;
-        let video = Path::new(&title.path).join(&file.rel_path);
-        let shape = self.listen(&video, file.media_info.as_ref().map(|m| m.audio_channels).unwrap_or(2.0)).await?;
-        self.check_against(file_id, rel_path, &shape, correct)
+    /// The subtitle tracks inside a video that are text, as (position among its subtitle
+    /// tracks, language). Picture-based tracks, as on Blu-ray, cannot be read as times and words.
+    async fn written_tracks(&self, video: &Path) -> Vec<(usize, String)> {
+        let Some(tool) = self.ffmpeg_path().map(|p| p.with_file_name("ffprobe")).filter(|p| p.is_file()) else { return vec![] };
+        let Ok(out) = tokio::process::Command::new(tool).args(["-v", "error", "-select_streams", "s", "-show_entries", "stream=codec_name:stream_tags=language", "-of", "json"]).arg(video).output().await else { return vec![] };
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+        v["streams"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            // The "forced" flag is set wrongly too often to go by; a track of only signs and
+            // songs is told apart later by how little it says.
+            .filter(|(_, s)| matches!(s["codec_name"].as_str(), Some("subrip" | "ass" | "ssa" | "mov_text" | "webvtt" | "text")))
+            .map(|(i, s)| (i, s["tags"]["language"].as_str().and_then(language_code).unwrap_or("und").to_string()))
+            .collect()
     }
 
-    fn check_against(&self, file_id: i64, rel_path: &str, shape: &[f32], correct: bool) -> Result<SyncReport> {
-        let (mut file, title) = self.file_and_title(file_id)?;
+    async fn read_written(&self, video: &Path, position: usize) -> Result<Vec<Cue>> {
+        let tool = self.ffmpeg_path().ok_or_else(|| anyhow!("ffmpeg is not installed"))?;
+        let out = tokio::process::Command::new(tool).args(["-v", "error", "-nostdin", "-i"]).arg(video).args(["-map", &format!("0:s:{position}"), "-f", "srt", "-"]).kill_on_drop(true).output().await?;
+        Ok(parse_srt(&decode(&out.stdout)))
+    }
+
+    /// The fullest text track inside the video, as a shape to check other subtitles against.
+    async fn written_shape(&self, r: &Reference) -> Option<Vec<f32>> {
+        // A track of signs and songs, or a handful of translated captions, says too little.
+        const ENOUGH: usize = 60;
+        let mut best: Vec<Cue> = vec![];
+        for (position, _) in self.written_tracks(&r.video).await.into_iter().take(3) {
+            let cues = self.read_written(&r.video, position).await.unwrap_or_default();
+            if cues.len() > best.len() {
+                best = cues;
+            }
+        }
+        (best.len() >= ENOUGH).then(|| cue_shape(&best, r.seconds))
+    }
+
+    pub fn reference_for(&self, file_id: i64) -> Result<Reference> {
+        let (file, title) = self.file_and_title(file_id)?;
+        let info = file.media_info.as_ref();
+        Ok(Reference::new(&Path::new(&title.path).join(&file.rel_path), info.map(|m| m.audio_channels).unwrap_or(2.0), info.map(|m| m.runtime_secs).unwrap_or(0.0)))
+    }
+
+    /// Say how a set of cues sits against a video, by its own subtitles if they settle it and
+    /// by its sound if not.
+    pub async fn judge_timing(&self, r: &mut Reference, cues: &[Cue]) -> SyncReport {
+        if r.written.is_none() {
+            r.written = Some(self.written_shape(r).await);
+        }
+        if let Some(Some(shape)) = &r.written {
+            let report = align(shape, cues);
+            if report.confidence >= SURE {
+                return SyncReport { method: "subtitles".into(), ..report };
+            }
+        }
+        if r.heard.is_none() {
+            r.heard = Some(self.listen(&r.video, r.channels).await.ok());
+        }
+        match &r.heard {
+            Some(Some(shape)) => SyncReport { method: "sound".into(), ..align(shape, cues) },
+            _ => align(&[], cues),
+        }
+    }
+
+    /// Check one subtitle file against the film, correcting it when it is out by a known
+    /// amount and `correct` is set.
+    pub async fn check_sidecar(&self, file_id: i64, rel_path: &str, correct: bool) -> Result<SyncReport> {
+        let mut r = self.reference_for(file_id)?;
+        self.check_with(file_id, rel_path, &mut r, correct).await
+    }
+
+    async fn check_with(&self, file_id: i64, rel_path: &str, r: &mut Reference, correct: bool) -> Result<SyncReport> {
+        let (_, title) = self.file_and_title(file_id)?;
         let path = Path::new(&title.path).join(rel_path);
         let cues = parse_srt(&decode(&std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?));
         if cues.is_empty() {
             bail!("the subtitle file has no readable lines");
         }
-        let mut report = align(shape, &cues);
+        let mut report = self.judge_timing(r, &cues).await;
         if correct && report.verdict == Verdict::Shifted {
             let fixed = retime(&cues, report.rate, report.offset);
             // Only keep the correction if the corrected file then checks out.
-            if align(shape, &fixed).verdict == Verdict::InSync {
+            if self.judge_timing(r, &fixed).await.verdict == Verdict::InSync {
                 std::fs::write(&path, write_srt(&fixed))?;
                 report.corrected = true;
-                tracing::info!(file = %rel_path, offset = report.offset, rate = report.rate, "corrected subtitle timing");
+                tracing::info!(file = %rel_path, offset = report.offset, rate = report.rate, by = %report.method, "corrected subtitle timing");
             }
         }
+        let (mut file, _) = self.file_and_title(file_id)?;
         if let Some(s) = file.subtitles.iter_mut().find(|s| s.rel_path == rel_path) {
             s.sync = Some(report.clone());
             self.save_file_data(&file)?;
@@ -715,8 +827,8 @@ impl App {
     }
 
     /// Download a chosen subtitle, put it beside the video and check it against the speech.
-    /// With `shape` given the film has been listened to already.
-    pub async fn add_subtitle(&self, file_id: i64, c: &Candidate, shape: Option<&[f32]>) -> Result<(Sidecar, SyncReport)> {
+    /// With a reference given, what has been learned about the video already is used again.
+    pub async fn add_subtitle(&self, file_id: i64, c: &Candidate, reference: Option<&mut Reference>) -> Result<(Sidecar, SyncReport)> {
         let bytes = self.fetch_subtitle(c.file_id).await?;
         let cues = parse_srt(&decode(&bytes));
         if cues.is_empty() {
@@ -733,8 +845,8 @@ impl App {
         let side = Sidecar { language: c.language.clone(), rel_path: rel.clone(), source: "opensubtitles".into(), release: c.release.clone(), hearing_impaired: c.hearing_impaired, forced: false, sync: None };
         file.subtitles.push(side.clone());
         self.save_file_data(&file)?;
-        let report = match shape {
-            Some(s) => self.check_against(file_id, &rel, s, true)?,
+        let report = match reference {
+            Some(r) => self.check_with(file_id, &rel, r, true).await?,
             None => self.check_sidecar(file_id, &rel, true).await?,
         };
         Ok((Sidecar { sync: Some(report.clone()), ..side }, report))
@@ -748,12 +860,10 @@ impl App {
         if candidates.is_empty() {
             return Ok(None);
         }
-        let (file, title) = self.file_and_title(file_id)?;
-        let video = Path::new(&title.path).join(&file.rel_path);
-        // A film that cannot be listened to can still take subtitles timed for this exact file.
-        let shape = self.listen(&video, file.media_info.as_ref().map(|m| m.audio_channels).unwrap_or(2.0)).await.unwrap_or_default();
+        let (_, title) = self.file_and_title(file_id)?;
+        let mut reference = self.reference_for(file_id)?;
         for c in candidates.iter().take(TRIES) {
-            let (side, report) = self.add_subtitle(file_id, c, Some(&shape)).await?;
+            let (side, report) = self.add_subtitle(file_id, c, Some(&mut reference)).await?;
             match report.verdict {
                 Verdict::InSync => return Ok(Some(side)),
                 Verdict::Shifted if report.corrected => return Ok(Some(side)),
@@ -920,6 +1030,22 @@ mod tests {
         assert_eq!(r.verdict, Verdict::NoMatch, "{r:?}");
         // Too little to judge by.
         assert_eq!(align(&shape, &other[..5]).verdict, Verdict::Unsure);
+    }
+
+    #[test]
+    fn subtitles_inside_the_video_are_an_exact_reference() {
+        let (_, cues) = film(40, 7);
+        let reference = cue_shape(&cues, 40.0 * 60.0);
+        // Another language's track: the same moments, cut into lines a little differently.
+        let translated: Vec<Cue> = cues.iter().enumerate().filter(|(i, _)| i % 9 != 0).map(|(i, c)| Cue { start: c.start + 0.1 * (i % 3) as f64, end: c.end + 0.2, text: "linea".into() }).collect();
+        let r = align(&reference, &translated);
+        assert_eq!(r.verdict, Verdict::InSync, "{r:?}");
+        let late = retime(&translated, 1.0, 12.25);
+        let r = align(&reference, &late);
+        assert_eq!(r.verdict, Verdict::Shifted, "{r:?}");
+        assert!((r.offset + 12.25).abs() < 0.2, "{r:?}");
+        let (_, other) = film(40, 99);
+        assert_eq!(align(&reference, &other).verdict, Verdict::NoMatch);
     }
 
     #[test]

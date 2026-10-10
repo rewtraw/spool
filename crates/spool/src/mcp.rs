@@ -184,6 +184,34 @@ const TOOLS: &[Tool] = &[
         description: "Start a background task: rss (read indexer feeds), backlog (search a few missing titles), refresh (update details), scan (rescan library folders), housekeeping (backup and tidy), plex (read Plex), compact (look for smaller copies of the few titles furthest over their size target; replaces files when they arrive), subtitles (find subtitles for a few files that lack them and check each is in time with the film).",
         schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles"]}}), &["name"]),
     },
+    Tool {
+        name: "bulk_titles",
+        read: false,
+        destructive: true,
+        description: "Do one thing to many titles at once. Actions: monitor, unmonitor, set_profile (needs profile, a profile name; applied only to titles of that profile's kind), search (look for missing releases), find_smaller (look for smaller copies of files over the size target), refresh, delete_files (keeps the titles, unmonitored), remove (takes them out of the library; files stay unless delete_files is true). search, find_smaller and refresh run in the background one title at a time; see status for progress. Deleting files needs confirm=true.",
+        schema: || obj(json!({"title_ids": {"type": "array", "items": {"type": "integer"}}, "action": {"type": "string", "enum": ["monitor", "unmonitor", "set_profile", "search", "find_smaller", "refresh", "delete_files", "remove"]}, "profile": {"type": "string"}, "delete_files": {"type": "boolean"}, "confirm": {"type": "boolean"}}), &["title_ids", "action"]),
+    },
+    Tool {
+        name: "subtitles",
+        read: true,
+        destructive: false,
+        description: "A title's subtitles, file by file: the languages inside each video, the subtitle files beside it with whether each has been checked and found in time, and which wanted languages are missing. Gives the file_id the other subtitle tools take.",
+        schema: || obj(json!({"title_id": {"type": "integer"}}), &["title_id"]),
+    },
+    Tool {
+        name: "find_subtitles",
+        read: false,
+        destructive: false,
+        description: "Find subtitles in one language for one video file on OpenSubtitles, check each against the film and keep the first that is in time (correcting a fixed offset). Tries up to three; each uses one of the account's daily downloads. Can take a minute.",
+        schema: || obj(json!({"file_id": {"type": "integer"}, "language": {"type": "string", "description": "A language code or name: en, es, french"}}), &["file_id", "language"]),
+    },
+    Tool {
+        name: "check_subtitles",
+        read: false,
+        destructive: false,
+        description: "Check a subtitle file beside a video against the film: in time, out by a known amount, or not for this film. With correct=true a file that is out by a known amount is rewritten in time. Can take half a minute.",
+        schema: || obj(json!({"file_id": {"type": "integer"}, "path": {"type": "string", "description": "The subtitle file's path as given by the subtitles tool"}, "correct": {"type": "boolean"}}), &["file_id", "path"]),
+    },
     Tool { name: "delete_title_files", read: false, destructive: true, description: "Free space by deleting all of a title's media files. The title stays in the library, unmonitored so it is not fetched again, and its saved releases stay in the archive for a later re-download. Needs confirm=true.", schema: || obj(json!({"title_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["title_id"]) },
     Tool { name: "delete_file", read: false, destructive: true, description: "Delete one media file by file_id (from title_detail). It goes to the recycle folder if recycling is on, otherwise it is gone at once. Needs confirm=true.", schema: || obj(json!({"file_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["file_id"]) },
     Tool { name: "empty_recycle", read: false, destructive: true, description: "Permanently delete everything in the recycle folder to free disk space. Needs confirm=true.", schema: || obj(json!({"confirm": {"type": "boolean"}}), &[]) },
@@ -531,6 +559,88 @@ impl Mcp {
                         "watched_in_plex": t["watched"], "last_watched": when(&t["last_viewed_at"]), "can_download_again": t["can_download_again"],
                     })).collect::<Vec<_>>(),
                 }))
+            }
+            "bulk_titles" => {
+                let ids: Vec<i64> = a["title_ids"].as_array().map(|x| x.iter().filter_map(|v| v.as_i64()).collect()).unwrap_or_default();
+                if ids.is_empty() {
+                    return Err("title_ids is required".into());
+                }
+                let action = a["action"].as_str().ok_or("action is required")?;
+                let delete_files = action == "delete_files" || (action == "remove" && a["delete_files"].as_bool() == Some(true));
+                if delete_files && !confirmed {
+                    let files = self.app.db.file_counts().map_err(|e| e.to_string())?;
+                    let (n, bytes) = ids.iter().filter_map(|id| files.get(id)).fold((0u32, 0u64), |t, f| (t.0 + f.0, t.1 + f.1));
+                    return Err(format!("this would delete {n} file(s), {:.1} GB, across {} titles. Call again with confirm=true if the person asked for that.", bytes as f64 / (1u64 << 30) as f64, ids.len()));
+                }
+                let mut body = json!({"ids": ids, "action": match action {
+                    "set_profile" => "profile",
+                    "find_smaller" => "compact",
+                    "delete_files" => "free",
+                    other => other,
+                }, "delete_files": delete_files});
+                if action == "set_profile" {
+                    // A name can belong to a film profile and a series profile; each goes to its own kind.
+                    let name = a["profile"].as_str().ok_or("profile is required for set_profile")?;
+                    let found: Vec<i64> = ["movie", "series"].iter().filter_map(|k| self.profile_id(name, k).ok()).collect();
+                    if found.is_empty() {
+                        return Err(self.profile_id(name, "movie").unwrap_err());
+                    }
+                    let mut changed = 0;
+                    for id in found {
+                        body["profile_id"] = json!(id);
+                        changed += self.post("/api/titles/bulk", body.clone()).await?["done"].as_i64().unwrap_or(0);
+                    }
+                    return Ok(json!({"titles_changed": changed, "asked_for": ids.len(), "note": "a profile applies only to titles of its own kind"}));
+                }
+                let r = self.post("/api/titles/bulk", body).await?;
+                Ok(match r["started"].as_i64() {
+                    Some(n) => json!({"started_for_titles": n, "note": "running in the background, one title at a time; status shows downloads as they start"}),
+                    None => json!({"titles_changed": r["done"], "gb_deleted": gb(&r["bytes"]), "asked_for": ids.len()}),
+                })
+            }
+            "subtitles" => {
+                let t = self.get(&format!("/api/titles/{}", int("title_id")?)).await?;
+                let mut files = vec![];
+                for f in t["files"].as_array().into_iter().flatten() {
+                    let Some(id) = f["id"].as_i64() else { continue };
+                    let s = self.get(&format!("/api/files/{id}/subtitles")).await?;
+                    let have: Vec<&str> = s["embedded"].as_array().into_iter().flatten().chain(s["beside"].as_array().into_iter().flatten().map(|b| &b["language"])).filter_map(|v| v.as_str()).collect();
+                    files.push(json!({
+                        "file_id": id, "file": f["rel_path"],
+                        "inside_the_video": s["embedded"],
+                        "beside_the_video": s["beside"].as_array().into_iter().flatten().map(|b| json!({
+                            "path": b["rel_path"], "language": b["language"], "from": b["source"], "made_for_release": b["release"], "hearing_impaired": b["hearing_impaired"],
+                            "timing": match b["sync"]["verdict"].as_str() {
+                                None => "not checked",
+                                Some(_) if b["sync"]["corrected"] == true => "was out of time; corrected",
+                                Some("in_sync") => "in time",
+                                Some("shifted") => "out of time by a known amount; check_subtitles with correct=true fixes it",
+                                Some("no_match") => "does not fit this film",
+                                Some(_) => "could not tell",
+                            },
+                            "seconds_to_add": b["sync"]["offset"], "checked_against": b["sync"]["method"], "checked": when(&b["sync"]["checked_at"]),
+                        })).collect::<Vec<_>>(),
+                        "wanted_but_missing": s["wanted"].as_array().into_iter().flatten().filter(|w| !have.contains(&w.as_str().unwrap_or(""))).collect::<Vec<_>>(),
+                    }));
+                }
+                let g = self.app.settings.general();
+                Ok(json!({"title": t["title"], "files": files, "search_available": !g.opensubtitles_api_key.is_empty(), "languages_wanted": crate::subs::wanted_languages(&g.subtitle_languages)}))
+            }
+            "find_subtitles" => {
+                let id = int("file_id")?;
+                let language = a["language"].as_str().ok_or("language is required")?;
+                let r = self.post(&format!("/api/files/{id}/subtitles/auto"), json!({"language": language})).await?;
+                Ok(match r["subtitle"].as_object() {
+                    Some(s) => json!({"added": s["rel_path"], "language": s["language"], "made_for_release": s["release"], "timing": if s["sync"]["corrected"] == true { "was out of time; corrected" } else if s["sync"]["verdict"] == "in_sync" { "in time" } else { "timed for this exact file; could not be checked further" }, "checked_against": s["sync"]["method"]}),
+                    None => json!({"added": null, "note": "nothing was found that is in time with this film"}),
+                })
+            }
+            "check_subtitles" => {
+                let id = int("file_id")?;
+                let path = a["path"].as_str().ok_or("path is required")?;
+                let r = self.post(&format!("/api/files/{id}/subtitles/check"), json!({"rel_path": path, "correct": a["correct"].as_bool() == Some(true)})).await?;
+                Ok(json!({"verdict": r["verdict"], "seconds_to_add": r["offset"], "speed_factor": r["rate"], "confidence": r["confidence"], "corrected": r["corrected"], "checked_against": r["method"],
+                    "meaning": "confidence of 8 or more means the subtitles belong to this film; under 5 means they do not"}))
             }
             "delete_title_files" => {
                 let id = int("title_id")?;

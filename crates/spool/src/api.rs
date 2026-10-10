@@ -118,7 +118,7 @@ async fn login(State(app): State<App>, Json(body): Json<Value>) -> Response {
             return ApiError(StatusCode::TOO_MANY_REQUESTS, "too many wrong passwords; wait a minute and try again".into()).into_response();
         }
     }
-    if g.password.is_empty() || body["password"].as_str().is_some_and(|p| same(p, &g.password)) {
+    if g.password.is_empty() || body["password"].as_str().is_some_and(|p| crate::settings::verify_password(&g.password, p)) {
         *app.login_failures.lock() = (0, 0);
         let token = crate::settings::new_key();
         {

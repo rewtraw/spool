@@ -826,6 +826,27 @@ async fn an_ai_session_can_inspect_and_operate_spool_over_mcp() {
     let (_, act) = tool(&router, "read-key", "activity", serde_json::json!({})).await;
     assert_eq!(act["finished"][0]["state"], "imported");
 
+    // Subtitles can be read with either key; acting on many titles needs the full one, and
+    // deleting through it needs confirmation like any other deletion.
+    let (err, subs) = tool(&router, "read-key", "subtitles", serde_json::json!({"title_id": movie.id})).await;
+    assert!(!err && subs["files"].as_array().unwrap().len() == 1 && subs["search_available"] == false, "{subs}");
+    assert!(subs["files"][0]["file_id"].as_i64().is_some() && subs["files"][0]["beside_the_video"].as_array().unwrap().is_empty(), "{subs}");
+    assert!(tool(&router, "read-key", "bulk_titles", serde_json::json!({"title_ids": [movie.id], "action": "unmonitor"})).await.0);
+    let (err, done) = tool(&router, "full-key", "bulk_titles", serde_json::json!({"title_ids": [movie.id], "action": "unmonitor"})).await;
+    assert!(!err && done["titles_changed"] == 1, "{done}");
+    assert!(!w.app.db.title(movie.id).unwrap().unwrap().monitored);
+    let (err, done) = tool(&router, "full-key", "bulk_titles", serde_json::json!({"title_ids": [movie.id], "action": "set_profile", "profile": "no such profile"})).await;
+    assert!(err, "{done}");
+    let (refused, msg) = tool(&router, "full-key", "bulk_titles", serde_json::json!({"title_ids": [movie.id], "action": "delete_files"})).await;
+    assert!(refused && msg.as_str().unwrap().contains("confirm=true"), "{msg}");
+    assert_eq!(w.app.db.files(movie.id).unwrap().len(), 1);
+
+    // The password set above is kept as a hash, and still lets its owner in.
+    let stored = w.app.settings.general().password;
+    assert!(spool::settings::is_hashed(&stored) && !stored.contains("pw"), "{stored}");
+    assert_eq!(call(&router, "POST", "/api/login", serde_json::json!({"password": "wrong"})).await.0, 401);
+    assert_eq!(call(&router, "POST", "/api/login", serde_json::json!({"password": "pw"})).await.0, 200);
+
     // Deleting files takes an explicit confirmation; removing the title alone does not.
     let (refused, msg) = tool(&router, "full-key", "remove_title", serde_json::json!({"title_id": movie.id, "delete_files": true})).await;
     assert!(refused && msg.as_str().unwrap().contains("confirm=true"), "{msg}");

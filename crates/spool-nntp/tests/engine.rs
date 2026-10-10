@@ -685,3 +685,57 @@ async fn unpacking_carries_on_after_a_restart() {
     assert_eq!(read(&done, "movie.mkv"), movie);
     assert_eq!(server.max_served_per_article(), 1, "nothing is fetched twice");
 }
+
+/// While a job is being repaired it fetches recovery data, and for that stretch it looks like
+/// any other download. The queue must not mistake it for one and start its checks a second time.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_job_fetching_recovery_data_is_not_taken_for_a_new_download() {
+    if !have("par2") {
+        eprintln!("par2 not installed; skipping");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    let data = bytes(11, 1_000_000);
+    std::fs::write(src.join("movie.mkv"), &data).unwrap();
+    let pars = make_par2(&src, "movie", &["movie.mkv"], 20, 4);
+    let mut post = Post::new();
+    let ids = post.add_file("movie.mkv", &data, 20_000);
+    for (name, body) in &pars {
+        post.add_file(name, body, 20_000);
+    }
+    let mut other = Post::new();
+    let small = bytes(12, 50_000);
+    other.add_file("other.bin", &small, 20_000);
+    let mut articles = post.articles.clone();
+    articles.extend(other.articles.clone());
+    let server = FakeServer::start(articles).await;
+    for i in [5usize, 6, 30] {
+        server.state.lock().missing.insert(ids[i].clone());
+    }
+    let engine = Engine::start(cfg(tmp.path(), vec![server.config("main", 0, 4)])).await.unwrap();
+    let id = engine.add(&post.nzb(), "Movie.Job", None).unwrap();
+
+    // Slow the server once the repair starts asking for recovery data, then give the queue a
+    // reason to look for work while that is going on.
+    let mut second = None;
+    for _ in 0..600 {
+        let s = engine.job(&id).unwrap();
+        if s.message.starts_with("Fetching") && second.is_none() {
+            server.state.lock().delay_ms = 150;
+            second = Some(engine.add(&other.nzb(), "Other.Job", None).unwrap());
+        }
+        if s.state.is_terminal() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    server.state.lock().delay_ms = 0;
+    let done = wait_done(&engine, &id).await;
+    let second = second.expect("the repair fetched recovery data");
+    assert_eq!(done.state, JobState::Completed, "{:?}", done.error);
+    assert_eq!(read(&done, "movie.mkv"), data);
+    assert_eq!(engine.post_runs(&id), 1, "the job was checked and repaired once");
+    assert_eq!(wait_done(&engine, &second).await.state, JobState::Completed);
+}

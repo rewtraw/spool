@@ -27,8 +27,9 @@
     const r = s.sync;
     if (!r) return { label: 'Not checked', tone: '', detail: '' };
     const by = `${Math.abs(r.offset).toFixed(1)} s ${r.offset < 0 ? 'late' : 'early'}`;
-    if (r.corrected) return { label: 'Corrected', tone: 'ok', detail: r.rate === 1 ? `It was ${by}; the file has been retimed.` : 'It was timed for a different frame rate; the file has been retimed.' };
-    if (r.verdict === 'in_sync') return { label: 'In time', tone: 'ok', detail: 'Lines up with the speech in the film.' };
+    const how = r.method === 'subtitles' ? " Checked against the film's own subtitles." : r.method === 'sound' ? ' Checked by listening to the film.' : '';
+    if (r.corrected) return { label: 'Corrected', tone: 'ok', detail: r.rate === 1 ? `It was ${by}; the file has been retimed.${how}` : `It was timed for a different frame rate; the file has been retimed.${how}` };
+    if (r.verdict === 'in_sync') return { label: 'In time', tone: 'ok', detail: `Lines up with the speech in the film.${how}` };
     if (r.verdict === 'shifted') return { label: r.rate === 1 ? `${by}` : 'Wrong frame rate', tone: 'warn', detail: 'It belongs to this film but is out of time. Spool can correct it.' };
     if (r.verdict === 'no_match') return { label: 'Does not fit', tone: 'bad', detail: 'It does not line up with this soundtrack anywhere. It is probably for a different cut.' };
     return { label: 'Cannot tell', tone: '', detail: 'Too little speech to judge by.' };

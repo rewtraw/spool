@@ -179,12 +179,13 @@ async fn main() -> Result<()> {
             }
         }
         Command::CheckSubtitles { video, subtitles, fix } => {
-            use spool::subs::{align, decode, parse_srt, retime, write_srt, Verdict};
+            use spool::subs::{decode, parse_srt, retime, write_srt, Reference, Verdict};
             let app = App::start(&dir, db).await?;
-            let channels = app.probe(&video, "").await.ok().flatten().map(|m| m.audio_channels).unwrap_or(2.0);
+            let info = app.probe(&video, "").await.ok().flatten();
             let cues = parse_srt(&decode(&std::fs::read(&subtitles)?));
-            let shape = app.listen(&video, channels).await?;
-            let r = align(&shape, &cues);
+            let mut reference = Reference::new(&video, info.as_ref().map(|m| m.audio_channels).unwrap_or(2.0), info.as_ref().map(|m| m.runtime_secs).unwrap_or(0.0));
+            let r = app.judge_timing(&mut reference, &cues).await;
+            println!("Checked against the film's {}.", if r.method == "subtitles" { "own subtitles" } else { "sound" });
             match r.verdict {
                 Verdict::InSync => println!("In time with the speech (confidence {}).", r.confidence),
                 Verdict::Shifted if r.rate == 1.0 => println!("Out by {:+.2} seconds (confidence {}).", -r.offset, r.confidence),

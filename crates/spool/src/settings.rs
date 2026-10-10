@@ -126,7 +126,14 @@ impl Settings {
     pub fn general(&self) -> General {
         self.db.get_setting("general")
     }
+    /// Save the general settings. The app's password is never stored as typed: whatever
+    /// arrives in the clear is replaced by a salted hash on the way in.
     pub fn set_general(&self, g: &General) -> anyhow::Result<()> {
+        if !g.password.is_empty() && !is_hashed(&g.password) {
+            let mut hashed = g.clone();
+            hashed.password = hash_password(&g.password)?;
+            return self.db.set_setting("general", &hashed);
+        }
         self.db.set_setting("general", g)
     }
     pub fn naming(&self) -> NamingConfig {
@@ -165,4 +172,59 @@ pub fn new_key() -> String {
         buf[..16].copy_from_slice(&n.to_le_bytes());
     }
     buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+const HASH_PREFIX: &str = "spool-argon2id$";
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn argon(password: &str, salt: &str) -> anyhow::Result<String> {
+    let mut out = [0u8; 32];
+    argon2::Argon2::default().hash_password_into(password.as_bytes(), salt.as_bytes(), &mut out).map_err(|e| anyhow::anyhow!("hashing the password: {e}"))?;
+    Ok(hex(&out))
+}
+
+/// Whether a stored password is a hash made here, as opposed to one typed in the clear.
+pub fn is_hashed(stored: &str) -> bool {
+    stored.strip_prefix(HASH_PREFIX).and_then(|rest| rest.split_once('$')).is_some_and(|(salt, hash)| salt.len() == 32 && hash.len() == 64 && rest_is_hex(salt) && rest_is_hex(hash))
+}
+
+fn rest_is_hex(s: &str) -> bool {
+    s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// A salted Argon2id hash of a password, in the form kept in the settings.
+pub fn hash_password(password: &str) -> anyhow::Result<String> {
+    let salt = &new_key()[..32];
+    Ok(format!("{HASH_PREFIX}{salt}${}", argon(password, salt)?))
+}
+
+/// Whether what was typed is the password that was stored. A password saved before hashing
+/// came in is compared as it is, and is replaced by a hash the next time Spool starts.
+pub fn verify_password(stored: &str, given: &str) -> bool {
+    let same = |a: &str, b: &str| a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0;
+    match stored.strip_prefix(HASH_PREFIX).and_then(|rest| rest.split_once('$')).filter(|_| is_hashed(stored)) {
+        Some((salt, hash)) => argon(given, salt).is_ok_and(|h| same(&h, hash)),
+        None => same(stored, given),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn passwords_are_hashed_and_still_verify() {
+        let h = hash_password("open sesame").unwrap();
+        assert!(is_hashed(&h) && !h.contains("sesame"));
+        assert!(verify_password(&h, "open sesame"));
+        assert!(!verify_password(&h, "open sesame!") && !verify_password(&h, ""));
+        // Two hashes of one password differ, so equal passwords cannot be spotted.
+        assert_ne!(h, hash_password("open sesame").unwrap());
+        // One saved before hashing still works until it is upgraded.
+        assert!(!is_hashed("plain") && verify_password("plain", "plain") && !verify_password("plain", "other"));
+        assert!(!is_hashed("spool-argon2id$short$nothex"));
+    }
 }

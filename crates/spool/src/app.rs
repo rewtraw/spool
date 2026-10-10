@@ -93,6 +93,11 @@ impl App {
             g.api_key = crate::settings::new_key();
             settings.set_general(&g)?;
         }
+        // A password saved in the clear by an earlier version is hashed where it sits.
+        if !g.password.is_empty() && !crate::settings::is_hashed(&g.password) {
+            settings.set_general(&g)?;
+            tracing::info!("the app password is now stored as a hash");
+        }
         let engine = Engine::start(engine_config(&settings, data_dir)).await?;
         let http = http_client();
         let (events, _) = broadcast::channel(1024);

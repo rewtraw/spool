@@ -144,6 +144,8 @@ pub(crate) struct Job {
     /// Set while the job is being checked, repaired and unpacked. That work fetches recovery
     /// data under the downloading state, and the queue must not take the job for a new download.
     in_post: AtomicBool,
+    /// How many times that work has been started for this job. More than once at a time is a fault.
+    post_runs: AtomicU64,
 }
 
 impl Job {
@@ -759,7 +761,7 @@ impl Engine {
                 rec.state = JobState::Queued;
                 rec.message = "Resuming after restart".into();
             }
-            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false) }));
+            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) }));
         }
         loaded.sort_by_key(|j| j.rec.lock().added_at);
         *inner.jobs.lock() = loaded;
@@ -825,6 +827,7 @@ impl Engine {
                     inner.publish(&job);
                     let (inner2, job2) = (inner.clone(), job.clone());
                     job.in_post.store(true, Ordering::Relaxed);
+                    job.post_runs.fetch_add(1, Ordering::Relaxed);
                     tokio::spawn(async move {
                         let _slot = inner2.post_slots.acquire().await;
                         if let Some(u) = unpacker {
@@ -916,7 +919,7 @@ impl Engine {
             direct_done: false,
             direct_off: false,
         };
-        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false) });
+        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) });
         job.save()?;
         self.0.jobs.lock().push(job.clone());
         self.0.publish(&job);
@@ -1019,6 +1022,12 @@ impl Engine {
         }
         self.0.wake.notify_one();
         Ok(())
+    }
+
+    /// How many times checking and unpacking has been started for a job. For tests.
+    #[doc(hidden)]
+    pub fn post_runs(&self, id: &str) -> u64 {
+        self.find(id).map(|j| j.post_runs.load(Ordering::Relaxed)).unwrap_or(0)
     }
 
     pub fn pause_all(&self) {
