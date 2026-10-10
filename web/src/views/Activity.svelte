@@ -30,10 +30,19 @@
   // The whole queue at a glance: how much there is, how much has arrived, and when it will be done.
   const totals = $derived.by(() => {
     let total = 0, done = 0, waiting = 0, count = 0;
+    // Downloads that finished during this run stay counted, so the bar fills instead of slipping back.
+    let arrived = data.finished?.count ?? 0;
+    total += data.finished?.bytes ?? 0;
+    done += data.finished?.bytes ?? 0;
     for (const i of queue) {
-      if (i.acquisition.state !== 'downloading') continue;
       const j = live(i);
       const size = j?.total_bytes || i.acquisition.release.size || 0;
+      if (i.acquisition.state !== 'downloading') {
+        total += size;
+        done += size;
+        arrived++;
+        continue;
+      }
       const finishedDownloading = j && !['queued', 'downloading', 'paused'].includes(j.state);
       total += size;
       done += finishedDownloading ? size : Math.min(j?.done_bytes ?? 0, size);
@@ -41,7 +50,7 @@
       count++;
     }
     const left = total - done;
-    return { total, done, left, waiting, count, eta: totalSpeed > 0 && left > 0 ? left / totalSpeed : null };
+    return { total, done, left, waiting, count, arrived, eta: totalSpeed > 0 && left > 0 ? left / totalSpeed : null };
   });
 
   async function action(id: number, a: string, msg?: string) {
@@ -87,7 +96,7 @@
     <div class="card summary">
       <div class="row wrap figures">
         <div><b>{bytes(totals.done)}</b> <span class="muted">of {bytes(totals.total)}</span></div>
-        <div class="muted">{totals.count} {totals.count === 1 ? 'download' : 'downloads'}{totals.waiting ? `, ${totals.waiting} paused or waiting` : ''}</div>
+        <div class="muted">{totals.count} {totals.count === 1 ? 'download' : 'downloads'} left{totals.arrived ? `, ${totals.arrived} finished` : ''}{totals.waiting ? `, ${totals.waiting} paused or waiting` : ''}</div>
         {#if totals.left > 0}<div class="muted">{bytes(totals.left)} to go{totals.eta != null ? ` · about ${duration(totals.eta)} at ${bytes(totalSpeed)}/s` : ''}</div>{/if}
         <span class="grow"></span>
         {#if app.status?.free_bytes != null}<div class="muted" class:low={app.status.free_bytes < totals.left}>{bytes(app.status.free_bytes)} free on disk</div>{/if}

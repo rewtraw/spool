@@ -369,6 +369,13 @@ async fn activity(State(app): State<App>) -> R<Value> {
     // Everything still in progress, however long the queue, then the most recent finished ones.
     let mut recent = app.db.active_acquisitions()?;
     recent.sort_by_key(|a| a.id);
+    // The current run reaches back to when the oldest download still going was added, so what
+    // has finished since then keeps counting towards the queue's progress.
+    let run_start = recent.iter().filter(|a| a.state == AcqState::Downloading).map(|a| a.created_at).min();
+    let (finished, finished_bytes) = match run_start {
+        Some(since) => app.db.imported_since(since)?,
+        None => (0, 0),
+    };
     for a in app.db.recent_acquisitions(60)? {
         if !recent.iter().any(|x| x.id == a.id) {
             recent.push(a);
@@ -389,7 +396,7 @@ async fn activity(State(app): State<App>) -> R<Value> {
         .collect();
     let known: Vec<&str> = recent.iter().filter_map(|a| a.job_id.as_deref()).collect();
     let orphans: Vec<&spool_nntp::JobStatus> = jobs.iter().filter(|j| !known.contains(&j.id.as_str())).collect();
-    Ok(Json(json!({"items": rows, "orphan_jobs": orphans, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit()})))
+    Ok(Json(json!({"items": rows, "orphan_jobs": orphans, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}})))
 }
 
 async fn activity_action(State(app): State<App>, Path((id, action)): Path<(i64, String)>, body: Option<Json<Value>>) -> R<Value> {

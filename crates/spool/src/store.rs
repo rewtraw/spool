@@ -316,6 +316,17 @@ impl Db {
         })
     }
 
+    /// How many downloads were imported at or after `since`, and their combined size in bytes.
+    pub fn imported_since(&self, since: i64) -> Result<(u64, u64)> {
+        self.with(|c| {
+            c.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(json_extract(data, '$.release.size')), 0) FROM acquisitions WHERE state = 'imported' AND updated_at >= ?1",
+                [since],
+                |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
+            )
+        })
+    }
+
     pub fn title_acquisitions(&self, title_id: i64) -> Result<Vec<Acquisition>> {
         self.with(|c| {
             let mut s = c.prepare("SELECT id, data FROM acquisitions WHERE title_id = ?1 ORDER BY id DESC LIMIT 50")?;
