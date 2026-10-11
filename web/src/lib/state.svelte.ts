@@ -1,5 +1,5 @@
 // Shared reactive state: router, live events, toasts, and the data every view needs.
-import { api, type Job, type Title } from './api';
+import { api, type Collection, type Job, type Title } from './api';
 import { setQualities } from './format';
 
 function parseRoute() {
@@ -19,6 +19,7 @@ export function go(path: string) {
 export const app = $state({
   status: null as any,
   titles: [] as Title[],
+  collections: [] as Collection[],
   titlesLoaded: false,
   profiles: [] as any[],
   jobs: {} as Record<string, Job>,
@@ -85,6 +86,10 @@ async function fetchTitles(full: boolean) {
       const known = new Set(next.map((t) => t.id));
       for (const t of r.titles) if (!known.has(t.id)) next.push(t);
       app.titles = next.sort((a, b) => a.id - b.id);
+    }
+    // Which titles belong together follows from the titles, so it is read with them.
+    if (r.full || r.titles.length || r.removed.length || !app.titlesLoaded) {
+      api.get<Collection[]>('/collections').then((c) => (app.collections = c)).catch(() => {});
     }
     revision = r.revision;
     app.titlesLoaded = true;

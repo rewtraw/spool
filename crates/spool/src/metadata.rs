@@ -13,6 +13,9 @@ pub struct Metadata {
     pub http: reqwest::Client,
     pub tmdb_base: String,
     pub tvmaze_base: String,
+    /// AniList, and the list that ties its ids to the other sources'. See `anime.rs`.
+    pub anilist_base: String,
+    pub anime_ids_url: String,
 }
 
 fn s(v: &Value, k: &str) -> String {
@@ -37,7 +40,7 @@ fn strip_html(text: &str) -> String {
 
 impl Metadata {
     pub fn new(http: reqwest::Client) -> Metadata {
-        Metadata { http, tmdb_base: TMDB.into(), tvmaze_base: TVMAZE.into() }
+        Metadata { http, tmdb_base: TMDB.into(), tvmaze_base: TVMAZE.into(), anilist_base: crate::anime::ANILIST.into(), anime_ids_url: crate::anime::ANIME_IDS.into() }
     }
 
     async fn get(&self, url: &str) -> Result<Value> {
@@ -107,6 +110,8 @@ impl Metadata {
             details_at: 0,
             local: Default::default(),
             in_episodes: false,
+            anilist: vec![],
+            anime_checked_at: 0,
             as_series: None,
             series_checked: false,
         };
@@ -184,6 +189,15 @@ impl Metadata {
         Ok(found)
     }
 
+    /// The film source's id for a film known by its IMDb id.
+    pub async fn movie_by_imdb(&self, key: &str, imdb_id: &str) -> Result<Option<u32>> {
+        if key.is_empty() {
+            bail!("add a TMDB API key in Settings to fetch movie details");
+        }
+        let v = self.get(&format!("{}/find/{imdb_id}?external_source=imdb_id&api_key={key}", self.tmdb_base)).await?;
+        Ok(v.get("movie_results").and_then(|r| r.as_array()).and_then(|r| r.first()).and_then(|m| m.get("id")).and_then(|x| x.as_u64()).map(|x| x as u32))
+    }
+
     pub async fn movie(&self, key: &str, tmdb_id: u32) -> Result<Title> {
         if key.is_empty() {
             bail!("add a TMDB API key in Settings to fetch movie details");
@@ -242,6 +256,8 @@ impl Metadata {
             details_at: 0,
             local: Default::default(),
             in_episodes: false,
+            anilist: vec![],
+            anime_checked_at: 0,
             as_series: None,
             series_checked: false,
         }

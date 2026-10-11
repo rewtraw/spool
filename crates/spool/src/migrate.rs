@@ -429,6 +429,8 @@ impl App {
                     details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
                     local: existing.as_ref().map(|e| e.local.clone()).unwrap_or_default(),
                     in_episodes: existing.as_ref().is_some_and(|e| e.in_episodes),
+                    anilist: existing.as_ref().map(|e| e.anilist.clone()).unwrap_or_default(),
+                    anime_checked_at: existing.as_ref().map(|e| e.anime_checked_at).unwrap_or(0),
                     as_series: existing.as_ref().and_then(|e| e.as_series.clone()),
                     series_checked: existing.as_ref().is_some_and(|e| e.series_checked),
                 };
@@ -555,6 +557,8 @@ impl App {
                     details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
                     local: existing.as_ref().map(|e| e.local.clone()).unwrap_or_default(),
                     in_episodes: existing.as_ref().is_some_and(|e| e.in_episodes),
+                    anilist: existing.as_ref().map(|e| e.anilist.clone()).unwrap_or_default(),
+                    anime_checked_at: existing.as_ref().map(|e| e.anime_checked_at).unwrap_or(0),
                     as_series: existing.as_ref().and_then(|e| e.as_series.clone()),
                     series_checked: existing.as_ref().is_some_and(|e| e.series_checked),
                 };

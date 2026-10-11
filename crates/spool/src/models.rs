@@ -175,6 +175,13 @@ pub struct Title {
     /// Whether the series source has been asked about this film yet.
     #[serde(default)]
     pub series_checked: bool,
+    /// The title's entries on AniList, when it is anime: one for a film, one a season for a
+    /// series, first season first.
+    #[serde(default)]
+    pub anilist: Vec<u32>,
+    /// When the anime sources were last asked about it.
+    #[serde(default)]
+    pub anime_checked_at: i64,
 }
 
 /// A film's listing as a series.

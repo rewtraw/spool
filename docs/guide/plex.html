@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="players.html">On a television</a><a class="on" aria-current="page" href="plex.html">Beside Plex</a><a class="sub" href="#connecting">Connecting</a><a class="sub" href="#what-spool-does-with-plex">What Spool does with Plex</a><a class="sub" href="#the-plex-tab">The Plex tab</a><a class="sub" href="#what-plex-leaves-in-a-folder">What Plex leaves in a folder</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="players.html">On a television</a><a class="on" aria-current="page" href="plex.html">Beside Plex</a><a class="sub" href="#connecting">Connecting</a><a class="sub" href="#what-spool-does-with-plex">What Spool does with Plex</a><a class="sub" href="#the-plex-tab">The Plex tab</a><a class="sub" href="#what-plex-leaves-in-a-folder">What Plex leaves in a folder</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -120,7 +120,7 @@
 <li><strong>Asks for a rescan after an import.</strong> When files change, Spool asks Plex to rescan the folders concerned, not the whole library, so a new film appears in Plex without waiting for its own schedule.</li>
 <li><strong>Knows what has been watched.</strong> Settings, Disk space shows, for the largest titles, whether Plex says they were watched and when. That is what makes &quot;delete what I have watched&quot; a safe thing to ask for.</li>
 </ul>
-<p>Spool never changes anything in Plex beyond asking for a rescan.</p>
+<p>Spool changes nothing in Plex beyond asking for a rescan, unless you turn on <strong>Write Spool&#39;s collections into Plex</strong> under the same settings. It then adds a collection tag to each title that is part of one of <a href="collections.html">Spool&#39;s collections</a>, beside the tags the title already has.</p>
 <h2 id="the-plex-tab"><a href="#the-plex-tab">The Plex tab</a></h2>
 <p>Settings, Plex compares the two libraries.</p>
 <div class="scroll"><table>
@@ -145,7 +145,7 @@
 <p>Track in Spool is the gentlest way to bring a library that Plex already knows into Spool. See <a href="your-library.html">Your library and what Spool does to it</a>.</p>
 <h2 id="what-plex-leaves-in-a-folder"><a href="#what-plex-leaves-in-a-folder">What Plex leaves in a folder</a></h2>
 <p>Plex, like Jellyfin and Kodi, reads trailers, extras and artwork from a title&#39;s folder by name, and can be told what a folder holds with a <code>.plexmatch</code> file. Spool recognises the same names, leaves those files alone, and keeps files named after the film in step when an upgrade renames it. <a href="local-files.html">Files Spool recognises</a> has the full list.</p>
-<nav class="around" aria-label="Other guides"><a class="prev" href="players.html"><span>Before</span>Playing on a television</a><a class="next" href="local-files.html"><span>Next</span>Files Spool recognises in a title's folder</a></nav>
+<nav class="around" aria-label="Other guides"><a class="prev" href="players.html"><span>Before</span>Playing on a television</a><a class="next" href="collections.html"><span>Next</span>Collections and anime</a></nav>
     </article>
   </div>
   <footer>

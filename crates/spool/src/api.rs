@@ -1016,7 +1016,7 @@ async fn test_indexer(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
 }
 
 async fn run_task(State(app): State<App>, Path(name): Path<String>) -> R<Value> {
-    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles"].contains(&name.as_str()) {
+    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles", "anime"].contains(&name.as_str()) {
         return Err(not_found("task"));
     }
     let app2 = app.clone();
@@ -1218,6 +1218,43 @@ async fn art(State(app): State<App>, Path((id, kind)): Path<(i64, String)>) -> R
     }
 }
 
+/// The library's collections: the films of one series of films, or an anime's series, films
+/// and specials, each with what it is to the story and what of the story is not here.
+async fn collections(State(app): State<App>) -> R<Value> {
+    let mut groups = app.collections()?;
+    for g in &mut groups {
+        g.poster = g.poster.as_ref().map(|src| format!("/api/collections/{}/art?v={}", g.id, &crate::art::tag(src)[..10]));
+        g.fanart = None;
+        for m in &mut g.missing {
+            m.poster = m.poster.as_ref().map(|src| format!("/api/anime/{}/art?v={}", m.anilist_id, &crate::art::tag(src)[..10]));
+        }
+    }
+    Ok(Json(json!(groups)))
+}
+
+/// Add a work a collection lacks.
+async fn collection_add(State(app): State<App>, Json(b): Json<Value>) -> R<Title> {
+    let id = b["anilist_id"].as_u64().ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "which work?".into()))? as u32;
+    Ok(Json(app.add_missing(id).await?))
+}
+
+fn picture(image: anyhow::Result<Vec<u8>>) -> Response {
+    match image {
+        Ok(bytes) => ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], bytes).into_response(),
+        Err(_) => ([(header::CACHE_CONTROL, "public, max-age=600")], StatusCode::NOT_FOUND).into_response(),
+    }
+}
+
+async fn collection_art(State(app): State<App>, Path(id): Path<u32>) -> Response {
+    let Some(src) = app.collections().ok().and_then(|g| g.into_iter().find(|g| g.id == id)).and_then(|g| g.poster) else { return StatusCode::NOT_FOUND.into_response() };
+    picture(app.art_any(&format!("set-{id}"), &src, 400).await)
+}
+
+async fn anime_art(State(app): State<App>, Path(id): Path<u32>) -> Response {
+    let Some(src) = app.db.anime(id).ok().flatten().and_then(|m| m.poster) else { return StatusCode::NOT_FOUND.into_response() };
+    picture(app.art_any(&format!("anime-{id}"), &src, 400).await)
+}
+
 /// Every place the library lives, with whether it can be reached and how much is on it.
 async fn locations(State(app): State<App>) -> Json<Value> {
     Json(json!(app.location_report()))
@@ -1374,6 +1411,10 @@ fn api_routes() -> Router<App> {
         .route("/api/art/{id}/{kind}", get(art))
         .route("/api/players", get(players))
         .route("/api/changes", get(changes))
+        .route("/api/collections", get(collections))
+        .route("/api/collections/add", post(collection_add))
+        .route("/api/collections/{id}/art", get(collection_art))
+        .route("/api/anime/{id}/art", get(anime_art))
         .route("/api/locations", get(locations))
         .route("/api/locations/{id}/look", post(location_look))
         .route("/api/locations/{id}/found", get(location_found))

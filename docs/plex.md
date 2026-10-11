@@ -12,7 +12,7 @@ Under Settings, General, Connections, enter Plex's address, such as `http://127.
 - **Asks for a rescan after an import.** When files change, Spool asks Plex to rescan the folders concerned, not the whole library, so a new film appears in Plex without waiting for its own schedule.
 - **Knows what has been watched.** Settings, Disk space shows, for the largest titles, whether Plex says they were watched and when. That is what makes "delete what I have watched" a safe thing to ask for.
 
-Spool never changes anything in Plex beyond asking for a rescan.
+Spool changes nothing in Plex beyond asking for a rescan, unless you turn on **Write Spool's collections into Plex** under the same settings. It then adds a collection tag to each title that is part of one of [Spool's collections](collections.md), beside the tags the title already has.
 
 ## The Plex tab
 

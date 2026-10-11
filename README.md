@@ -16,6 +16,7 @@
 - **More than one version of a film**, when you want it: a 4K copy beside a small one, or two cuts. Upgrades replace the main file and leave the others alone.
 - **A library in more than one place.** Beside the main folders, Spool can take further locations: another disk, or a share from a NAS mounted on the machine. Each is either managed like the main one or only read, in which case Spool lists and plays what is there and changes nothing. It can look through a location and bring in the films and shows already on it, where they lie. While a location cannot be reached its titles are shown as offline and left alone, so a NAS that is switched off never looks like a library that needs downloading again.
 - **Knows what else is in a folder.** Trailers, featurettes and other extras, posters and backdrops, theme music and the notes a media server keeps (`.nfo`, `.plexmatch`) are recognised under the names Plex, Jellyfin, Emby and Kodi use. An extra is never taken for the film, so an upgrade replaces the film and nothing else; a poster you put there yourself is the one shown; notes are used to tell what a folder holds; and players are offered the trailers and extras. [docs/local-files.md](docs/local-files.md) lists every name.
+- **Collections, and anime handled as anime.** Series of films are grouped by themselves, and so are an anime's series, films, recaps and side stories, using AniList's record of how they relate, with what is missing from the story listed. The library can show each collection as one tile; players get them as collections, and Plex can be given them as tags. AniList also tells Spool when a "film" is really an OVA posted as episodes.
 - **Plays on the television.** Spool can answer as a Jellyfin server, so a player such as Infuse on Apple TV browses the library with Spool's posters, cast and details, plays each file as it is, and reports what has been watched. It is found on the local network without typing an address. Off until you turn it on under Settings, Players; nothing is transcoded.
 - **Bulk actions** across the library, the queue and the disk-space view.
 - **An MCP endpoint**, so an AI assistant can look things up, explain why a title has not downloaded, and operate Spool.
@@ -36,6 +37,7 @@ The guides are at **[rewtraw.github.io/spool/guide](https://rewtraw.github.io/sp
 | [Your library and what Spool does to it](docs/your-library.md) | What it changes, what it never touches, how to undo things |
 | [A library in more than one place](docs/locations.md) | Further disks and NAS shares, managed or only read |
 | [Playing on a television](docs/players.md) | Infuse and other players that speak to Jellyfin |
+| [Collections and anime](docs/collections.md) | Films and series grouped by themselves, on players and in Plex |
 | [Beside Plex](docs/plex.md) | What Spool reads from Plex and asks of it |
 | [Files Spool recognises](docs/local-files.md) | Trailers, extras, artwork, notes and theme music |
 | [AI assistants](docs/assistants.md) · [The HTTP API](docs/api.md) | For programs |
@@ -146,6 +148,6 @@ The tests run the real application against a fake indexer and a fake Usenet serv
 
 Spool is licensed under the [GNU General Public License v3](LICENSE).
 
-Its release-name parsers are ported from [Radarr](https://github.com/Radarr/Radarr) and [Sonarr](https://github.com/Sonarr/Sonarr), and their parser test cases run as Spool's fixtures. Movie details and artwork come from [TMDB](https://www.themoviedb.org); this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from [TVmaze](https://www.tvmaze.com).
+Its release-name parsers are ported from [Radarr](https://github.com/Radarr/Radarr) and [Sonarr](https://github.com/Sonarr/Sonarr), and their parser test cases run as Spool's fixtures. Movie details and artwork come from [TMDB](https://www.themoviedb.org); this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from [TVmaze](https://www.tvmaze.com). Anime formats and relations come from [AniList](https://anilist.co), matched through [Fribb/anime-lists](https://github.com/Fribb/anime-lists).
 
 Spool is a tool for managing a media library. You are responsible for what you use it to download and for complying with the terms of the services you connect it to.

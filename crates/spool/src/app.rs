@@ -52,6 +52,8 @@ pub struct Inner {
     pub location_changes: std::sync::atomic::AtomicU64,
     /// The last look through a location for titles to bring in, and what came of it.
     pub adoption: Mutex<Option<crate::adopt::Adoption>>,
+    /// The anime id list, once read.
+    pub anime_list: Mutex<Option<Arc<crate::anime::Ids>>>,
     pub sessions: Mutex<HashSet<String>>,
     /// Wrong passwords lately: (how many, when the last one was).
     pub login_failures: Mutex<(u32, i64)>,
@@ -131,6 +133,8 @@ impl App {
         let mut meta = Metadata::new(http.clone());
         if let Some((tmdb, tvmaze)) = sources {
             (meta.tmdb_base, meta.tvmaze_base) = (tmdb.to_string(), tvmaze.to_string());
+            // The anime sources stand beside the series source, so a test's stand-in serves all.
+            (meta.anilist_base, meta.anime_ids_url) = (format!("{tvmaze}/anilist"), format!("{tvmaze}/anime-ids.json"));
         }
         let (events, _) = broadcast::channel(1024);
         Ok(App(Arc::new(Inner {
@@ -150,6 +154,7 @@ impl App {
             location_checking: Mutex::new(HashSet::new()),
             location_changes: std::sync::atomic::AtomicU64::new(0),
             adoption: Mutex::new(None),
+            anime_list: Mutex::new(None),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),

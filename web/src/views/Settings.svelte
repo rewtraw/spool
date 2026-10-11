@@ -315,6 +315,7 @@
     ['scan', 'Rescan library folders', 'Finds files added or removed outside Spool. Changes the catalog only.'],
     ['housekeeping', 'Back up and tidy', 'Writes a database backup and empties old recycle folders.'],
     ['plex', 'Read Plex', 'Matches Plex\'s films and shows to titles in Spool.'],
+    ['anime', 'Read AniList', 'Finds which titles are anime and reads their format, names and relations from AniList. Collections of series and films are built from these.'],
     ['subtitles', 'Find missing subtitles', 'Looks for subtitles in the languages you chose for a few files that lack them, and keeps only ones in time with the film.'],
   ];
   async function runTask(name: string) {
@@ -481,6 +482,10 @@
         <label class="field">Plex address<input class="input mono" bind:value={general.plex_url} placeholder="http://127.0.0.1:32400" /></label>
         <label class="field">Plex token<input class="input mono" bind:value={general.plex_token} autocomplete="off" /></label>
       </div>
+      {#if general.plex_token}
+        <label class="check"><input type="checkbox" bind:checked={general.plex_collections} /> Write Spool's collections into Plex</label>
+        <span class="hint">Each title in a collection gets the collection's name as a collection tag in Plex, beside any it already has. Plex keeps collections per library, so one that holds films and series appears in both. Removing a tag in Plex later is respected.</span>
+      {/if}
       <label class="field narrow">Password for this app<input class="input" type="password" bind:value={general.password} autocomplete="new-password" /><span class="hint">Empty means anyone who can reach this address can use it. Setting or changing it signs every other browser out.</span></label>
       {#if general.password}<div><button class="btn ghost" type="button" onclick={signOut}>Sign out of this browser</button></div>{/if}
       <label class="field">Second backup folder<input class="input mono" bind:value={general.backup_dir} autocomplete="off" placeholder="None" /><span class="hint">The nightly database backup is also copied here. Choose a folder on a different disk from the one Spool's data is on.</span></label>
@@ -854,7 +859,7 @@
         {/if}
       {/if}
     </fieldset>
-    <p class="faint small">Spool {app.status?.version}. Movie details and artwork come from TMDB; series details come from TVmaze. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+    <p class="faint small">Spool {app.status?.version}. Movie details and artwork come from TMDB; series details come from TVmaze; anime formats and relations come from AniList. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
   </div>
 {/if}
 

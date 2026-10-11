@@ -53,6 +53,8 @@ pub struct General {
     pub tmdb_api_key: String,
     pub plex_url: String,
     pub plex_token: String,
+    /// Whether Spool writes its collections into Plex, as collection tags on the items.
+    pub plex_collections: bool,
     pub ffprobe_path: String,
     /// When set, the API and web app require it.
     pub password: String,
@@ -117,6 +119,7 @@ impl Default for General {
             tmdb_api_key: String::new(),
             plex_url: String::new(),
             plex_token: String::new(),
+            plex_collections: false,
             ffprobe_path: String::new(),
             password: String::new(),
             api_key: String::new(),

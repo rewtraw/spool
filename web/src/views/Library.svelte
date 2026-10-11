@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, go, act, toast, loadTitles } from '../lib/state.svelte';
   import { api } from '../lib/api';
-  import type { Title } from '../lib/api';
+  import type { Collection, Title } from '../lib/api';
   import { bytes } from '../lib/format';
   import Poster from '../components/Poster.svelte';
 
@@ -10,11 +10,13 @@
   let show = $state<'all' | 'have' | 'missing' | 'monitored' | 'unmonitored'>(saved.show ?? 'all');
   let sort = $state<'title' | 'added' | 'year' | 'size'>(saved.sort ?? 'title');
   let layout = $state<'grid' | 'table'>(saved.layout ?? 'grid');
+  /** Show each collection as one tile in place of its titles. */
+  let grouped = $state<boolean>(saved.grouped ?? false);
   let query = $state('');
   let limit = $state(120);
 
   $effect(() => {
-    localStorage.setItem('spool.library', JSON.stringify({ kind, show, sort, layout }));
+    localStorage.setItem('spool.library', JSON.stringify({ kind, show, sort, layout, grouped }));
   });
 
   function have(t: Title) {
@@ -55,7 +57,31 @@
     };
     return list.sort(by[sort]);
   });
-  const shown = $derived(filtered.slice(0, limit));
+  // With collections gathered, a collection stands where its first title would, and holds
+  // those of its titles the filters let through. One title alone is shown as itself.
+  type Entry = { t: Title; c?: undefined } | { c: Collection; inside: Title[]; t?: undefined };
+  const entries = $derived.by((): Entry[] => {
+    if (!grouped || selecting) return filtered.map((t) => ({ t }));
+    const of = new Map<number, Collection>();
+    for (const c of app.collections) for (const m of c.members) of.set(m.title_id, c);
+    const inside = new Map<number, Title[]>();
+    for (const t of filtered) {
+      const c = of.get(t.id);
+      if (c) inside.set(c.id, [...(inside.get(c.id) ?? []), t]);
+    }
+    const out: Entry[] = [];
+    const placed = new Set<number>();
+    for (const t of filtered) {
+      const c = of.get(t.id);
+      if (!c || inside.get(c.id)!.length < 2) out.push({ t });
+      else if (!placed.has(c.id)) {
+        placed.add(c.id);
+        out.push({ c, inside: inside.get(c.id)! });
+      }
+    }
+    return out;
+  });
+  const shown = $derived(entries.slice(0, limit));
 
   $effect(() => {
     // Reset paging when the filter changes.
@@ -165,6 +191,7 @@
     <option value="year">Year</option>
     <option value="size">Size</option>
   </select>
+  <button class="btn toggle" class:on={grouped} aria-pressed={grouped} onclick={() => (grouped = !grouped)} title="Show each collection as one tile">Collections</button>
   <div class="seg" aria-label="Layout">
     <button class:on={layout === 'grid'} onclick={() => (layout = 'grid')} aria-pressed={layout === 'grid'}>Grid</button>
     <button class:on={layout === 'table'} onclick={() => (layout = 'table')} aria-pressed={layout === 'table'}>Table</button>
@@ -177,7 +204,18 @@
   <div class="card empty">{app.titles.length ? 'Nothing matches these filters.' : 'The library is empty. Add a title to get started.'}</div>
 {:else if layout === 'grid'}
   <div class="grid">
-    {#each shown as t (t.id)}
+    {#each shown as e (e.c ? `c${e.c.id}` : e.t.id)}
+      {#if e.c}
+        <a class="tile" href="#/collection/{e.c.id}">
+          <div class="art stack">
+            <Poster src={e.c.poster ?? e.inside[0].poster_small ?? e.inside[0].poster} title={e.c.name} kind="movie" />
+            <span class="chip pin">{e.inside.length} titles</span>
+          </div>
+          <div class="name truncate">{e.c.name}</div>
+          <div class="faint small">Collection</div>
+        </a>
+      {:else}
+      {@const t = e.t}
       {@const s = statusOf(t)}
       <a class="tile" href="#/title/{t.id}" class:dim={t.offline || (!t.monitored && !(t.file_count || t.episodes_have))} class:picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
         <div class="art">
@@ -188,6 +226,7 @@
         <div class="name truncate">{t.title}</div>
         <div class="faint small">{t.year || ''}{t.kind === 'series' ? ' · Series' : ''}</div>
       </a>
+      {/if}
     {/each}
   </div>
 {:else}
@@ -195,7 +234,18 @@
     <table class="table">
       <thead><tr>{#if selecting}<th style="width:1%"><input class="tick" type="checkbox" aria-label="Select all" checked={filtered.length > 0 && filtered.every((t) => picked[t.id])} onchange={pickAll} /></th>{/if}<th>Title</th><th>Year</th><th>Type</th><th>Status</th><th>Profile</th><th>Size</th></tr></thead>
       <tbody>
-        {#each shown as t (t.id)}
+        {#each shown as e (e.c ? `c${e.c.id}` : e.t.id)}
+          {#if e.c}
+          <tr onclick={() => go(`collection/${e.c.id}`)}>
+            <td><a href="#/collection/{e.c.id}"><b>{e.c.name}</b></a></td>
+            <td class="muted">{Math.min(...e.inside.map((t) => t.year).filter(Boolean)) || ''}</td>
+            <td class="muted">Collection</td>
+            <td><span class="chip">{e.inside.length} titles</span></td>
+            <td></td>
+            <td class="muted" style="white-space:nowrap">{bytes(e.inside.reduce((n, t) => n + t.size, 0))}</td>
+          </tr>
+          {:else}
+          {@const t = e.t}
           {@const s = statusOf(t)}
           <tr onclick={(e) => (selecting ? pick(e, t) : go(`title/${t.id}`))} class:picked={picked[t.id]}>
             {#if selecting}<td><input class="tick" type="checkbox" aria-label="Select {t.title}" checked={!!picked[t.id]} /></td>{/if}
@@ -206,6 +256,7 @@
             <td class="muted">{t.profile ?? ''}</td>
             <td class="muted" style="white-space:nowrap">{t.size ? bytes(t.size) : ''}</td>
           </tr>
+          {/if}
         {/each}
       </tbody>
     </table>
@@ -297,6 +348,30 @@
     display: grid;
     gap: 4px;
     min-width: 0;
+  }
+  .toggle.on {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  /* A collection's tile: a poster with the edges of others behind it. */
+  .art.stack {
+    margin: 0 6px 0 0;
+  }
+  .art.stack::before,
+  .art.stack::after {
+    content: '';
+    position: absolute;
+    inset: 4px -4px 4px 4px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--raised);
+    z-index: -1;
+  }
+  .art.stack::after {
+    inset: 9px -8px 9px 8px;
+    z-index: -2;
+    opacity: 0.6;
   }
   .tile.picked .art {
     outline: 3px solid var(--accent);

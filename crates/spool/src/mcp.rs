@@ -182,7 +182,7 @@ const TOOLS: &[Tool] = &[
         read: false,
         destructive: false,
         description: "Start a background task: rss (read indexer feeds), backlog (search a few missing titles), refresh (update details), scan (rescan library folders), housekeeping (backup and tidy), plex (read Plex), compact (look for smaller copies of the few titles furthest over their size target; replaces files when they arrive), subtitles (find subtitles for a few files that lack them and check each is in time with the film).",
-        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles"]}}), &["name"]),
+        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles", "anime"]}}), &["name"]),
     },
     Tool {
         name: "bulk_titles",

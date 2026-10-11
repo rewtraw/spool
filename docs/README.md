@@ -15,6 +15,7 @@ Spool finds, downloads, verifies, files and plays movies and television, in one 
 | --- | --- |
 | [A library in more than one place](locations.md) | Adding another disk or a share from a NAS, managed or only read, and what happens when it is switched off. |
 | [Playing on a television](players.md) | Serving the library to Infuse and other players that speak to Jellyfin, at home and away. |
+| [Collections and anime](collections.md) | Series of films and an anime's series and films, grouped by themselves, in the library, on players and in Plex. |
 | [Beside Plex](plex.md) | What Spool reads from Plex and what it asks of it. |
 | [Files Spool recognises in a title's folder](local-files.md) | Every name it knows for trailers, extras, artwork, notes and theme music. |
 | [AI assistants](assistants.md) | Connecting an assistant over the Model Context Protocol, and what it can do. |

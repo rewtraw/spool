@@ -9,6 +9,7 @@
   import Activity from './views/Activity.svelte';
   import Archive from './views/Archive.svelte';
   import Settings from './views/Settings.svelte';
+  import CollectionView from './views/Collection.svelte';
 
   const nav = [
     { id: 'home', label: 'Home', icon: 'M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
@@ -36,7 +37,7 @@
     }
   }
 
-  const active = $derived(route.view === 'title' ? 'library' : route.view);
+  const active = $derived(route.view === 'title' || route.view === 'collection' ? 'library' : route.view);
   const busy = $derived(Object.values(app.jobs).filter((j) => !['completed', 'failed', 'paused'].includes(j.state)).length);
 
   function onKey(e: KeyboardEvent) {
@@ -92,6 +93,7 @@
       {#if route.view === 'home'}<Home />
       {:else if route.view === 'library'}<Library />
       {:else if route.view === 'title'}{#key route.arg}<TitleView id={Number(route.arg)} />{/key}
+      {:else if route.view === 'collection'}{#key route.arg}<CollectionView id={Number(route.arg)} />{/key}
       {:else if route.view === 'discover'}<Discover />
       {:else if route.view === 'activity'}<Activity />
       {:else if route.view === 'archive'}<Archive />

@@ -81,6 +81,38 @@ impl Db {
         })
     }
 
+    // ------------------------------------------------------------ anime
+
+    /// Keep what AniList said of these works. A work seen only in passing never replaces
+    /// what is known of it from being asked about directly.
+    pub fn anime_put(&self, works: &[crate::anime::Media]) -> Result<()> {
+        self.with(|c| {
+            for m in works {
+                c.execute(
+                    "INSERT INTO anime(id, depth, fetched_at, data) VALUES (?1,?2,?3,?4)
+                     ON CONFLICT(id) DO UPDATE SET depth = excluded.depth, fetched_at = excluded.fetched_at, data = excluded.data WHERE excluded.depth >= anime.depth",
+                    params![m.id, m.depth, now(), serde_json::to_string(m).unwrap_or_default()],
+                )?;
+            }
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    pub fn anime(&self, id: u32) -> Result<Option<crate::anime::Media>> {
+        let data: Option<String> = self.with(|c| c.query_row("SELECT data FROM anime WHERE id = ?1", [id], |r| r.get(0)).optional())?;
+        Ok(data.and_then(|d| serde_json::from_str(&d).ok()))
+    }
+
+    pub fn anime_all(&self) -> Result<Vec<crate::anime::Media>> {
+        let rows: Vec<String> = self.with(|c| {
+            let mut s = c.prepare("SELECT data FROM anime ORDER BY id")?;
+            let rows = s.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })?;
+        Ok(rows.iter().filter_map(|d| serde_json::from_str(d).ok()).collect())
+    }
+
     pub fn delete_title(&self, id: i64) -> Result<()> {
         self.with(|c| c.execute("DELETE FROM titles WHERE id = ?1", [id]))?;
         Ok(())

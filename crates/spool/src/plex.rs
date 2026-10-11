@@ -21,6 +21,9 @@ pub struct PlexItem {
     pub tvdb_id: Option<u32>,
     pub imdb_id: Option<String>,
     pub section: String,
+    /// The section's key, which an edit is addressed to.
+    #[serde(default)]
+    pub section_key: String,
     /// Movie files, or the series folder.
     pub paths: Vec<String>,
     /// Times a movie was played; for a series, episodes watched.
@@ -116,6 +119,49 @@ impl App {
         r.json().await.map_err(|e| anyhow!("Plex sent something unreadable: {}", e.without_url()))
     }
 
+    /// Give Plex the collections Spool has: each member that Plex holds gets the collection's
+    /// name as a collection tag, beside whatever tags it already has. Plex keeps collections
+    /// per library, so one that holds films and series shows up in both under the same name.
+    /// Each item is written once; a tag later removed in Plex is not put back.
+    async fn plex_collections(&self, idx: &PlexIndex, titles: &[Title]) -> Result<usize> {
+        let g = self.settings.general();
+        let mut done: HashMap<String, String> = self.db.get_setting("plex_collections_done");
+        let mut written = 0;
+        for group in self.collections()? {
+            for member in &group.members {
+                let Some(item) = titles.iter().find(|t| t.id == member.title_id).and_then(|t| idx.find(t)) else { continue };
+                if item.section_key.is_empty() || done.get(&item.rating_key) == Some(&group.name) || written >= 40 {
+                    continue;
+                }
+                // Its tags as they are now, so that none is lost by naming them again.
+                let detail = self.plex_get(&format!("/library/metadata/{}", item.rating_key)).await?;
+                let mut tags: Vec<String> = detail["MediaContainer"]["Metadata"][0]["Collection"].as_array().into_iter().flatten().filter_map(|c| c["tag"].as_str().map(str::to_string)).collect();
+                if !tags.iter().any(|t| t.eq_ignore_ascii_case(&group.name)) {
+                    tags.push(group.name.clone());
+                    let mut query: Vec<(String, String)> = vec![("type".into(), if item.kind == Kind::Movie { "1" } else { "2" }.into()), ("id".into(), item.rating_key.clone())];
+                    query.extend(tags.iter().enumerate().map(|(i, t)| (format!("collection[{i}].tag.tag"), t.clone())));
+                    query.push(("collection.locked".into(), "1".into()));
+                    let r = self
+                        .http
+                        .put(format!("{}/library/sections/{}/all", g.plex_url.trim_end_matches('/'), item.section_key))
+                        .query(&query)
+                        .header("X-Plex-Token", &g.plex_token)
+                        .timeout(std::time::Duration::from_secs(30))
+                        .send()
+                        .await
+                        .map_err(|e| anyhow!("Plex did not answer: {}", e.without_url()))?;
+                    if !r.status().is_success() {
+                        bail!("Plex answered HTTP {} to a collection tag", r.status().as_u16());
+                    }
+                    written += 1;
+                }
+                done.insert(item.rating_key.clone(), group.name.clone());
+            }
+        }
+        self.db.set_setting("plex_collections_done", &done)?;
+        Ok(written)
+    }
+
     /// Read every movie and show from Plex and replace Spool's copy of that list.
     pub async fn plex_sync(&self) -> Result<String> {
         let identity = self.plex_get("/identity").await?;
@@ -145,6 +191,7 @@ impl App {
                     tvdb_id: guid("tvdb://").and_then(|g| g.parse().ok()),
                     imdb_id: guid("imdb://"),
                     section: sec["title"].as_str().unwrap_or_default().to_string(),
+                    section_key: key.to_string(),
                     paths,
                     watched: m[if kind == Kind::Movie { "viewCount" } else { "viewedLeafCount" }].as_u64().unwrap_or(0) as u32,
                     items: if kind == Kind::Movie { 1 } else { m["leafCount"].as_u64().unwrap_or(0) as u32 },
@@ -212,6 +259,13 @@ impl App {
             }
         }
         self.db.set_setting("plex_revision", &reached)?;
+        if self.settings.general().plex_collections {
+            match self.plex_collections(&idx, &titles).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(items = n, "collections written to Plex"),
+                Err(e) => tracing::warn!(error = %e, "collections could not be written to Plex"),
+            }
+        }
         Ok(if nudged > 0 { format!("{count} items read from Plex; asked it to rescan {nudged} folders that changed or that it was behind on") } else { format!("{count} items read from Plex") })
     }
 

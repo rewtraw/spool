@@ -33,7 +33,8 @@ impl App {
         title.monitored = monitored;
         title.added_at = now();
         title.last_refresh_at = now();
-        // Before anything is searched for: is this film a series somewhere else?
+        // Before anything is searched for: is it anime, and is this film a series somewhere else?
+        self.learn_anime(&mut title).await;
         self.ask_series_source(&mut title).await;
         self.ensure_title_path(&mut title)?;
         self.db.save_title(&mut title)?;
@@ -64,7 +65,18 @@ impl App {
             return;
         }
         match self.meta.series_twin(t.imdb_id.as_deref(), &t.title, t.year, t.runtime).await {
-            Ok(twin) => {
+            Ok(mut twin) => {
+                // An OVA the series source lists under another name is still found by the
+                // series id the anime list has for it.
+                let tvdb = t.anilist.first().and_then(|a| self.anime_ids().and_then(|ids| ids.back.get(a).cloned())).filter(|k| !k.film && k.season >= 1).and_then(|k| k.tvdb);
+                if let (None, Some(tvdb)) = (&twin, tvdb) {
+                    if let Ok((show, episodes)) = self.meta.series_by_tvdb(tvdb).await {
+                        let regular: Vec<&Episode> = episodes.iter().filter(|e| e.season > 0).collect();
+                        if let (Some(tvmaze_id), true) = (show.tvmaze_id, regular.len() >= 2) {
+                            twin = Some(SeriesTwin { tvmaze_id, title: show.title, episodes: regular.len() as u32, minutes: regular.iter().map(|e| e.runtime).sum() });
+                        }
+                    }
+                }
                 t.series_checked = true;
                 if twin.is_some() {
                     t.in_episodes = true;

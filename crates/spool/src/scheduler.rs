@@ -20,6 +20,7 @@ impl App {
             "housekeeping" => self.housekeeping().await,
             "compact" => self.compact_library().await,
             "subtitles" => self.subtitle_sweep().await,
+            "anime" => self.anime_sweep().await,
             "plex" if self.settings.general().plex_token.is_empty() => Ok("skipped: Plex is not set up".into()),
             "plex" => self.plex_sync().await,
             other => Err(anyhow::anyhow!("unknown task {other}")),
@@ -248,6 +249,7 @@ impl App {
                     ("housekeeping", 24 * 60),
                     ("plex", 60),
                     ("subtitles", 6 * 60),
+                    ("anime", 24 * 60),
                 ] {
                     if name == "subtitles" && !g.subtitles_auto {
                         continue;

@@ -24,8 +24,10 @@ pub struct Library {
     episodes: HashMap<i64, Vec<Episode>>,
     episode_title: HashMap<i64, i64>,
     watched: HashMap<(String, i64), Watched>,
-    /// Film collections with more than one film here.
+    /// Collections with more than one title here: a film series, or an anime's series and films.
     pub sets: Vec<Collection>,
+    /// Per collection, its titles in the order they came out.
+    set_members: HashMap<u32, Vec<i64>>,
 }
 
 #[derive(Clone, Copy)]
@@ -146,17 +148,13 @@ impl Library {
                 Kind::Series => episodes.contains_key(&t.id),
             })
             .collect();
-        let mut sets: Vec<Collection> = vec![];
-        let mut members: HashMap<u32, u32> = HashMap::new();
-        for c in titles.iter().filter_map(|t| t.collection.as_ref()) {
-            *members.entry(c.id).or_default() += 1;
-            if !sets.iter().any(|s| s.id == c.id) {
-                sets.push(c.clone());
-            }
-        }
-        sets.retain(|s| members[&s.id] > 1);
+        // The same collections the web app shows, among what can be played.
+        let works = if titles.iter().any(|t| !t.anilist.is_empty()) { app.db.anime_all()? } else { vec![] };
+        let groups = crate::anime::groups(&titles, &works, app.anime_ids().as_deref());
+        let set_members = groups.iter().map(|g| (g.id, g.members.iter().map(|m| m.title_id).collect())).collect();
+        let sets = groups.into_iter().map(|g| Collection { id: g.id, name: g.name, poster: g.poster, fanart: g.fanart }).collect();
         let index = titles.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
-        Ok(Library { server_id: super::server_id(app), titles, index, files, episodes, episode_title, watched: app.db.watched_all()?, sets })
+        Ok(Library { server_id: super::server_id(app), titles, index, files, episodes, episode_title, watched: app.db.watched_all()?, sets, set_members })
     }
 
     fn title(&self, id: i64) -> Option<&Title> {
@@ -561,7 +559,7 @@ impl Library {
                 put!("Type", json!("BoxSet"));
                 put!("IsFolder", json!(true));
                 put!("ParentId", json!(Id::Movies.to_string()));
-                put!("ChildCount", json!(self.titles.iter().filter(|t| t.collection.as_ref().is_some_and(|x| x.id == c.id)).count()));
+                put!("ChildCount", json!(self.set_members.get(&c.id).map(|m| m.len()).unwrap_or(0)));
                 put!("ImageTags", tag_of(&c.poster).map(|p| json!({"Primary": p})).unwrap_or(json!({})));
                 put!("BackdropImageTags", json!(tag_of(&c.fanart).into_iter().collect::<Vec<_>>()));
                 put!("PrimaryImageAspectRatio", json!(0.6667));
@@ -719,7 +717,11 @@ impl Library {
                     natural = true;
                     self.title(i).map(|t| self.season_episodes(t, Some(s))).unwrap_or_default()
                 }
-                Some(Id::Collection(c)) => self.movies().filter(|n| matches!(n, Node::Movie(t) if t.collection.as_ref().is_some_and(|x| x.id == c))).collect(),
+                Some(Id::Collection(c)) => {
+                    // In the order they came out, films and series together.
+                    natural = true;
+                    self.set_members.get(&c).into_iter().flatten().filter_map(|id| self.title(*id)).map(|t| if t.kind == Kind::Movie { Node::Movie(t) } else { Node::Series(t) }).collect()
+                }
                 _ => vec![],
             }
         };

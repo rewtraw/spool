@@ -100,6 +100,18 @@ export interface Quality {
   revision?: { version: number; real: number; is_repack: boolean };
 }
 
+/** Titles that belong together: a series of films, or an anime's series, films and specials. */
+export interface Collection {
+  id: number;
+  name: string;
+  poster?: string | null;
+  kind: 'anime' | 'films';
+  /** In the order they came out. `role` says what a member is when not simply part of the story. */
+  members: { title_id: number; year: number; role: string }[];
+  /** Works of the same story that are not in the library. */
+  missing: { anilist_id: number; title: string; year: number; format: string; episodes: number; role: string; poster?: string | null; can_add: boolean }[];
+}
+
 export interface Title {
   original_language?: string | null;
   id: number;

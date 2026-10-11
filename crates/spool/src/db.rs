@@ -292,6 +292,25 @@ const MIGRATIONS: &[&str] = &[
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
     "#,
+    // 6: what AniList says of each anime work, and a quieter count: when a title was last
+    // asked about is not a change to it.
+    r#"
+    CREATE TABLE anime (
+        id INTEGER PRIMARY KEY,
+        depth INTEGER NOT NULL,
+        fetched_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+    DROP TRIGGER titles_changed;
+    CREATE TRIGGER titles_changed AFTER UPDATE ON titles
+    WHEN json_remove(OLD.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at', '$.anime_checked_at', '$.series_checked') IS NOT json_remove(NEW.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at', '$.anime_checked_at', '$.series_checked')
+        OR OLD.monitored IS NOT NEW.monitored OR OLD.profile_id IS NOT NEW.profile_id OR OLD.path IS NOT NEW.path
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', NEW.id, NEW.id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    "#,
 ];
 
 impl Db {

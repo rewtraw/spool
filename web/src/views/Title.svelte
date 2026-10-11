@@ -121,6 +121,9 @@
     load();
   }
 
+  const inCollection = $derived(app.collections.find((c) => c.members.some((m) => m.title_id === id)));
+  const myRole = $derived(inCollection?.members.find((m) => m.title_id === id)?.role ?? '');
+
   /** A film that is posted in episodes becomes the series it is listed as. */
   async function toSeries() {
     let made: any;
@@ -213,6 +216,9 @@
       {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
       {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
       {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
+      {#if inCollection}
+        <p class="where">Part of <a class="link" href="#/collection/{inCollection.id}">{inCollection.name}</a>{#if myRole}, as {myRole === 'Alternative telling' ? 'an alternative telling' : `a ${myRole.toLowerCase()}`}{/if}.</p>
+      {/if}
       {#if t.kind === 'movie' && t.in_episodes && !t.files.length}
         <div class="notice warn episodes">
           {#if t.as_series}

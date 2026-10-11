@@ -34,6 +34,12 @@ The same measuring settles the neighbouring cases at import (`plan` in `import.r
 
 A film so marked turns down releases named as its episodes (`episode` in the verdicts) and still accepts the film whole. `film_to_series` replaces it with the series the other source lists, hands over any download that was stopped, and files it as the episode its name says it is.
 
+## Anime and collections
+
+`anime.rs` adds a third source for titles that are anime. A community list ties AniList's ids to IMDb's and TVDB's, so a title is found by an id it already has. AniList then gives the work's format, its episode count, the names releases carry, and its relations to other works; one request covers ten titles and reaches two works out from each. What it says is kept in the `anime` table.
+
+Collections are worked out when asked for (`anime::groups`), from the titles and that table: works joined by a story relation are one story, and a story with two or more titles in the library is a collection, as is a TMDB film collection with two or more films here. The web app, the players' server and the Plex task all read the same result.
+
 ## Storage
 
 One SQLite database in WAL mode holds everything, in a "columns plus JSON document" shape: the columns that are queried are real columns and the rest of each record is JSON. Saved NZBs are gzip files beside it. The database contains indexer keys and Usenet passwords and is created readable only by its owner.
