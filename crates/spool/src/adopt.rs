@@ -414,7 +414,9 @@ impl App {
         }
         title.path = folder.to_string();
         title.monitored = monitor;
-        title.profile_id = if kind == Kind::Movie { g.default_movie_profile } else { g.default_series_profile };
+        // The profile set for the place the folder is on: a shelf of remuxes brought in under
+        // a profile meant for a small disk would be marked for shrinking.
+        title.profile_id = self.profile_for_folder(kind, folder);
         title.added_at = now();
         title.last_refresh_at = now();
         self.db.save_title(&mut title)?;

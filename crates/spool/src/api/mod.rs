@@ -261,6 +261,7 @@ fn api_routes() -> Router<App> {
         .route("/api/logout", post(logout))
         .route("/api/session", get(session))
         .route("/api/status", get(status))
+        .route("/api/busy", get(busy))
         .route("/api/titles", get(list_titles).post(add_title))
         .route("/api/titles/bulk", post(bulk_titles))
         .route("/api/titles/move", post(move_titles))
@@ -301,6 +302,7 @@ fn api_routes() -> Router<App> {
         .route("/api/profiles", get(list_profiles).post(save_profile))
         .route("/api/profiles/{id}", put(save_profile).delete(delete_profile))
         .route("/api/qualities", get(qualities))
+        .route("/api/profiles/fit", get(profile_fit))
         .route("/api/indexers", get(list_indexers).post(save_indexer))
         .route("/api/indexers/{id}", put(save_indexer).delete(delete_indexer))
         .route("/api/indexers/{id}/test", post(test_indexer))
@@ -332,9 +334,15 @@ fn api_routes() -> Router<App> {
         .route("/api/anime/{id}/art", get(anime_art))
         .route("/api/locations", get(locations))
         .route("/api/locations/{id}/look", post(location_look))
+        .route("/api/locations/{id}/check", post(location_check))
         .route("/api/locations/{id}/found", get(location_found))
         .route("/api/locations/{id}/add", post(location_add))
         .route("/api/events", get(events))
+}
+
+/// Whether Spool can be restarted now without interrupting anything.
+async fn busy(State(app): State<App>) -> Json<Value> {
+    Json(json!(app.busy()))
 }
 
 pub fn router(app: App) -> Router {

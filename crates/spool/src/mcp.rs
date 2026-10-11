@@ -215,6 +215,29 @@ const TOOLS: &[Tool] = &[
     Tool { name: "delete_title_files", read: false, destructive: true, description: "Free space by deleting all of a title's media files. The title stays in the library, unmonitored so it is not fetched again, and its saved releases stay in the archive for a later re-download. Needs confirm=true.", schema: || obj(json!({"title_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["title_id"]) },
     Tool { name: "delete_file", read: false, destructive: true, description: "Delete one media file by file_id (from title_detail). It goes to the recycle folder if recycling is on, otherwise it is gone at once. Needs confirm=true.", schema: || obj(json!({"file_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["file_id"]) },
     Tool { name: "empty_recycle", read: false, destructive: true, description: "Permanently delete everything in the recycle folder to free disk space. Needs confirm=true.", schema: || obj(json!({"confirm": {"type": "boolean"}}), &[]) },
+    Tool { name: "restart_check", read: true, destructive: false, description: "Whether Spool can be restarted or upgraded now without interrupting anything: a download being checked or unpacked, an import, a title being moved, a location being looked through, or someone playing. Downloads still coming down do not count; they resume. Ask this before restarting the service.", schema: || obj(json!({}), &[]) },
+    Tool { name: "locations", read: true, destructive: false, description: "The places the library lives: the main one and any further disks or shares, each with whether it can be reached, whether Spool manages it or only reads it, how many titles are on it and how much room is free. Gives the location ids the other location tools take.", schema: || obj(json!({}), &[]) },
+    Tool { name: "check_location", read: false, destructive: false, description: "Try a location out: whether each of its folders is there, can be listed, can be read and how fast, and, where Spool manages the location, can be written (a small test file is written and removed). Each failure comes with the likely cause. Use it when a location is new, offline, or behaving oddly.", schema: || obj(json!({"location_id": {"type": "integer"}}), &["location_id"]) },
+    Tool {
+        name: "look_through_location",
+        read: false,
+        destructive: false,
+        description: "Look through a location for films and shows already on it and say what each folder is: sure and to add, already in the library, unclear (several candidates), or not recognised. Changes nothing on disk or in the library. Takes a minute or two for a large location; if it is still going the reply says so, and asking again gives the result.",
+        schema: || obj(json!({"location_id": {"type": "integer"}}), &["location_id"]),
+    },
+    Tool {
+        name: "add_from_location",
+        read: false,
+        destructive: false,
+        description: "Add to the library what the last look through a location was sure of, plus any unclear folders settled in picks (each a folder path from look_through_location with the tmdb_id of the film or the tvdb_id of the series it is). Titles are recorded where they lie; no file is moved. A title already in the library without a file is pointed at the folder; one with files elsewhere gains the folder as a further copy. monitor applies only to a location Spool manages.",
+        schema: || obj(json!({"location_id": {"type": "integer"}, "picks": {"type": "array", "items": {"type": "object", "properties": {"folder": {"type": "string"}, "tmdb_id": {"type": "integer"}, "tvdb_id": {"type": "integer"}}, "required": ["folder"]}}, "monitor": {"type": "boolean"}}), &["location_id"]),
+    },
+    Tool { name: "move_titles", read: false, destructive: false, description: "Move titles to another location that Spool manages, one at a time in the background. Each title's whole folder is copied, checked against the original, and the title pointed at the copy before the original is removed; from a location Spool only reads, the original stays as a further copy. Refused with the reason when the other location is away, only read, short of room or already has a folder of that name, or the title has a download under way.", schema: || obj(json!({"title_ids": {"type": "array", "items": {"type": "integer"}}, "location_id": {"type": "integer"}}), &["title_ids", "location_id"]) },
+    Tool { name: "collections", read: true, destructive: false, description: "The library's collections: a series of films, or an anime's series, films and side stories, each with its members in order of release, what each is to the story (recap, side story, alternative telling, spin-off), which has been watched, what to watch next, and the works of the same story that are not in the library with the ids to add them by.", schema: || obj(json!({}), &[]) },
+    Tool { name: "add_missing_work", read: false, destructive: false, description: "Add a work that a collection lacks, monitored and searched for at once. Give the anilist_id of an anime work or the tmdb_id of a film, as collections lists them.", schema: || obj(json!({"anilist_id": {"type": "integer"}, "tmdb_id": {"type": "integer"}}), &[]) },
+    Tool { name: "film_to_series", read: false, destructive: false, description: "Turn a film that is posted in episodes into the series it is listed as elsewhere: the film's entry, which must have no file, is replaced by the series with the same monitoring, and a download of the film that turned out to be an episode is filed as that episode. Use when title_detail shows in_episodes with an as_series listing.", schema: || obj(json!({"title_id": {"type": "integer"}}), &["title_id"]) },
+    Tool { name: "discover", read: true, destructive: false, description: "Search for something to add, films and series together, with whether each is already in the library. Anime is also looked up on AniList, so a romanised name finds it and an OVA that is listed as a film is marked as posted in episodes, with the series to add in its place. Gives the tmdb_id or tvmaze_id that add_title takes.", schema: || obj(json!({"query": {"type": "string"}}), &["query"]) },
+    Tool { name: "profile_fit", read: true, destructive: false, description: "How each quality profile fits the files of the titles that use it, location by location: how many files are in a quality the profile does not allow, how many are over its size target, and how many it would replace. A profile that does not describe what is on disk is harmless while nothing is monitored and will try to change the files once something is.", schema: || obj(json!({}), &[]) },
 ];
 
 fn gb(bytes: &Value) -> Value {
@@ -779,6 +802,74 @@ impl Mcp {
                 }
                 let r = self.post("/api/recycle/empty", json!({})).await?;
                 Ok(json!({"freed_gb": gb(&r["freed"])}))
+            }
+            "restart_check" => self.get("/api/busy").await,
+            "locations" => {
+                let r = self.get("/api/locations").await?;
+                Ok(json!(r.as_array().into_iter().flatten().map(|l| json!({"location_id": l["id"], "name": l["name"], "reachable": l["online"], "spool_manages_it": l["manage"], "new_titles_go_here": l["new_titles"], "titles": l["titles"], "used_gb": gb(&l["bytes"]), "free_gb": gb(&l["free"]), "movies_folder": l["movie_root"], "series_folder": l["series_root"]})).collect::<Vec<_>>()))
+            }
+            "check_location" => self.post(&format!("/api/locations/{}/check", int("location_id")?), json!({})).await,
+            "look_through_location" | "add_from_location" => {
+                let id = int("location_id")?;
+                let started = if name == "look_through_location" {
+                    self.post(&format!("/api/locations/{id}/look"), json!({})).await
+                } else {
+                    self.post(&format!("/api/locations/{id}/add"), json!({"picks": a.get("picks").cloned().unwrap_or(json!([])), "monitor": a["monitor"].as_bool().unwrap_or(false)})).await
+                };
+                // Already under way is not a failure: the result is waited for all the same.
+                if let Err(e) = started {
+                    if !e.contains("already") {
+                        return Err(e);
+                    }
+                }
+                let mut found = Value::Null;
+                for _ in 0..80 {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    found = self.get(&format!("/api/locations/{id}/found")).await?;
+                    if found["running"] != true {
+                        break;
+                    }
+                }
+                if found["running"] == true {
+                    return Ok(json!({"still_running": true, "done": found["done"], "of": found["total"], "note": "ask again in a minute for the result"}));
+                }
+                let folders = |state: &str| found["found"].as_array().into_iter().flatten().filter(|f| f["state"] == state).map(|f| json!({"folder": f["folder"], "note": f["note"], "could_be": f["matches"].as_array().into_iter().flatten().take(4).map(|m| json!({"title": m["title"], "year": m["year"], "tmdb_id": m["tmdb_id"], "tvdb_id": m["tvdb_id"]})).collect::<Vec<_>>()})).collect::<Vec<_>>();
+                let count = |state: &str| found["found"].as_array().into_iter().flatten().filter(|f| f["state"] == state).count();
+                Ok(json!({"result": found["message"], "to_add": count("new"), "added": count("added"), "already_in_library": count("have"), "unclear": folders("unclear"), "not_recognised": folders("unknown"), "failed": folders("failed")}))
+            }
+            "move_titles" => self.post("/api/titles/move", json!({"ids": a["title_ids"], "location": int("location_id")?})).await,
+            "collections" => {
+                let (groups, titles) = (self.get("/api/collections").await?, self.get("/api/titles").await?);
+                let titles = titles.get("titles").cloned().unwrap_or(titles);
+                let named = |id: &Value| titles.as_array().into_iter().flatten().find(|t| t["id"] == *id).map(|t| t["title"].clone()).unwrap_or(Value::Null);
+                Ok(json!(groups.as_array().into_iter().flatten().map(|g| json!({
+                    "name": g["name"], "kind": g["kind"], "in_your_own_order": g["ordered"], "watch_next": if g["next"].is_null() { Value::Null } else { named(&g["next"]) },
+                    "members": g["members"].as_array().into_iter().flatten().map(|m| json!({"title_id": m["title_id"], "title": named(&m["title_id"]), "year": m["year"], "role": m["role"], "place_in_story": m["story"], "watched": m["watched"]})).collect::<Vec<_>>(),
+                    "not_in_library": g["missing"].as_array().into_iter().flatten().map(|m| json!({"title": m["title"], "year": m["year"], "format": m["format"], "episodes": m["episodes"], "role": m["role"], "anilist_id": if m["anilist_id"] == 0 { Value::Null } else { m["anilist_id"].clone() }, "tmdb_id": m["tmdb_id"], "can_add": m["can_add"]})).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>()))
+            }
+            "add_missing_work" => {
+                let body = match (a["tmdb_id"].as_u64(), a["anilist_id"].as_u64()) {
+                    (Some(t), _) => json!({"tmdb_id": t}),
+                    (_, Some(n)) => json!({"anilist_id": n}),
+                    _ => return Err("give anilist_id or tmdb_id".into()),
+                };
+                let t = self.post("/api/collections/add", body).await?;
+                Ok(json!({"added": t["title"], "title_id": t["id"], "kind": t["kind"]}))
+            }
+            "film_to_series" => {
+                let t = self.post(&format!("/api/titles/{}/to-series", int("title_id")?), json!({})).await?;
+                Ok(json!({"now_a_series": t["title"], "title_id": t["id"], "monitored": t["monitored"]}))
+            }
+            "discover" => {
+                let q = a["query"].as_str().ok_or("query is required")?;
+                let r = self.get(&format!("/api/lookup/all?q={}", urlencoding::encode(q))).await?;
+                let brief = |list: &Value| list.as_array().into_iter().flatten().take(8).map(|t| json!({"title": t["title"], "year": t["year"], "tmdb_id": t["tmdb_id"], "tvmaze_id": t["tvmaze_id"], "in_library_as_title_id": t["library_id"], "anime": t["anime"], "overview": t["overview"].as_str().map(|o| o.chars().take(160).collect::<String>())})).collect::<Vec<_>>();
+                Ok(json!({"films": brief(&r["movies"]), "series": brief(&r["series"]), "films_could_not_be_searched": r["movies_error"]}))
+            }
+            "profile_fit" => {
+                let r = self.get("/api/profiles/fit").await?;
+                Ok(json!(r.as_array().into_iter().flatten().map(|f| json!({"location": f["location"], "profile": f["profile"], "kind": f["kind"], "titles": f["titles"], "monitored": f["monitored"], "files": f["files"], "files_in_a_quality_not_allowed": f["not_allowed"], "files_over_size_target": f["over_target"], "over_target_gb": gb(&f["over_bytes"]), "files_it_would_upgrade": f["below_cutoff"], "note": f["note"]})).collect::<Vec<_>>()))
             }
             other => Err(format!("unknown tool: {other}")),
         }

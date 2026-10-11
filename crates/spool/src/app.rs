@@ -52,6 +52,8 @@ pub struct Inner {
     pub location_changes: std::sync::atomic::AtomicU64,
     /// The last look through a location for titles to bring in, and what came of it.
     pub adoption: Mutex<Option<crate::adopt::Adoption>>,
+    /// When a player last reported that it was playing something.
+    pub last_playing: std::sync::atomic::AtomicI64,
     /// Titles being moved between locations.
     pub moves: Mutex<crate::relocate::Moves>,
     /// The anime id list, once read.
@@ -158,6 +160,7 @@ impl App {
             adoption: Mutex::new(None),
             anime_list: Mutex::new(None),
             moves: Mutex::new(Default::default()),
+            last_playing: Default::default(),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),

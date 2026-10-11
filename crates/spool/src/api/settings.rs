@@ -155,6 +155,11 @@ pub(super) async fn delete_profile(State(app): State<App>, Path(id): Path<i64>) 
     Ok(Json(json!({"ok": true})))
 }
 
+/// How each profile fits the files of the titles that use it, by location.
+pub(super) async fn profile_fit(State(app): State<App>) -> R<Value> {
+    Ok(Json(json!(app.profile_fit()?)))
+}
+
 pub(super) async fn qualities() -> Json<Vec<Value>> {
     Json(Quality::ALL.iter().filter(|q| **q != Quality::Unknown).map(|q| json!({"key": q.key(), "movie": q.name(Flavor::Movie), "tv": q.name(Flavor::Tv), "resolution": q.resolution(), "weight": q.default_weight()})).collect())
 }

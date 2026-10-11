@@ -187,7 +187,10 @@
 </li>
 <li><p><strong>Save.</strong> The location now shows whether it can be reached, how many titles are on it and how much room is free.</p>
 </li>
+<li><p><strong>Check this location.</strong> The button tries the location out: whether each folder is there, can be listed, can be read and how fast, and, where Spool is to change files, can be written (a small test file is written and removed). Anything that fails comes with its likely cause.</p>
+</li>
 </ol>
+<p>Each location can have its own <strong>profile for films and for series</strong>, given to titles added there or brought in from there. A big disk kept as an archive and a small one for everyday viewing want different things: under a profile with a size target, a shelf of untouched Blu-ray copies would all count as too big. Settings, Profiles shows how each profile fits what is on disk.</p>
 <p>In a container, the location&#39;s folders must be mounted into the container as well, and the paths you enter are the ones the container sees.</p>
 <h2 id="bringing-in-what-is-already-there"><a href="#bringing-in-what-is-already-there">Bringing in what is already there</a></h2>
 <p><strong>Look for films and shows</strong> reads the location and reports before it adds anything. Looking changes nothing, and neither does adding: titles are recorded where they lie.</p>
@@ -264,9 +267,13 @@
 <h2 id="mounting-a-share"><a href="#mounting-a-share">Mounting a share</a></h2>
 <p>How to mount a share is the system&#39;s business, not Spool&#39;s. What matters to Spool is that it is mounted at the same path each time and comes back by itself after a restart.</p>
 <ul>
-<li><strong>Linux.</strong> A line in <code>/etc/fstab</code> with the <code>nofail</code> and <code>_netdev</code> options, or a systemd automount.</li>
-<li><strong>macOS.</strong> An automount map (<code>/etc/auto_master</code> and a map file), which mounts the share when it is first used and does not depend on anyone being signed in. A share connected from Finder lasts only as long as that sign-in.</li>
-<li><strong>A container.</strong> Mount the share on the host and pass it in as a volume, or use the container system&#39;s own NFS or SMB volume.</li>
+<li><p><strong>Linux.</strong> A line in <code>/etc/fstab</code> with the <code>nofail</code> and <code>_netdev</code> options, or a systemd automount.</p>
+</li>
+<li><p><strong>macOS.</strong> An automount map (<code>/etc/auto_master</code> and a map file), which mounts the share when it is first used and does not depend on anyone being signed in. A share connected from Finder lasts only as long as that sign-in.</p>
+<p>macOS guards network volumes as a matter of privacy, and without leave a program that lists one simply waits, with no error. Give Spool&#39;s program <strong>Full Disk Access</strong> under System Settings, Privacy &amp; Security, or it will find the folders there and never be able to read them. The same applies to setting the mount up over SSH: Remote Login has its own &quot;Allow full disk access for remote users&quot;, without which <code>/etc/auto_master</code> cannot be changed even by an administrator. &quot;Check this location&quot; names this when it is the cause.</p>
+</li>
+<li><p><strong>A container.</strong> Mount the share on the host and pass it in as a volume, or use the container system&#39;s own NFS or SMB volume.</p>
+</li>
 </ul>
 <p>NFS suits a share that is only read. If Spool is to manage the location, the user Spool runs as needs to be able to write there.</p>
 <h2 id="limits"><a href="#limits">Limits</a></h2>

@@ -115,7 +115,7 @@ impl App {
         let (listed, _) = self.meta.series(tvmaze).await?;
         let series = match self.db.find_title(Kind::Series, None, listed.tvdb_id)?.filter(|_| listed.tvdb_id.is_some()) {
             Some(have) => have,
-            None => self.add_title(Kind::Series, None, Some(tvmaze), g.default_series_profile, film.monitored, false).await?,
+            None => self.add_title(Kind::Series, None, Some(tvmaze), self.profile_for_new(Kind::Series, g.new_titles_location), film.monitored, false).await?,
         };
 
         // What was downloaded as the film and stopped: the release is judged again as part of

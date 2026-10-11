@@ -129,11 +129,23 @@
 </thead>
 <tbody><tr>
 <td>The overall picture</td>
-<td><code>status</code>, <code>activity</code>, <code>logs</code>, <code>disk_space</code></td>
+<td><code>status</code>, <code>activity</code>, <code>logs</code>, <code>disk_space</code>, <code>restart_check</code></td>
 </tr>
 <tr>
 <td>Titles</td>
-<td><code>find_title</code>, <code>title_detail</code>, <code>add_title</code>, <code>update_title</code>, <code>refresh_title</code>, <code>remove_title</code>, <code>bulk_titles</code></td>
+<td><code>find_title</code>, <code>title_detail</code>, <code>discover</code>, <code>add_title</code>, <code>update_title</code>, <code>refresh_title</code>, <code>remove_title</code>, <code>bulk_titles</code>, <code>film_to_series</code></td>
+</tr>
+<tr>
+<td>Locations</td>
+<td><code>locations</code>, <code>check_location</code>, <code>look_through_location</code>, <code>add_from_location</code>, <code>move_titles</code></td>
+</tr>
+<tr>
+<td>Collections</td>
+<td><code>collections</code>, <code>add_missing_work</code></td>
+</tr>
+<tr>
+<td>Profiles</td>
+<td><code>profile_fit</code></td>
 </tr>
 <tr>
 <td>Why something has not arrived</td>
@@ -164,6 +176,7 @@
 <td><code>delete_file</code>, <code>delete_title_files</code></td>
 </tr>
 </tbody></table></div>
+<p><code>restart_check</code> says whether Spool can be restarted without interrupting a download being unpacked, an import, a move or someone playing; an assistant should ask it before restarting the service.</p>
 <p><code>diagnose</code> answers &quot;why has this not downloaded&quot; in one call: whether the title is monitored, the releases that were rejected and why, downloads that failed, and the log lines that mention it.</p>
 <h2 id="deleting-needs-a-yes"><a href="#deleting-needs-a-yes">Deleting needs a yes</a></h2>
 <p>Any tool that deletes files refuses unless it is called with an explicit confirmation, and the tools tell the assistant to use it only when you asked for that deletion. Deleted files go to the <a href="your-library.html#getting-something-back">recycle folder</a> like any others.</p>

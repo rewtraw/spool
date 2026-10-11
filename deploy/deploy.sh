@@ -7,6 +7,12 @@
 #   SPOOL_SIGN_IDENTITY  codesign identity; unset signs ad hoc
 #   SPOOL_LABEL          LaunchAgent label and signing identifier (default: local.spool)
 #   SPOOL_BIND           address to listen on (default: 0.0.0.0:7979)
+#   SPOOL_API_KEY        Spool's key, if the app has a password, so the script may ask it things
+#   SPOOL_FORCE          set to restart even though Spool says it is in the middle of something
+#
+# A Spool that is already running is asked first whether a restart would interrupt anything:
+# a download being unpacked, an import, a title being moved, someone playing. If so the
+# script stops and says what. Downloads still coming down are paused, and resumed afterwards.
 #
 # Signing with a stable identity matters when the library is on a removable disk: macOS ties
 # the permission to read it to the program's signature, and an ad hoc build is a new program
@@ -22,6 +28,26 @@ BIND="${SPOOL_BIND:-0.0.0.0:7979}"
 cargo build --release -p spool
 codesign --force -s "${SPOOL_SIGN_IDENTITY:--}" --identifier "$LABEL" target/release/spool
 codesign --verify --strict target/release/spool
+
+URL="http://$HOST:${BIND##*:}"
+ask() { curl -fsS -m 8 ${SPOOL_API_KEY:+-H "X-Api-Key: $SPOOL_API_KEY"} "$@"; }
+RESUME=""
+if STATE=$(ask "$URL/api/busy" 2>/dev/null); then
+  case "$STATE" in
+    *'"busy":true'*)
+      echo "Spool on $HOST is in the middle of something:"
+      printf '%s\n' "$STATE" | sed -e 's/.*"reasons":\[//' -e 's/\].*//' -e 's/","/\n/g' -e 's/"//g' | sed 's/^/  - /'
+      if [ -z "${SPOOL_FORCE:-}" ]; then
+        echo "Not restarting it. Try again when that is done, or set SPOOL_FORCE=1 to restart anyway."
+        exit 1
+      fi
+      ;;
+  esac
+  # Downloads resume from where they stopped; pausing first lets them stop at a clean point.
+  case "$(ask "$URL/api/status" 2>/dev/null)" in
+    *'"queue_paused":false'*) ask -X POST "$URL/api/queue/pause" >/dev/null 2>&1 && RESUME=1 ;;
+  esac
+fi
 
 REMOTE_HOME=$(ssh "$HOST" 'printf %s "$HOME"')
 PLIST=$(mktemp)
@@ -49,4 +75,10 @@ ssh "$HOST" LABEL="$LABEL" sh <<'REMOTE'
   ~/spool/bin/spool --version
   tail -n 3 ~/Library/Logs/spool.log
 REMOTE
-echo "Deployed. Open http://$HOST:${BIND##*:}"
+if [ -n "$RESUME" ]; then
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    ask -X POST "$URL/api/queue/resume" >/dev/null 2>&1 && break
+    sleep 1
+  done
+fi
+echo "Deployed. Open $URL"

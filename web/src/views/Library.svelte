@@ -7,7 +7,7 @@
 
   const saved = JSON.parse(localStorage.getItem('spool.library') ?? '{}');
   let kind = $state<'all' | 'movie' | 'series'>(saved.kind ?? 'all');
-  let show = $state<'all' | 'have' | 'missing' | 'monitored' | 'unmonitored'>(saved.show ?? 'all');
+  let show = $state<'all' | 'have' | 'missing' | 'incomplete' | 'monitored' | 'unmonitored'>(saved.show ?? 'all');
   let sort = $state<'title' | 'added' | 'year' | 'size'>(saved.sort ?? 'title');
   let layout = $state<'grid' | 'table'>(saved.layout ?? 'grid');
   /** Show each collection as one tile in place of its titles. */
@@ -49,6 +49,8 @@
       if (place && placeNames.includes(place) && !onPlace(t, place)) return false;
       if (show === 'have' && !(t.kind === 'movie' ? t.file_count > 0 : t.episodes_have > 0)) return false;
       if (show === 'missing' && (have(t) || !t.monitored || !t.available)) return false;
+      // A series with some of its aired episodes and not all, whether or not it is monitored.
+      if (show === 'incomplete' && !(t.kind === 'series' && t.episodes_have > 0 && t.episodes_have < t.episodes_aired)) return false;
       if (show === 'monitored' && !t.monitored) return false;
       if (show === 'unmonitored' && t.monitored) return false;
       if (q && !t.title.toLowerCase().includes(q) && String(t.year) !== q) return false;
@@ -201,7 +203,8 @@
   <select class="input narrow" bind:value={show} aria-label="Show">
     <option value="all">Everything</option>
     <option value="have">Have files</option>
-    <option value="missing">Missing</option>
+    <option value="missing">Missing (wanted)</option>
+    <option value="incomplete">Incomplete series</option>
     <option value="monitored">Monitored</option>
     <option value="unmonitored">Not monitored</option>
   </select>

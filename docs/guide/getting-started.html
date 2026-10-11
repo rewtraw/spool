@@ -221,6 +221,7 @@ spool shadow-report    # does Spool read past releases as Radarr and Sonarr did?
 <p><strong>macOS.</strong> <code>deploy/deploy.sh</code> builds Spool, installs it as a LaunchAgent on a Mac over SSH and restarts it. It reads its settings from the environment or from <code>deploy/local.env</code>:</p>
 <pre><code class="language-sh">SPOOL_HOST=my-mac deploy/deploy.sh
 </code></pre>
+<p>Run against a Spool that is already going, the script first asks it whether a restart would interrupt anything: a download being unpacked, an import, a title being moved, someone playing. If so it stops and says what; <code>SPOOL_FORCE=1</code> restarts anyway. Downloads still coming down are paused and resumed around the restart.</p>
 <p>If the library is on a removable disk, set <code>SPOOL_SIGN_IDENTITY</code> to a stable code-signing identity. macOS ties the permission to read a removable disk to the program&#39;s signature, and the first read under launchd shows a consent prompt on that Mac&#39;s screen. Spool reports that it is waiting for the prompt instead of hanging.</p>
 <h2 id="the-command-line"><a href="#the-command-line">The command line</a></h2>
 <pre><code class="language-sh">spool serve [--bind 0.0.0.0:7979]   # run the service

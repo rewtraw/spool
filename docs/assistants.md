@@ -20,8 +20,11 @@ The same settings can make a second, read-only key. A session using it can use t
 
 | Area | Tools |
 | --- | --- |
-| The overall picture | `status`, `activity`, `logs`, `disk_space` |
-| Titles | `find_title`, `title_detail`, `add_title`, `update_title`, `refresh_title`, `remove_title`, `bulk_titles` |
+| The overall picture | `status`, `activity`, `logs`, `disk_space`, `restart_check` |
+| Titles | `find_title`, `title_detail`, `discover`, `add_title`, `update_title`, `refresh_title`, `remove_title`, `bulk_titles`, `film_to_series` |
+| Locations | `locations`, `check_location`, `look_through_location`, `add_from_location`, `move_titles` |
+| Collections | `collections`, `add_missing_work` |
+| Profiles | `profile_fit` |
 | Why something has not arrived | `diagnose` |
 | Releases and downloads | `search_releases`, `download_release`, `manage_download`, `unblock_release`, `dismiss_attention` |
 | The archive | `archive`, `check_availability` |
@@ -29,6 +32,8 @@ The same settings can make a second, read-only key. A session using it can use t
 | Plex | `plex_report`, `plex_sync`, `plex_track` |
 | Housekeeping | `run_task`, `empty_recycle` |
 | Deleting files | `delete_file`, `delete_title_files` |
+
+`restart_check` says whether Spool can be restarted without interrupting a download being unpacked, an import, a move or someone playing; an assistant should ask it before restarting the service.
 
 `diagnose` answers "why has this not downloaded" in one call: whether the title is monitored, the releases that were rejected and why, downloads that failed, and the log lines that mention it.
 

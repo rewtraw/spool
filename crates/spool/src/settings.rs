@@ -29,6 +29,10 @@ pub struct Location {
     pub volume: String,
     /// Spool may add, replace and delete files here. When false it only reads.
     pub manage: bool,
+    /// The profile new films and new series get here; 0 for the usual one. A disk with room
+    /// to spare and a small one want different things.
+    pub movie_profile: i64,
+    pub series_profile: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

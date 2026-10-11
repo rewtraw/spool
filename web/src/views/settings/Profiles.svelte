@@ -1,6 +1,7 @@
 <script lang="ts">
   // The Profiles tab: quality profiles and the hard size limits.
   import { api } from '../../lib/api';
+  import { bytes } from '../../lib/format';
   import { act, loadProfiles } from '../../lib/state.svelte';
 
   let profiles = $state<any[]>([]);
@@ -58,7 +59,10 @@
   const gbFor = (mbPerMin: any, minutes: number) => (Number(mbPerMin) > 0 ? `${((Number(mbPerMin) * minutes) / 1024).toFixed(1)} GB` : '');
 
 
+  // How each profile fits what is on disk.
+  let fit = $state<any[]>([]);
   async function load() {
+    api.get<any[]>('/profiles/fit').then((f) => (fit = f)).catch(() => {});
     profiles = await api.get('/profiles');
     qualities = await api.get('/qualities');
     await loadLimits();
@@ -115,6 +119,26 @@
     {/each}
     <div class="row"><button class="btn" onclick={() => { newProfile('movie'); editing = profiles.length - 1; }}>New movie profile</button><button class="btn" onclick={() => { newProfile('tv'); editing = profiles.length - 1; }}>New series profile</button></div>
 
+    {#if fit.length}
+      <fieldset class="card">
+        <legend>How the profiles fit what is on disk</legend>
+        <p class="muted">A profile says what a title's files should be. Where the files are something else, nothing happens while the title is not monitored; once it is, Spool works to make them what the profile says.</p>
+        <div class="scroll-x">
+          <table class="table">
+            <thead><tr><th>Location</th><th>Profile</th><th>Titles</th><th>Monitored</th><th>Files</th><th>Quality not allowed</th><th>Over size target</th><th>Would upgrade</th></tr></thead>
+            <tbody>
+              {#each fit as f}
+                <tr>
+                  <td>{f.location || 'Library'}</td><td><b>{f.profile}</b> <span class="faint small">{f.kind}</span></td><td>{f.titles}</td><td>{f.monitored}</td><td>{f.files}</td>
+                  <td class:warn={f.not_allowed > 0}>{f.not_allowed || ''}</td><td class:warn={f.over_target > 0}>{f.over_target ? `${f.over_target} (${bytes(f.over_bytes)})` : ''}</td><td>{f.below_cutoff || ''}</td>
+                </tr>
+                {#if f.note}<tr><td colspan="8" class="small warn">{f.note}</td></tr>{/if}
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </fieldset>
+    {/if}
     <fieldset class="card">
       <legend>Hard size limits</legend>
       <p class="muted">These reject a release outright, whatever its profile, when it is smaller or larger than a quality should be. They are in megabytes per minute of runtime, so they scale with length. Leave a box empty for no limit. To steer toward a size without rejecting anything, use a profile's size target instead.</p>

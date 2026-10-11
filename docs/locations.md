@@ -32,6 +32,9 @@ Only read is the right choice for a library that something else looks after, or 
    | Let Spool change files here | Off for only read. |
 
 3. **Save.** The location now shows whether it can be reached, how many titles are on it and how much room is free.
+4. **Check this location.** The button tries the location out: whether each folder is there, can be listed, can be read and how fast, and, where Spool is to change files, can be written (a small test file is written and removed). Anything that fails comes with its likely cause.
+
+Each location can have its own **profile for films and for series**, given to titles added there or brought in from there. A big disk kept as an archive and a small one for everyday viewing want different things: under a profile with a size target, a shelf of untouched Blu-ray copies would all count as too big. Settings, Profiles shows how each profile fits what is on disk.
 
 In a container, the location's folders must be mounted into the container as well, and the paths you enter are the ones the container sees.
 
@@ -113,6 +116,8 @@ How to mount a share is the system's business, not Spool's. What matters to Spoo
 
 - **Linux.** A line in `/etc/fstab` with the `nofail` and `_netdev` options, or a systemd automount.
 - **macOS.** An automount map (`/etc/auto_master` and a map file), which mounts the share when it is first used and does not depend on anyone being signed in. A share connected from Finder lasts only as long as that sign-in.
+
+  macOS guards network volumes as a matter of privacy, and without leave a program that lists one simply waits, with no error. Give Spool's program **Full Disk Access** under System Settings, Privacy & Security, or it will find the folders there and never be able to read them. The same applies to setting the mount up over SSH: Remote Login has its own "Allow full disk access for remote users", without which `/etc/auto_master` cannot be changed even by an administrator. "Check this location" names this when it is the cause.
 - **A container.** Mount the share on the host and pass it in as a volume, or use the container system's own NFS or SMB volume.
 
 NFS suits a share that is only read. If Spool is to manage the location, the user Spool runs as needs to be able to write there.

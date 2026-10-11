@@ -106,6 +106,8 @@ spool shadow-report    # does Spool read past releases as Radarr and Sonarr did?
 SPOOL_HOST=my-mac deploy/deploy.sh
 ```
 
+Run against a Spool that is already going, the script first asks it whether a restart would interrupt anything: a download being unpacked, an import, a title being moved, someone playing. If so it stops and says what; `SPOOL_FORCE=1` restarts anyway. Downloads still coming down are paused and resumed around the restart.
+
 If the library is on a removable disk, set `SPOOL_SIGN_IDENTITY` to a stable code-signing identity. macOS ties the permission to read a removable disk to the program's signature, and the first read under launchd shows a consent prompt on that Mac's screen. Spool reports that it is waiting for the prompt instead of hanging.
 
 ## The command line

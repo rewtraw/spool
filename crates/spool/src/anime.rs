@@ -791,7 +791,7 @@ impl App {
     /// Add a film a film collection lacks.
     pub async fn add_missing_film(&self, tmdb_id: u32) -> Result<Title> {
         let g = self.settings.general();
-        self.add_title(Kind::Movie, Some(tmdb_id), None, g.default_movie_profile, true, true).await
+        self.add_title(Kind::Movie, Some(tmdb_id), None, self.profile_for_new(Kind::Movie, g.new_titles_location), true, true).await
     }
 
     /// What a search for something to add finds, films and series together. The film and
@@ -872,11 +872,11 @@ impl App {
         if let Some(tvdb) = known.tvdb.filter(|_| !known.film && known.season >= 1) {
             let (listed, _) = self.meta.series_by_tvdb(tvdb).await?;
             let tvmaze = listed.tvmaze_id.ok_or_else(|| anyhow!("the series source does not list it"))?;
-            return self.add_title(Kind::Series, None, Some(tvmaze), g.default_series_profile, true, true).await;
+            return self.add_title(Kind::Series, None, Some(tvmaze), self.profile_for_new(Kind::Series, g.new_titles_location), true, true).await;
         }
         let imdb = known.imdb.clone().ok_or_else(|| anyhow!("no film or series id is known for this work"))?;
         let tmdb = self.meta.movie_by_imdb(&g.tmdb_api_key, &imdb).await?.ok_or_else(|| anyhow!("the film source does not list it"))?;
-        self.add_title(Kind::Movie, Some(tmdb), None, g.default_movie_profile, true, true).await
+        self.add_title(Kind::Movie, Some(tmdb), None, self.profile_for_new(Kind::Movie, g.new_titles_location), true, true).await
     }
 }
 

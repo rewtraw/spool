@@ -26,6 +26,13 @@ pub(super) async fn location_look(State(app): State<App>, Path(id): Path<u32>) -
     Ok(Json(json!({"started": true})))
 }
 
+/// Try a location out: can its folders be listed, read and, where Spool is meant to, written.
+pub(super) async fn location_check(State(app): State<App>, Path(id): Path<u32>) -> R<Value> {
+    let place = app.locations().into_iter().find(|l| l.id == id).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such location".into()))?;
+    let lines = app.check_up(&place).await;
+    Ok(Json(json!({"location": place.name, "ok": lines.iter().all(|l| l.ok), "checks": lines})))
+}
+
 /// What the last look found, or how far it has got.
 pub(super) async fn location_found(State(app): State<App>, Path(id): Path<u32>) -> Json<Value> {
     Json(json!(app.adoption_of(id)))

@@ -2302,6 +2302,91 @@ async fn a_new_title_is_kept_on_the_location_the_user_chooses() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn spool_can_say_whether_it_is_busy_whether_a_location_works_and_whether_a_profile_fits() {
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let (shelf, vault) = (w.root.join("Shelf/films"), w.root.join("Vault/films"));
+    std::fs::create_dir_all(&shelf).unwrap();
+    std::fs::create_dir_all(vault.join("Heat (1995)")).unwrap();
+    std::fs::write(vault.join("Heat (1995)/Heat.1995.Remux-1080p.mkv"), vec![1u8; 2 << 20]).unwrap();
+    // A profile that keeps things as they are, for what is brought in from the vault.
+    let mut keep = QualityProfile::default_hd("movie");
+    keep.name = "Keep as is".into();
+    keep.id = 0;
+    for item in &mut keep.items {
+        item.allowed = true;
+    }
+    let keep_id = w.app.db.save_profile(&mut keep).unwrap();
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["locations"] = json!([
+        {"name": "Shelf", "movie_root": shelf, "manage": true},
+        {"name": "Vault", "movie_root": vault, "manage": false, "movie_profile": keep_id},
+        {"name": "Gone", "movie_root": w.root.join("nowhere/films"), "manage": false},
+    ]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+
+    // Nothing is under way, so a restart interrupts nothing; a player playing changes that.
+    let (_, idle) = call(&api, "GET", "/api/busy", Value::Null).await;
+    assert_eq!((idle["busy"].as_bool(), idle["reasons"].as_array().map(|r| r.len())), (Some(false), Some(0)), "{idle}");
+    w.app.last_playing.store(spool::db::now(), std::sync::atomic::Ordering::Relaxed);
+    let (_, playing) = call(&api, "GET", "/api/busy", Value::Null).await;
+    assert!(playing["busy"] == true && playing["reasons"][0].as_str().unwrap().contains("playing"), "{playing}");
+    w.app.last_playing.store(0, std::sync::atomic::Ordering::Relaxed);
+
+    // A location is tried out: one Spool manages is written to, one it only reads is not,
+    // and one that is not there is said to be missing, with what that usually means.
+    let checked = |id: u32| {
+        let api = api.clone();
+        async move { call(&api, "POST", &format!("/api/locations/{id}/check"), Value::Null).await.1 }
+    };
+    let line = |r: &Value, what: &str| r["checks"].as_array().unwrap().iter().find(|c| c["what"].as_str().unwrap().contains(what)).cloned().unwrap_or(Value::Null);
+    let managed = checked(1).await;
+    assert_eq!(managed["ok"], true, "{managed}");
+    assert!(line(&managed, "can write")["detail"].as_str().unwrap().contains("wrote and removed"), "{managed}");
+    assert_eq!(tree(&shelf), Vec::<String>::new(), "the test file is gone");
+    let read_only = checked(2).await;
+    assert!(read_only["ok"] == true && line(&read_only, "can write")["detail"].as_str().unwrap().contains("not tried"), "{read_only}");
+    assert!(line(&read_only, "can be read")["detail"].as_str().unwrap().contains("Heat.1995"), "{read_only}");
+    let gone = checked(3).await;
+    assert!(gone["ok"] == false && line(&gone, "is there")["detail"].as_str().unwrap().contains("not mounted"), "{gone}");
+
+    // What is brought in from a location gets that location's profile, not the usual one.
+    let mut heat = w.movie("Heat", 1995, "tt0113277");
+    heat.path = vault.join("Heat (1995)").to_string_lossy().to_string();
+    heat.profile_id = w.app.profile_for_folder(Kind::Movie, &heat.path);
+    w.app.db.save_title(&mut heat).unwrap();
+    let usual = w.app.settings.general().default_movie_profile;
+    assert_eq!((heat.profile_id, w.app.profile_for_new(Kind::Movie, 1), w.app.profile_for_new(Kind::Movie, 0)), (keep_id, usual, usual));
+    w.app.scan_all().await.unwrap();
+
+    // The profile fits what is there; the usual one would not have allowed a remux.
+    let (_, fit) = call(&api, "GET", "/api/profiles/fit", Value::Null).await;
+    let row = fit.as_array().unwrap().iter().find(|f| f["location"] == "Vault").unwrap().clone();
+    assert_eq!((row["profile"].as_str(), row["files"].as_u64(), row["not_allowed"].as_u64(), row["over_target"].as_u64()), (Some("Keep as is"), Some(1), Some(0), Some(0)), "{row}");
+    let mut heat = w.app.db.title(heat.id).unwrap().unwrap();
+    heat.profile_id = w.profile("movie");
+    w.app.db.save_title(&mut heat).unwrap();
+    let (_, fit) = call(&api, "GET", "/api/profiles/fit", Value::Null).await;
+    let row = fit.as_array().unwrap().iter().find(|f| f["location"] == "Vault").unwrap().clone();
+    assert_eq!(row["not_allowed"].as_u64(), Some(1), "{row}");
+
+    // An assistant can ask the same things.
+    let mut g = w.app.settings.general();
+    g.api_key = "full-key".into();
+    w.app.settings.set_general(&g).unwrap();
+    let mcp_router = spool::api::router(w.app.clone());
+    let (failed, said) = tool(&mcp_router, "full-key", "restart_check", json!({})).await;
+    assert!(!failed && said["busy"] == false, "{said}");
+    let (failed, places) = tool(&mcp_router, "full-key", "locations", json!({})).await;
+    assert!(!failed && places.as_array().unwrap().iter().any(|p| p["name"] == "Vault" && p["spool_manages_it"] == false), "{places}");
+    let (failed, fits) = tool(&mcp_router, "full-key", "profile_fit", json!({})).await;
+    assert!(!failed && fits.as_array().unwrap().iter().any(|f| f["location"] == "Vault" && f["files_in_a_quality_not_allowed"] == 1), "{fits}");
+    let (refused, why) = tool(&mcp_router, "full-key", "move_titles", json!({"title_ids": [heat.id], "location_id": 2})).await;
+    assert!(refused && why.to_string().contains("only reads"), "{why}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_its_original() {
     use serde_json::{json, Value};
     let w = World::new(Mode::Active).await;

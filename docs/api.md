@@ -20,6 +20,16 @@ The key is the one in the command that Settings, General, AI access copies.
 
 `GET /api/status` gives the mode, the version, how many movies, series and files there are, free space, whether the queue is paused, the scheduled tasks and any warnings, such as a location that cannot be reached.
 
+## Before restarting
+
+`GET /api/busy` says whether stopping Spool now would interrupt something that does not simply carry on afterwards:
+
+```json
+{"busy": true, "reasons": ["1 download is being checked, repaired or unpacked"], "resumable": 2}
+```
+
+A download still coming down is not a reason: it is checkpointed and resumes, and is counted under `resumable`. `deploy/deploy.sh` asks this and stops if the answer is yes.
+
 ## Asking what changed
 
 Spool keeps a count of changes to the library. Every write that alters a title, an episode, a file or what has been watched moves it on by one. A program that keeps its own copy of the library remembers the count it last saw and asks for what moved after it.

@@ -131,6 +131,11 @@
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
+.settings .checks {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
 .settings .place .warn {
   color: var(--warn);
 }

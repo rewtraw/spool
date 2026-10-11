@@ -98,7 +98,7 @@ impl App {
     pub fn locations(&self) -> Vec<Location> {
         let g = self.settings.general();
         let name = Path::new(&g.required_volume).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Library".into());
-        let mut all = vec![Location { id: 0, name, movie_root: g.movie_root, series_root: g.series_root, volume: g.required_volume, manage: true }];
+        let mut all = vec![Location { id: 0, name, movie_root: g.movie_root, series_root: g.series_root, volume: g.required_volume, manage: true, movie_profile: 0, series_profile: 0 }];
         all.extend(g.locations.into_iter().filter(|l| l.id != 0));
         all
     }
@@ -242,6 +242,7 @@ impl App {
                     "id": l.id, "name": l.name, "movie_root": l.movie_root, "series_root": l.series_root, "volume": l.volume, "manage": l.manage,
                     "online": online, "free": free, "titles": mine.len(), "bytes": mine.iter().map(|t| sizes.get(&t.id).map(|s| s.1).unwrap_or(0)).sum::<u64>(),
                     "new_titles": places.for_new(Kind::Movie, g.new_titles_location).is_some_and(|n| n.id == l.id),
+                    "movie_profile": l.movie_profile, "series_profile": l.series_profile,
                 })
             })
             .collect()

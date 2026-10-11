@@ -69,6 +69,17 @@
     monitored = true;
     searchNow = app.status?.mode === 'active';
     placeId = places.find((p) => p.new_titles)?.id ?? 0;
+    usualProfile();
+  }
+
+  /** The profile a new title gets on the place chosen: that place's own, or the usual one. */
+  function usualProfile() {
+    if (!adding) return;
+    const of = app.profiles.filter((p) => p.kind === (adding!.kind === 'movie' ? 'movie' : 'tv'));
+    const here = places.find((p) => p.id === placeId);
+    const own = adding.kind === 'movie' ? here?.movie_profile : here?.series_profile;
+    const usual = adding.kind === 'movie' ? app.status?.default_movie_profile : app.status?.default_series_profile;
+    profileId = of.find((p) => p.id === own)?.id ?? of.find((p) => p.id === usual)?.id ?? of[0]?.id ?? 0;
   }
 
   async function add() {
@@ -146,7 +157,7 @@
       </label>
       {#if choices.length > 1}
         <label class="field">Keep it on
-          <select class="input" bind:value={placeId}>
+          <select class="input" bind:value={placeId} onchange={usualProfile}>
             {#each choices as p}<option value={p.id}>{p.name}{p.free != null ? ` (${bytes(p.free)} free)` : ''}</option>{/each}
           </select>
         </label>

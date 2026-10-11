@@ -592,6 +592,9 @@ impl Call {
     }
 
     fn progress_for(&self, id: &str, stopped: bool) -> Response {
+        // Remembered so that Spool can say whether a restart would interrupt someone. A
+        // player that has stopped is no longer one.
+        self.app.last_playing.store(if stopped { 0 } else { crate::db::now() }, std::sync::atomic::Ordering::Relaxed);
         let ticks = self.given("PositionTicks").and_then(|t| t.parse::<f64>().ok()).unwrap_or(0.0);
         if let (Some(id), Ok(lib)) = (Id::parse(id), self.library()) {
             if let Err(e) = media::report(&self.app, &lib, id, ticks / items::TICKS, stopped) {

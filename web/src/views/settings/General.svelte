@@ -47,6 +47,12 @@
     }
   }
   const placeOf = (id: number) => places.find((p) => p.id === id);
+  // Trying a location out: can it be listed, read and, where Spool should, written.
+  let checks = $state<Record<number, any>>({});
+  async function checkPlace(id: number) {
+    checks[id] = 'running';
+    checks[id] = await api.post(`/locations/${id}/check`).catch((e) => ({ ok: false, checks: [{ what: 'check', ok: false, detail: e.message }] }));
+  }
   function addPlace() {
     general.locations.push({ id: 0, name: '', movie_root: '', series_root: '', volume: '', manage: false });
   }
@@ -89,6 +95,7 @@
       return;
     }
     confirmActive = false;
+    for (const l of general.locations) (l.movie_profile = Number(l.movie_profile) || 0), (l.series_profile = Number(l.series_profile) || 0);
     await act(() => api.put('/settings/general', { ...general, recycle_days: Number(general.recycle_days), retention_days: Number(general.retention_days), rss_interval_minutes: Number(general.rss_interval_minutes), backlog_batch: Number(general.backlog_batch), backlog_interval_minutes: Number(general.backlog_interval_minutes), min_free_gb: Number(general.min_free_gb), post_parallel: Number(general.post_parallel), space_wait_gb: Number(general.space_wait_gb), archive_runner_ups: Number(general.archive_runner_ups), default_movie_profile: Number(general.default_movie_profile), default_series_profile: Number(general.default_series_profile), players_port: Number(general.players_port), new_titles_location: Number(general.new_titles_location) }), 'Saved');
     loadStatus();
     load();
@@ -96,6 +103,20 @@
     setTimeout(loadPlayers, 4000);
   }
 </script>
+
+{#snippet checked(id: number)}
+  <div class="row wrap">
+    <button class="btn small" type="button" disabled={checks[id] === 'running'} onclick={() => checkPlace(id)}>{checks[id] === 'running' ? 'Checking…' : 'Check this location'}</button>
+    {#if checks[id] && checks[id] !== 'running'}<span class="small" class:warn={!checks[id].ok}>{checks[id].ok ? 'Everything works.' : 'Something is wrong:'}</span>{/if}
+  </div>
+  {#if checks[id] && checks[id] !== 'running'}
+    <div class="list checks">
+      {#each checks[id].checks as c}
+        <div class="small" class:warn={!c.ok}><b>{c.ok ? '✓' : '✗'} {c.what}</b> <span class="muted">{c.detail}</span></div>
+      {/each}
+    </div>
+  {/if}
+{/snippet}
 
 {#if general}
   <form class="stack form" onsubmit={(e) => { e.preventDefault(); saveGeneral(); }}>
@@ -136,6 +157,7 @@
             <span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>
           </div>
           <span class="hint">The folders under Folders above, where downloads also land. Spool changes files here.</span>
+          {@render checked(0)}
           <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
         </div>
       {/if}
@@ -152,6 +174,21 @@
           </div>
           <label class="check"><input type="checkbox" bind:checked={l.manage} onchange={() => { if (!l.manage && general.new_titles_location === l.id) general.new_titles_location = 0; }} /> Let Spool change files here</label>
           <span class="hint">Off, Spool lists and plays what is here and changes nothing: no downloads, upgrades, renames, subtitles or deletions. On, it treats this location like the main one.</span>
+          <div class="cols">
+            <label class="field">Profile for films here
+              <select class="input" bind:value={l.movie_profile}>
+                <option value={0}>The usual one</option>
+                {#each app.profiles.filter((x) => x.kind === 'movie') as x}<option value={x.id}>{x.name}</option>{/each}
+              </select>
+            </label>
+            <label class="field">Profile for series here
+              <select class="input" bind:value={l.series_profile}>
+                <option value={0}>The usual one</option>
+                {#each app.profiles.filter((x) => x.kind === 'tv') as x}<option value={x.id}>{x.name}</option>{/each}
+              </select>
+            </label>
+          </div>
+          <span class="hint">Given to titles added here or brought in from here; titles already in the library keep theirs. A library kept as it is wants a profile with no size target and no upgrades.</span>
           {#if l.id}<label class="check"><input type="radio" bind:group={general.new_titles_location} value={l.id} disabled={!l.manage} /> New titles go here{#if !l.manage}<span class="faint small">&nbsp;(needs "Let Spool change files here")</span>{/if}</label>{/if}
           <div class="row wrap">
             {#if p}
@@ -163,6 +200,7 @@
             {/if}
             <button class="btn small ghost danger" type="button" onclick={() => general.locations.splice(i, 1)}>Remove</button>
           </div>
+          {#if p}{@render checked(l.id)}{/if}
           {#if foundBy[l.id]}
             {@const found = foundBy[l.id]}
             <div class="found">
