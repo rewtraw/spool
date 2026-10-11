@@ -45,6 +45,9 @@ enum Command {
     },
     /// Compare where every library file is with where Spool would put it.
     CheckPaths,
+    /// Lay out a made-up library under a folder and record it, to look at. Give it a data
+    /// folder of its own with --data-dir.
+    Demo { folder: PathBuf },
     /// Check a subtitle file against a video's speech: is it in time, and if not, by how much.
     CheckSubtitles {
         video: PathBuf,
@@ -143,6 +146,7 @@ async fn main() -> Result<()> {
             if recovered > 0 {
                 tracing::info!(recovered, "finished imports interrupted by the last shutdown");
             }
+            app.resume_moves().await;
             if std::env::var_os("SPOOL_NO_SCHEDULER").is_none() {
                 app.spawn_scheduler();
             }
@@ -269,6 +273,11 @@ async fn main() -> Result<()> {
                     break;
                 }
             }
+        }
+        Command::Demo { folder } => {
+            let app = App::start(&dir, db).await?;
+            let titles = spool::demo::seed(&app, &folder).await?;
+            println!("A demonstration library of {titles} titles is under {}", folder.display());
         }
         Command::Backup { dest } => {
             db.backup(&dest)?;

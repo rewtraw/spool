@@ -242,7 +242,7 @@
 <h2 id="moving-a-title-to-another-location"><a href="#moving-a-title-to-another-location">Moving a title to another location</a></h2>
 <p><strong>Move to…</strong> on a title&#39;s page, or in the bar that appears when titles are selected in the library, takes a title&#39;s folder to another location Spool manages. Titles are moved one at a time, and a title stays playable where it is until its move is done.</p>
 <ol>
-<li>The whole folder is copied to the other location under a working name: the film or episodes, subtitles, extras, artwork and notes.</li>
+<li>The whole folder is copied to the other location under a working name: the film or episodes, subtitles, extras, artwork and notes, a media server&#39;s hidden notes such as <code>.plexmatch</code> among them. What a file system keeps for itself (<code>.DS_Store</code>, <code>._</code> files, <code>.AppleDouble</code>, <code>@eaDir</code>) is not copied, and is cleared away with the original.</li>
 <li>Every file is checked against its original.</li>
 <li>The copy is given the folder&#39;s name and the title is pointed at it.</li>
 <li>Only then is the original taken away.</li>
@@ -251,7 +251,8 @@
 <p>A move can be cancelled there or on the title&#39;s own page. A waiting title is simply taken out of the line. Cancelling the move under way stops the copy and removes what was copied so far; the title stays where it was, untouched. Once the copy is complete the move can no longer be cancelled and finishes.</p>
 <p>If anything fails before the last step, the title is left where it was and a notice says why. On one disk the folder is simply renamed into place.</p>
 <p>A location Spool only reads gives nothing up. Moving a title off one copies it, and the original stays there as <a href="#one-title-in-two-places">a further copy</a>.</p>
-<p>A move is refused, with the reason, when the other location is away, is only read, has no room, or already has a folder of that name; and while the title has a download under way.</p>
+<p>A move is refused, with the reason, when the other location is away, is only read, has no room, or already has a folder of that name; and while the title has a download under way. Room is reckoned for the whole line: a title is refused when you ask if it would not fit once the titles ahead of it have arrived, so a batch does not run out of room halfway.</p>
+<p>The line of waiting titles is written down. If Spool is restarted, it clears away the half-made copy of the move that was interrupted and takes the line up again from that title.</p>
 <h2 id="when-a-location-cannot-be-reached"><a href="#when-a-location-cannot-be-reached">When a location cannot be reached</a></h2>
 <p>A NAS that is switched off, or a disk that is unplugged, takes its titles offline:</p>
 <ul>

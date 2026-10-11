@@ -2387,6 +2387,19 @@ async fn spool_can_say_whether_it_is_busy_whether_a_location_works_and_whether_a
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_demonstration_library_is_laid_out_and_recorded() {
+    let w = World::new(Mode::Shadow).await;
+    let root = w.root.join("demo");
+    assert_eq!(spool::demo::seed(&w.app, &root).await.unwrap(), 14);
+    let titles = w.app.db.titles(None).unwrap();
+    let on = |part: &str| titles.iter().filter(|t| t.path.contains(part)).count();
+    assert_eq!((on("/Movies/"), on("/Shelf/"), on("/Vault/"), titles.iter().filter(|t| t.path.is_empty()).count()), (8, 2, 2, 1));
+    let series = titles.iter().find(|t| t.kind == Kind::Series).unwrap();
+    assert_eq!(w.app.db.episodes(series.id).unwrap().iter().filter(|e| e.file_id.is_some()).count(), 6, "six of its eight episodes are on disk");
+    assert!(spool::demo::seed(&w.app, &root).await.is_err(), "it will not be laid over a library that is there");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_its_original() {
     use serde_json::{json, Value};
     let w = World::new(Mode::Active).await;
@@ -2453,7 +2466,7 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
     {
         use std::sync::{atomic::AtomicU64, Arc};
         let mut moves = w.app.moves.lock();
-        moves.now = Some(spool::relocate::Moving { title_id: heat.id, to: "Main".into(), done: Arc::new(AtomicU64::new(300)), total: 1200, stop: Default::default() });
+        moves.now = Some(spool::relocate::Moving { title_id: heat.id, to: "Main".into(), done: Arc::new(AtomicU64::new(300)), total: 1200, stop: Default::default(), location: 0 });
         moves.queue.push_back((heat.id, 2));
     }
     let (_, busy) = call(&api, "GET", "/api/activity", Value::Null).await;
@@ -2496,6 +2509,45 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
     assert_eq!(std::fs::read(kept.join("Alpha (2001).mkv")).unwrap(), b"another film", "nothing is taken from a place Spool only reads");
     let files = w.app.db.files(alpha.id).unwrap();
     assert_eq!((files.len(), files.iter().filter(|f| f.base.is_some()).count()), (2, 1));
+
+    // The line is written down, and a restart takes it up again, clearing away the half-made
+    // copy the interrupted move left behind.
+    let waits = vault.join("Beta (2002)");
+    lay(waits.join("Beta (2002).mkv"), b"a third film");
+    lay(waits.join(".plexmatch"), b"tmdbid: 3\n");
+    let beta = film("Beta", 2002, "tt0000002", waits.clone());
+    w.app.scan_all().await.unwrap();
+    w.app.db.set_setting("moves_waiting", &vec![(beta.id, 1u32), (987_654i64, 1u32)]).unwrap();
+    lay(shelf.join(".spool-moving-55/half.mkv"), b"half a copy");
+    assert_eq!(w.app.resume_moves().await, 1, "the title that is gone is passed over");
+    settled(beta.id).await;
+    assert!(!shelf.join(".spool-moving-55").exists());
+    assert_eq!(std::fs::read(shelf.join("Beta (2002)/.plexmatch")).unwrap(), b"tmdbid: 3\n", "a media server's hidden note goes with its title");
+    for _ in 0..100 {
+        if w.app.db.get_setting::<Vec<(i64, u32)>>("moves_waiting").is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(w.app.db.get_setting::<Vec<(i64, u32)>>("moves_waiting").is_empty(), "nothing is left written down once the line is done");
+
+    // A batch is checked for room as a whole: what would not fit is refused when it is asked
+    // for, by name, and the rest goes ahead.
+    let (big, small) = (vault.join("Gamma (2003)"), vault.join("Delta (2004)"));
+    lay(big.join("Gamma (2003).mkv"), b"said to be vast");
+    lay(small.join("Delta (2004).mkv"), b"small");
+    let (gamma, delta) = (film("Gamma", 2003, "tt0000003", big.clone()), film("Delta", 2004, "tt0000004", small.clone()));
+    w.app.scan_all().await.unwrap();
+    let mut vast = w.app.db.files(gamma.id).unwrap().remove(0);
+    vast.size = 1 << 60;
+    w.app.db.save_file(&mut vast).unwrap();
+    let (status, said) = call(&api, "POST", "/api/titles/move", json!({"ids": [gamma.id, delta.id], "location": 1})).await;
+    assert_eq!((status, said["queued"].as_u64(), said["refused"].as_array().map(Vec::len)), (200, Some(1), Some(1)), "{said}");
+    assert!(said["refused"][0]["title"] == "Gamma" && said["refused"][0]["why"].to_string().contains("no room"), "{said}");
+    settled(delta.id).await;
+    assert!(shelf.join("Delta (2004)").exists() && !shelf.join("Gamma (2003)").exists());
+    let (status, refused) = call(&api, "POST", "/api/titles/move", json!({"ids": [gamma.id], "location": 1})).await;
+    assert!(status == 409 && refused.to_string().contains("no room"), "{status} {refused}");
 
     // What cannot be moved is refused, with the reason.
     for (location, why) in [(2, "only reads"), (1, "already on Shelf"), (9, "no such location")] {

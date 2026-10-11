@@ -170,11 +170,11 @@ pub(super) async fn add_title(State(app): State<App>, Json(b): Json<AddTitle>) -
 pub(super) async fn move_titles(State(app): State<App>, Json(b): Json<Value>) -> R<Value> {
     let ids: Vec<i64> = b["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default();
     let location = b["location"].as_u64().ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "which location?".into()))? as u32;
-    let queued = app.move_titles(&ids, location).map_err(|e| ApiError(StatusCode::CONFLICT, format!("{e:#}")))?;
+    let asked = app.move_titles(&ids, location).map_err(|e| ApiError(StatusCode::CONFLICT, format!("{e:#}")))?;
     for id in &ids {
         app.emit(Event::Title { id: *id });
     }
-    Ok(Json(json!({"queued": queued, "asked": ids.len()})))
+    Ok(Json(json!({"queued": asked.queued, "asked": ids.len(), "refused": asked.refused})))
 }
 
 /// Call moves off: the waiting titles named, or all that wait; and the move under way, when

@@ -131,6 +131,7 @@ cargo test --workspace     # needs ffmpeg, par2 and 7zz for the full suite
 (cd web && bun run check)
 (cd web && bun run docs)   # after changing a guide in docs/: rebuilds the pages in docs/guide
 bun tools/smoke.mjs http://localhost:7979   # opens every page of a running Spool in Chrome and checks it draws
+bun tools/demo.mjs                          # the same on a made-up library with a move under way, which it then cancels and restarts through
 ```
 
 | Path | What it is |

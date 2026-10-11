@@ -79,7 +79,7 @@ Spool plays a copy and never changes it, whatever kind of location it is on: it 
 
 **Move to…** on a title's page, or in the bar that appears when titles are selected in the library, takes a title's folder to another location Spool manages. Titles are moved one at a time, and a title stays playable where it is until its move is done.
 
-1. The whole folder is copied to the other location under a working name: the film or episodes, subtitles, extras, artwork and notes.
+1. The whole folder is copied to the other location under a working name: the film or episodes, subtitles, extras, artwork and notes, a media server's hidden notes such as `.plexmatch` among them. What a file system keeps for itself (`.DS_Store`, `._` files, `.AppleDouble`, `@eaDir`) is not copied, and is cleared away with the original.
 2. Every file is checked against its original.
 3. The copy is given the folder's name and the title is pointed at it.
 4. Only then is the original taken away.
@@ -92,7 +92,9 @@ If anything fails before the last step, the title is left where it was and a not
 
 A location Spool only reads gives nothing up. Moving a title off one copies it, and the original stays there as [a further copy](#one-title-in-two-places).
 
-A move is refused, with the reason, when the other location is away, is only read, has no room, or already has a folder of that name; and while the title has a download under way.
+A move is refused, with the reason, when the other location is away, is only read, has no room, or already has a folder of that name; and while the title has a download under way. Room is reckoned for the whole line: a title is refused when you ask if it would not fit once the titles ahead of it have arrived, so a batch does not run out of room halfway.
+
+The line of waiting titles is written down. If Spool is restarted, it clears away the half-made copy of the move that was interrupted and takes the line up again from that title.
 
 ## When a location cannot be reached
 

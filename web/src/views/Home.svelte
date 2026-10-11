@@ -136,7 +136,7 @@
               {#if moves.waiting.length}<span class="muted"> · {moves.waiting.length} more waiting</span>{/if}
             </div>
             {#if m?.total}
-              <div class="progress" role="progressbar" aria-label="Move progress" aria-valuenow={Math.round(pct(m.done, m.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(m.done, m.total)}%"></i></div>
+              <div class="progress" style="margin:8px 0 5px" role="progressbar" aria-label="Move progress" aria-valuenow={Math.round(pct(m.done, m.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(m.done, m.total)}%"></i></div>
               <div class="faint small">{bytes(m.done)} of {bytes(m.total)}</div>
             {/if}
           </div>

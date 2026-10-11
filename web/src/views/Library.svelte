@@ -123,7 +123,11 @@
     const n = chosen.length;
     if (!confirm(`Move ${n} ${n === 1 ? 'title' : 'titles'} (${bytes(chosenBytes)}) to ${place.name}? They are moved one at a time; each original is removed once its copy has been checked, or kept as a copy where Spool only reads.`)) return;
     const r = await act(() => api.post<any>('/titles/move', { ids: chosen.map((t) => t.id), location: place.id }));
-    if (r) toast(r.queued === r.asked ? `Moving ${r.queued} to ${place.name}` : `Moving ${r.queued} of ${r.asked} to ${place.name}; the rest are already there, have a download under way, or have a folder there`);
+    if (r) {
+      // Say why for the first that was refused; the rest are usually for the same reason.
+      const first = r.refused?.[0];
+      toast(!first ? `Moving ${r.queued} to ${place.name}` : `Moving ${r.queued} of ${r.asked} to ${place.name}. Not moved: ${first.why}${r.refused.length > 1 ? `, and ${r.refused.length - 1} more` : ''}.`);
+    }
     picked = {};
   }
 

@@ -37,6 +37,75 @@ pub struct Moving {
     /// Set when the person calls the move off; the copy stops at the next block.
     #[serde(skip)]
     pub stop: Arc<AtomicBool>,
+    /// The location it is going to, by id, as it was asked for.
+    #[serde(skip)]
+    pub location: u32,
+}
+
+/// What came of asking for titles to be moved.
+#[derive(Default, Serialize)]
+pub struct Asked {
+    pub queued: usize,
+    /// The titles that were not put in line, each with the reason.
+    pub refused: Vec<Refused>,
+}
+
+#[derive(Serialize)]
+pub struct Refused {
+    pub title_id: i64,
+    pub title: String,
+    pub why: String,
+}
+
+/// Where the line of moves is kept, so a restart does not forget it.
+const LINE: &str = "moves_waiting";
+/// Room left over on a disk after a move, so it is never filled to the brim.
+const SPARE: u64 = 1 << 30;
+
+/// What a file system or a file manager keeps about other files. It is not part of a title:
+/// it is not copied with it, and it is cleared away with the original.
+fn litter(name: &str) -> bool {
+    name == ".DS_Store" || name == ".AppleDouble" || name == "@eaDir" || name.starts_with("._")
+}
+
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if litter(&name) || name == ".spool-recycle" || name == "#recycle" {
+            continue;
+        }
+        let p = e.path();
+        if p.is_dir() {
+            walk(&p, out);
+        } else {
+            out.push(p);
+        }
+    }
+}
+
+/// Clear a folder of what a file system left in it, deepest first, so the folder can go.
+fn sweep(dir: &Path) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let (p, name) = (e.path(), e.file_name().to_string_lossy().to_string());
+        if litter(&name) {
+            let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+        } else if p.is_dir() && name != ".spool-recycle" && name != "#recycle" {
+            sweep(&p);
+        }
+    }
+}
+
+/// For looking at a move as it goes: bytes a second to hold the copy to, which also has a
+/// move within one disk copied instead of renamed. See tools/demo.mjs.
+fn pace() -> Option<u64> {
+    std::env::var("SPOOL_MOVE_PACE").ok().and_then(|p| p.parse().ok()).filter(|p| *p > 0)
+}
+
+fn same_disk(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    matches!((std::fs::metadata(a), std::fs::metadata(b)), (Ok(x), Ok(y)) if x.dev() == y.dev())
 }
 
 /// What a move that was called off ends with, so it is not reported as a failure.
@@ -46,12 +115,13 @@ fn count<S: serde::Serializer>(n: &Arc<AtomicU64>, s: S) -> std::result::Result<
     s.serialize_u64(n.load(Ordering::Relaxed))
 }
 
-/// Every file under a folder, relative to it, with its size. What a file system keeps for
-/// itself, and Spool's own recycle folder, are left behind.
+/// Every file under a folder, relative to it, with its size: the film or episodes and all
+/// that lies beside them, a media server's hidden notes such as `.plexmatch` included. What
+/// a file system keeps for itself, and recycle folders, are left behind.
 fn listing(root: &Path) -> Vec<(PathBuf, u64)> {
     let mut files = vec![];
-    crate::catalog::collect(root, &mut files);
-    files.into_iter().filter(|p| !p.components().any(|c| c.as_os_str() == ".spool-recycle")).filter_map(|p| Some((p.strip_prefix(root).ok()?.to_path_buf(), std::fs::metadata(&p).ok()?.len()))).collect()
+    walk(root, &mut files);
+    files.into_iter().filter_map(|p| Some((p.strip_prefix(root).ok()?.to_path_buf(), std::fs::metadata(&p).ok()?.len()))).collect()
 }
 
 /// Copy a folder's files to another, counting bytes as they go, and check each against its
@@ -59,6 +129,10 @@ fn listing(root: &Path) -> Vec<(PathBuf, u64)> {
 fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64, stop: &AtomicBool) -> Result<()> {
     use std::io::{Read, Write};
     let mut buffer = vec![0u8; 4 << 20];
+    let pace = pace();
+    if pace.is_some() {
+        buffer.truncate(256 << 10);
+    }
     for (rel, size) in files {
         let (src, dst) = (from.join(rel), to.join(rel));
         if let Some(parent) = dst.parent() {
@@ -76,6 +150,9 @@ fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64, 
             }
             output.write_all(&buffer[..n]).with_context(|| format!("writing {}", dst.display()))?;
             done.fetch_add(n as u64, Ordering::Relaxed);
+            if let Some(pace) = pace {
+                std::thread::sleep(std::time::Duration::from_millis(n as u64 * 1000 / pace));
+            }
         }
         output.sync_all().with_context(|| format!("writing {}", dst.display()))?;
         let written = std::fs::metadata(&dst)?.len();
@@ -91,6 +168,7 @@ fn remove_all(root: &Path, files: &[(PathBuf, u64)]) {
     for (rel, _) in files {
         let _ = std::fs::remove_file(root.join(rel));
     }
+    sweep(root);
     let mut folders: Vec<PathBuf> = files.iter().filter_map(|(rel, _)| rel.parent().map(|p| root.join(p))).collect();
     folders.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
     folders.dedup();
@@ -132,30 +210,120 @@ impl App {
         Ok(target)
     }
 
+    /// How much room moving a title under a folder will take there, by the files Spool has
+    /// recorded for it. Within one disk a folder is renamed into place and takes none, unless
+    /// it is on a location Spool only reads, which keeps its original and is always copied.
+    fn needs(&self, t: &Title, root: &Path) -> u64 {
+        if same_disk(Path::new(&t.path), root) && !self.placement().read_only(t) {
+            return 0;
+        }
+        self.db.files(t.id).map(|f| f.iter().filter(|f| f.base.is_none()).map(|f| f.size).sum()).unwrap_or(0)
+    }
+
+    /// Room on a location for what is still to arrive there: what is free now, less what the
+    /// titles already in line for it will take.
+    fn room_on(&self, location: u32, root: &Path) -> Option<u64> {
+        let free = crate::app::free_space(root)?;
+        let (now, waiting) = {
+            let moves = self.moves.lock();
+            (moves.now.clone(), moves.queue.iter().copied().collect::<Vec<_>>())
+        };
+        let coming = |id: i64| self.db.title(id).ok().flatten().map(|t| self.needs(&t, root)).unwrap_or(0);
+        let mut owed: u64 = waiting.iter().filter(|m| m.1 == location).map(|m| coming(m.0)).sum();
+        if let Some(m) = now.filter(|m| m.location == location) {
+            owed += m.total.max(coming(m.title_id)).saturating_sub(m.done.load(Ordering::Relaxed));
+        }
+        Some(free.saturating_sub(owed))
+    }
+
+    /// Write the line down: the title being moved, then those waiting.
+    fn keep_line(&self) {
+        let line: Vec<(i64, u32)> = {
+            let moves = self.moves.lock();
+            moves.now.iter().map(|m| (m.title_id, m.location)).chain(moves.queue.iter().copied()).collect()
+        };
+        let _ = self.db.set_setting(LINE, &line);
+    }
+
+    /// Take up the moves a restart interrupted, after clearing away the half-made copy the
+    /// interrupted one left behind. Says how many were put back in line.
+    pub async fn resume_moves(&self) -> usize {
+        let line: Vec<(i64, u32)> = self.db.get_setting(LINE);
+        if self.moves.lock().working {
+            return 0;
+        }
+        let roots: Vec<PathBuf> = self.placement().0.iter().filter(|p| p.1 && p.0.manage).flat_map(|p| [p.0.movie_root.clone(), p.0.series_root.clone()]).filter(|r| !r.is_empty()).map(PathBuf::from).collect();
+        let _ = tokio::task::spawn_blocking(move || {
+            for root in roots {
+                for e in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+                    if e.file_name().to_string_lossy().starts_with(".spool-moving-") {
+                        tracing::info!(folder = %e.path().display(), "clearing away a copy an interrupted move left behind");
+                        let _ = std::fs::remove_dir_all(e.path());
+                    }
+                }
+            }
+        })
+        .await;
+        let mut resumed = 0;
+        for (id, location) in &line {
+            match self.move_titles(&[*id], *location) {
+                Ok(asked) => resumed += asked.queued,
+                Err(e) => {
+                    tracing::warn!(title = id, error = %format!("{e:#}"), "a move interrupted by a restart could not be taken up again");
+                    let _ = self.db.add_attention("config", Some(*id), None, &format!("A move was interrupted by a restart and could not be taken up again: {e:#}. The title is still where it was."), serde_json::json!({}));
+                    self.emit(Event::Attention);
+                }
+            }
+        }
+        self.keep_line();
+        if resumed > 0 {
+            tracing::info!(resumed, "took up the moves interrupted by the last shutdown");
+        }
+        resumed
+    }
+
     /// Put titles in line to be moved to a location, and start on them if nothing is moving.
-    /// Each is checked first, so what cannot be moved is refused now and not later.
-    pub fn move_titles(&self, ids: &[i64], location: u32) -> Result<usize> {
-        let mut queued = 0;
+    /// Each is checked first, so what cannot be moved is refused now and not later: among
+    /// the reasons, that the location has no room for it once the titles ahead of it in line
+    /// have arrived. One title alone that is refused is an error; of several, the refused are
+    /// named in the answer.
+    pub fn move_titles(&self, ids: &[i64], location: u32) -> Result<Asked> {
+        let mut asked = Asked::default();
+        let mut room: Option<Option<u64>> = None;
+        let name = self.placement().0.iter().find(|p| p.0.id == location).map(|p| p.0.name.clone()).unwrap_or_default();
         for id in ids {
             let t = self.db.title(*id)?.ok_or_else(|| anyhow!("no such title"))?;
-            if let Err(e) = self.move_target(&t, location) {
-                if ids.len() == 1 {
-                    return Err(e);
-                }
-                continue;
-            }
-            if self.db.title_acquisitions(*id)?.iter().any(|a| a.state.is_active()) {
-                if ids.len() == 1 {
+            let checked = (|| -> Result<u64> {
+                let target = self.move_target(&t, location)?;
+                if self.db.title_acquisitions(*id)?.iter().any(|a| a.state.is_active()) {
                     bail!("{} has a download under way; move it when that is done", t.title);
                 }
-                continue;
-            }
+                let root = target.parent().unwrap_or(&target);
+                let need = self.needs(&t, root);
+                let left = *room.get_or_insert_with(|| self.room_on(location, root));
+                if let Some(left) = left.filter(|left| need > 0 && *left < need + SPARE) {
+                    bail!("{name} has no room for {}: it needs {:.1} GB and {:.1} GB is left once the titles ahead of it have arrived", t.title, need as f64 / 1e9, left as f64 / 1e9);
+                }
+                Ok(need)
+            })();
+            let need = match checked {
+                Ok(need) => need,
+                Err(e) if ids.len() == 1 => return Err(e),
+                Err(e) => {
+                    asked.refused.push(Refused { title_id: *id, title: t.title.clone(), why: format!("{e:#}") });
+                    continue;
+                }
+            };
             let mut moves = self.moves.lock();
             if !moves.queue.iter().any(|m| m.0 == *id) && moves.now.as_ref().is_none_or(|m| m.title_id != *id) {
                 moves.queue.push_back((*id, location));
-                queued += 1;
+                asked.queued += 1;
+                if let Some(Some(left)) = room.as_mut() {
+                    *left = left.saturating_sub(need);
+                }
             }
         }
+        self.keep_line();
         let start = {
             let mut moves = self.moves.lock();
             !std::mem::replace(&mut moves.working, true)
@@ -171,7 +339,7 @@ impl App {
                         let mut moves = app.moves.lock();
                         match moves.queue.pop_front() {
                             Some(next) => {
-                                moves.now = Some(Moving { title_id: next.0, to: String::new(), done: Arc::new(AtomicU64::new(0)), total: 0, stop: Default::default() });
+                                moves.now = Some(Moving { title_id: next.0, to: String::new(), done: Arc::new(AtomicU64::new(0)), total: 0, stop: Default::default(), location: next.1 });
                                 next
                             }
                             None => {
@@ -197,11 +365,12 @@ impl App {
                         }
                     }
                     app.moves.lock().now = None;
+                    app.keep_line();
                     app.emit(Event::Title { id });
                 }
             });
         }
-        Ok(queued)
+        Ok(asked)
     }
 
     /// Whether a title is being moved or waiting to be: its files are not to be touched meanwhile.
@@ -226,6 +395,7 @@ impl App {
             }
             (taken, stopping)
         };
+        self.keep_line();
         for id in &taken {
             self.emit(Event::Title { id: *id });
         }
@@ -287,7 +457,7 @@ impl App {
         };
         let total: u64 = files.iter().map(|f| f.1).sum();
         if let Some(free) = crate::app::free_space(target.parent().unwrap_or(&target)) {
-            if free < total + (1 << 30) {
+            if (keep_original || !same_disk(&from, target.parent().unwrap_or(&target))) && free < total + SPARE {
                 bail!("{to_name} has {:.1} GB free and the title needs {:.1} GB", free as f64 / 1e9, total as f64 / 1e9);
             }
         }
@@ -297,7 +467,7 @@ impl App {
         let stop = {
             let mut moves = self.moves.lock();
             let stop = moves.now.as_ref().map(|m| m.stop.clone()).unwrap_or_default();
-            moves.now = Some(Moving { title_id: id, to: to_name.clone(), done: done.clone(), total, stop: stop.clone() });
+            moves.now = Some(Moving { title_id: id, to: to_name.clone(), done: done.clone(), total, stop: stop.clone(), location });
             stop
         };
         if stop.load(Ordering::Relaxed) {
@@ -311,7 +481,7 @@ impl App {
         tokio::task::spawn_blocking(move || -> Result<()> {
             let _ = std::fs::remove_dir_all(&w);
             // On the same disk a folder is moved by renaming it, which takes no time.
-            if !keep_original && std::fs::rename(&f, &t).is_ok() {
+            if !keep_original && pace().is_none() && std::fs::rename(&f, &t).is_ok() {
                 return Ok(());
             }
             let copied = copy_all(&f, &w, &fl, &d, &st).and_then(|_| std::fs::rename(&w, &t).with_context(|| format!("naming {}", t.display())));
@@ -365,8 +535,13 @@ mod tests {
         lay("poster.jpg", b"jpg");
         // What a file system keeps for itself is not part of the title and stays behind.
         lay(".AppleDouble/Film (1999).mkv", b"junk");
+        lay("._Film (1999).mkv", b"junk");
+        lay(".DS_Store", b"junk");
+        // A media server's hidden note is part of it.
+        lay(".plexmatch", b"tmdbid: 949\n");
+        lay(".spool-recycle/old.mkv", b"recycled");
         let files = listing(&from);
-        assert_eq!(files.len(), 4);
+        assert_eq!(files.len(), 5);
         let done = AtomicU64::new(0);
         copy_all(&from, &to, &files, &done, &AtomicBool::new(false)).unwrap();
         assert_eq!(done.load(Ordering::Relaxed), files.iter().map(|f| f.1).sum::<u64>());
@@ -380,6 +555,8 @@ mod tests {
         assert!(from.join("Film (1999).mkv").exists());
         remove_all(&from, &files);
         assert!(!from.join("Film (1999).mkv").exists() && !from.join("Trailers").exists());
-        assert!(from.join(".AppleDouble").exists(), "what was not copied is not removed");
+        assert!(!from.join(".AppleDouble").exists() && !from.join(".DS_Store").exists(), "what the file system left is cleared away");
+        assert!(from.join(".spool-recycle/old.mkv").exists(), "what was recycled stays, and can be got back");
+        assert!(to.join(".plexmatch").exists() && !to.join(".DS_Store").exists() && !to.join(".spool-recycle").exists());
     }
 }

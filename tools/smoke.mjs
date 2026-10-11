@@ -104,13 +104,16 @@ if (!status) {
 const listed = await api('/api/titles');
 const titles = listed?.titles ?? listed ?? [];
 const collections = (await api('/api/collections')) ?? [];
+const moves = (await api('/api/activity'))?.moves ?? {};
+// A move that is under way, or waiting, has to be on show where activity is.
+const moving = moves.now || moves.waiting?.length ? ['Moving to another location', ...(moves.now?.title ? [moves.now.title.slice(0, 12)] : []), ...(moves.waiting?.length ? ['waiting'] : [])] : [];
 
 // Each page, what must be on it, and whether it may be pictured.
 const pages = [
-  ['home', '#/home', ['Home'], true],
+  ['home', '#/home', ['Home', ...(moving.length ? ['In progress'] : [])], true],
   ['library', '#/library', ['Library', ...(titles.length ? [titles[0].title.slice(0, 12)] : [])], true],
   ['discover', '#/discover', ['Discover'], true],
-  ['activity', '#/activity', ['Activity'], true],
+  ['activity', '#/activity', ['Activity', ...moving], true],
   ['archive', '#/archive', ['Archive'], true],
   ['settings-general', '#/settings/general', ['Mode', 'Locations', 'Players'], false],
   ['settings-usenet', '#/settings/usenet', ['Speed'], false],
@@ -130,7 +133,8 @@ const tab = await open();
 let failed = 0;
 for (const [name, route, must, mayPicture] of pages) {
   const seen = await tab.go(`${base}/${route}`);
-  const missing = must.filter((m) => (m instanceof RegExp ? !m.test(seen) : !seen.includes(m))).map(String);
+  // Headings are drawn in capitals by the style sheet, so letter case is not compared.
+  const missing = must.filter((m) => (m instanceof RegExp ? !m.test(seen) : !seen.toLowerCase().includes(m.toLowerCase()))).map(String);
   const wrong = [...missing.map((m) => `does not show ${m}`), ...tab.problems];
   if (shots && mayPicture) await tab.picture(join(shots, `${name}.png`));
   console.log(`${wrong.length ? 'FAIL' : 'ok  '} ${name}${wrong.length ? `\n       ${wrong.join('\n       ')}` : ''}`);

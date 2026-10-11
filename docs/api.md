@@ -94,7 +94,7 @@ The routes the web app uses are open to other programs as well. A few that are u
 | `POST /api/tasks/{name}` | Run a scheduled task now: `rss`, `backlog`, `refresh`, `scan`, `housekeeping`, `plex` or `subtitles`. |
 | `POST /api/titles/{id}/search` | Search for a title now. |
 | `POST /api/titles/{id}/scan` | Rescan a title's folder. |
-| `POST /api/titles/move` | Move titles to another location: `{"ids": [...], "location": id}`. |
+| `POST /api/titles/move` | Move titles to another location: `{"ids": [...], "location": id}`. The answer says how many were put in line and names those refused, each with the reason. |
 | `POST /api/titles/move/cancel` | Call moves off: `{"ids": [...]}` takes those titles out of the line and stops the move under way if its title is among them; with no ids, every waiting title is taken out. `GET /api/activity` lists the move under way and those waiting, under `moves`. |
 | `POST /api/titles/{id}/to-series` | Replace a film that is posted in episodes with the series it is listed as. |
 | `GET /api/lookup/all?q=…` | Films and series by name, together, with what AniList says of any that are anime. |
