@@ -106,6 +106,7 @@ impl Metadata {
             }),
             details_at: 0,
             local: Default::default(),
+            in_episodes: false,
         };
         let original = s(m, "original_title");
         if !original.is_empty() && original != t.title {
@@ -238,6 +239,7 @@ impl Metadata {
             collection: None,
             details_at: 0,
             local: Default::default(),
+            in_episodes: false,
         }
     }
 

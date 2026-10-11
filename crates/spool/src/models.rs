@@ -163,6 +163,11 @@ pub struct Title {
     /// theme music and a media server's notes. Read from disk, never written.
     #[serde(default)]
     pub local: crate::local::Local,
+    /// A film that is posted as its episodes: an OVA the metadata source lists as one film.
+    /// Learned when a download for it turned out to be a single episode, so that the other
+    /// episodes are not downloaded one after another to find out the same.
+    #[serde(default)]
+    pub in_episodes: bool,
 }
 
 impl Title {

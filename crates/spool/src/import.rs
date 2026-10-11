@@ -364,6 +364,20 @@ impl App {
             };
             if let (Kind::Movie, Some(mi)) = (title.kind, &media_info) {
                 if title.runtime > 0 && mi.runtime_secs > 0.0 && mi.runtime_secs < title.runtime as f64 * 60.0 * 0.4 {
+                    // Short, and named as an episode: the film is posted in episodes. Remember
+                    // it, so the rest are turned down by name instead of downloaded to find out.
+                    if crate::acquire::names_an_episode(&acq.release.title, title) || crate::acquire::names_an_episode(&file_name, title) {
+                        if let Some(mut t) = self.db.title(title.id).ok().flatten().filter(|t| !t.in_episodes) {
+                            t.in_episodes = true;
+                            let _ = self.db.save_title(&mut t);
+                        }
+                        return Err(Blocked::Needs(format!(
+                            "{file_name} is one episode ({:.0} minutes) of a film that runs {} minutes. {} is posted in episodes, and Spool files a film as one video. Other single episodes will now be turned down. To collect the episodes, remove this film and add it as a series.",
+                            mi.runtime_secs / 60.0,
+                            title.runtime,
+                            title.title
+                        )));
+                    }
                     return Err(Blocked::Needs(format!("{file_name} runs {:.0} minutes but the movie is {} minutes; it may be a sample", mi.runtime_secs / 60.0, title.runtime)));
                 }
             }

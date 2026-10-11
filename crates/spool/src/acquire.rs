@@ -60,6 +60,25 @@ struct Judged {
     candidate: Candidate,
 }
 
+/// Whether a release's name says it is episodes of this film: an episode number that comes
+/// after the film's whole title. The series parser finds numbers in most film names (a year,
+/// or a number in the title itself), so only one that follows the full title counts.
+pub(crate) fn names_an_episode(name: &str, t: &Title) -> bool {
+    let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    let Some(p) = parse_episode_title(name) else { return false };
+    if p.full_season || p.is_multi_season() || (p.episode_numbers.is_empty() && p.absolute_episode_numbers.is_empty()) {
+        return false;
+    }
+    // "Film.1989.1080p" reads as season 19, episode 89.
+    if let (Some(s), [e]) = (p.season_numbers.first(), p.episode_numbers.as_slice()) {
+        if (1900..=2100).contains(&(s * 100 + e)) {
+            return false;
+        }
+    }
+    let before = plain(&p.series_title);
+    std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).any(|n| !n.is_empty() && before.contains(&n))
+}
+
 fn rej(code: &str, message: impl Into<String>) -> Rejection {
     Rejection { code: code.into(), message: message.into() }
 }
@@ -120,7 +139,7 @@ impl App {
             candidate: Candidate { quality: q, size_bytes: release.size, age_days: release.age_days(), languages: vec![], release_group: None, indexer_priority: release.indexer_priority, item_count: 0, dubbed: false, full_season: false, multi_season: false, efficient_codec: false, playback: Default::default() },
         };
 
-        let (quality, languages, group, covered, covers, full_season, multi_season, pre): (QualityModel, Vec<String>, Option<String>, Vec<&Episode>, String, bool, bool, Option<Rejection>) = match t.kind {
+        let (quality, languages, group, covered, covers, full_season, multi_season, mut pre): (QualityModel, Vec<String>, Option<String>, Vec<&Episode>, String, bool, bool, Option<Rejection>) = match t.kind {
             Kind::Movie => match parse_movie_title(&release.title, false) {
                 Some(p) => {
                     let by_id = release.imdb_id.is_some() && release.imdb_id == t.imdb_id;
@@ -232,6 +251,11 @@ impl App {
         };
         let mut record = DecisionRecord { id: 0, ts: 0, title_id: t.id, release: release.clone(), quality, languages, release_group: group, covers, episode_ids: covered_ids.clone(), accepted: false, rejections: vec![], source: source.into() };
 
+        // A film that is posted in episodes: one of them is not the film, and has already been
+        // downloaded once to find that out.
+        if t.kind == Kind::Movie && t.in_episodes && pre.is_none() && names_an_episode(&release.title, t) {
+            pre = Some(rej("episode", format!("is an episode, not the whole of {}, which is posted in episodes; add it as a series to collect them", t.title)));
+        }
         if let Some(r) = pre {
             record.rejections.push(r);
             return Judged { record, candidate };
@@ -1103,4 +1127,29 @@ pub struct SearchOutcome {
     pub grabbed: Vec<Acquisition>,
     pub errors: Vec<String>,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_an_episode;
+    use crate::models::Title;
+
+    #[test]
+    fn an_episode_is_told_from_a_film_by_its_name() {
+        let film = |title: &str, year: u32| -> Title { serde_json::from_value(serde_json::json!({"kind": "movie", "title": title, "year": year})).unwrap() };
+        let gundam = film("Mobile Suit Gundam 0080: War in the Pocket", 1989);
+        for name in [
+            "[ZetaRebel] Mobile Suit Gundam - 0080 War in the Pocket - 05 - Say it Ain't So, Bernie! (BD x264 1080p DTS)",
+            "[ZetaRebel] Mobile Suit Gundam - 0080 War in the Pocket - 01 - How Many Miles to the Battlefield (BD x264 1080p 8-bit FLAC)",
+            "[Group] Mobile Suit Gundam 0080 War in the Pocket 01-06 (BD 1080p)",
+        ] {
+            assert!(names_an_episode(name, &gundam), "{name}");
+        }
+        // The whole film: the only numbers are the title's own and the year.
+        for name in ["Mobile.Suit.Gundam.0080.War.in.the.Pocket.1989.1080p.BluRay.x264-GRP", "[ZetaRebel] Mobile Suit Gundam 0080 War in the Pocket (BD x264 1080p DTS)"] {
+            assert!(!names_an_episode(name, &gundam), "{name}");
+        }
+        assert!(!names_an_episode("2001.A.Space.Odyssey.1968.1080p.BluRay.x264-GRP", &film("2001: A Space Odyssey", 1968)));
+        assert!(!names_an_episode("The.Matrix.1999.1080p.BluRay.x264-GRP", &film("The Matrix", 1999)));
+    }
 }

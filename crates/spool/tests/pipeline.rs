@@ -1113,6 +1113,38 @@ async fn a_film_the_indexer_never_linked_to_its_id_is_found_by_name() {
 }
 
 /// One call to the web API, as the app makes them.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_film_posted_in_episodes_is_learned_from_the_first_and_the_rest_are_turned_down() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    // An OVA the metadata source lists as one three-hour film, posted as its episodes.
+    let mut ova = w.movie("Pocket Robot War 0080: A Small Example", 1989, "tt0000080");
+    ova.runtime = 180;
+    w.app.db.save_title(&mut ova).unwrap();
+    let episode = |n: u32| format!("[FanSub] Pocket Robot War - 0080 A Small Example - {n:02} - A Chapter (BD x264 1080p DTS)");
+    let whole = "[FanSub] Pocket Robot War 0080 A Small Example (BD x264 1080p DTS)";
+    w.release(&episode(5), &[("05.mkv", &video)]);
+    w.indexer.lock().untagged.insert(episode(5));
+
+    // Nothing in the name settles it, so the first one is downloaded, and is far too short.
+    let outcome = w.app.search(ova.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    let blocked = w.wait_state(ova.id, AcqState::ImportBlocked).await;
+    let why = blocked.error.unwrap_or_default();
+    assert!(why.contains("posted in episodes") && why.contains("add it as a series"), "{why}");
+    assert!(w.app.db.title(ova.id).unwrap().unwrap().in_episodes);
+
+    // The other episodes are now known for what they are by name; the whole film is still wanted.
+    for name in [episode(6), whole.to_string()] {
+        w.release(&name, &[("v.mkv", &video)]);
+        w.indexer.lock().untagged.insert(name);
+    }
+    let found = w.app.search(ova.id, Scope::Movie, true, false).await.unwrap();
+    let codes = |name: &str| found.decisions.iter().find(|d| d.release.title == name).map(|d| d.rejections.iter().map(|r| r.code.clone()).collect::<Vec<_>>()).unwrap_or_else(|| panic!("{name} was not judged"));
+    assert_eq!(codes(&episode(6)), ["episode"]);
+    assert!(!codes(whole).contains(&"episode".to_string()), "{:?}", codes(whole));
+}
+
 async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
     use tower::ServiceExt;
     let req = axum::http::Request::builder().method(method).uri(uri).header("content-type", "application/json");
