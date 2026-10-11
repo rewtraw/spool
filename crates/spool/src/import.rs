@@ -372,8 +372,6 @@ impl App {
             }
         }
 
-        // How long an episode runs, in seconds; 0 when the source does not say.
-        let length = |e: &Episode| (if e.runtime > 0 { e.runtime } else { title.runtime }) as f64 * 60.0;
         let claimed: std::collections::HashSet<i64> = targets.iter().flat_map(|t| t.2.iter().map(|e| e.id)).collect();
         let in_parts = targets.len() > 1 && title.kind == Kind::Movie;
         let mut ops: Vec<Operation> = vec![];
@@ -393,103 +391,17 @@ impl App {
                 Ok(mi) => mi,
                 Err(e) => return Err(Blocked::Needs(format!("{file_name} is not playable video: {e}"))),
             };
-            let ran = media_info.as_ref().map(|m| m.runtime_secs).unwrap_or(0.0);
-            let film = title.runtime as f64 * 60.0;
-            if title.kind == Kind::Movie && part.is_none() && ran > 0.0 && film > 0.0 {
-                // One part of a film that was posted in parts, on its own: named as a part and
-                // well short of the film. "Part 1" in a film's own title is not a marker.
-                let own_title = title.title.to_lowercase().contains("part");
-                let named = crate::local::part_number(&stem_of(&path)).filter(|_| !own_title).or_else(|| crate::local::part_of_release(&acq.release.title).filter(|p| !(p.1 && own_title)).map(|p| p.0));
-                if let Some(n) = named.filter(|_| ran < film * 0.75) {
-                    // With the rest already here, or on its way from the same release, it joins them.
-                    let key = crate::local::part_of_release(&acq.release.title).map(|p| p.2);
-                    let others = self.db.title_acquisitions(title.id).unwrap_or_default();
-                    let with_set = key.is_some() && others.iter().any(|o| o.id != acq.id && !matches!(o.state, AcqState::Failed | AcqState::Cancelled) && crate::local::part_of_release(&o.release.title).map(|p| p.2) == key);
-                    let mains: Vec<&MediaFile> = files.iter().filter(|f| !f.extra).collect();
-                    let beside_parts = !mains.is_empty() && mains.iter().all(|f| crate::local::is_part(&stem_of(Path::new(&f.rel_path))));
-                    if !(forced || with_set || beside_parts) {
-                        return Err(Blocked::Needs(format!(
-                            "{file_name} is part {n} of the film: it runs {:.0} of {} minutes, and the other parts were not posted with it. Import anyway keeps it as part {n}, and the rest can be added beside it; or discard it and find the film whole.",
-                            ran / 60.0,
-                            title.runtime
-                        )));
-                    }
-                    if !mains.is_empty() && !beside_parts {
-                        return Err(Blocked::Needs(format!("{file_name} is only part {n} of the film, and the library already has the film whole")));
-                    }
-                    part = Some(n);
-                }
-            }
-            if title.kind == Kind::Movie && part.is_none() && !forced && ran > 0.0 && film > 0.0 {
-                if ran < film * 0.4 {
-                    // Short, and named as an episode: the film is posted in episodes. Remember
-                    // it, so the rest are turned down by name instead of downloaded to find out.
-                    if crate::acquire::names_an_episode(&acq.release.title, title) || crate::acquire::names_an_episode(&file_name, title) {
-                        if let Some(mut t) = self.db.title(title.id).ok().flatten().filter(|t| !t.in_episodes) {
-                            t.in_episodes = true;
-                            let _ = self.db.save_title(&mut t);
-                        }
-                        return Err(Blocked::Needs(format!(
-                            "{file_name} is one episode ({:.0} minutes) of a film that runs {} minutes. {} is posted in episodes, and Spool files a film as one video. Other single episodes will now be turned down. To collect the episodes, remove this film and add it as a series.",
-                            ran / 60.0,
-                            title.runtime,
-                            title.title
-                        )));
-                    }
-                    return Err(Blocked::Needs(format!("{file_name} runs {:.0} minutes but the movie is {} minutes; it may be a sample", ran / 60.0, title.runtime)));
-                }
-                // More than twice as long, and by an hour or more: another film, or several in one.
-                if ran > film * 2.2 && ran - film >= 3600.0 {
-                    return Err(Blocked::Needs(format!(
-                        "{file_name} runs {:.0} minutes but the movie is {} minutes; it may be a different film, or several films in one file",
-                        ran / 60.0,
-                        title.runtime
-                    )));
-                }
-            }
-            if title.kind == Kind::Series && !forced && ran > 0.0 {
-                if let [first] = eps.as_slice() {
-                    // One file named as one episode that runs as long as it and the next ones
-                    // together holds them all. Only when the source gives each one's length,
-                    // and the sum fits: a long episode is otherwise just a long episode.
-                    let own = length(first);
-                    if own > 0.0 && ran > own * 1.6 {
-                        let mut run = vec![first.clone()];
-                        let mut sum = own;
-                        while run.len() < 4 && sum < ran * 0.85 {
-                            let last = run.last().unwrap();
-                            let Some(next) = episodes.iter().find(|e| e.season == last.season && e.episode == last.episode + 1).filter(|e| length(e) > 0.0 && !claimed.contains(&e.id)) else { break };
-                            sum += length(next);
-                            run.push(next.clone());
-                        }
-                        if run.len() > 1 && (sum - ran).abs() <= ran * 0.15 {
-                            tracing::info!(file = %file_name, episodes = run.len(), "one file holds several episodes");
-                            eps = run;
-                        }
-                    }
-                } else if eps.len() >= 3 && eps.iter().all(|e| length(e) > 0.0) {
-                    // One file for many episodes. Too short to be all of them, or a whole season
-                    // run together: either way counting every episode as present needs a yes.
-                    let sum: f64 = eps.iter().map(&length).sum();
-                    let season = eps[0].season;
-                    let whole = eps.len() >= 4 && eps.iter().all(|e| e.season == season) && episodes.iter().filter(|e| e.season == season).all(|e| eps.iter().any(|x| x.id == e.id));
-                    if ran < sum * 0.6 {
-                        return Err(Blocked::Needs(format!(
-                            "{file_name} runs {:.0} minutes but is named as {} episodes, which run {:.0} minutes together; it is probably not all of them. Import anyway counts all {} as present.",
-                            ran / 60.0,
-                            eps.len(),
-                            sum / 60.0,
-                            eps.len()
-                        )));
-                    }
-                    if whole {
-                        return Err(Blocked::Needs(format!(
-                            "{file_name} is the whole of season {season} in one file ({:.0} minutes). Spool keeps one file per episode. Import anyway counts all {} episodes as present in this one file; or discard it and find the episodes.",
-                            ran / 60.0,
-                            eps.len()
-                        )));
+            // Does the video run as long as what its name says it is? See shape.rs.
+            let video = crate::shape::Video { path: &path, name: &file_name, ran: media_info.as_ref().map(|m| m.runtime_secs).unwrap_or(0.0) };
+            match title.kind {
+                Kind::Movie if part.is_none() => {
+                    part = self.lone_part(acq, title, &files, &video, forced)?;
+                    if part.is_none() && !forced {
+                        self.film_length(acq, title, &video)?;
                     }
                 }
+                Kind::Series if !forced => eps = crate::shape::episodes_held(title, &episodes, eps, &claimed, &video)?,
+                _ => {}
             }
             let file = MediaFile {
                 id: 0,

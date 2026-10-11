@@ -22,6 +22,7 @@ pub mod newznab;
 pub mod plex;
 pub mod scheduler;
 pub mod settings;
+pub mod shape;
 pub mod shadow;
 pub mod store;
 pub mod subs;
