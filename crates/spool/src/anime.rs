@@ -236,6 +236,45 @@ pub struct Missing {
     pub can_add: bool,
 }
 
+/// What each work of a story is to it, reckoned outward from where the story began. A sequel
+/// continues whatever it follows: the second film of a retelling is still the retelling.
+/// Relations are followed both ways, since a work often names its parent and the parent
+/// does not name it.
+fn roles(first: u32, story: &[&Media]) -> HashMap<u32, &'static str> {
+    let mut steps: HashMap<u32, Vec<(u32, &str)>> = HashMap::new();
+    for m in story {
+        for e in m.edges.iter().filter(|e| STORY.contains(&e.kind.as_str())) {
+            steps.entry(m.id).or_default().push((e.to, e.kind.as_str()));
+            let back = match e.kind.as_str() {
+                "PREQUEL" => "SEQUEL",
+                "SEQUEL" => "PREQUEL",
+                "PARENT" => "SIDE_STORY",
+                "ALTERNATIVE" => "ALTERNATIVE",
+                _ => "PARENT",
+            };
+            steps.entry(e.to).or_default().push((m.id, back));
+        }
+    }
+    // What a work says of another outright counts before what is only implied by the reverse.
+    for list in steps.values_mut() {
+        list.sort_by_key(|(_, kind)| *kind == "SIDE_STORY");
+    }
+    let mut role: HashMap<u32, &'static str> = HashMap::from([(first, "")]);
+    let mut queue = std::collections::VecDeque::from([first]);
+    while let Some(at) = queue.pop_front() {
+        let here = role[&at];
+        for (to, kind) in steps.get(&at).into_iter().flatten() {
+            if role.contains_key(to) {
+                continue;
+            }
+            let said = role_of(kind);
+            role.insert(*to, if here.is_empty() { said } else { here });
+            queue.push_back(*to);
+        }
+    }
+    role
+}
+
 fn role_of(kind: &str) -> &'static str {
     match kind {
         "SUMMARY" | "COMPILATION" => "Recap",
@@ -269,23 +308,6 @@ pub fn groups(titles: &[Title], works: &[Media], ids: Option<&Ids>) -> Vec<Group
             }
         }
     }
-    // What each work is to the story: what another work calls it, or failing that the fact
-    // that it names a parent.
-    let mut role: HashMap<u32, &'static str> = HashMap::new();
-    for m in works {
-        for e in &m.edges {
-            let r = role_of(&e.kind);
-            if !r.is_empty() && (role.get(&e.to).is_none_or(|have| *have == "Side story")) {
-                role.insert(e.to, r);
-            }
-        }
-    }
-    for m in works {
-        if m.edges.iter().any(|e| e.kind == "PARENT") && !role.contains_key(&m.id) {
-            role.insert(m.id, "Side story");
-        }
-    }
-
     let known: Vec<u32> = parent.keys().copied().collect();
     let story: HashMap<u32, u32> = known.into_iter().map(|i| (i, find(&mut parent, i))).collect();
     let story_of = |i: u32| story.get(&i).copied().unwrap_or(i);
@@ -302,8 +324,10 @@ pub fn groups(titles: &[Title], works: &[Media], ids: Option<&Ids>) -> Vec<Group
         }
         members.sort_by_key(|t| (t.year, t.id));
         let in_story: Vec<&Media> = works.iter().filter(|m| story_of(m.id) == root).collect();
-        // Named for where the story began: its first series, or its first work of any kind.
-        let Some(first) = in_story.iter().filter(|m| m.year > 0).min_by_key(|m| (m.format != "TV", m.year, m.id)).or(in_story.first()) else { continue };
+        // Named for where the story began: its earliest work, a series before a film of the same year.
+        let rank = |m: &Media| ["TV", "OVA", "ONA", "TV_SHORT", "MOVIE"].iter().position(|f| *f == m.format).unwrap_or(9);
+        let Some(first) = in_story.iter().filter(|m| m.year > 0).min_by_key(|m| (m.year, rank(m), m.id)).or(in_story.first()) else { continue };
+        let role = roles(first.id, &in_story);
         let have: HashSet<u32> = members.iter().flat_map(|t| t.anilist.iter().copied()).collect();
         // Works the library's own are directly tied to, and does not hold under any id.
         let near: HashSet<u32> = have.iter().filter_map(|i| by_id.get(i)).flat_map(|m| m.edges.iter().filter(|e| STORY.contains(&e.kind.as_str())).map(|e| e.to)).collect();
