@@ -132,6 +132,190 @@ fn posted_in_episodes(t: &Title, judged: &[Judged]) -> bool {
     numbers.len() >= 3 && episodes > whole
 }
 
+/// What a release's name says it is, read for one title.
+struct Named<'a> {
+    quality: QualityModel,
+    languages: Vec<String>,
+    group: Option<String>,
+    /// The episodes it holds; none for a film.
+    covered: Vec<&'a Episode>,
+    /// Those episodes in words: "S01E02", "Season 2".
+    covers: String,
+    full_season: bool,
+    multi_season: bool,
+    /// Why it is not this title, or not something that can be filed, when it is not.
+    wrong: Option<Rejection>,
+}
+
+/// A release read as a film. None when the name cannot be read at all.
+fn film_release(t: &Title, release: &Release) -> Option<Named<'static>> {
+    let flavor = t.kind.flavor();
+    let film = |quality, languages, group, wrong| Named { quality, languages, group, covered: vec![], covers: String::new(), full_season: false, multi_season: false, wrong };
+    let Some(p) = crate::names::movie(&release.title) else {
+        // The parser wants a year in a film's release name, and some posts, fan releases of
+        // anime above all, leave it out. If the name plainly carries this film's full title,
+        // take it as this film and read the rest of the name as usual.
+        if !names_film_without_year(t, &release.title) {
+            return None;
+        }
+        let mut read = film(spool_core::quality::parse_quality(&release.title, flavor), spool_core::parser::parse_languages(&release.title), spool_core::parser::parse_release_group(&release.title, flavor), None);
+        read.wrong = an_episode_of_it(t, release);
+        return Some(read);
+    };
+    let mut wrong = None;
+    if matching::match_movie(&p, &[t.key()]).is_none() {
+        // The indexer tagged this release with the movie's own id. Radarr trusts that; Spool
+        // does too, unless the release names a clearly different year (a remake or a mis-tag).
+        // Only a tag on the release itself counts, never the fact that we searched by id.
+        let by_id = release.imdb_id.is_some() && release.imdb_id == t.imdb_id;
+        let year_close = p.year == 0 || p.year.abs_diff(t.year) <= 1 || t.alt_years.contains(&p.year);
+        if !(by_id && year_close) {
+            wrong = Some(rej("wrong_title", format!("looks like \"{}\"{}, not {} ({})", p.title(), if p.year > 0 { format!(" ({})", p.year) } else { String::new() }, t.title, t.year)));
+        }
+    }
+    let wrong = wrong.or_else(|| an_episode_of_it(t, release));
+    Some(film(p.quality, p.languages, p.release_group, wrong))
+}
+
+/// A film that is posted in episodes: one of them is not the film, and has already been
+/// downloaded once to find that out.
+fn an_episode_of_it(t: &Title, release: &Release) -> Option<Rejection> {
+    (t.in_episodes && names_an_episode(&release.title, t)).then(|| rej("episode", format!("is an episode, not the whole of {}, which is posted in episodes; add it as a series to collect them", t.title)))
+}
+
+/// A release read as episodes of a series, with which of the series' episodes it holds. None
+/// when the name cannot be read at all.
+fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'a>> {
+    let t = &tc.title;
+    let mut p = crate::names::episode(&release.title)?;
+    let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id;
+    // A later season posted under its own name and numbered from one.
+    let named = season_named(&p.series_title, t, &tc.seasons);
+    if let Some((season, offset)) = named {
+        let within = tc.episodes.iter().filter(|e| e.season == season).count() as u32;
+        if p.is_absolute() && p.absolute_episode_numbers.iter().all(|n| n + offset <= within) {
+            p.episode_numbers = p.absolute_episode_numbers.iter().map(|n| n + offset).collect();
+            p.absolute_episode_numbers.clear();
+            p.season_numbers = vec![season];
+        }
+    }
+    let mut wrong = None;
+    if !by_id && named.is_none() && matching::match_series(&p, &[t.key()]).is_none() {
+        wrong = Some(rej("wrong_title", format!("looks like \"{}\", not {}", p.series_title, t.title)));
+    }
+    let season = p.season_number();
+    let mut covered: Vec<&Episode> = vec![];
+    let mut covers = String::new();
+    if wrong.is_none() {
+        if p.is_multi_season() {
+            covers = format!("Seasons {}-{}", p.season_numbers.first().unwrap_or(&0), p.season_numbers.last().unwrap_or(&0));
+        } else if let Some(date) = &p.air_date {
+            covered = tc.episodes.iter().filter(|e| e.air_date.as_deref() == Some(date.as_str())).collect();
+            covers = date.clone();
+            if covered.is_empty() {
+                wrong = Some(rej("unknown_episode", format!("no episode aired on {date}")));
+            }
+        } else if p.full_season {
+            covered = tc.episodes.iter().filter(|e| e.season == season).collect();
+            covers = format!("Season {season}");
+            if covered.is_empty() {
+                wrong = Some(rej("unknown_episode", format!("season {season} is not in the episode list")));
+            }
+        } else if !p.episode_numbers.is_empty() {
+            covered = tc.episodes.iter().filter(|e| e.season == season && p.episode_numbers.contains(&e.episode)).collect();
+            covers = format!("S{season:02}{}", p.episode_numbers.iter().map(|n| format!("E{n:02}")).collect::<String>());
+            if covered.len() != p.episode_numbers.len() {
+                wrong = Some(rej("unknown_episode", format!("{covers} is not in the episode list")));
+            }
+        } else if p.is_absolute() {
+            // Anime numbering: one count across seasons.
+            match episodes_by_absolute(&tc.episodes, &p.absolute_episode_numbers) {
+                Some(found) => {
+                    covers = found.iter().map(|e| format!("S{:02}E{:02}", e.season, e.episode)).collect::<Vec<_>>().join(" ");
+                    if found.len() > 3 {
+                        covers = format!("{} to {}", covers.split(' ').next().unwrap_or(""), covers.split(' ').next_back().unwrap_or(""));
+                    }
+                    covered = found;
+                }
+                None => wrong = Some(rej("unknown_episode", format!("episode {} by absolute count is not in the episode list", p.absolute_episode_numbers.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ")))),
+            }
+        } else {
+            wrong = Some(rej("unsupported_release", "partial seasons, extras and unnumbered specials are not handled"));
+        }
+    }
+    if wrong.is_none() && (p.is_partial_season || p.is_season_extra || (p.special && p.episode_numbers.is_empty())) {
+        wrong = Some(rej("unsupported_release", "partial seasons, extras and unnumbered specials are not handled"));
+    }
+    let (full_season, multi_season) = (p.full_season, p.is_multi_season());
+    Some(Named { quality: p.quality.unwrap_or(QualityModel::new(Quality::Unknown)), languages: p.languages, group: p.release_group, covered, covers, full_season, multi_season, wrong })
+}
+
+/// What rules a release out before its merits are weighed: the title's files cannot be
+/// changed, it is not what was asked for, or it is beside the point of a compacting search.
+fn ruled_out(tc: &TitleContext, scope: Option<Scope>, covered: &[&Episode]) -> Option<Rejection> {
+    if let Some(why) = &tc.locked {
+        return Some(rej("location", why.clone()));
+    }
+    // A search for one episode or season should not grab something else that happened to come back.
+    match scope {
+        Some(Scope::Episode(id)) if !covered.iter().any(|e| e.id == id) => return Some(rej("not_requested", "does not contain the requested episode")),
+        Some(Scope::Season(n)) if covered.iter().any(|e| e.season != n) || covered.is_empty() => return Some(rej("not_requested", format!("is not season {n}"))),
+        _ => {}
+    }
+    // Compacting replaces what is too big and leaves alone what already fits.
+    if tc.compact {
+        let touches = match tc.title.kind {
+            Kind::Movie => tc.files.iter().any(|f| tc.oversize.contains(&f.id)),
+            Kind::Series => covered.iter().any(|e| e.file_id.is_some_and(|f| tc.oversize.contains(&f))),
+        };
+        if !touches {
+            return Some(rej("not_requested", "what it covers is already within the size target"));
+        }
+    }
+    None
+}
+
+/// What the library holds where a release would go, and whether it is wanted there.
+struct Held {
+    existing: Vec<ExistingFile>,
+    monitored: bool,
+    available: bool,
+    season_complete: bool,
+    /// How long what it covers runs, in minutes.
+    runtime: u32,
+}
+
+fn held(tc: &TitleContext, covered: &[&Episode]) -> Held {
+    let t = &tc.title;
+    let file = |f: &MediaFile| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size };
+    match t.kind {
+        Kind::Movie => Held {
+            // The main file is what an upgrade is measured against; versions kept beside it
+            // on purpose do not count, unless they are all there is.
+            existing: tc.files.iter().filter(|f| !f.extra || tc.files.iter().all(|x| x.extra)).map(file).collect(),
+            monitored: t.monitored,
+            available: t.movie_available(chrono::Local::now().date_naive()),
+            season_complete: true,
+            runtime: t.runtime,
+        },
+        Kind::Series => {
+            let now = chrono::Utc::now();
+            let mut file_ids: Vec<i64> = covered.iter().filter_map(|e| e.file_id).collect();
+            file_ids.sort_unstable();
+            file_ids.dedup();
+            let aired = covered.iter().all(|e| e.has_aired(now));
+            Held {
+                existing: tc.files.iter().filter(|f| file_ids.contains(&f.id)).map(file).collect(),
+                // A pack is wanted if anything in it is; a single release needs its episodes monitored.
+                monitored: t.monitored && covered.iter().any(|e| e.monitored && t.season_monitored(e.season)),
+                available: aired,
+                season_complete: aired,
+                runtime: covered.iter().map(|e| if e.runtime > 0 { e.runtime } else { t.runtime }).sum(),
+            }
+        }
+    }
+}
+
 fn rej(code: &str, message: impl Into<String>) -> Rejection {
     Rejection { code: code.into(), message: message.into() }
 }
@@ -243,119 +427,26 @@ impl App {
         })
     }
 
+    /// Say whether a release is wanted for a title, and why not when it is not. Three steps:
+    /// what the release's name says it is, whether anything rules it out before its merits
+    /// are weighed, and then its merits against what the library already holds.
     fn judge(&self, tc: &TitleContext, release: &Release, source: &str, scope: Option<Scope>, user: bool) -> Judged {
         let g = self.settings.general();
-        let limits = self.settings.size_limits();
         let t = &tc.title;
-        let flavor = t.kind.flavor();
-        let unknown = QualityModel::new(Quality::Unknown);
-        let blank = |r: Rejection, q: QualityModel| Judged {
-            record: rejected(t.id, release, source, q, r),
-            candidate: Candidate { quality: q, size_bytes: release.size, age_days: release.age_days(), languages: vec![], release_group: None, indexer_priority: release.indexer_priority, item_count: 0, dubbed: false, full_season: false, multi_season: false, efficient_codec: false, playback: Default::default() },
+        let read = match t.kind {
+            Kind::Movie => film_release(t, release),
+            Kind::Series => series_release(tc, release),
         };
-
-        let (quality, languages, group, covered, covers, full_season, multi_season, mut pre): (QualityModel, Vec<String>, Option<String>, Vec<&Episode>, String, bool, bool, Option<Rejection>) = match t.kind {
-            Kind::Movie => match crate::names::movie(&release.title) {
-                Some(p) => {
-                    let by_id = release.imdb_id.is_some() && release.imdb_id == t.imdb_id;
-                    let mut pre = None;
-                    if matching::match_movie(&p, &[t.key()]).is_none() {
-                        // The indexer tagged this release with the movie's own id. Radarr trusts that; Spool
-                        // does too, unless the release names a clearly different year (a remake or a mis-tag).
-                        // Only a tag on the release itself counts, never the fact that we searched by id.
-                        let year_close = p.year == 0 || p.year.abs_diff(t.year) <= 1 || t.alt_years.contains(&p.year);
-                        if !(by_id && year_close) {
-                            pre = Some(rej("wrong_title", format!("looks like \"{}\"{}, not {} ({})", p.title(), if p.year > 0 { format!(" ({})", p.year) } else { String::new() }, t.title, t.year)));
-                        }
-                    }
-                    (p.quality, p.languages, p.release_group, vec![], String::new(), false, false, pre)
-                }
-                // The parser wants a year in a film's release name, and some posts, fan releases of
-                // anime above all, leave it out. If the name plainly carries this film's full title,
-                // take it as this film and read the rest of the name as usual.
-                None if names_film_without_year(t, &release.title) => (
-                    spool_core::quality::parse_quality(&release.title, flavor),
-                    spool_core::parser::parse_languages(&release.title),
-                    spool_core::parser::parse_release_group(&release.title, flavor),
-                    vec![],
-                    String::new(),
-                    false,
-                    false,
-                    None,
-                ),
-                None => return blank(rej("unparseable", "the release name could not be understood"), unknown),
-            },
-            Kind::Series => {
-                let Some(mut p) = crate::names::episode(&release.title) else {
-                    return blank(rej("unparseable", "the release name could not be understood"), unknown);
-                };
-                let q = p.quality.unwrap_or(unknown);
-                let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id;
-                let mut pre = None;
-                // A later season posted under its own name and numbered from one.
-                let named = season_named(&p.series_title, t, &tc.seasons);
-                if let Some((season, offset)) = named {
-                    let within = tc.episodes.iter().filter(|e| e.season == season).count() as u32;
-                    if p.is_absolute() && p.absolute_episode_numbers.iter().all(|n| n + offset <= within) {
-                        p.episode_numbers = p.absolute_episode_numbers.iter().map(|n| n + offset).collect();
-                        p.absolute_episode_numbers.clear();
-                        p.season_numbers = vec![season];
-                    }
-                }
-                if !by_id && named.is_none() && matching::match_series(&p, &[t.key()]).is_none() {
-                    pre = Some(rej("wrong_title", format!("looks like \"{}\", not {}", p.series_title, t.title)));
-                }
-                let season = p.season_number();
-                let mut covered: Vec<&Episode> = vec![];
-                let mut covers = String::new();
-                if pre.is_none() {
-                    if p.is_multi_season() {
-                        covers = format!("Seasons {}-{}", p.season_numbers.first().unwrap_or(&0), p.season_numbers.last().unwrap_or(&0));
-                    } else if let Some(date) = &p.air_date {
-                        covered = tc.episodes.iter().filter(|e| e.air_date.as_deref() == Some(date.as_str())).collect();
-                        covers = date.clone();
-                        if covered.is_empty() {
-                            pre = Some(rej("unknown_episode", format!("no episode aired on {date}")));
-                        }
-                    } else if p.full_season {
-                        covered = tc.episodes.iter().filter(|e| e.season == season).collect();
-                        covers = format!("Season {season}");
-                        if covered.is_empty() {
-                            pre = Some(rej("unknown_episode", format!("season {season} is not in the episode list")));
-                        }
-                    } else if !p.episode_numbers.is_empty() {
-                        covered = tc.episodes.iter().filter(|e| e.season == season && p.episode_numbers.contains(&e.episode)).collect();
-                        covers = format!("S{season:02}{}", p.episode_numbers.iter().map(|n| format!("E{n:02}")).collect::<String>());
-                        if covered.len() != p.episode_numbers.len() {
-                            pre = Some(rej("unknown_episode", format!("{covers} is not in the episode list")));
-                        }
-                    } else if p.is_absolute() {
-                        // Anime numbering: one count across seasons.
-                        match episodes_by_absolute(&tc.episodes, &p.absolute_episode_numbers) {
-                            Some(found) => {
-                                covers = found.iter().map(|e| format!("S{:02}E{:02}", e.season, e.episode)).collect::<Vec<_>>().join(" ");
-                                if found.len() > 3 {
-                                    covers = format!("{} to {}", covers.split(' ').next().unwrap_or(""), covers.split(' ').next_back().unwrap_or(""));
-                                }
-                                covered = found;
-                            }
-                            None => pre = Some(rej("unknown_episode", format!("episode {} by absolute count is not in the episode list", p.absolute_episode_numbers.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ")))),
-                        }
-                    } else {
-                        pre = Some(rej("unsupported_release", "partial seasons, extras and unnumbered specials are not handled"));
-                    }
-                }
-                if pre.is_none() && (p.is_partial_season || p.is_season_extra || (p.special && p.episode_numbers.is_empty())) {
-                    pre = Some(rej("unsupported_release", "partial seasons, extras and unnumbered specials are not handled"));
-                }
-                {
-                    let (full, multi) = (p.full_season, p.is_multi_season());
-                    (q, p.languages, p.release_group, covered, covers, full, multi, pre)
-                }
-            }
+        let Some(Named { quality, languages, group, covered, covers, full_season, multi_season, wrong }) = read else {
+            let unknown = QualityModel::new(Quality::Unknown);
+            return Judged {
+                record: rejected(t.id, release, source, unknown, rej("unparseable", "the release name could not be understood")),
+                candidate: Candidate { quality: unknown, size_bytes: release.size, age_days: release.age_days(), languages: vec![], release_group: None, indexer_priority: release.indexer_priority, item_count: 0, dubbed: false, full_season: false, multi_season: false, efficient_codec: false, playback: Default::default() },
+            };
         };
 
         let covered_ids: Vec<i64> = covered.iter().map(|e| e.id).collect();
+        let playback = decision::PlaybackTraits::from_title(&release.title);
         let candidate = Candidate {
             quality,
             size_bytes: release.size,
@@ -368,97 +459,31 @@ impl App {
             dubbed: !g.language.is_empty() && languages.iter().any(|l| l != "original" && *l != g.language && !t.original_language.as_deref().is_some_and(|o| l.starts_with(o))),
             full_season,
             multi_season,
-            efficient_codec: {
-                let t = decision::PlaybackTraits::from_title(&release.title);
-                t.hevc || t.av1
-            },
-            playback: decision::PlaybackTraits::from_title(&release.title),
+            efficient_codec: playback.hevc || playback.av1,
+            playback,
         };
         let mut record = DecisionRecord { id: 0, ts: 0, title_id: t.id, release: release.clone(), quality, languages, release_group: group, covers, episode_ids: covered_ids.clone(), accepted: false, rejections: vec![], source: source.into() };
 
-        // A film that is posted in episodes: one of them is not the film, and has already been
-        // downloaded once to find that out.
-        if t.kind == Kind::Movie && t.in_episodes && pre.is_none() && names_an_episode(&release.title, t) {
-            pre = Some(rej("episode", format!("is an episode, not the whole of {}, which is posted in episodes; add it as a series to collect them", t.title)));
-        }
-        if let Some(r) = pre {
+        if let Some(r) = wrong.or_else(|| ruled_out(tc, scope, &covered)) {
             record.rejections.push(r);
             return Judged { record, candidate };
         }
-        if let Some(why) = &tc.locked {
-            record.rejections.push(rej("location", why.clone()));
-            return Judged { record, candidate };
-        }
 
-        // A search for one episode or season should not grab something else that happened to come back.
-        match scope {
-            Some(Scope::Episode(id)) if !covered_ids.contains(&id) => {
-                record.rejections.push(rej("not_requested", "does not contain the requested episode"));
-                return Judged { record, candidate };
-            }
-            Some(Scope::Season(n)) if covered.iter().any(|e| e.season != n) || covered.is_empty() => {
-                record.rejections.push(rej("not_requested", format!("is not season {n}")));
-                return Judged { record, candidate };
-            }
-            _ => {}
-        }
-
-        // Compacting replaces what is too big and leaves alone what already fits.
-        if tc.compact {
-            let touches = match t.kind {
-                Kind::Movie => tc.files.iter().any(|f| tc.oversize.contains(&f.id)),
-                Kind::Series => covered.iter().any(|e| e.file_id.is_some_and(|f| tc.oversize.contains(&f))),
-            };
-            if !touches {
-                record.rejections.push(rej("not_requested", "what it covers is already within the size target"));
-                return Judged { record, candidate };
-            }
-        }
-
-        let now = chrono::Utc::now();
-        let today = chrono::Local::now().date_naive();
-        let (existing, monitored, available, season_complete, runtime): (Vec<ExistingFile>, bool, bool, bool, u32) = match t.kind {
-            Kind::Movie => (
-                // The main file is what an upgrade is measured against; versions kept beside it
-                // on purpose do not count, unless they are all there is.
-                tc.files.iter().filter(|f| !f.extra || tc.files.iter().all(|x| x.extra)).map(|f| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size }).collect(),
-                t.monitored,
-                t.movie_available(today),
-                true,
-                t.runtime,
-            ),
-            Kind::Series => {
-                let mut file_ids: Vec<i64> = covered.iter().filter_map(|e| e.file_id).collect();
-                file_ids.sort_unstable();
-                file_ids.dedup();
-                let existing = tc.files.iter().filter(|f| file_ids.contains(&f.id)).map(|f| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size }).collect();
-                // A pack is wanted if anything in it is; a single release needs its episodes monitored.
-                let monitored = t.monitored && covered.iter().any(|e| e.monitored && t.season_monitored(e.season));
-                let aired = covered.iter().all(|e| e.has_aired(now));
-                let runtime: u32 = covered.iter().map(|e| if e.runtime > 0 { e.runtime } else { t.runtime }).sum();
-                (existing, monitored, aired, aired, runtime)
-            }
-        };
-        let queued: Vec<QualityModel> = tc
-            .active
-            .iter()
-            .filter(|a| t.kind == Kind::Movie || a.episode_ids.iter().any(|id| covered_ids.contains(id)))
-            .map(|a| a.quality)
-            .collect();
-        let blocklisted = tc.blocklist.iter().any(|(guid, name)| (!guid.is_empty() && *guid == release.guid) || *name == release.title);
-        let limit_key = format!("{}:{}", t.kind.profile_kind(), quality.quality.key());
+        let held = held(tc, &covered);
+        let queued: Vec<QualityModel> = tc.active.iter().filter(|a| t.kind == Kind::Movie || a.episode_ids.iter().any(|id| covered_ids.contains(id))).map(|a| a.quality).collect();
+        let limits = self.settings.size_limits();
         let ctx = Context {
-            flavor,
+            flavor: t.kind.flavor(),
             profile: &tc.profile,
-            size_limit: limits.get(&limit_key).copied(),
-            runtime_minutes: runtime,
-            existing: &existing,
+            size_limit: limits.get(&format!("{}:{}", t.kind.profile_kind(), quality.quality.key())).copied(),
+            runtime_minutes: held.runtime,
+            existing: &held.existing,
             queued: &queued,
-            blocklisted,
+            blocklisted: tc.blocklist.iter().any(|(guid, name)| (!guid.is_empty() && *guid == release.guid) || *name == release.title),
             compact: tc.compact,
-            monitored,
-            available,
-            season_complete,
+            monitored: held.monitored,
+            available: held.available,
+            season_complete: held.season_complete,
             retention_days: g.retention_days,
             proper_policy: g.proper_policy,
             wanted_language: if g.language.is_empty() { None } else { Some(g.language.as_str()) },
