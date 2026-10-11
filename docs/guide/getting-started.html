@@ -121,6 +121,7 @@ docker compose up -d --build       # http://localhost:7979
 </code></pre>
 <p>The image carries the helper tools Spool calls. Everything Spool keeps lives in <code>/data</code>.</p>
 <p>Mount the library and the downloads folder under one path. A finished download is then moved into the library, which takes no time, instead of being copied.</p>
+<p>If Spool runs on one machine and the library is on a NAS, the NAS can run <a href="helper.html">a helper</a>: the same image, doing the downloading and filing on the NAS&#39;s own disks.</p>
 <p>On <strong>TrueNAS SCALE</strong>, add it as a custom app with the same settings as <a href="https://github.com/rewtraw/spool/blob/main/compose.yaml">compose.yaml</a>: port 7979, a dataset for <code>/data</code>, your media dataset at <code>/media</code>, and the apps user (568) as the user.</p>
 <h3 id="from-source"><a href="#from-source">From source</a></h3>
 <p>You need Rust, <a href="https://bun.sh">Bun</a>, and four helper tools: <code>par2</code> for repair, <code>7zz</code> for extraction, and <code>ffprobe</code> and <code>ffmpeg</code> for reading media files and checking subtitles.</p>
@@ -259,6 +260,7 @@ spool backup DEST                   # write a consistent copy of the database
 <ul>
 <li><a href="your-library.html">Your library and what Spool does to it</a></li>
 <li><a href="locations.html">A library in more than one place</a></li>
+<li><a href="helper.html">A helper on the machine that holds the disks</a></li>
 <li><a href="players.html">Playing on a television</a></li>
 </ul>
 <nav class="around" aria-label="Other guides"><span></span><a class="next" href="your-library.html"><span>Next</span>Your library and what Spool does to it</a></nav>

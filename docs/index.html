@@ -252,7 +252,7 @@
   <section>
     <p class="eyebrow">The library you already have</p>
     <h2>Takes your folders as it finds them.</h2>
-    <p class="sub">Spool can look through a disk or a share from a NAS and bring in the films and shows already there, where they lie. Nothing is moved or renamed to suit it. If the NAS can run a container, <a class="more" href="guide/helper.html">a helper on the NAS</a> downloads and files there directly, so nothing crosses the network and back.</p>
+    <p class="sub">Spool can look through a disk or a share from a NAS and bring in the films and shows already there, where they lie. Nothing is moved or renamed to suit it.</p>
     <div class="grid">
       <div><h3>In more than one place</h3><p>Add further disks and shares beside the main library. Each is managed like the main one or only read, in which case Spool lists and plays what is there and writes nothing. <a class="more" href="guide/locations.html">More than one place</a></p></div>
       <div><h3>Away means left alone</h3><p>When a NAS is switched off its titles are shown as offline. Nothing is searched for or downloaded again because files cannot be seen. <a class="more" href="guide/locations.html#when-a-location-cannot-be-reached">When a location is away</a></p></div>
@@ -262,6 +262,17 @@
       <div><h3>Knows what else is in a folder</h3><p>Trailers, extras, your own posters and a media server's notes are recognised under the names Plex, Jellyfin, Emby and Kodi use. An upgrade replaces the film and nothing else. <a class="more" href="guide/local-files.html">Every name it knows</a></p></div>
     </div>
     <p class="note">Before pointing Spool at files you care about, read <a href="guide/your-library.html">what it changes and what it never touches</a>.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">A helper on the NAS</p>
+    <h2>Does the heavy work where the disks are.</h2>
+    <p class="sub">When part of the library is on another machine, a small Spool there does the file work on its own disks, told what to do by the one you already run. Nothing crosses the network and back. <a class="more" href="guide/helper.html">A helper on the NAS</a></p>
+    <div class="grid">
+      <div><h3>Downloads land in place</h3><p>The NAS fetches, repairs and unpacks for the titles it holds, and files each with a local move. The film is in the library seconds after it is unpacked.</p></div>
+      <div><h3>Disk to disk</h3><p>A title moved between two of the NAS's folders is copied inside the NAS, with the same progress and the same way to cancel.</p></div>
+      <div><h3>Only what it is given</h3><p>The helper works inside the folders it is started with and nowhere else, never writes to one marked as read, and answers nothing without its key. If it is away, Spool carries on as before.</p></div>
+    </div>
   </section>
 
   <section class="show">
@@ -305,7 +316,7 @@ cargo run --release -p spool -- serve</pre>
       <a href="guide/collections.html"><h3>Collections and anime</h3><p>Series of films, and an anime's series, films and side stories, grouped by themselves in the library, on players and in Plex.</p></a>
       <a href="guide/local-files.html"><h3>Files it recognises</h3><p>Every name it knows for trailers, extras, artwork, notes and theme music in a title's folder.</p></a>
     </div>
-    <p class="note">Also: <a href="guide/plex.html">beside Plex</a>, <a href="guide/assistants.html">AI assistants</a>, <a href="guide/api.html">the HTTP API</a>, <a href="guide/architecture.html">how Spool is put together</a> and <a href="guide/">the full list</a>.</p>
+    <p class="note">Also: <a href="guide/helper.html">a helper on the NAS</a>, <a href="guide/plex.html">beside Plex</a>, <a href="guide/assistants.html">AI assistants</a>, <a href="guide/api.html">the HTTP API</a>, <a href="guide/architecture.html">how Spool is put together</a> and <a href="guide/">the full list</a>.</p>
   </section>
 
   <footer>

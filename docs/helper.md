@@ -4,7 +4,7 @@ Spool runs on one machine and may keep part of its library on another, such as a
 
 A helper is a small Spool that runs on the NAS itself and does only the file work, on the NAS's own disks. The Spool you already have stays in charge: it holds the catalogue, makes every choice, and serves the web app and players. It tells the helper what to fetch and what goes where.
 
-This part of Spool is new. It is tested end to end, with a helper and a Spool in one test; it has had little use yet on a real network.
+This part of Spool is new. It is tested end to end, with a helper and a Spool in one test, and it runs on one real setup: a Mac driving a helper on TrueNAS SCALE, where a download arrives at the speed of the line and is in the library seconds after it is unpacked. A move carried out by the helper, and a helper restarted in the middle of one, have had no real use yet.
 
 ## What the helper does, and what it leaves alone
 
@@ -86,6 +86,8 @@ Under Settings, General, Helpers, choose **Add a helper**:
 | The other machine's disks, as this machine sees them | The folder the shares are mounted under here, such as `/Volumes/nas`. |
 | The same folder, as the helper sees it | The folder they are mounted under in the container, such as `/nas`. |
 
+The key is not shown again once saved, and is not handed back to the browser.
+
 The two folders must name the same place. A path is turned from one machine's to the other's by swapping them at its start: with the example above, `/Volumes/nas/movies/Heat (1995)` here is `/nas/movies/Heat (1995)` to the helper.
 
 There is nothing to set on a location. Every location whose folders lie under the first folder is served by the helper, and the settings page says which those are.
@@ -94,13 +96,45 @@ There is nothing to set on a location. Every location whose folders lie under th
 
 **Check this location**, on a location the helper serves, asks the helper whether it sees the same folder Spool does, and says whether Spool can see the helper's downloads. Anything that fails comes with what to do about it.
 
-From then on, a download for a title on that location shows **On** and the helper's name in Activity.
+From then on, a download for a title on that location shows **On** and the helper's name in Activity, and nothing appears in the downloads folder on Spool's own machine. The Helpers section of the settings shows, for each helper, whether it answers, which locations it serves, how many downloads it is running and how much room it has for them.
+
+### On TrueNAS SCALE
+
+The helper is a custom app. Under Apps, Discover Apps, the menu beside Custom App offers **Install via YAML**: give it a name and paste the definition, with your datasets and a key of your own. From a shell on the NAS the same thing is one call:
+
+```sh
+midclt call -job app.create '{"custom_app": true, "app_name": "spool-helper", "custom_compose_config_string": "<the definition>"}'
+```
+
+Run it as the apps user (568), which is the user a share from TrueNAS usually maps everyone to, so that what the helper writes and what Spool writes across the share belong to the same owner. Share the helper's downloads folder over NFS, read-only, to the network Spool's machine is on.
+
+## When it does not connect
+
+**"The helper did not answer", and Spool runs on a Mac.** macOS asks before a program may reach other machines on the local network, and a Spool started as a service has nobody to ask: the request is refused without a word. Under System Settings, Privacy & Security, Local Network, turn on **spool**. The sign is that the helper answers `curl` from a shell on the same Mac and not Spool. Sign the program with a stable identity, as for [a removable disk](getting-started.md#running-it-as-a-service), or macOS takes each new build for a new program and the permission has to be given again.
+
+**"Does not speak as this Spool does".** The two are different versions. Update them together; see below.
+
+**"Downloads into a folder this machine should see and cannot".** The helper is usable for moves, and downloads run on Spool's machine until the helper's downloads folder is shared and mounted there under the name it has in the container. Spool looks again by itself every half minute.
+
+**"It does not see the folder where this machine does".** The two folders given for the helper do not name the same place, or a share is mounted on Spool's machine under a different name than in the container.
+
+**The key is refused.** The key in Spool's settings is not the one the helper was started with. A helper answers nothing, not even what version it is, without its key.
 
 ## Keeping the two in step
 
 The helper and Spool must be the same version. Spool asks when it connects, and if the helper does not speak as it does, it leaves the helper unused and says so in a notice, until the two are updated together.
 
-`deploy/helper.sh` updates a helper on TrueNAS SCALE over SSH: it waits for the image of the current commit to be built, asks the helper whether a restart would interrupt anything, pulls the image and restarts the app. `deploy/deploy.sh` runs it after updating Spool when `SPOOL_HELPER_HOST` is set.
+The image is built and published by GitHub each time the main branch changes, as `ghcr.io/rewtraw/spool:latest`.
+
+`deploy/helper.sh` updates a helper on TrueNAS SCALE over SSH: it waits for the image of the current commit to be built, asks the helper whether a restart would interrupt anything, pulls the image and restarts the app. `deploy/deploy.sh` runs it after updating Spool when `SPOOL_HELPER_HOST` is set. Its settings go in `deploy/local.env`, which is not tracked:
+
+```sh
+SPOOL_HELPER_HOST=root@nas            # where to reach the NAS over SSH
+SPOOL_HELPER_URL=http://nas:7978      # where the helper answers
+SPOOL_HELPER_KEY=<the helper's key>
+```
+
+Anywhere else, `docker compose pull && docker compose up -d` does the same.
 
 A helper that restarts in the middle of things picks up its downloads where they stopped. A title it was moving stays where it was: the half-made copy is cleared away, and Spool reports that the move did not finish.
 

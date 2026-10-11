@@ -3,6 +3,9 @@
 #
 # Put the library and the downloads folder under ONE mount (here /media), so a finished
 # download is moved into the library instantly instead of being copied.
+#
+# For a NAS that only holds part of the library while Spool runs elsewhere, see
+# deploy/helper.compose.yaml and docs/helper.md.
 services:
   spool:
     build: .

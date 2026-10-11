@@ -17,6 +17,8 @@ The image carries the helper tools Spool calls. Everything Spool keeps lives in 
 
 Mount the library and the downloads folder under one path. A finished download is then moved into the library, which takes no time, instead of being copied.
 
+If Spool runs on one machine and the library is on a NAS, the NAS can run [a helper](helper.md): the same image, doing the downloading and filing on the NAS's own disks.
+
 On **TrueNAS SCALE**, add it as a custom app with the same settings as [compose.yaml](https://github.com/rewtraw/spool/blob/main/compose.yaml): port 7979, a dataset for `/data`, your media dataset at `/media`, and the apps user (568) as the user.
 
 ### From source
@@ -137,4 +139,5 @@ spool backup DEST                   # write a consistent copy of the database
 
 - [Your library and what Spool does to it](your-library.md)
 - [A library in more than one place](locations.md)
+- [A helper on the machine that holds the disks](helper.md)
 - [Playing on a television](players.md)

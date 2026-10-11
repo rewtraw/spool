@@ -106,14 +106,14 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#when-it-does-not-connect">When it does not connect</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
 <h1>A helper on the machine that holds the disks</h1>
 <p>Spool runs on one machine and may keep part of its library on another, such as a NAS, which it reaches over a <a href="locations.html">network share</a>. Without help, everything it does to files there crosses the network: a download arrives at Spool&#39;s machine and is copied over, and a title moved between two of the NAS&#39;s own disks is read to Spool&#39;s machine and written back.</p>
 <p>A helper is a small Spool that runs on the NAS itself and does only the file work, on the NAS&#39;s own disks. The Spool you already have stays in charge: it holds the catalogue, makes every choice, and serves the web app and players. It tells the helper what to fetch and what goes where.</p>
-<p>This part of Spool is new. It is tested end to end, with a helper and a Spool in one test; it has had little use yet on a real network.</p>
+<p>This part of Spool is new. It is tested end to end, with a helper and a Spool in one test, and it runs on one real setup: a Mac driving a helper on TrueNAS SCALE, where a download arrives at the speed of the line and is in the library seconds after it is unpacked. A move carried out by the helper, and a helper restarted in the middle of one, have had no real use yet.</p>
 <h2 id="what-the-helper-does-and-what-it-leaves-alone"><a href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a></h2>
 <div class="scroll"><table>
 <thead>
@@ -236,14 +236,32 @@ volumes:
 <td>The folder they are mounted under in the container, such as <code>/nas</code>.</td>
 </tr>
 </tbody></table></div>
+<p>The key is not shown again once saved, and is not handed back to the browser.</p>
 <p>The two folders must name the same place. A path is turned from one machine&#39;s to the other&#39;s by swapping them at its start: with the example above, <code>/Volumes/nas/movies/Heat (1995)</code> here is <code>/nas/movies/Heat (1995)</code> to the helper.</p>
 <p>There is nothing to set on a location. Every location whose folders lie under the first folder is served by the helper, and the settings page says which those are.</p>
 <h3 id="4-check"><a href="#4-check">4. Check</a></h3>
 <p><strong>Check this location</strong>, on a location the helper serves, asks the helper whether it sees the same folder Spool does, and says whether Spool can see the helper&#39;s downloads. Anything that fails comes with what to do about it.</p>
-<p>From then on, a download for a title on that location shows <strong>On</strong> and the helper&#39;s name in Activity.</p>
+<p>From then on, a download for a title on that location shows <strong>On</strong> and the helper&#39;s name in Activity, and nothing appears in the downloads folder on Spool&#39;s own machine. The Helpers section of the settings shows, for each helper, whether it answers, which locations it serves, how many downloads it is running and how much room it has for them.</p>
+<h3 id="on-truenas-scale"><a href="#on-truenas-scale">On TrueNAS SCALE</a></h3>
+<p>The helper is a custom app. Under Apps, Discover Apps, the menu beside Custom App offers <strong>Install via YAML</strong>: give it a name and paste the definition, with your datasets and a key of your own. From a shell on the NAS the same thing is one call:</p>
+<pre><code class="language-sh">midclt call -job app.create &#39;{&quot;custom_app&quot;: true, &quot;app_name&quot;: &quot;spool-helper&quot;, &quot;custom_compose_config_string&quot;: &quot;&lt;the definition&gt;&quot;}&#39;
+</code></pre>
+<p>Run it as the apps user (568), which is the user a share from TrueNAS usually maps everyone to, so that what the helper writes and what Spool writes across the share belong to the same owner. Share the helper&#39;s downloads folder over NFS, read-only, to the network Spool&#39;s machine is on.</p>
+<h2 id="when-it-does-not-connect"><a href="#when-it-does-not-connect">When it does not connect</a></h2>
+<p><strong>&quot;The helper did not answer&quot;, and Spool runs on a Mac.</strong> macOS asks before a program may reach other machines on the local network, and a Spool started as a service has nobody to ask: the request is refused without a word. Under System Settings, Privacy &amp; Security, Local Network, turn on <strong>spool</strong>. The sign is that the helper answers <code>curl</code> from a shell on the same Mac and not Spool. Sign the program with a stable identity, as for <a href="getting-started.html#running-it-as-a-service">a removable disk</a>, or macOS takes each new build for a new program and the permission has to be given again.</p>
+<p><strong>&quot;Does not speak as this Spool does&quot;.</strong> The two are different versions. Update them together; see below.</p>
+<p><strong>&quot;Downloads into a folder this machine should see and cannot&quot;.</strong> The helper is usable for moves, and downloads run on Spool&#39;s machine until the helper&#39;s downloads folder is shared and mounted there under the name it has in the container. Spool looks again by itself every half minute.</p>
+<p><strong>&quot;It does not see the folder where this machine does&quot;.</strong> The two folders given for the helper do not name the same place, or a share is mounted on Spool&#39;s machine under a different name than in the container.</p>
+<p><strong>The key is refused.</strong> The key in Spool&#39;s settings is not the one the helper was started with. A helper answers nothing, not even what version it is, without its key.</p>
 <h2 id="keeping-the-two-in-step"><a href="#keeping-the-two-in-step">Keeping the two in step</a></h2>
 <p>The helper and Spool must be the same version. Spool asks when it connects, and if the helper does not speak as it does, it leaves the helper unused and says so in a notice, until the two are updated together.</p>
-<p><code>deploy/helper.sh</code> updates a helper on TrueNAS SCALE over SSH: it waits for the image of the current commit to be built, asks the helper whether a restart would interrupt anything, pulls the image and restarts the app. <code>deploy/deploy.sh</code> runs it after updating Spool when <code>SPOOL_HELPER_HOST</code> is set.</p>
+<p>The image is built and published by GitHub each time the main branch changes, as <code>ghcr.io/rewtraw/spool:latest</code>.</p>
+<p><code>deploy/helper.sh</code> updates a helper on TrueNAS SCALE over SSH: it waits for the image of the current commit to be built, asks the helper whether a restart would interrupt anything, pulls the image and restarts the app. <code>deploy/deploy.sh</code> runs it after updating Spool when <code>SPOOL_HELPER_HOST</code> is set. Its settings go in <code>deploy/local.env</code>, which is not tracked:</p>
+<pre><code class="language-sh">SPOOL_HELPER_HOST=root@nas            # where to reach the NAS over SSH
+SPOOL_HELPER_URL=http://nas:7978      # where the helper answers
+SPOOL_HELPER_KEY=&lt;the helper&#39;s key&gt;
+</code></pre>
+<p>Anywhere else, <code>docker compose pull &amp;&amp; docker compose up -d</code> does the same.</p>
 <p>A helper that restarts in the middle of things picks up its downloads where they stopped. A title it was moving stays where it was: the half-made copy is cleared away, and Spool reports that the move did not finish.</p>
 <h2 id="limits"><a href="#limits">Limits</a></h2>
 <ul>
