@@ -2363,6 +2363,21 @@ async fn a_title_may_be_held_in_two_places_and_played_from_whichever_is_there() 
     let file_of = |n: u32| files.iter().find(|f| Some(f.id) == episodes.iter().find(|e| e.episode == n).unwrap().file_id).unwrap();
     assert_eq!((files.len(), file_of(1).base.is_none(), file_of(2).base.is_some()), (2, true, true));
 
+    // A player is offered both, the copy named for its place, and can play the copy.
+    let mut g = w.app.settings.general();
+    g.players_enabled = true;
+    w.app.settings.set_general(&g).unwrap();
+    let jf = spool::jellyfin::router(w.app.clone());
+    let (_, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "spool", "Pw": ""})).await;
+    let token = serde_json::from_slice::<Value>(&body).unwrap()["AccessToken"].as_str().unwrap().to_string();
+    let (_, _, body) = player(&jf, "GET", "/Items?Recursive=true&IncludeItemTypes=Movie&Fields=MediaSources", Some(&token), Value::Null).await;
+    let item = serde_json::from_slice::<Value>(&body).unwrap()["Items"][0].clone();
+    let sources = item["MediaSources"].as_array().unwrap().clone();
+    let second = sources.iter().find(|s| s["Name"].as_str().unwrap().ends_with("· Elsewhere")).unwrap_or_else(|| panic!("{sources:?}"));
+    assert_eq!(sources.len(), 2);
+    let (status, _, played) = player(&jf, "GET", &format!("/Videos/{}/stream?MediaSourceId={}&Static=true", item["Id"].as_str().unwrap(), second["Id"].as_str().unwrap()), Some(&token), Value::Null).await;
+    assert_eq!((status, played.as_slice()), (200, &b"not really video"[..]));
+
     // A copy is played and never changed.
     assert!(w.app.delete_file(copy.id).is_err());
     let (_, page) = call(&api, "GET", &format!("/api/titles/{}", heat.id), Value::Null).await;

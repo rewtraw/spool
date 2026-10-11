@@ -486,6 +486,13 @@ pub(crate) fn collect(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
+        // What a file system or a file manager keeps for itself is not part of the library:
+        // ".AppleDouble" and "._name" hold a Mac's notes about a file under that file's own
+        // name, "@eaDir" a NAS's thumbnails. Taken at their word they pass for posters and videos.
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name == "@eaDir" || name == "#recycle" {
+            continue;
+        }
         if p.is_dir() {
             collect(&p, out);
         } else {

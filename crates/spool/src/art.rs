@@ -123,7 +123,20 @@ impl App {
         }
         let prefix = format!("{}-{}-", t.id, art.name());
         let (url, presized) = sized_source(&src, art);
-        self.art_fetch(&path, &url, presized, art.width(), &prefix).await
+        let own = crate::local::art_file(&src).is_some();
+        match self.art_fetch(&path, &url, presized, art.width(), &prefix).await {
+            // A picture in the folder that turns out not to be one: the source's own serves.
+            Err(e) if own => {
+                let fetched = match art {
+                    Art::Poster => t.poster.clone(),
+                    Art::Fanart => t.fanart.clone(),
+                };
+                let Some(fetched) = fetched else { return Err(e) };
+                let (url, presized) = sized_source(&fetched, art);
+                self.art_fetch(&path, &url, presized, art.width(), &prefix).await
+            }
+            other => other,
+        }
     }
 
     /// The poster again, smaller, for grids and lists where the full one is more than the screen

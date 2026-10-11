@@ -668,6 +668,26 @@ mod tests {
     }
 
     #[test]
+    fn what_a_file_system_keeps_for_itself_is_not_taken_for_the_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let lay = |rel: &str| {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"x").unwrap();
+        };
+        lay("The.Matrix.mkv");
+        lay("poster.jpg");
+        lay(".AppleDouble/The.Matrix.tbn");
+        lay(".AppleDouble/The.Matrix.mkv");
+        lay("._The.Matrix.mkv");
+        lay("@eaDir/The.Matrix.mkv/SYNOVIDEO_VIDEO_SCREENSHOT.jpg");
+        lay(".DS_Store");
+        let (videos, local) = survey(dir.path(), Kind::Movie);
+        assert_eq!(videos, ["The.Matrix.mkv"]);
+        assert_eq!(local.art.iter().map(|a| a.rel_path.as_str()).collect::<Vec<_>>(), ["poster.jpg"]);
+    }
+
+    #[test]
     fn a_part_is_numbered_by_its_file_name_or_its_release_name() {
         assert_eq!(part_number("Film (1999) - part 2"), Some(2));
         assert_eq!(part_number("film.pt-a"), Some(1));
