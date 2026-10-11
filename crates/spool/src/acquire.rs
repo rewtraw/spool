@@ -12,7 +12,7 @@ use spool_core::profile::QualityProfile;
 use spool_core::{Quality, QualityModel};
 use std::collections::{HashMap, HashSet};
 
-pub const COMPACT_REASON: &str = "smaller copy that fits the profile's size target";
+pub const SMALLER_REASON: &str = "smaller copy that fits the profile's size target";
 pub const BY_HAND_REASON: &str = "chosen by hand";
 pub const ANOTHER_VERSION_REASON: &str = "chosen by hand, to keep as another version";
 
@@ -25,7 +25,7 @@ pub enum Scope {
     /// Every monitored, aired episode without a file.
     Missing,
     /// Files larger than the profile's size target, to be replaced by copies that fit it.
-    Compact,
+    Smaller,
 }
 
 /// A release whose articles have mostly left the Usenet servers, found before downloading it.
@@ -251,7 +251,7 @@ fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'
 }
 
 /// What rules a release out before its merits are weighed: the title's files cannot be
-/// changed, it is not what was asked for, or it is beside the point of a compacting search.
+/// changed, it is not what was asked for, or it is beside the point of a search for a smaller copy.
 fn ruled_out(tc: &TitleContext, scope: Option<Scope>, covered: &[&Episode]) -> Option<Rejection> {
     if let Some(why) = &tc.locked {
         return Some(rej("location", why.clone()));
@@ -262,8 +262,8 @@ fn ruled_out(tc: &TitleContext, scope: Option<Scope>, covered: &[&Episode]) -> O
         Some(Scope::Season(n)) if covered.iter().any(|e| e.season != n) || covered.is_empty() => return Some(rej("not_requested", format!("is not season {n}"))),
         _ => {}
     }
-    // Compacting replaces what is too big and leaves alone what already fits.
-    if tc.compact {
+    // A search for a smaller copy replaces what is too big and leaves alone what already fits.
+    if tc.smaller {
         let touches = match tc.title.kind {
             Kind::Movie => tc.files.iter().any(|f| tc.oversize.contains(&f.id)),
             Kind::Series => covered.iter().any(|e| e.file_id.is_some_and(|f| tc.oversize.contains(&f))),
@@ -333,8 +333,8 @@ pub struct TitleContext {
     pub active: Vec<Acquisition>,
     pub blocklist: Vec<(String, String)>,
     /// Judge for a smaller copy of what is on disk, not for an upgrade.
-    pub compact: bool,
-    /// Files over the profile's size target, when compacting.
+    pub smaller: bool,
+    /// Files over the profile's size target, when a smaller copy is being looked for.
     pub oversize: HashSet<i64>,
     /// Where each indexer stands against its daily allowance.
     pub budgets: HashMap<i64, IndexerBudget>,
@@ -421,7 +421,7 @@ impl App {
             seasons: self.season_names(&title),
             profile,
             title,
-            compact: false,
+            smaller: false,
             oversize: HashSet::new(),
             budgets: self.indexer_budgets(),
         })
@@ -480,7 +480,7 @@ impl App {
             existing: &held.existing,
             queued: &queued,
             blocklisted: tc.blocklist.iter().any(|(guid, name)| (!guid.is_empty() && *guid == release.guid) || *name == release.title),
-            compact: tc.compact,
+            smaller: tc.smaller,
             monitored: held.monitored,
             available: held.available,
             season_complete: held.season_complete,
@@ -662,7 +662,7 @@ impl App {
         // A film the indexer has not linked to its id is invisible to a search by id, and anime
         // films sit outside the movie categories altogether. When the first search turns up
         // nothing acceptable, ask by name: with the year, then without.
-        if t.kind == Kind::Movie && !tc.compact && !judged.iter().any(|j| j.record.accepted) {
+        if t.kind == Kind::Movie && !tc.smaller && !judged.iter().any(|j| j.record.accepted) {
             let plain: String = t.title.chars().map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
             let mut texts = vec![];
             if t.year > 0 {
@@ -689,7 +689,7 @@ impl App {
             let wanted: Vec<&Episode> = match scope {
                 Scope::Episode(id) => tc.episodes.iter().filter(|e| e.id == id).collect(),
                 Scope::Season(n) => tc.episodes.iter().filter(|e| e.season == n && e.file_id.is_none() && e.has_aired(now)).collect(),
-                Scope::Compact => tc.episodes.iter().filter(|e| e.file_id.is_some_and(|f| oversize.contains(&f))).collect(),
+                Scope::Smaller => tc.episodes.iter().filter(|e| e.file_id.is_some_and(|f| oversize.contains(&f))).collect(),
                 _ => tc.episodes.iter().filter(|e| e.season > 0 && e.monitored && t.season_monitored(e.season) && e.file_id.is_none() && e.has_aired(now)).collect(),
             };
             let uncovered = |judged: &[Judged]| -> Vec<&Episode> {
@@ -754,7 +754,7 @@ impl App {
                 .collect();
             let mut any_gone = false;
             for j in pick(&live, &tc.profile, policy) {
-                match self.grab(&j.record, &tc.title, if tc.compact { COMPACT_REASON } else { "best acceptable release from search" }, may_queue).await {
+                match self.grab(&j.record, &tc.title, if tc.smaller { SMALLER_REASON } else { "best acceptable release from search" }, may_queue).await {
                     Ok(Some(a)) => grabbed.push(a),
                     Ok(None) => {}
                     Err(e) if e.downcast_ref::<NoSpace>().is_some() => {
@@ -828,11 +828,11 @@ impl App {
     pub async fn search_with(&self, title_id: i64, scope: Scope, user: bool, grab: bool, may_queue: bool) -> Result<SearchOutcome> {
         let title = self.db.title(title_id)?.ok_or_else(|| anyhow!("no such title"))?;
         let mut tc = self.title_context(title)?;
-        tc.compact = scope == Scope::Compact;
+        tc.smaller = scope == Scope::Smaller;
         let now = chrono::Utc::now();
-        // Files over the profile's per-item size target; what a compacting search is about.
+        // Files over the profile's per-item size target; what a search for a smaller copy is about.
         let oversize: HashSet<i64> = match tc.profile.size_ceiling() {
-            Some(ceiling) if tc.compact => tc.files.iter().filter(|f| f.size > ceiling).map(|f| f.id).collect(),
+            Some(ceiling) if tc.smaller => tc.files.iter().filter(|f| f.size > ceiling).map(|f| f.id).collect(),
             _ => HashSet::new(),
         };
         tc.oversize = oversize.clone();
@@ -841,11 +841,11 @@ impl App {
         if let Some(why) = &tc.locked {
             return Ok(SearchOutcome { decisions: self.db.decisions(title_id)?, grabbed: vec![], errors: vec![], message: format!("Not searched: {why}") });
         }
-        if tc.compact && oversize.is_empty() {
+        if tc.smaller && oversize.is_empty() {
             let message = match tc.profile.target_size_gb {
-                _ if tc.files.is_empty() => "Nothing to compact: there is no file on disk yet".to_string(),
-                Some((_, hi)) => format!("Nothing to compact: every file is within the {hi:.0} GB target of profile \"{}\"", tc.profile.name),
-                None => format!("Profile \"{}\" has no size target to compact to", tc.profile.name),
+                _ if tc.files.is_empty() => "Nothing to make smaller: there is no file on disk yet".to_string(),
+                Some((_, hi)) => format!("Nothing to make smaller: every file is within the {hi:.0} GB target of profile \"{}\"", tc.profile.name),
+                None => format!("Profile \"{}\" has no size target to bring files down to", tc.profile.name),
             };
             return Ok(SearchOutcome { decisions: self.db.decisions(title_id)?, grabbed: vec![], errors: vec![], message });
         }
@@ -856,7 +856,7 @@ impl App {
                 vec![Query::Episode { tvdb_id: t.tvdb_id, title: t.title.clone(), season: e.season, episode: e.episode }]
             }
             (Kind::Series, Scope::Season(n)) => vec![Query::Season { tvdb_id: t.tvdb_id, title: t.title.clone(), season: n }],
-            (Kind::Series, Scope::Compact) => {
+            (Kind::Series, Scope::Smaller) => {
                 let mut seasons: Vec<u32> = tc.episodes.iter().filter(|e| e.file_id.is_some_and(|f| oversize.contains(&f))).map(|e| e.season).collect();
                 seasons.sort_unstable();
                 seasons.dedup();
@@ -1138,7 +1138,7 @@ impl App {
             output_path: None,
             error: None,
             reason: reason.to_string(),
-            replace_better: reason == COMPACT_REASON || reason == BY_HAND_REASON || reason == ANOTHER_VERSION_REASON,
+            replace_better: reason == SMALLER_REASON || reason == BY_HAND_REASON || reason == ANOTHER_VERSION_REASON,
             extra_version: reason == ANOTHER_VERSION_REASON,
             created_at: 0,
             updated_at: 0,

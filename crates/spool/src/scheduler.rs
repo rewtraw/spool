@@ -18,7 +18,7 @@ impl App {
             "refresh" => self.refresh_due(true).await,
             "scan" => self.scan_all().await.map(|r| format!("{} files on disk, {} added, {} missing, {} unmatched", r.files_found, r.files_added, r.files_missing, r.unmatched.len())),
             "housekeeping" => self.housekeeping().await,
-            "compact" => self.compact_library().await,
+            "smaller" => self.smaller_copies().await,
             "subtitles" => self.subtitle_sweep().await,
             "anime" => self.anime_sweep().await,
             "plex" if self.settings.general().plex_token.is_empty() => Ok("skipped: Plex is not set up".into()),
@@ -83,7 +83,7 @@ impl App {
     /// Look for smaller copies of the titles furthest over their profile's size target. Only ever
     /// run by hand: it replaces files, and a few titles at a time keeps it within what the disk
     /// and the indexers can take.
-    async fn compact_library(&self) -> anyhow::Result<String> {
+    async fn smaller_copies(&self) -> anyhow::Result<String> {
         const PER_RUN: usize = 8;
         if !self.is_active() {
             return Ok("skipped in shadow mode".into());
@@ -102,9 +102,9 @@ impl App {
         let (mut searched, mut started) = (0, 0);
         for (_, t) in over.into_iter().filter(|o| !self.still_short_of_space(o.1.id)).take(PER_RUN) {
             searched += 1;
-            match self.search(t.id, Scope::Compact, false, true).await {
+            match self.search(t.id, Scope::Smaller, false, true).await {
                 Ok(o) => started += o.grabbed.len(),
-                Err(e) => tracing::warn!(title = %t.title, error = %e, "compacting search failed"),
+                Err(e) => tracing::warn!(title = %t.title, error = %e, "the search for a smaller copy failed"),
             }
         }
         let left = total.saturating_sub(searched);

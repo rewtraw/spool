@@ -295,14 +295,14 @@ pub(super) async fn bulk_titles(State(app): State<App>, Json(b): Json<Value>) ->
                 done += 1;
             }
         }
-        "search" | "compact" | "refresh" => {
+        "search" | "smaller" | "refresh" => {
             if action != "refresh" && !app.is_active() {
                 return Err(ApiError(StatusCode::CONFLICT, "Spool is in shadow mode and does not download".into()));
             }
             let n = ids.len();
             let what = match action.as_str() {
                 "search" => "Searching",
-                "compact" => "Looking for smaller copies of",
+                "smaller" => "Looking for smaller copies of",
                 _ => "Refreshing",
             };
             if !app.task_start("bulk", &format!("{what} {n} titles")) {
@@ -317,7 +317,7 @@ pub(super) async fn bulk_titles(State(app): State<App>, Json(b): Json<Value>) ->
                         "refresh" => app2.refresh_title(id).await.map(|_| 0),
                         // Under the automatic rules for disk space, so a long list cannot queue
                         // more than the disk has room to wait for.
-                        "compact" => app2.search_with(id, Scope::Compact, true, true, false).await.map(|o| o.grabbed.len()),
+                        "smaller" => app2.search_with(id, Scope::Smaller, true, true, false).await.map(|o| o.grabbed.len()),
                         _ => app2.search_with(id, if t.kind == Kind::Movie { Scope::Movie } else { Scope::Missing }, true, true, false).await.map(|o| o.grabbed.len()),
                     };
                     match r {
@@ -368,13 +368,13 @@ pub(super) struct SearchBody {
     grab: bool,
     /// Look for smaller copies of files over the profile's size target.
     #[serde(default)]
-    compact: bool,
+    smaller: bool,
 }
 
 pub(super) async fn search_title(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<SearchBody>) -> R<crate::acquire::SearchOutcome> {
     let t = app.db.title(id)?.ok_or_else(|| not_found("title"))?;
     let scope = match (t.kind, b.episode, b.season) {
-        _ if b.compact => Scope::Compact,
+        _ if b.smaller => Scope::Smaller,
         (Kind::Movie, _, _) => Scope::Movie,
         (_, Some(e), _) => Scope::Episode(e),
         (_, _, Some(s)) => Scope::Season(s),

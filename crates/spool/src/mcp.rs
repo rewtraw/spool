@@ -157,7 +157,7 @@ const TOOLS: &[Tool] = &[
         read: false,
         destructive: false,
         description: "Ask the indexers (and the archive) for releases of a title and judge them. With grab=false it only reports; with grab=true the best acceptable release starts downloading. For a series give season, or season and episode; neither means everything missing. Uses indexer request allowance.",
-        schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "grab": {"type": "boolean", "description": "Default false."}, "compact": {"type": "boolean", "description": "Look for smaller copies of files that are over the profile's size target, accepting equal or lower quality that fits it. With grab=true the chosen copy replaces the file on disk once imported."}}), &["title_id"]),
+        schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "grab": {"type": "boolean", "description": "Default false."}, "smaller": {"type": "boolean", "description": "Look for smaller copies of files that are over the profile's size target, accepting equal or lower quality that fits it. With grab=true the chosen copy replaces the file on disk once imported."}}), &["title_id"]),
     },
     Tool {
         name: "download_release",
@@ -181,8 +181,8 @@ const TOOLS: &[Tool] = &[
         name: "run_task",
         read: false,
         destructive: false,
-        description: "Start a background task: rss (read indexer feeds), backlog (search a few missing titles), refresh (update details), scan (rescan library folders), housekeeping (backup and tidy), plex (read Plex), compact (look for smaller copies of the few titles furthest over their size target; replaces files when they arrive), subtitles (find subtitles for a few files that lack them and check each is in time with the film).",
-        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles", "anime"]}}), &["name"]),
+        description: "Start a background task: rss (read indexer feeds), backlog (search a few missing titles), refresh (update details), scan (rescan library folders), housekeeping (backup and tidy), plex (read Plex), smaller (look for smaller copies of the few titles furthest over their size target; replaces files when they arrive), subtitles (find subtitles for a few files that lack them and check each is in time with the film).",
+        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime"]}}), &["name"]),
     },
     Tool {
         name: "bulk_titles",
@@ -602,7 +602,7 @@ impl Mcp {
                 }
                 let mut body = json!({"ids": ids, "action": match action {
                     "set_profile" => "profile",
-                    "find_smaller" => "compact",
+                    "find_smaller" => "smaller",
                     "delete_files" => "free",
                     other => other,
                 }, "delete_files": delete_files});
@@ -737,7 +737,7 @@ impl Mcp {
             }
             "search_releases" => {
                 let id = int("title_id")?;
-                let mut body = json!({"grab": a["grab"].as_bool().unwrap_or(false), "compact": a["compact"].as_bool().unwrap_or(false)});
+                let mut body = json!({"grab": a["grab"].as_bool().unwrap_or(false), "smaller": a["smaller"].as_bool().unwrap_or(false)});
                 match (a["season"].as_i64(), a["episode"].as_i64()) {
                     (Some(s), Some(e)) => {
                         let t = self.get(&format!("/api/titles/{id}")).await?;

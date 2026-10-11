@@ -100,7 +100,7 @@
     loadTitles();
   }
 
-  async function search(scope: { season?: number; episode?: number; compact?: boolean } = {}, grab = true, key = 'all') {
+  async function search(scope: { season?: number; episode?: number; smaller?: boolean } = {}, grab = true, key = 'all') {
     searching = key;
     searchMessage = '';
     const r = await act(() => api.post(`/titles/${id}/search`, { ...scope, grab: grab && isActive }));
@@ -370,7 +370,7 @@
           {searching === 'all' ? 'Searching…' : !isActive ? 'Search' : t.kind === 'movie' ? 'Search and download' : 'Get missing episodes'}
         </button>
         {#if isActive}<button class="btn" disabled={!!searching} onclick={() => search({}, false, 'look')}>{searching === 'look' ? 'Searching…' : 'Show releases'}</button>{/if}
-        {#if isActive && oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ compact: true }, true, 'compact')}>{searching === 'compact' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
+        {#if isActive && oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ smaller: true }, true, 'smaller')}>{searching === 'smaller' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
         {/if}
         {#if t.kind === 'series' && t.files.length}
           {#if compacting}<button class="btn ghost" onclick={() => cancelCompact()}>Cancel compact versions</button>

@@ -982,7 +982,7 @@ async fn downloads_wait_for_space_under_one_notice() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_compacting_search_replaces_an_oversized_file_with_one_that_fits() {
+async fn a_search_for_a_smaller_copy_replaces_an_oversized_file_with_one_that_fits() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;
     let movie = w.movie("Hefty Example", 2016, "tt6666666");
@@ -1009,8 +1009,8 @@ async fn a_compacting_search_replaces_an_oversized_file_with_one_that_fits() {
     let trim = normal.decisions.iter().find(|d| d.release.title.ends_with("-TRIM")).unwrap();
     assert_eq!(trim.rejections[0].code, "not_an_upgrade");
 
-    // ...a compacting one does, because the copy fits the target and is much smaller.
-    let compact = w.app.search(movie.id, Scope::Compact, true, true).await.unwrap();
+    // ...one for a smaller copy does, because the copy fits the target and is much smaller.
+    let compact = w.app.search(movie.id, Scope::Smaller, true, true).await.unwrap();
     assert_eq!(compact.grabbed.len(), 1, "{}", compact.message);
     assert!(compact.grabbed[0].release.title.ends_with("-TRIM"));
     for _ in 0..400 {
@@ -1026,8 +1026,8 @@ async fn a_compacting_search_replaces_an_oversized_file_with_one_that_fits() {
 
     // With everything inside the target there is nothing left to do, and no indexer is asked.
     let hits = w.indexer.lock().hits;
-    let again = w.app.search(movie.id, Scope::Compact, true, true).await.unwrap();
-    assert!(again.grabbed.is_empty() && again.message.starts_with("Nothing to compact"), "{}", again.message);
+    let again = w.app.search(movie.id, Scope::Smaller, true, true).await.unwrap();
+    assert!(again.grabbed.is_empty() && again.message.starts_with("Nothing to make smaller"), "{}", again.message);
     assert_eq!(w.indexer.lock().hits, hits);
 }
 

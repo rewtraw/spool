@@ -232,7 +232,7 @@ pub(super) async fn test_indexer(State(app): State<App>, Path(id): Path<i64>) ->
 }
 
 pub(super) async fn run_task(State(app): State<App>, Path(name): Path<String>) -> R<Value> {
-    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "compact", "subtitles", "anime"].contains(&name.as_str()) {
+    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime"].contains(&name.as_str()) {
         return Err(not_found("task"));
     }
     let app2 = app.clone();

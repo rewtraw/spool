@@ -114,7 +114,7 @@ pub struct Context<'a> {
     pub blocklisted: bool,
     /// Looking for a smaller copy of what is on disk: a release is wanted if it fits the
     /// profile's size target and is clearly smaller, whether or not it is a quality upgrade.
-    pub compact: bool,
+    pub smaller: bool,
     pub monitored: bool,
     /// Movie: released per its minimum availability. Episode: has aired.
     pub available: bool,
@@ -200,11 +200,11 @@ pub fn evaluate(c: &Candidate, ctx: &Context) -> Vec<Rejection> {
         }
     }
 
-    let compacting = ctx.compact && !ctx.existing.is_empty();
-    if compacting {
+    let shrinking = ctx.smaller && !ctx.existing.is_empty();
+    if shrinking {
         let on_disk: u64 = ctx.existing.iter().map(|e| e.size_bytes).sum();
         match ctx.profile.size_ceiling() {
-            None => out.push(reject("no_size_target", format!("profile \"{}\" has no size target to compact to", ctx.profile.name))),
+            None => out.push(reject("no_size_target", format!("profile \"{}\" has no size target to bring files down to", ctx.profile.name))),
             Some(ceiling) if c.size_bytes > ceiling * c.item_count.max(1) as u64 => {
                 out.push(reject("over_target", format!("{} is over this profile's {:.0} GB target", fmt_size(c.size_bytes), ctx.profile.target_size_gb.map(|t| t.1).unwrap_or(0.0))));
             }
@@ -339,7 +339,7 @@ mod tests {
     }
 
     fn ctx<'a>(p: &'a QualityProfile, existing: &'a [ExistingFile]) -> Context<'a> {
-        Context { flavor: Flavor::Movie, profile: p, size_limit: None, runtime_minutes: 110, existing, queued: &[], blocklisted: false, compact: false, monitored: true, available: true, season_complete: true, retention_days: 0, proper_policy: ProperPolicy::PreferAndUpgrade, wanted_language: Some("english"), original_language: None, user_invoked: false }
+        Context { flavor: Flavor::Movie, profile: p, size_limit: None, runtime_minutes: 110, existing, queued: &[], blocklisted: false, smaller: false, monitored: true, available: true, season_complete: true, retention_days: 0, proper_policy: ProperPolicy::PreferAndUpgrade, wanted_language: Some("english"), original_language: None, user_invoked: false }
     }
 
     fn codes(r: Vec<Rejection>) -> Vec<String> {
@@ -422,7 +422,7 @@ mod tests {
         v.remove(0)
     }
 
-    fn compact() -> QualityProfile {
+    fn lean() -> QualityProfile {
         let mut p = QualityProfile::default_hd("movie");
         for i in &mut p.items {
             i.allowed = true;
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn size_target_prefers_what_fits_without_filtering() {
-        let p = compact();
+        let p = lean();
         // The remux is the highest quality but far over the target; the 4K web release fits.
         let pick = best(vec![sized(Quality::Remux2160p, 62, true), sized(Quality::Webdl2160p, 20, true), sized(Quality::Bluray1080p, 12, false)], &p);
         assert_eq!((pick.quality.quality, pick.size_bytes >> 30), (Quality::Webdl2160p, 20));
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn direct_play_preference_orders_equal_quality_releases() {
-        let mut p = compact();
+        let mut p = lean();
         p.prefer_direct_play = true;
         let q = Quality::Webdl2160p;
         // Same quality and size: Dolby Digital Plus beats TrueHD, HDR fallback beats Dolby Vision alone.
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn oversize_releases_never_replace_an_existing_file() {
-        let p = compact();
+        let p = lean();
         let have = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: None, size_bytes: 0 }];
         assert_eq!(codes(evaluate(&sized(Quality::Remux2160p, 62, true), &ctx(&p, &have))), ["too_large_to_upgrade"]);
         assert!(evaluate(&sized(Quality::Webdl2160p, 20, true), &ctx(&p, &have)).is_empty(), "a fitting upgrade is still taken");
@@ -521,7 +521,7 @@ mod tests {
     }
 
     #[test]
-    fn compacting_takes_a_smaller_copy_that_fits_even_at_lower_quality() {
+    fn asked_for_smaller_it_takes_a_smaller_copy_that_fits_even_at_lower_quality() {
         let mut p = QualityProfile::default_hd("movie");
         p.target_size_gb = Some((10.0, 20.0));
         let have = [ExistingFile { quality: QualityModel::new(Quality::Remux1080p), release_group: None, size_bytes: 37 << 30 }];
@@ -529,14 +529,14 @@ mod tests {
         // Ordinarily a lower quality is no upgrade.
         assert_eq!(codes(evaluate(&sized(Quality::Bluray1080p, 12), &ctx(&p, &have))), ["not_an_upgrade"]);
         let mut c = ctx(&p, &have);
-        c.compact = true;
+        c.smaller = true;
         assert!(evaluate(&sized(Quality::Bluray1080p, 12), &c).is_empty());
         assert_eq!(codes(evaluate(&sized(Quality::Bluray1080p, 24), &c)), ["over_target"]);
         assert_eq!(codes(evaluate(&sized(Quality::Bluray720p, 6), &c)), ["quality_not_wanted"]);
         // On a file that is already small, a slightly smaller one is not worth fetching.
         let small = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: None, size_bytes: 13 << 30 }];
         let mut c = ctx(&p, &small);
-        c.compact = true;
+        c.smaller = true;
         assert_eq!(codes(evaluate(&sized(Quality::Webdl1080p, 12), &c)), ["not_smaller"]);
     }
 

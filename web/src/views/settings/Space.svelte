@@ -32,10 +32,10 @@
     loadSpace();
     loadStatus();
   }
-  async function compactChosen() {
+  async function smallerChosen() {
     const ids = spaceChosen.filter((t: any) => t.over_target > 0).map((t: any) => t.title_id);
     if (!ids.length) return toast('None of the selected titles is over its size target');
-    const r = await act(() => api.post<any>('/titles/bulk', { ids, action: 'compact' }));
+    const r = await act(() => api.post<any>('/titles/bulk', { ids, action: 'smaller' }));
     if (r) toast(`Looking for smaller copies of ${r.started} ${r.started === 1 ? 'title' : 'titles'} in the background. Downloads appear in Activity.`);
     spacePicked = {};
   }
@@ -52,11 +52,11 @@
     const rows = (space?.titles ?? []).filter((t: any) => t.over_target > 0);
     return { count: rows.length, bytes: rows.reduce((s: number, t: any) => s + t.over_target, 0) };
   });
-  async function compactLibrary() {
-    await act(() => api.post('/tasks/compact'), 'Looking for smaller copies of the titles furthest over target. Downloads appear in Activity.');
+  async function smallerLibrary() {
+    await act(() => api.post('/tasks/smaller'), 'Looking for smaller copies of the titles furthest over target. Downloads appear in Activity.');
   }
-  async function compactTitle(t: any) {
-    const r = await act(() => api.post<any>(`/titles/${t.title_id}/search`, { compact: true, grab: true }));
+  async function smallerTitle(t: any) {
+    const r = await act(() => api.post<any>(`/titles/${t.title_id}/search`, { smaller: true, grab: true }));
     if (r) toast(r.grabbed?.length ? `Downloading a smaller copy of ${t.title}; it replaces the file when it arrives` : r.message.startsWith('Nothing') ? r.message : `No smaller copy of ${t.title} that fits was found`);
     loadSpace();
   }
@@ -93,7 +93,7 @@
         <fieldset class="card">
           <legend>Over their size target</legend>
           <p class="muted">{overTarget.count} {overTarget.count === 1 ? 'title is' : 'titles are'} larger than the profile asks for, by {bytes(overTarget.bytes)} in all. Spool can look for smaller copies of the worst few at a time, accepting lower quality, and replace each file when its smaller copy arrives.</p>
-          <div><button class="btn" onclick={compactLibrary}>Find smaller copies</button></div>
+          <div><button class="btn" onclick={smallerLibrary}>Find smaller copies</button></div>
         </fieldset>
       {/if}
       <div class="row wrap">
@@ -123,7 +123,7 @@
                     {:else}<span class="muted">Not watched</span>{/if}
                   </td>
                   <td style="white-space:nowrap">{#if t.can_download_again}<span class="chip ok">Kept</span>{:else if t.saved_releases}<span class="chip bad">Gone from Usenet</span>{:else}<span class="faint">None</span>{/if}</td>
-                  <td><div class="row" style="gap:6px;flex-wrap:nowrap">{#if t.over_target > 0}<button class="btn small" onclick={() => compactTitle(t)}>Find smaller</button>{/if}<button class="btn small ghost" onclick={() => freeTitle(t)}>Delete files</button></div></td>
+                  <td><div class="row" style="gap:6px;flex-wrap:nowrap">{#if t.over_target > 0}<button class="btn small" onclick={() => smallerTitle(t)}>Find smaller</button>{/if}<button class="btn small ghost" onclick={() => freeTitle(t)}>Delete files</button></div></td>
                 </tr>
               {/each}
             </tbody>
@@ -134,7 +134,7 @@
             <span class="n">{spaceChosen.length} selected · {bytes(spaceChosenBytes)}</span>
             <button class="btn small ghost" onclick={() => (spacePicked = {})}>Select none</button>
             <span class="sep"></span>
-            <button class="btn small" onclick={compactChosen}>Find smaller copies</button>
+            <button class="btn small" onclick={smallerChosen}>Find smaller copies</button>
             <button class="btn small ghost danger" onclick={freeChosen}>Delete files</button>
           </div>
         {/if}
