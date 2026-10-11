@@ -31,7 +31,7 @@ const TITLE_KEPT: i64 = 30 * 86400;
 const PER_REQUEST: usize = 10;
 const BETWEEN_REQUESTS: std::time::Duration = std::time::Duration::from_millis(2500);
 /// Raised when the way a title is matched to its entry changes, so the library is read again.
-const RULES: u32 = 2;
+const RULES: u32 = 3;
 
 /// Group ids for players and the web app share one space with TMDB's collection ids, which
 /// are small. An anime group is its first work's AniList id with this bit set.
@@ -436,12 +436,20 @@ impl App {
         let mut unsure = false;
         if let (Kind::Movie, Some(listed)) = (t.kind, entries.first().and_then(|i| self.db.anime(*i).ok().flatten())) {
             let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
-            let ours: Vec<String> = std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
-            let named = |m: &Media| m.names.iter().any(|n| ours.contains(&plain(n)));
-            if !named(&listed) {
-                let beside = listed.edges.iter().filter_map(|e| self.db.anime(e.to).ok().flatten()).find(|m| named(m));
+            // The title itself is asked first, then its other names: those may hold a name
+            // taken from the listed entry on an earlier reading, which would settle nothing.
+            let own = vec![plain(&t.title)];
+            let all: Vec<String> = std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
+            let named = |m: &Media, ours: &[String]| m.names.iter().any(|n| ours.contains(&plain(n)));
+            if !named(&listed, &own) {
+                let near: Vec<Media> = listed.edges.iter().filter_map(|e| self.db.anime(e.to).ok().flatten()).collect();
+                let beside = near.iter().find(|m| named(m, &own)).or_else(|| if named(&listed, &all) { None } else { near.iter().find(|m| named(m, &all)) });
                 match beside {
-                    Some(m) => entries = vec![m.id],
+                    Some(m) => {
+                        entries = vec![m.id];
+                        t.alt_titles.retain(|a| !listed.names.iter().any(|n| n.eq_ignore_ascii_case(a)));
+                    }
+                    None if named(&listed, &all) => {}
                     // Nothing settles which of the set it is: it is of this story, and no more is taken from the entry.
                     None => unsure = self.anime_ids().is_some_and(|ids| ids.back.get(&listed.id).is_some_and(|k| k.several)),
                 }
