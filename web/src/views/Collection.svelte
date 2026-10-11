@@ -27,7 +27,7 @@
     <div>
       <a class="back" href="#/library">Library</a>
       <h1>{c.name}</h1>
-      <div class="muted">{members.length} in the library, in the order they came out{c.kind === 'anime' && c.missing.length ? ` · ${c.missing.length} more of the story not here` : ''}</div>
+      <div class="muted">{members.length} in the library, in order of release{c.kind === 'anime' && c.missing.length ? ` · ${c.missing.length} more of the story not here` : ''}</div>
     </div>
   </header>
 
