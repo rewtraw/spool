@@ -319,11 +319,24 @@ pub fn free_space(p: &Path) -> Option<u64> {
         dir = dir.parent()?;
     }
     let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
-        return None;
+    // On macOS statvfs counts blocks in 32 bits, and on a large share with small blocks the
+    // count wraps: a volume with 9.5 TB free was reported as having 0.9. statfs counts in 64.
+    #[cfg(target_os = "macos")]
+    {
+        let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
+            return None;
+        }
+        Some(st.f_bavail * st.f_bsize as u64)
     }
-    Some(st.f_bavail as u64 * st.f_frsize as u64)
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+            return None;
+        }
+        Some(st.f_bavail as u64 * st.f_frsize as u64)
+    }
 }
 
 pub fn is_mount_point(p: &Path) -> bool {
