@@ -30,6 +30,8 @@ TMDB lists some works as one film that TVmaze lists as a series, and such works 
 2. **The results as a set.** If a search for the film brings back releases naming three or more different episodes of it, and more of those than of releases that could be the whole film, it is posted in episodes. No single release shows this; the run does.
 3. **One download.** A file far shorter than the film, from a release named as an episode, marks the title when it is stopped at import.
 
+The same measuring settles the neighbouring cases at import (`plan` in `import.rs`): a film split into parts is filed as all of its parts, and a part released alone brings its siblings, which share its name but for the number; a file that runs as long as several consecutive episodes together is filed as those episodes; and a film far too long, or one file standing for a whole season, waits for a person to say yes. Import anyway is that yes, and is not asked for twice.
+
 A film so marked turns down releases named as its episodes (`episode` in the verdicts) and still accepts the film whole. `film_to_series` replaces it with the series the other source lists, hands over any download that was stopped, and files it as the episode its name says it is.
 
 ## Storage

@@ -700,7 +700,9 @@ async fn activity_action(State(app): State<App>, Path((id, action)): Path<(i64, 
                 app.db.save_acquisition(&mut a)?;
             }
             let episodes: Option<Vec<i64>> = body.and_then(|b| b.0["episode_ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()));
-            let force = episodes.clone().or_else(|| app.db.title(acq.title_id).ok().flatten().filter(|t| t.kind == Kind::Movie).map(|_| vec![]));
+            // This is "Import anyway": the person has read why it was stopped, and is not asked
+            // again. For a series the episodes the release was taken for stand.
+            let force = episodes.clone().or_else(|| Some(if app.db.title(acq.title_id).ok().flatten().is_some_and(|t| t.kind == Kind::Movie) { vec![] } else { acq.episode_ids.clone() }));
             app.import(id, if episodes.is_some() || force.is_some() { force } else { None }).await?;
         }
         _ => return Err(ApiError(StatusCode::BAD_REQUEST, "unknown action".into())),

@@ -1079,6 +1079,11 @@ impl SortKey {
 
 /// What to call one version of a film among several: its cut if it has one, else its size.
 fn version_name(f: &MediaFile) -> String {
+    // A film in several files: each is offered by its place in the order.
+    let stem = std::path::Path::new(&f.rel_path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    if let Some(n) = crate::local::part_number(&stem).filter(|_| !f.extra) {
+        return format!("Part {n}");
+    }
     let height = f.media_info.as_ref().map(|m| (m.width, m.height)).unwrap_or((0, 0));
     let size = match height {
         (w, h) if w >= 3000 || h >= 2000 => "4K",

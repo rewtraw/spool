@@ -359,12 +359,55 @@ pub fn classify(rel: &str, kind: Kind, sibling_videos: &[String]) -> Class {
 
 /// A part of a film split across files: "Film-cd1", "Film - part 2", "Film.pt-a".
 pub fn is_part(stem: &str) -> bool {
+    part_number(stem).is_some()
+}
+
+/// Which part a file is, from the end of its name: 2 for "Film - part 2", 1 for "Film.pt-a".
+pub fn part_number(stem: &str) -> Option<u32> {
     let lower = stem.to_lowercase();
     let tail = lower.trim_end_matches(|c: char| c.is_ascii_digit());
-    let numbered = tail.len() < lower.len();
-    let tail = if numbered { tail } else { lower.strip_suffix(['a', 'b', 'c', 'd']).unwrap_or("") };
+    let (tail, n) = if tail.len() < lower.len() {
+        (tail, lower[tail.len()..].parse::<u32>().ok()?)
+    } else {
+        let letter = lower.chars().last().filter(|c| ('a'..='d').contains(c))?;
+        (&lower[..lower.len() - 1], letter as u32 - 'a' as u32 + 1)
+    };
     let tail = tail.trim_end_matches([' ', '.', '-', '_']);
-    ["cd", "dvd", "part", "pt", "disc", "disk"].iter().any(|w| tail.strip_suffix(w).is_some_and(|before| before.ends_with([' ', '.', '-', '_'])))
+    ["cd", "dvd", "part", "pt", "disc", "disk"].iter().any(|w| tail.strip_suffix(w).is_some_and(|before| before.ends_with([' ', '.', '-', '_']))).then_some(n)
+}
+
+/// A part marked anywhere in a release's name, which ends with its group and not the marker:
+/// "Film.2001.DVDRip.XviD.CD2-GRP". Gives the number, whether the word was "part" (which a
+/// film's own title can hold), and the name with the number struck out, which every part of
+/// one release shares. "DVD5" and "DVD9" are kinds of disc and are not read as parts.
+pub fn part_of_release(name: &str) -> Option<(u32, bool, String)> {
+    let lower = name.to_lowercase();
+    let bytes = lower.as_bytes();
+    for (i, _) in lower.char_indices() {
+        if i > 0 && bytes[i - 1].is_ascii_alphanumeric() {
+            continue;
+        }
+        for word in ["cd", "disc", "disk", "part", "pt"] {
+            if !lower[i..].starts_with(word) {
+                continue;
+            }
+            let mut j = i + word.len();
+            if j < bytes.len() && matches!(bytes[j], b' ' | b'.' | b'-' | b'_') {
+                j += 1;
+            }
+            let digits = bytes[j..].iter().take_while(|b| b.is_ascii_digit()).count();
+            let end = j + digits;
+            if !(1..=2).contains(&digits) || bytes.get(end).is_some_and(|b| b.is_ascii_alphanumeric()) {
+                continue;
+            }
+            let n: u32 = lower[j..end].parse().ok()?;
+            if n == 0 {
+                continue;
+            }
+            return Some((n, word == "part" || word == "pt", format!("{}#{}", &lower[..j], &lower[end..])));
+        }
+    }
+    None
 }
 
 /// When a video has been replaced by one with another name, bring along the files a media
@@ -622,6 +665,28 @@ mod tests {
         assert_eq!((show_notes.tvdb_id, show_notes.title.as_str()), (Some(79126), "The Wire"));
         let plex = read_notes(".plexmatch", "title: The Wire\nyear: 2002\ntvdbid: 79126\nimdbid: tt0306414\n");
         assert_eq!((plex.tvdb_id, plex.imdb_id.as_deref(), plex.year), (Some(79126), Some("tt0306414"), 2002));
+    }
+
+    #[test]
+    fn a_part_is_numbered_by_its_file_name_or_its_release_name() {
+        assert_eq!(part_number("Film (1999) - part 2"), Some(2));
+        assert_eq!(part_number("film.pt-a"), Some(1));
+        assert_eq!(part_number("Film-cd12"), Some(12));
+        assert_eq!(part_number("Casablanca"), None);
+        assert_eq!(part_number("Apollo 13"), None);
+
+        let part = |name: &str| part_of_release(name).map(|p| (p.0, p.1));
+        assert_eq!(part("Film.2001.DVDRip.XviD.CD2-GRP"), Some((2, false)));
+        assert_eq!(part("Film.2001.DVDRip.XviD.Disc.1-GRP"), Some((1, false)));
+        // The word a film's own title can hold is marked as such.
+        assert_eq!(part("A.Long.Tale.Part.1.2010.1080p.BluRay.x264-GRP"), Some((1, true)));
+        // Kinds of disc, a year and a resolution are not parts.
+        for name in ["Film.2001.DVD9.NTSC-GRP", "Film.2001.1080p.BluRay.x264-GRP", "Film.2001.DVDRip.XviD-CDX", "Departed.2006.1080p-GRP"] {
+            assert_eq!(part(name), None, "{name}");
+        }
+        // Every part of one release shares a name but for the number.
+        assert_eq!(part_of_release("Film.2001.XviD.CD1-GRP").unwrap().2, part_of_release("Film.2001.XviD.CD2-GRP").unwrap().2);
+        assert_ne!(part_of_release("Film.2001.XviD.CD1-GRP").unwrap().2, part_of_release("Film.2001.XviD.CD1-OTHER").unwrap().2);
     }
 
     #[test]

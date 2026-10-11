@@ -59,6 +59,19 @@ Plex, Jellyfin and Kodi attach artwork and notes to a film by name: `Film (1999)
 
 **A film that is posted in episodes.** Some works, short animated series above all, are listed as one film by the film source and posted as their episodes. Each episode's name carries the film's whole title, so a single episode can pass for the film. Spool guards against it three ways: when a film is added it asks the series source whether the same work is listed there as episodes; when a search brings back a run of numbered releases it takes that as the answer; and failing both, the first download is stopped because it is far too short, and the rest are turned down by name. The title's page then offers **Switch to series**, which replaces the film with the series, keeps its monitoring, and files an episode that was already downloaded where it belongs.
 
+**A download that is not the shape its name says.** Spool measures how long each video runs before filing it, and stops to ask when the length contradicts the name. In each case the notice says what it found, and offers Import anyway or Discard and find another.
+
+| What arrives | What Spool does |
+| --- | --- |
+| A film in parts, all in one release | Files every part, in order. |
+| A film in parts, each part a release of its own | Fetches the others with the one it chose, and files them together. |
+| One part of a film and no others | Asks. Import anyway keeps it as that part, and the rest can be added beside it. |
+| A film under half its length | Asks: it is probably a sample. |
+| A film more than twice its length, and over an hour longer | Asks: it may be another film, or several in one file. |
+| One episode's file that runs as long as it and the next ones together | Files it as those episodes, when the source gives each one's length and the sum fits. |
+| One file named for many episodes but far too short to hold them | Asks, instead of counting them all as present. |
+| A whole season run together in one file | Asks, instead of counting the season as complete. |
+
 **Two programs managing one folder.** Stop Radarr and Sonarr before making Spool active. Plex and Jellyfin only read, and can stay.
 
 **An extra taken for the film.** Spool tells extras from the film by the folder and file names media servers use. A featurette with an unmarked name, loose in a film's folder, looks like a second version of the film. It is kept and never replaced, and it is listed on the title's page as a version, where you can see it.

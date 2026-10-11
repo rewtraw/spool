@@ -203,6 +203,47 @@
 <p><strong>A folder matched to the wrong film.</strong> Two films share a name, or a folder is named carelessly. When looking through a location, Spool adds only what it is sure of, lists the rest as unclear for you to choose, and notes when a file runs much longer or shorter than the film it was matched to. A wrong match changes nothing on disk: the title shows the wrong details until you remove it and add the right one. It matters more if the title is monitored, because Spool would then look for the wrong film.</p>
 <p><strong>A file that disappears while its title is monitored.</strong> The library scan notices files added and removed outside Spool. A monitored title whose file has gone from a disk that is there counts as missing, and Spool looks for it again. Stop monitoring a title before deleting its file by hand, or delete it through Spool, which does that for you.</p>
 <p><strong>A film that is posted in episodes.</strong> Some works, short animated series above all, are listed as one film by the film source and posted as their episodes. Each episode&#39;s name carries the film&#39;s whole title, so a single episode can pass for the film. Spool guards against it three ways: when a film is added it asks the series source whether the same work is listed there as episodes; when a search brings back a run of numbered releases it takes that as the answer; and failing both, the first download is stopped because it is far too short, and the rest are turned down by name. The title&#39;s page then offers <strong>Switch to series</strong>, which replaces the film with the series, keeps its monitoring, and files an episode that was already downloaded where it belongs.</p>
+<p><strong>A download that is not the shape its name says.</strong> Spool measures how long each video runs before filing it, and stops to ask when the length contradicts the name. In each case the notice says what it found, and offers Import anyway or Discard and find another.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>What arrives</th>
+<th>What Spool does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A film in parts, all in one release</td>
+<td>Files every part, in order.</td>
+</tr>
+<tr>
+<td>A film in parts, each part a release of its own</td>
+<td>Fetches the others with the one it chose, and files them together.</td>
+</tr>
+<tr>
+<td>One part of a film and no others</td>
+<td>Asks. Import anyway keeps it as that part, and the rest can be added beside it.</td>
+</tr>
+<tr>
+<td>A film under half its length</td>
+<td>Asks: it is probably a sample.</td>
+</tr>
+<tr>
+<td>A film more than twice its length, and over an hour longer</td>
+<td>Asks: it may be another film, or several in one file.</td>
+</tr>
+<tr>
+<td>One episode&#39;s file that runs as long as it and the next ones together</td>
+<td>Files it as those episodes, when the source gives each one&#39;s length and the sum fits.</td>
+</tr>
+<tr>
+<td>One file named for many episodes but far too short to hold them</td>
+<td>Asks, instead of counting them all as present.</td>
+</tr>
+<tr>
+<td>A whole season run together in one file</td>
+<td>Asks, instead of counting the season as complete.</td>
+</tr>
+</tbody></table></div>
 <p><strong>Two programs managing one folder.</strong> Stop Radarr and Sonarr before making Spool active. Plex and Jellyfin only read, and can stay.</p>
 <p><strong>An extra taken for the film.</strong> Spool tells extras from the film by the folder and file names media servers use. A featurette with an unmarked name, loose in a film&#39;s folder, looks like a second version of the film. It is kept and never replaced, and it is listed on the title&#39;s page as a version, where you can see it.</p>
 <h2 id="getting-something-back"><a href="#getting-something-back">Getting something back</a></h2>

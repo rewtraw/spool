@@ -783,6 +783,22 @@ impl App {
                     break;
                 }
             }
+            // A film posted in parts, each part a release of its own: the others come with it.
+            // They share a name but for the number.
+            if t.kind == Kind::Movie && grabbed.len() == 1 {
+                let own_title = t.title.to_lowercase().contains("part");
+                if let Some((n, _, key)) = crate::local::part_of_release(&grabbed[0].release.title).filter(|p| !(p.1 && own_title)) {
+                    let mut seen: HashSet<u32> = HashSet::from([n]);
+                    let rest: Vec<&Judged> = judged.iter().filter(|j| j.record.accepted && crate::local::part_of_release(&j.record.release.title).is_some_and(|p| p.2 == key && seen.insert(p.0))).collect();
+                    for j in rest {
+                        match self.grab(&j.record, &tc.title, "another part of the same film", may_queue).await {
+                            Ok(Some(a)) => grabbed.push(a),
+                            Ok(None) => {}
+                            Err(e) => grab_errors.push(format!("Could not start {}: {e}", j.record.release.title)),
+                        }
+                    }
+                }
+            }
             // Remember a title turned away only for space, so the backlog leaves it alone until
             // the disk has more to give.
             if no_room && grabbed.is_empty() {

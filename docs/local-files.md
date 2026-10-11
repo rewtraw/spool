@@ -42,7 +42,7 @@ A release name ends with the group that made it, and groups have all sorts of na
 ## The film itself
 
 - **Versions.** Several films' worth of video in one film folder are one film and versions of it kept beside it: `Film (1999) - 2160p.mkv`, `Film (1999) - Directors Cut.mkv`. The largest is the main file, which an upgrade replaces; the others are left alone.
-- **Parts.** Files that end in `cd1`, `disc 2`, `part-1`, `pt2`, `dvd1`, `disk1`, or the same with a letter from `a` to `d`, are the parts of one film and are replaced together.
+- **Parts.** Files that end in `cd1`, `disc 2`, `part-1`, `pt2`, `dvd1`, `disk1`, or the same with a letter from `a` to `d`, are the parts of one film and are replaced together. A download that holds a film in parts is filed as `Film (1999) - part1.mkv`, `Film (1999) - part2.mkv`, which Plex and Jellyfin read as one film. Spool's own door for players offers them as Part 1 and Part 2 to choose from; it does not join them into one.
 - **Ids in a folder's name.** `{tmdb-603}`, `{imdb-tt0133093}`, `{tvdb-79126}` as Plex writes them, and `[tmdbid-603]`, `[imdbid-tt0133093]`, `[tvdbid-79126]` as Jellyfin and Emby do.
 
 ## Artwork

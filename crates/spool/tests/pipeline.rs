@@ -36,6 +36,28 @@ fn sample_video() -> Option<Vec<u8>> {
     .clone()
 }
 
+/// A small real video that runs for `secs`, made once per length.
+fn video_of(secs: u32) -> Option<Vec<u8>> {
+    static MADE: std::sync::OnceLock<Mutex<HashMap<u32, Option<Vec<u8>>>>> = std::sync::OnceLock::new();
+    let mut made = MADE.get_or_init(Default::default).lock();
+    made.entry(secs)
+        .or_insert_with(|| {
+            let dir = tempfile::tempdir().ok()?;
+            let out = dir.path().join("v.mkv");
+            let rate = if secs > 600 { 1 } else { 5 };
+            let ok = std::process::Command::new("ffmpeg")
+                .args(["-v", "error", "-f", "lavfi", "-i", &format!("testsrc=size=64x48:rate={rate}:duration={secs}"), "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-y"])
+                .arg(&out)
+                .status()
+                .ok()?;
+            if !ok.success() {
+                return None;
+            }
+            std::fs::read(out).ok()
+        })
+        .clone()
+}
+
 #[derive(Default)]
 struct IndexerState {
     /// (release title, size in bytes, nzb)
@@ -1219,6 +1241,118 @@ async fn a_film_becomes_the_series_it_is_listed_as_and_its_download_is_filed_as_
     w.app.search(kept.id, Scope::Movie, false, true).await.unwrap();
     w.wait_state(kept.id, AcqState::Imported).await;
     assert!(w.app.film_to_series(kept.id, Some(88)).await.is_err());
+}
+
+/// Wait until the title has this many files on record.
+async fn wait_files(w: &World, title_id: i64, n: usize) -> Vec<MediaFile> {
+    for _ in 0..150 {
+        let files = w.app.db.files(title_id).unwrap();
+        if files.len() >= n {
+            return files;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    panic!("still {} files, wanted {n}", w.app.db.files(title_id).unwrap().len());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_film_in_parts_is_filed_whole_whether_the_parts_come_together_or_apart() {
+    let (Some(_), Some(half)) = (sample_video(), video_of(28)) else {
+        eprintln!("ffmpeg not available; skipping");
+        return;
+    };
+    let mut w = World::new(Mode::Active).await;
+    let film = |w: &World, title: &str, year: u32, imdb: &str| {
+        let mut t = w.movie(title, year, imdb);
+        t.runtime = 1;
+        w.app.db.save_title(&mut t).unwrap();
+        t
+    };
+    let parts = |files: &[MediaFile]| {
+        let mut names: Vec<String> = files.iter().filter(|f| !f.extra).map(|f| f.rel_path.rsplit(" - ").next().unwrap_or_default().to_string()).collect();
+        names.sort();
+        names
+    };
+
+    // Both halves in one release: taking the larger alone would file half a film as the film.
+    let together = film(&w, "Two Disc Example", 2001, "tt0002001");
+    w.release("Two.Disc.Example.2001.1080p.BluRay.x264-GRP", &[("two.disc.example-cd1.mkv", &half), ("two.disc.example-cd2.mkv", &half)]);
+    let outcome = w.app.search(together.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{} {:?}", outcome.message, outcome.decisions.iter().map(|d| (&d.release.title, &d.rejections)).collect::<Vec<_>>());
+    w.wait_state(together.id, AcqState::Imported).await;
+    assert_eq!(parts(&w.app.db.files(together.id).unwrap()), ["part1.mkv", "part2.mkv"]);
+
+    // Each half a release of its own: the one chosen brings the other with it.
+    let apart = film(&w, "Apart Example", 2002, "tt0002002");
+    for n in 1..=2 {
+        w.release(&format!("Apart.Example.2002.1080p.BluRay.x264.CD{n}-GRP"), &[("ae.mkv", &half)]);
+    }
+    let outcome = w.app.search(apart.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 2, "{}", outcome.message);
+    assert_eq!(parts(&wait_files(&w, apart.id, 2).await), ["part1.mkv", "part2.mkv"]);
+
+    // One half and no other: a question, and after a yes it is kept as the part it is.
+    let lonely = film(&w, "Lonely Example", 2003, "tt0002003");
+    w.release("Lonely.Example.2003.1080p.BluRay.x264.CD1-GRP", &[("le.mkv", &half)]);
+    w.app.search(lonely.id, Scope::Movie, false, true).await.unwrap();
+    let stopped = w.wait_state(lonely.id, AcqState::ImportBlocked).await;
+    assert!(stopped.error.as_deref().unwrap_or_default().contains("is part 1 of the film"), "{:?}", stopped.error);
+    w.app.import(stopped.id, Some(vec![])).await.unwrap();
+    assert_eq!(parts(&wait_files(&w, lonely.id, 1).await), ["part1.mkv"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn files_that_hold_more_or_less_than_their_name_says_are_noticed() {
+    let (Some(short), Some(double), Some(season), Some(hours)) = (sample_video(), video_of(120), video_of(240), video_of(3700)) else {
+        eprintln!("ffmpeg not available; skipping");
+        return;
+    };
+    let mut w = World::new(Mode::Active).await;
+    let minute_long = |w: &World, show: &Title| {
+        for mut e in w.app.db.episodes(show.id).unwrap() {
+            e.runtime = 1;
+            w.app.db.upsert_episode(&e).unwrap();
+        }
+    };
+
+    // A film that runs an hour longer than it should, and more than twice as long.
+    let mut film = w.movie("Long Example", 2004, "tt0002004");
+    film.runtime = 1;
+    w.app.db.save_title(&mut film).unwrap();
+    w.release("Long.Example.2004.1080p.BluRay.x264-GRP", &[("long.mkv", &hours)]);
+    w.app.search(film.id, Scope::Movie, false, true).await.unwrap();
+    let stopped = w.wait_state(film.id, AcqState::ImportBlocked).await;
+    assert!(stopped.error.as_deref().unwrap_or_default().contains("a different film, or several films"), "{:?}", stopped.error);
+
+    // One file named for the first episode that runs as long as the first two together.
+    let (show, eps) = w.series("Double Show", 501, &[(1, 1, "One"), (1, 2, "Two"), (1, 3, "Three")]);
+    minute_long(&w, &show);
+    w.release("Double.Show.S01E01.1080p.WEB.H264-GRP", &[("d.mkv", &double)]);
+    w.app.search(show.id, Scope::Episode(eps[0]), true, true).await.unwrap();
+    w.wait_state(show.id, AcqState::Imported).await;
+    let have: Vec<bool> = w.app.db.episodes(show.id).unwrap().iter().map(|e| e.file_id.is_some()).collect();
+    assert_eq!(have, [true, true, false]);
+    assert!(tree(&w.root.join("TV Shows/Double Show")).iter().any(|f| f.contains("S01E01-02")), "{:?}", tree(&w.root.join("TV Shows/Double Show")));
+
+    // A whole season run together into one file: all its episodes are not counted without a yes.
+    let four = [(1, 1, "One"), (1, 2, "Two"), (1, 3, "Three"), (1, 4, "Four")];
+    let (stitched, _) = w.series("Stitched Show", 502, &four);
+    minute_long(&w, &stitched);
+    w.release("Stitched.Show.S01.1080p.WEB.H264-GRP", &[("all.of.it.mkv", &season)]);
+    w.app.search(stitched.id, Scope::Missing, false, true).await.unwrap();
+    let stopped = w.wait_state(stitched.id, AcqState::ImportBlocked).await;
+    assert!(stopped.error.as_deref().unwrap_or_default().contains("the whole of season 1 in one file"), "{:?}", stopped.error);
+    assert!(w.app.db.episodes(stitched.id).unwrap().iter().all(|e| e.file_id.is_none()));
+    w.app.import(stopped.id, Some(stopped.episode_ids.clone())).await.unwrap();
+    assert!(w.app.db.episodes(stitched.id).unwrap().iter().all(|e| e.file_id.is_some()));
+
+    // The same name on a file far too short to be the season.
+    let (thin, _) = w.series("Thin Show", 503, &four);
+    minute_long(&w, &thin);
+    w.release("Thin.Show.S01.1080p.WEB.H264-GRP", &[("thin.mkv", &short)]);
+    w.app.search(thin.id, Scope::Missing, false, true).await.unwrap();
+    let stopped = w.wait_state(thin.id, AcqState::ImportBlocked).await;
+    assert!(stopped.error.as_deref().unwrap_or_default().contains("probably not all of them"), "{:?}", stopped.error);
 }
 
 async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
