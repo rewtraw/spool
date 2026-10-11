@@ -126,8 +126,19 @@
     </fieldset>
 
     <fieldset class="card">
-      <legend>More locations</legend>
+      <legend>Locations</legend>
       <p class="muted">The library can live in more than one place: another disk, or a share from another machine mounted on this one. Each location has folders of its own. While one cannot be reached its titles are shown as offline and left alone; nothing is searched for or downloaded again because files there cannot be seen.</p>
+      {#if placeOf(0)}
+        {@const main = placeOf(0)}
+        <div class="place">
+          <div class="row wrap">
+            <b>{main.name}</b>
+            <span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>
+          </div>
+          <span class="hint">The folders under Folders above, where downloads also land. Spool changes files here.</span>
+          <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
+        </div>
+      {/if}
       {#each general.locations as l, i (i)}
         {@const p = placeOf(l.id)}
         <div class="place">
@@ -139,8 +150,9 @@
             <label class="field">Movies<input class="input mono" bind:value={l.movie_root} placeholder="/Volumes/Goliath/movies" /></label>
             <label class="field">Series<input class="input mono" bind:value={l.series_root} placeholder="/Volumes/Goliath/tv" /></label>
           </div>
-          <label class="check"><input type="checkbox" bind:checked={l.manage} /> Let Spool change files here</label>
+          <label class="check"><input type="checkbox" bind:checked={l.manage} onchange={() => { if (!l.manage && general.new_titles_location === l.id) general.new_titles_location = 0; }} /> Let Spool change files here</label>
           <span class="hint">Off, Spool lists and plays what is here and changes nothing: no downloads, upgrades, renames, subtitles or deletions. On, it treats this location like the main one.</span>
+          {#if l.id}<label class="check"><input type="radio" bind:group={general.new_titles_location} value={l.id} disabled={!l.manage} /> New titles go here{#if !l.manage}<span class="faint small">&nbsp;(needs "Let Spool change files here")</span>{/if}</label>{/if}
           <div class="row wrap">
             {#if p}
               <span class="small" class:warn={!p.online}>{[p.online ? 'Reachable' : 'Cannot be reached', `${p.titles} ${p.titles === 1 ? 'title' : 'titles'}`, p.bytes ? bytes(p.bytes) : '', p.free != null ? `${bytes(p.free)} free` : ''].filter(Boolean).join(' · ')}</span>
@@ -199,15 +211,7 @@
         </div>
       {/each}
       <div><button class="btn" type="button" onclick={addPlace}>Add a location</button></div>
-      {#if general.locations.some((l: any) => l.manage && l.id)}
-        <label class="field narrow">Put new titles on
-          <select class="input" bind:value={general.new_titles_location}>
-            <option value={0}>{placeOf(0)?.name ?? 'The main library'}</option>
-            {#each general.locations.filter((l: any) => l.manage && l.id) as l}<option value={l.id}>{l.name}</option>{/each}
-          </select>
-          <span class="hint">Titles already in the library stay where they are. When the chosen location cannot be reached, new titles go to the main library.</span>
-        </label>
-      {/if}
+      <p class="hint">Titles already in the library stay where they are. When the place chosen for new titles cannot be reached, they go to the first location above. A title being added can be put somewhere else from its own box.</p>
     </fieldset>
 
     <fieldset class="card">
