@@ -100,7 +100,7 @@ It would also remove the need for the helper's downloads folder to be shared wit
 
 1. **The helper reads its own folders.** Looking through a location and the nightly scan are done on the NAS, and only the findings cross. Written up under [More for the helper to do](#more-for-the-helper-to-do).
 2. **The helper plays its own files.** A player takes a film from the NAS, on a ticket from Spool. Written up under [Playing straight from the helper](#playing-straight-from-the-helper). After this, playing what is on a NAS needs Spool only to sign in and browse.
-3. **Helpers report in.** A helper is given Spool's address and tells it when it starts, what it has finished and when it is going down. Spool stops asking every second, and a second helper becomes a matter of starting it.
+3. **Helpers report in.** A helper is given Spool's address and tells it when it starts, what it has finished and when it is going down. Spool stops asking every second, and a second helper becomes a matter of starting it. [Being found and linked by itself](#helpers-that-are-found-and-linked-by-themselves) belongs with this.
 4. **Work that can go anywhere, goes to whoever is free.** Checking subtitles against the sound and repairing a damaged download need a processor more than a particular disk. With more than one helper, Spool could send such a job to the one with least to do.
 5. **A second Spool that follows the first.** It keeps a copy of the catalogue up to date and takes over when the first stops answering: searching, choosing, serving the web app and players. This is the step that makes a cluster in the strict sense.
 
@@ -114,3 +114,41 @@ It would also remove the need for the helper's downloads folder to be shared wit
 **Why it is waiting.** For one household's library, Spool being down for the length of a restart costs a few seconds of nothing being searched for. The first two steps bring most of what a cluster would, at a fraction of the work: with them, a NAS goes on playing what it holds whatever Spool's machine is doing.
 
 **When to build it.** Steps 1 and 2 when their own entries say. Step 3 when there is a second helper. Step 4 when a second helper sits idle while the first is busy. Step 5 if Spool's machine proves unreliable enough that its being away is noticed, and not before.
+
+## Helpers that are found and linked by themselves
+
+**What it is.** Setting up [a helper](helper.md) today means making a key, giving it to the helper and to Spool, typing the helper's address, and naming one folder as each machine sees it. A helper could instead announce itself on the network, be listed in Spool's settings as found, and be linked with a button and a short code.
+
+**How it would go.**
+
+1. A helper is started on a machine, with the folders it may use.
+2. Under Settings, General, Helpers, a line appears: found on your network, with the machine's name and a **Link** button.
+3. Linking asks for a short code the helper printed when it started. The two agree a key between themselves; nobody copies one.
+4. Spool works out which of its locations lie on the helper's disks, and shows the match to be confirmed.
+
+**The three parts.**
+
+| Part | Today | As it would be |
+| --- | --- | --- |
+| Finding | The helper's address is typed in. | The helper announces itself on the network and Spool listens, as players already find Spool. |
+| Trusting | A key is made by hand and given to both. | A helper that is not yet linked accepts one thing only: a request to link, with the right code. |
+| Matching folders | One folder is named twice, as each machine sees it. | Spool compares what is in its own location folders with what the helper sees in its folders and lines them up, which is the comparison "Check this location" already makes. |
+
+**What it would not change.**
+
+- The folders a helper may touch are still set where the helper runs. That is what keeps it inside them, and it should not be something a button in a web page can widen.
+- The helper's downloads folder still has to be shared with Spool's machine, until [the helper reads its downloads itself](#more-for-the-helper-to-do).
+- Typing an address stays possible, for a helper that cannot be found.
+
+**What stands in the way.**
+
+- A container on its container system's own network neither hears nor is heard by the home network's announcements. The helper would have to share the host's network, as Spool must to be found by players from a container.
+- On a Mac, a program may not speak to the local network until it is allowed to under Privacy & Security, and a Spool run as a service is refused without a word. Finding helpers would fail the same quiet way as reaching one does.
+- Anything on the network can announce itself as a helper. The code is what keeps a stranger's machine from being linked, so linking can never be made a single click.
+- Folders are matched by what is in them. Two empty folders look alike, and so do two copies of one library; those have to be chosen by hand.
+
+**What it would cost.** About a day: the announcement and the listening are small, and most of the work is the linking and the matching, with their tests.
+
+**Why it is waiting.** A helper is set up once. The four things typed today take a few minutes, and the settings page says at once whether they were right.
+
+**When to build it.** With [helpers that report in](#from-one-spool-and-its-helpers-to-a-cluster), since both are a helper making itself known; or when a second helper is added and setting one up is no longer something done once.

@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a><a class="sub" href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a><a class="sub" href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a><a class="sub" href="#helpers-that-are-found-and-linked-by-themselves">Helpers that are found and linked by themselves</a></nav>
       </details>
     </aside>
     <article>
@@ -260,7 +260,7 @@
 <ol>
 <li><strong>The helper reads its own folders.</strong> Looking through a location and the nightly scan are done on the NAS, and only the findings cross. Written up under <a href="#more-for-the-helper-to-do">More for the helper to do</a>.</li>
 <li><strong>The helper plays its own files.</strong> A player takes a film from the NAS, on a ticket from Spool. Written up under <a href="#playing-straight-from-the-helper">Playing straight from the helper</a>. After this, playing what is on a NAS needs Spool only to sign in and browse.</li>
-<li><strong>Helpers report in.</strong> A helper is given Spool&#39;s address and tells it when it starts, what it has finished and when it is going down. Spool stops asking every second, and a second helper becomes a matter of starting it.</li>
+<li><strong>Helpers report in.</strong> A helper is given Spool&#39;s address and tells it when it starts, what it has finished and when it is going down. Spool stops asking every second, and a second helper becomes a matter of starting it. <a href="#helpers-that-are-found-and-linked-by-themselves">Being found and linked by itself</a> belongs with this.</li>
 <li><strong>Work that can go anywhere, goes to whoever is free.</strong> Checking subtitles against the sound and repairing a damaged download need a processor more than a particular disk. With more than one helper, Spool could send such a job to the one with least to do.</li>
 <li><strong>A second Spool that follows the first.</strong> It keeps a copy of the catalogue up to date and takes over when the first stops answering: searching, choosing, serving the web app and players. This is the step that makes a cluster in the strict sense.</li>
 </ol>
@@ -273,6 +273,56 @@
 </ul>
 <p><strong>Why it is waiting.</strong> For one household&#39;s library, Spool being down for the length of a restart costs a few seconds of nothing being searched for. The first two steps bring most of what a cluster would, at a fraction of the work: with them, a NAS goes on playing what it holds whatever Spool&#39;s machine is doing.</p>
 <p><strong>When to build it.</strong> Steps 1 and 2 when their own entries say. Step 3 when there is a second helper. Step 4 when a second helper sits idle while the first is busy. Step 5 if Spool&#39;s machine proves unreliable enough that its being away is noticed, and not before.</p>
+<h2 id="helpers-that-are-found-and-linked-by-themselves"><a href="#helpers-that-are-found-and-linked-by-themselves">Helpers that are found and linked by themselves</a></h2>
+<p><strong>What it is.</strong> Setting up <a href="helper.html">a helper</a> today means making a key, giving it to the helper and to Spool, typing the helper&#39;s address, and naming one folder as each machine sees it. A helper could instead announce itself on the network, be listed in Spool&#39;s settings as found, and be linked with a button and a short code.</p>
+<p><strong>How it would go.</strong></p>
+<ol>
+<li>A helper is started on a machine, with the folders it may use.</li>
+<li>Under Settings, General, Helpers, a line appears: found on your network, with the machine&#39;s name and a <strong>Link</strong> button.</li>
+<li>Linking asks for a short code the helper printed when it started. The two agree a key between themselves; nobody copies one.</li>
+<li>Spool works out which of its locations lie on the helper&#39;s disks, and shows the match to be confirmed.</li>
+</ol>
+<p><strong>The three parts.</strong></p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Part</th>
+<th>Today</th>
+<th>As it would be</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Finding</td>
+<td>The helper&#39;s address is typed in.</td>
+<td>The helper announces itself on the network and Spool listens, as players already find Spool.</td>
+</tr>
+<tr>
+<td>Trusting</td>
+<td>A key is made by hand and given to both.</td>
+<td>A helper that is not yet linked accepts one thing only: a request to link, with the right code.</td>
+</tr>
+<tr>
+<td>Matching folders</td>
+<td>One folder is named twice, as each machine sees it.</td>
+<td>Spool compares what is in its own location folders with what the helper sees in its folders and lines them up, which is the comparison &quot;Check this location&quot; already makes.</td>
+</tr>
+</tbody></table></div>
+<p><strong>What it would not change.</strong></p>
+<ul>
+<li>The folders a helper may touch are still set where the helper runs. That is what keeps it inside them, and it should not be something a button in a web page can widen.</li>
+<li>The helper&#39;s downloads folder still has to be shared with Spool&#39;s machine, until <a href="#more-for-the-helper-to-do">the helper reads its downloads itself</a>.</li>
+<li>Typing an address stays possible, for a helper that cannot be found.</li>
+</ul>
+<p><strong>What stands in the way.</strong></p>
+<ul>
+<li>A container on its container system&#39;s own network neither hears nor is heard by the home network&#39;s announcements. The helper would have to share the host&#39;s network, as Spool must to be found by players from a container.</li>
+<li>On a Mac, a program may not speak to the local network until it is allowed to under Privacy &amp; Security, and a Spool run as a service is refused without a word. Finding helpers would fail the same quiet way as reaching one does.</li>
+<li>Anything on the network can announce itself as a helper. The code is what keeps a stranger&#39;s machine from being linked, so linking can never be made a single click.</li>
+<li>Folders are matched by what is in them. Two empty folders look alike, and so do two copies of one library; those have to be chosen by hand.</li>
+</ul>
+<p><strong>What it would cost.</strong> About a day: the announcement and the listening are small, and most of the work is the linking and the matching, with their tests.</p>
+<p><strong>Why it is waiting.</strong> A helper is set up once. The four things typed today take a few minutes, and the settings page says at once whether they were right.</p>
+<p><strong>When to build it.</strong> With <a href="#from-one-spool-and-its-helpers-to-a-cluster">helpers that report in</a>, since both are a helper making itself known; or when a second helper is added and setting one up is no longer something done once.</p>
 <nav class="around" aria-label="Other guides"><a class="prev" href="architecture.html"><span>Before</span>How Spool is put together</a><span></span></nav>
     </article>
   </div>
