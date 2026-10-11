@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a></nav>
       </details>
     </aside>
     <article>
@@ -171,13 +171,35 @@
 <tr>
 <td>Playing</td>
 <td>NAS to Spool&#39;s machine to the player</td>
-<td>From the NAS to the player directly</td>
+<td>From the NAS to the player directly; see <a href="#playing-straight-from-the-helper">below</a></td>
 </tr>
 </tbody></table></div>
 <p>It would also remove the need for the helper&#39;s downloads folder to be shared with Spool&#39;s machine, since Spool would no longer read a download before filing it.</p>
 <p><strong>What it would cost.</strong> Each is a part of Spool that reads files directly today and would have to ask the helper instead: the import plan, the library scan and the subtitle check. Playing from the NAS means the helper serving files to players, which gives it a door to the outside that it does not have now.</p>
 <p><strong>Why it is waiting.</strong> The jobs that move whole films across the network are the ones that were slow, and those are done. These read a little of each file.</p>
 <p><strong>When to build it.</strong> A nightly scan of a large share proves slow in practice, or sharing the downloads folder is in the way.</p>
+<h2 id="playing-straight-from-the-helper"><a href="#playing-straight-from-the-helper">Playing straight from the helper</a></h2>
+<p><strong>What it is.</strong> A film kept on a NAS is played today by way of Spool&#39;s machine: the NAS sends it to Spool across the share, and Spool sends it on to the player. With <a href="helper.html">a helper</a> on the NAS, the player could fetch the film from the NAS itself, while still knowing only one server.</p>
+<p><strong>How it would work.</strong></p>
+<ol>
+<li>The player signs in to Spool and browses the library there, as now. Spool is the only server it is ever told of.</li>
+<li>Asked to play a file that lies on a helper&#39;s disks, Spool answers with a redirect to the helper, carrying a ticket for that one file.</li>
+<li>The player follows the redirect and takes the film from the NAS. What was watched, and where it stopped, are still reported to Spool.</li>
+</ol>
+<p><strong>Why the player still sees one server.</strong> The helper would not answer the question players ask of a network to find servers, and would have no sign-in, no library and nothing to browse. It would serve a file to whoever holds a ticket from Spool, and nothing else. No name in DNS is needed for it: the redirect carries its address.</p>
+<p><strong>The ticket.</strong> It names one file, runs out after a few hours, and is signed with the key Spool and the helper already share, so the helper cannot be used as an open door to the files.</p>
+<p><strong>What is not known.</strong></p>
+<ul>
+<li>Whether Infuse follows a redirect on the address it streams from, and keeps following it when seeking. Most players do. If it does not, the protocol has a second way to say that a file is at another address (a media source marked as remote, with its own address), to try next.</li>
+<li>How the player is told from the helper&#39;s side that a file has subtitles beside it. Spool hands those out itself today, and could go on doing so.</li>
+</ul>
+<p><strong>What it would cost.</strong></p>
+<ul>
+<li>The helper takes requests from players, where today it takes them only from Spool. It would stay on the home network and answer only to a ticket, but it is a door it does not have now.</li>
+<li>A player away from home cannot reach a NAS that is only on the home network. Spool would redirect a player on the same network as the helper and go on relaying for any other, which means knowing which is which from the address the request came from.</li>
+</ul>
+<p><strong>Why it is waiting.</strong> On a gigabit network, relaying a film through Spool&#39;s machine costs next to nothing: a film plays at a small fraction of the line&#39;s speed.</p>
+<p><strong>When to build it.</strong> Spool&#39;s machine becomes the limit on playing, for instance with several films at once of the largest kind; or the NAS is given a faster line than Spool&#39;s machine has; or playing what is on the NAS should carry on while Spool&#39;s machine is busy.</p>
 <nav class="around" aria-label="Other guides"><a class="prev" href="architecture.html"><span>Before</span>How Spool is put together</a><span></span></nav>
     </article>
   </div>
