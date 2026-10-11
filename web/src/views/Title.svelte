@@ -394,7 +394,7 @@
                 <span class="chip {have >= airedCount && airedCount > 0 ? 'ok' : have < airedCount && seasonOf(n) ? 'warn' : ''}">{have} / {airedCount}{airedCount < eps.length ? ` of ${eps.length}` : ''}</span>
               </button>
               <label class="check small"><input type="checkbox" checked={seasonOf(n)} onchange={(e) => toggleSeason(n, e.currentTarget.checked)} /> Monitored</label>
-              {#if n > 0 && !locked}<button class="btn small" disabled={!!searching} onclick={() => search({ season: n }, true, `s${n}`)}>{searching === `s${n}` ? 'Searching…' : 'Search season'}</button>{/if}
+              {#if n > 0 && !locked}<button class="btn small" disabled={!!searching} onclick={() => search({ season: n }, true, `s${n}`)}>{searching === `s${n}` ? 'Searching…' : 'Search season'}</button>{:else if n > 0 && locked}<span class="faint small" title={locked}>No searching: {t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `${t.location} is only read`}</span>{/if}
             </div>
             {#if openSeasons[n]}
               <div class="eps">
@@ -410,7 +410,9 @@
                     {#if f}<span class="chip ok">{qualityName(f.quality, 'series')}</span>{/if}
                     {#if coming.get(e.id)}<span class="chip accent">{coming.get(e.id)}</span>
                     {:else if !f && !aired(e)}<span class="chip">Not aired</span>
-                    {:else if !f && e.monitored}<span class="chip warn">Missing</span>{/if}
+                    {:else if !f && e.monitored}<span class="chip warn">Missing</span>
+                    {:else if !f}<span class="chip">Not here</span>{/if}
+                    {#if !f && aired(e) && locked}<span class="faint small" title={locked}>{t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `no searching on ${t.location}`}</span>{/if}
                     {#if aired(e) && !locked}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
                     {#if f}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}
