@@ -170,7 +170,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 18px 14px;
-    margin-top: 18px;
+    margin-top: 24px;
   }
   .slot {
     display: grid;
@@ -181,6 +181,7 @@
   .tools {
     gap: 8px;
     align-items: center;
+    margin-top: 14px;
   }
   .seg {
     display: inline-flex;
