@@ -129,6 +129,8 @@ export interface Title {
   poster?: string | null;
   /** The location the title is kept on, when there is more than one. */
   location?: string | null;
+  /** The other locations that hold a copy of it. */
+  also_on?: string[];
   /** Its location cannot be reached right now. */
   offline?: boolean;
   /** Its location is one Spool only reads. */

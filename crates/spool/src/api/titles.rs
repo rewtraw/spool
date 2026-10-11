@@ -20,6 +20,11 @@ pub(super) fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashM
     // Where it is kept matters only once there is more than one place.
     if places.0.len() > 1 {
         v["location"] = json!(places.of(&t.path).map(|p| p.0.name.clone()));
+        // And the other places that hold a copy of it.
+        let mut also: Vec<String> = t.also.iter().filter_map(|f| places.of(f)).map(|p| p.0.name.clone()).collect();
+        also.sort();
+        also.dedup();
+        v["also_on"] = json!(also);
     }
     // What the folder holds beside the film, in brief; the title's own page has it in full.
     v["trailers"] = json!(t.local.trailers().count());

@@ -12,11 +12,15 @@
   let layout = $state<'grid' | 'table'>(saved.layout ?? 'grid');
   /** Show each collection as one tile in place of its titles. */
   let grouped = $state<boolean>(saved.grouped ?? false);
+  /** Only what is kept on this location, as its home or as a copy; empty for everywhere. */
+  let place = $state<string>(saved.place ?? '');
+  const placeNames = $derived([...new Set(app.titles.flatMap((t) => [t.location, ...(t.also_on ?? [])]).filter(Boolean) as string[])].sort());
+  const onPlace = (t: Title, name: string) => t.location === name || (t.also_on ?? []).includes(name);
   let query = $state('');
   let limit = $state(120);
 
   $effect(() => {
-    localStorage.setItem('spool.library', JSON.stringify({ kind, show, sort, layout, grouped }));
+    localStorage.setItem('spool.library', JSON.stringify({ kind, show, sort, layout, grouped, place }));
   });
 
   function have(t: Title) {
@@ -42,6 +46,7 @@
     const q = query.trim().toLowerCase();
     let list = app.titles.filter((t) => {
       if (kind !== 'all' && t.kind !== kind) return false;
+      if (place && placeNames.includes(place) && !onPlace(t, place)) return false;
       if (show === 'have' && !(t.kind === 'movie' ? t.file_count > 0 : t.episodes_have > 0)) return false;
       if (show === 'missing' && (have(t) || !t.monitored || !t.available)) return false;
       if (show === 'monitored' && !t.monitored) return false;
@@ -85,7 +90,7 @@
 
   $effect(() => {
     // Reset paging when the filter changes.
-    kind; show; sort; query;
+    kind; show; sort; query; place;
     limit = 120;
   });
 
@@ -169,10 +174,12 @@
     bulkProfile = '';
   }
 
+  // The counts follow the location chosen, so they say what the tabs will show.
+  const inPlace = $derived(place && placeNames.includes(place) ? app.titles.filter((t) => onPlace(t, place)) : app.titles);
   const counts = $derived({
-    all: app.titles.length,
-    movie: app.titles.filter((t) => t.kind === 'movie').length,
-    series: app.titles.filter((t) => t.kind === 'series').length,
+    all: inPlace.length,
+    movie: inPlace.filter((t) => t.kind === 'movie').length,
+    series: inPlace.filter((t) => t.kind === 'series').length,
   });
 </script>
 
@@ -198,6 +205,12 @@
     <option value="monitored">Monitored</option>
     <option value="unmonitored">Not monitored</option>
   </select>
+  {#if placeNames.length > 1}
+    <select class="input narrow" bind:value={place} aria-label="Location">
+      <option value="">Every location</option>
+      {#each placeNames as name}<option value={name}>{name}</option>{/each}
+    </select>
+  {/if}
   <select class="input narrow" bind:value={sort} aria-label="Sort by">
     <option value="title">Title</option>
     <option value="added">Recently added</option>
@@ -232,7 +245,7 @@
 {:else}
   <div class="card scroll-x">
     <table class="table">
-      <thead><tr>{#if selecting}<th style="width:1%"><input class="tick" type="checkbox" aria-label="Select all" checked={filtered.length > 0 && filtered.every((t) => picked[t.id])} onchange={pickAll} /></th>{/if}<th>Title</th><th>Year</th><th>Type</th><th>Status</th><th>Profile</th><th>Size</th></tr></thead>
+      <thead><tr>{#if selecting}<th style="width:1%"><input class="tick" type="checkbox" aria-label="Select all" checked={filtered.length > 0 && filtered.every((t) => picked[t.id])} onchange={pickAll} /></th>{/if}<th>Title</th><th>Year</th><th>Type</th><th>Status</th>{#if placeNames.length > 1}<th>Location</th>{/if}<th>Profile</th><th>Size</th></tr></thead>
       <tbody>
         {#each shown as e (e.c ? `c${e.c.id}` : e.t.id)}
           {#if e.c}
@@ -241,6 +254,7 @@
             <td class="muted">{Math.min(...e.inside.map((t) => t.year).filter(Boolean)) || ''}</td>
             <td class="muted">Collection</td>
             <td><span class="chip">{e.inside.length} titles</span></td>
+            {#if placeNames.length > 1}<td></td>{/if}
             <td></td>
             <td class="muted" style="white-space:nowrap">{bytes(e.inside.reduce((n, t) => n + t.size, 0))}</td>
           </tr>
@@ -253,6 +267,7 @@
             <td class="muted">{t.year || ''}</td>
             <td class="muted">{t.kind === 'movie' ? 'Movie' : 'Series'}</td>
             <td><span class="chip {s.tone}">{s.label}</span>{#if !t.monitored}<span class="faint small"> not monitored</span>{/if}</td>
+            {#if placeNames.length > 1}<td class="muted">{t.location ?? ''}{#if t.also_on?.length}<span class="faint small"> +{t.also_on.join(', ')}</span>{/if}</td>{/if}
             <td class="muted">{t.profile ?? ''}</td>
             <td class="muted" style="white-space:nowrap">{t.size ? bytes(t.size) : ''}</td>
           </tr>
