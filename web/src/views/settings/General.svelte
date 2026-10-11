@@ -281,7 +281,7 @@
           <label class="field">Key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with.</span></label>
           <div class="cols">
             <label class="field">The other machine's disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="/Volumes/nas" /></label>
-            <label class="field">The same folder, as the helper sees it<input class="input mono" bind:value={h.there} placeholder="/mnt" /></label>
+            <label class="field">The same folder, as the helper sees it<input class="input mono" bind:value={h.there} placeholder="/nas" /></label>
           </div>
           <span class="hint">Every location whose folders lie under the first is served by this helper. A path is turned from one machine's to the other's by swapping these two at its start, so they must name the same folder.</span>
           <div class="row wrap">

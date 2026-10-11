@@ -37,6 +37,9 @@ COPY --from=build /src/target/release/spool /usr/local/bin/spool
 # Everything Spool keeps (database, backups, saved NZBs, artwork, log) lives in /data.
 # HOME points there too so the container runs as any user without extra setup.
 ENV SPOOL_DATA_DIR=/data HOME=/data SPOOL_BIND=0.0.0.0:7979
+# Writable by whichever user the container is run as, so a named volume works without anyone
+# having to make a folder and hand it over first. What Spool keeps there it keeps to itself.
+RUN mkdir -p /data && chmod 1777 /data
 VOLUME /data
 EXPOSE 7979
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/7979' || exit 1

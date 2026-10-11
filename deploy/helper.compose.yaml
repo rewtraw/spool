@@ -3,9 +3,11 @@
 # docs/helper.md. This is the definition to give TrueNAS SCALE as a custom app, or to
 # `docker compose -f deploy/helper.compose.yaml up -d` anywhere else.
 #
-# The folders are mounted at the same paths inside as outside, so the path the helper
-# reports is the path on the NAS, and "the same folder, as the helper sees it" in Spool's
-# settings is simply where the NAS keeps it.
+# Spool turns a path on its own machine into a path here by swapping the start of it, so the
+# folders are mounted in the container under the same names Spool's machine sees them by.
+# If Spool's machine mounts the NAS's shares as /Volumes/nas/movies, /Volumes/nas/tv and
+# /Volumes/nas/downloads, mount them here as /nas/movies, /nas/tv and /nas/downloads, and in
+# Spool's settings give the helper /Volumes/nas and /nas as the two folders.
 services:
   spool-helper:
     image: ghcr.io/rewtraw/spool:latest
@@ -20,17 +22,19 @@ services:
       # At least 16 characters; Spool is given the same one. `openssl rand -hex 24` makes one.
       SPOOL_HELPER_KEY: "change-me-to-a-long-random-key"
       # Folders it may file into and move titles within, separated by colons.
-      SPOOL_HELPER_ROOTS: "/mnt/tank/movies:/mnt/tank/tv"
+      SPOOL_HELPER_ROOTS: "/nas/movies:/nas/tv"
       # Folders it may read and copy from, and never changes. Mounted read-only below as well.
       SPOOL_HELPER_READ_ROOTS: ""
       # Where it downloads to: a folder of its own. On the same dataset as the library, a
       # finished download is filed by renaming it; on another, by a copy within the NAS.
-      SPOOL_HELPER_DOWNLOADS: "/mnt/tank/downloads/spool"
+      SPOOL_HELPER_DOWNLOADS: "/nas/downloads/spool"
     volumes:
-      # Its own small state: the Usenet servers Spool gives it. Owned by the user above.
-      - /mnt/tank/apps/spool-helper:/data
-      - /mnt/tank/movies:/mnt/tank/movies
-      - /mnt/tank/tv:/mnt/tank/tv
-      - /mnt/tank/downloads:/mnt/tank/downloads
+      # Its own small state: the Usenet servers Spool gives it.
+      - spool-helper-data:/data
+      - /mnt/tank/movies:/nas/movies
+      - /mnt/tank/tv:/nas/tv
+      - /mnt/tank/downloads:/nas/downloads
       # A folder it only reads is mounted so that it cannot be written, whatever is asked:
-      # - /mnt/archive/movies:/mnt/archive/movies:ro
+      # - /mnt/archive/movies:/nas/archive-movies:ro
+volumes:
+  spool-helper-data:

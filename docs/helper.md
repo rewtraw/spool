@@ -53,24 +53,26 @@ services:
     ports: ["7978:7979"]
     environment:
       SPOOL_HELPER_KEY: "a long random key"
-      SPOOL_HELPER_ROOTS: "/mnt/tank/movies:/mnt/tank/tv"
-      SPOOL_HELPER_READ_ROOTS: "/mnt/archive/movies"
-      SPOOL_HELPER_DOWNLOADS: "/mnt/tank/downloads/spool"
+      SPOOL_HELPER_ROOTS: "/nas/movies:/nas/tv"
+      SPOOL_HELPER_READ_ROOTS: "/nas/archive-movies"
+      SPOOL_HELPER_DOWNLOADS: "/nas/downloads/spool"
     volumes:
-      - /mnt/tank/apps/spool-helper:/data
-      - /mnt/tank/movies:/mnt/tank/movies
-      - /mnt/tank/tv:/mnt/tank/tv
-      - /mnt/tank/downloads:/mnt/tank/downloads
-      - /mnt/archive/movies:/mnt/archive/movies:ro
+      - spool-helper-data:/data
+      - /mnt/tank/movies:/nas/movies
+      - /mnt/tank/tv:/nas/tv
+      - /mnt/tank/downloads:/nas/downloads
+      - /mnt/archive/movies:/nas/archive-movies:ro
+volumes:
+  spool-helper-data:
 ```
 
-Mount each folder at the same path inside the container as outside. The paths the helper reports are then the paths on the NAS, which keeps the next step simple.
+**Name the folders in the container as Spool's machine names them.** Spool turns a path on its own machine into a path on the helper by swapping the start of it, and everything after the start has to match. If Spool's machine mounts the NAS's shares as `/Volumes/nas/movies`, `/Volumes/nas/tv` and `/Volumes/nas/archive-movies`, mount them in the container as `/nas/movies`, `/nas/tv` and `/nas/archive-movies`, wherever the NAS itself keeps them.
 
 Put the downloads folder on the same dataset as the library if you can: a finished download is then filed by renaming it. On another dataset it is copied, inside the NAS.
 
 ### 2. Let Spool's machine see the downloads folder
 
-Spool reads what was downloaded before it files it: which file is the film, how long it runs, what is in it. So the helper's downloads folder has to be shared and mounted on Spool's machine, beside the library folders. Reading is enough; the share can be read-only.
+Spool reads what was downloaded before it files it: which file is the film, how long it runs, what is in it. So the helper's downloads folder has to be shared and mounted on Spool's machine, beside the library folders and under the name it has in the container (`/Volumes/nas/downloads` for the example above). Reading is enough; the share can be read-only.
 
 ### 3. Tell Spool about the helper
 
@@ -82,9 +84,9 @@ Under Settings, General, Helpers, choose **Add a helper**:
 | Address | Where it answers, such as `http://nas:7978`. |
 | Key | The key it was started with. |
 | The other machine's disks, as this machine sees them | The folder the shares are mounted under here, such as `/Volumes/nas`. |
-| The same folder, as the helper sees it | Where the NAS keeps them, such as `/mnt`. |
+| The same folder, as the helper sees it | The folder they are mounted under in the container, such as `/nas`. |
 
-The two folders must name the same place. A path is turned from one machine's to the other's by swapping them at its start: with the example above, `/Volumes/nas/tank/movies/Heat (1995)` here is `/mnt/tank/movies/Heat (1995)` to the helper.
+The two folders must name the same place. A path is turned from one machine's to the other's by swapping them at its start: with the example above, `/Volumes/nas/movies/Heat (1995)` here is `/nas/movies/Heat (1995)` to the helper.
 
 There is nothing to set on a location. Every location whose folders lie under the first folder is served by the helper, and the settings page says which those are.
 
