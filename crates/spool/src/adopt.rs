@@ -11,7 +11,6 @@ use crate::db::now;
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
-use spool_core::parser::is_video_file;
 use std::path::{Path, PathBuf};
 
 /// One thing a folder could be.
@@ -161,8 +160,18 @@ fn as_match(t: &Title) -> Match {
     Match { tmdb_id: t.tmdb_id, tvmaze_id: t.tvmaze_id, tvdb_id: t.tvdb_id, title: t.title.clone(), year: t.year, poster: t.poster.clone() }
 }
 
-/// The folders directly inside a library folder that hold video, with how much.
-fn folders(root: &str) -> Vec<(PathBuf, usize, u64)> {
+/// A folder on a location, before anything has been asked about it.
+struct Folder {
+    path: PathBuf,
+    files: usize,
+    bytes: u64,
+    /// What a media server's notes in the folder say it is.
+    notes: crate::local::Notes,
+}
+
+/// The folders directly inside a library folder that hold a film or episodes, with how much.
+/// Trailers and other extras do not count: a folder with only those holds nothing to add.
+fn folders(root: &str, kind: Kind) -> Vec<Folder> {
     let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
     let mut out = vec![];
     for e in rd.flatten() {
@@ -170,14 +179,13 @@ fn folders(root: &str) -> Vec<(PathBuf, usize, u64)> {
         if !path.is_dir() || e.file_name().to_string_lossy().starts_with('.') {
             continue;
         }
-        let mut files = vec![];
-        crate::catalog::collect(&path, &mut files);
-        let videos: Vec<&PathBuf> = files.iter().filter(|f| is_video_file(&f.to_string_lossy()) && !f.to_string_lossy().contains("/.spool-recycle/")).collect();
+        let (videos, local) = crate::local::survey(&path, kind);
         if !videos.is_empty() {
-            out.push((path.clone(), videos.len(), videos.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum()));
+            let bytes = videos.iter().filter_map(|f| std::fs::metadata(path.join(f)).ok()).map(|m| m.len()).sum();
+            out.push(Folder { path: path.clone(), files: videos.len(), bytes, notes: local.notes });
         }
     }
-    out.sort();
+    out.sort_by(|a, b| a.path.cmp(&b.path));
     out
 }
 
@@ -201,9 +209,17 @@ impl App {
     }
 
     /// Work out what one folder is.
-    async fn recognise(&self, kind: Kind, folder: &Path, files: usize, bytes: u64, here: &[Title]) -> Found {
+    async fn recognise(&self, kind: Kind, f: &Folder, here: &[Title]) -> Found {
+        let (folder, files, bytes) = (f.path.as_path(), f.files, f.bytes);
         let folder_name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let named = read_name(&folder_name);
+        let mut named = read_name(&folder_name);
+        // What Plex, Jellyfin or Kodi wrote down about the folder says more than its name does.
+        named.tmdb_id = named.tmdb_id.or(f.notes.tmdb_id);
+        named.tvdb_id = named.tvdb_id.or(f.notes.tvdb_id);
+        named.imdb_id = named.imdb_id.take().or(f.notes.imdb_id.clone());
+        if named.year == 0 {
+            named.year = f.notes.year;
+        }
         let mut found = Found { folder: folder.to_string_lossy().to_string(), kind, name: named.name.clone(), year: named.year, files, bytes, state: "unknown".into(), note: String::new(), matches: vec![] };
         if let Some(t) = here.iter().find(|t| Path::new(&t.path) == folder) {
             found.state = "have".into();
@@ -213,7 +229,10 @@ impl App {
         }
         let key = self.settings.general().tmdb_api_key;
         // An id in the folder's name settles it; otherwise the name is searched for.
-        let by_id = named.tmdb_id.is_some() || named.tvdb_id.is_some() || named.imdb_id.is_some();
+        let by_id = match kind {
+            Kind::Movie => named.tmdb_id.is_some() || named.imdb_id.is_some(),
+            Kind::Series => named.tvdb_id.is_some(),
+        };
         let looked: Result<Vec<Title>> = match kind {
             Kind::Movie => match (&named.tmdb_id, &named.imdb_id) {
                 (Some(id), _) => self.meta.search_movies(&key, &format!("tmdb:{id}")).await,
@@ -268,11 +287,11 @@ impl App {
         }
         *self.adoption.lock() = Some(Adoption { location: location_id, running: true, step: "looking".into(), ..Default::default() });
         let roots = [(Kind::Movie, loc.movie_root.clone()), (Kind::Series, loc.series_root.clone())];
-        let listed = tokio::task::spawn_blocking(move || roots.into_iter().filter(|(_, r)| !r.is_empty()).flat_map(|(k, r)| folders(&r).into_iter().map(move |f| (k, f))).collect::<Vec<_>>()).await.unwrap_or_default();
+        let listed = tokio::task::spawn_blocking(move || roots.into_iter().filter(|(_, r)| !r.is_empty()).flat_map(|(k, r)| folders(&r, k).into_iter().map(move |f| (k, f))).collect::<Vec<_>>()).await.unwrap_or_default();
         self.adoption_set(|a| a.total = listed.len());
         let here = self.db.titles(None).unwrap_or_default();
-        for (kind, (folder, files, bytes)) in listed {
-            let found = self.recognise(kind, &folder, files, bytes, &here).await;
+        for (kind, folder) in listed {
+            let found = self.recognise(kind, &folder, &here).await;
             self.adoption_set(|a| {
                 a.done += 1;
                 a.found.push(found);
@@ -292,7 +311,7 @@ impl App {
     }
 
     /// Record one folder as a title where it lies.
-    async fn adopt_one(&self, kind: Kind, folder: &str, m: &Match, monitor: bool) -> Result<Title> {
+    async fn adopt_one(&self, kind: Kind, folder: &str, m: &Match, monitor: bool) -> Result<(Title, String)> {
         let g = self.settings.general();
         let (mut title, episodes) = match kind {
             Kind::Movie => (self.meta.movie(&g.tmdb_api_key, m.tmdb_id.ok_or_else(|| anyhow!("no TMDB id"))?).await?, vec![]),
@@ -318,8 +337,17 @@ impl App {
         }
         let mut report = crate::catalog::ScanReport::default();
         self.scan_title(title.id, &mut report).await?;
-        self.db.add_history(Some(title.id), "adopted", serde_json::json!({"path": folder, "files": report.files_added}))?;
-        Ok(title)
+        // A film that runs much longer or shorter than the one it was taken for may be another
+        // film: a cue to look, since nothing else about a folder says its name is wrong.
+        let mut doubt = String::new();
+        if kind == Kind::Movie && title.runtime > 0 {
+            let ran = self.db.files(title.id)?.iter().filter(|f| !f.extra).filter_map(|f| f.media_info.as_ref()).map(|i| i.runtime_secs / 60.0).fold(0.0, f64::max);
+            if ran > 1.0 && (ran - title.runtime as f64).abs() > (title.runtime as f64 * 0.25).max(12.0) {
+                doubt = format!("the file runs {ran:.0} minutes and {} runs {}: check it is the right film", title.title, title.runtime);
+            }
+        }
+        self.db.add_history(Some(title.id), "adopted", serde_json::json!({"path": folder, "files": report.files_added, "doubt": doubt}))?;
+        Ok((title, doubt))
     }
 
     /// Add what the last look was sure of, and whatever `picks` settles. Runs to completion.
@@ -350,9 +378,9 @@ impl App {
             self.adoption_set(|a| {
                 a.done += 1;
                 match &result {
-                    Ok(t) => {
+                    Ok((t, doubt)) => {
                         a.found[i].state = "added".into();
-                        a.found[i].note = String::new();
+                        a.found[i].note = doubt.clone();
                         a.found[i].matches = vec![as_match(t)];
                     }
                     Err(e) => {
@@ -361,7 +389,7 @@ impl App {
                     }
                 }
             });
-            if let Ok(t) = result {
+            if let Ok((t, _)) = result {
                 added += 1;
                 self.emit(Event::Title { id: t.id });
             }

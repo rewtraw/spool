@@ -105,6 +105,7 @@ impl Metadata {
                 fanart: opt(c, "backdrop_path").map(|p| format!("{TMDB_IMG}/w1280{p}")),
             }),
             details_at: 0,
+            local: Default::default(),
         };
         let original = s(m, "original_title");
         if !original.is_empty() && original != t.title {
@@ -236,6 +237,7 @@ impl Metadata {
             people: series_people(show),
             collection: None,
             details_at: 0,
+            local: Default::default(),
         }
     }
 

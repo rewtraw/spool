@@ -84,7 +84,7 @@ async fn send_file(path: &Path, headers: &HeaderMap, head: bool) -> Response {
 /// The video itself: a film, an episode, or one named version of a film.
 pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool) -> Response {
     let Some(id) = Id::parse(id) else { return StatusCode::NOT_FOUND.into_response() };
-    let path: Option<PathBuf> = Library::shared(app).ok().and_then(|lib| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| Path::new(&t.path).join(&f.rel_path)));
+    let path: Option<PathBuf> = Library::shared(app).ok().and_then(|lib| lib.extra_path(id).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| Path::new(&t.path).join(&f.rel_path))));
     match path {
         Some(p) => send_file(&p, headers, head).await,
         None => StatusCode::NOT_FOUND.into_response(),

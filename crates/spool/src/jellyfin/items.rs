@@ -444,8 +444,10 @@ impl Library {
                 put!("Type", json!(if movie { "Movie" } else { "Series" }));
                 put!("IsFolder", json!(!movie));
                 put!("ParentId", json!(if movie { Id::Movies } else { Id::Shows }.to_string()));
-                put!("ImageTags", tag_of(&t.poster).map(|p| json!({"Primary": p})).unwrap_or(json!({})));
-                put!("BackdropImageTags", json!(tag_of(&t.fanart).into_iter().collect::<Vec<_>>()));
+                put!("ImageTags", tag_of(&t.poster_source()).map(|p| json!({"Primary": p})).unwrap_or(json!({})));
+                put!("BackdropImageTags", json!(tag_of(&t.fanart_source()).into_iter().collect::<Vec<_>>()));
+                put!("LocalTrailerCount", json!(t.local.trailers().count()));
+                put!("SpecialFeatureCount", json!(t.local.features().count()));
                 put!("PrimaryImageAspectRatio", json!(0.6667));
                 put!("CanDownload", json!(movie));
                 if let Some(c) = &t.certification {
@@ -517,7 +519,7 @@ impl Library {
                 put!("SeriesId", json!(Id::Series(t.id).to_string()));
                 put!("SeriesName", json!(t.title));
                 put!("ChildCount", json!(self.episodes_of(t.id).iter().filter(|e| e.season == *s).count()));
-                put!("ImageTags", tag_of(&t.poster).map(|p| json!({"Primary": p})).unwrap_or(json!({})));
+                put!("ImageTags", tag_of(&self.season_poster(t, *s).or_else(|| t.poster_source())).map(|p| json!({"Primary": p})).unwrap_or(json!({})));
                 put!("BackdropImageTags", json!([]));
                 put!("PrimaryImageAspectRatio", json!(0.6667));
                 put!("MediaType", json!("Unknown"));
@@ -535,7 +537,7 @@ impl Library {
                 put!("SeriesId", json!(Id::Series(t.id).to_string()));
                 put!("SeriesName", json!(t.title));
                 // An episode with no frame of its own borrows the show's wide image.
-                put!("ImageTags", tag_of(&e.still).or_else(|| tag_of(&t.fanart)).map(|p| json!({"Primary": p})).unwrap_or(json!({})));
+                put!("ImageTags", tag_of(&self.episode_still(t, e)).or_else(|| tag_of(&t.fanart_source())).map(|p| json!({"Primary": p})).unwrap_or(json!({})));
                 put!("BackdropImageTags", json!([]));
                 put!("PrimaryImageAspectRatio", json!(1.7778));
                 put!("MediaType", json!("Video"));
@@ -571,10 +573,10 @@ impl Library {
     }
 
     fn put_series_art(&self, o: &mut Map<String, Value>, t: &Title) {
-        if let Some(p) = tag_of(&t.poster) {
+        if let Some(p) = tag_of(&t.poster_source()) {
             o.insert("SeriesPrimaryImageTag".into(), json!(p));
         }
-        if let Some(b) = tag_of(&t.fanart) {
+        if let Some(b) = tag_of(&t.fanart_source()) {
             o.insert("ParentBackdropItemId".into(), json!(Id::Series(t.id).to_string()));
             o.insert("ParentBackdropImageTags".into(), json!([b]));
         }
@@ -964,22 +966,98 @@ impl Library {
     }
 
     /// Where an image for an item comes from, a name to keep it under, and how wide to keep it.
+    // ------------------------------------------------------------ extras
+
+    /// A trailer or another extra by its id, with the title it belongs to.
+    pub fn extra(&self, id: Id) -> Option<(&Title, &crate::local::Extra)> {
+        match id {
+            Id::Extra(title, n) => self.title(title).and_then(|t| t.local.extras.get(n as usize).map(|e| (t, e))),
+            _ => None,
+        }
+    }
+
+    pub fn extra_path(&self, id: Id) -> Option<std::path::PathBuf> {
+        self.extra(id).map(|(t, e)| std::path::Path::new(&t.path).join(&e.rel_path))
+    }
+
+    /// An extra as a player lists and plays it. Its file is sent as it is, like any other.
+    pub fn extra_json(&self, id: Id) -> Option<Value> {
+        let (t, e) = self.extra(id)?;
+        let trailer = e.kind == crate::local::ExtraKind::Trailer;
+        let path = format!("{}/{}", t.path, e.rel_path);
+        let container = e.rel_path.rsplit_once('.').map(|(_, x)| x.to_lowercase()).unwrap_or_default();
+        let owner = match t.kind {
+            Kind::Movie => Id::Movie(t.id),
+            Kind::Series => Id::Series(t.id),
+        };
+        let name = if e.name.is_empty() { "Trailer".to_string() } else { e.name.clone() };
+        let source = json!({
+            "Protocol": "File", "Id": id.to_string(), "Path": path, "Type": "Default", "Container": container, "Size": e.size, "Name": name, "IsRemote": false,
+            "ETag": format!("{:x}{:x}", t.id, e.size), "ReadAtNativeFramerate": false, "IgnoreDts": false, "IgnoreIndex": false, "GenPtsInput": false,
+            "SupportsTranscoding": false, "SupportsDirectStream": true, "SupportsDirectPlay": true, "IsInfiniteStream": false,
+            "RequiresOpening": false, "RequiresClosing": false, "RequiresLooping": false, "SupportsProbing": true, "HasSegments": false,
+            "VideoType": "VideoFile", "MediaStreams": [], "MediaAttachments": [], "Formats": [], "RequiredHttpHeaders": {},
+        });
+        Some(json!({
+            "Name": name, "SortName": name.to_lowercase(), "ServerId": self.server_id, "Id": id.to_string(), "Type": if trailer { "Trailer" } else { "Video" },
+            "ExtraType": e.kind.jellyfin(), "MediaType": "Video", "VideoType": "VideoFile", "IsFolder": false, "LocationType": "FileSystem",
+            "Path": path, "Container": container, "CanDownload": false, "ParentId": owner.to_string(),
+            "ImageTags": {}, "BackdropImageTags": [], "ImageBlurHashes": {},
+            "UserData": {"PlaybackPositionTicks": 0, "PlayCount": 0, "IsFavorite": false, "Played": false, "Key": id.to_string(), "ItemId": id.to_string()},
+            "MediaSources": [source],
+        }))
+    }
+
+    /// The trailers of a film, a show or a season, or its other extras. A season has those
+    /// kept inside its own folder.
+    pub fn extras_of(&self, owner: Id, trailers: bool) -> Vec<Value> {
+        let (title, season) = match owner {
+            Id::Movie(i) | Id::Series(i) => (i, None),
+            Id::Season(i, n) => (i, Some(n)),
+            _ => return vec![],
+        };
+        let Some(t) = self.title(title) else { return vec![] };
+        let in_season = |rel: &str| std::path::Path::new(rel).components().next().and_then(|c| crate::local::season_folder(&c.as_os_str().to_string_lossy()));
+        let wanted: Vec<usize> = if trailers { t.local.trailers().map(|(i, _)| i).collect() } else { t.local.features().map(|(i, _)| i).collect() };
+        wanted
+            .into_iter()
+            .filter(|i| match season {
+                Some(n) => in_season(&t.local.extras[*i].rel_path) == Some(n),
+                None => true,
+            })
+            .filter_map(|i| self.extra_json(Id::Extra(t.id, i as u32)))
+            .collect()
+    }
+
+    /// A season's poster kept in the show's folder.
+    fn season_poster(&self, t: &Title, season: u32) -> Option<String> {
+        t.local.season_art(crate::local::ArtKind::Poster, season).map(|a| crate::local::art_address(&t.path, a))
+    }
+
+    /// An episode's frame: a picture kept beside its file, before the metadata source's.
+    fn episode_still(&self, t: &Title, e: &Episode) -> Option<String> {
+        self.episode_file(e).and_then(|f| t.local.art_of(&f.rel_path)).map(|a| crate::local::art_address(&t.path, a)).or_else(|| e.still.clone())
+    }
+
     pub fn image(&self, id: Id, kind: &str) -> Option<(String, String, u32)> {
         let wide = matches!(kind, "backdrop" | "thumb" | "art" | "banner");
         if !wide && kind != "primary" {
             return None;
         }
         let title_art = |t: &Title| match wide {
-            true => t.fanart.clone().map(|src| (src, format!("jf-fanart-{}", t.id), 1920)),
-            false => t.poster.clone().map(|src| (src, format!("jf-poster-{}", t.id), 780)),
+            true => t.fanart_source().map(|src| (src, format!("jf-fanart-{}", t.id), 1920)),
+            false => t.poster_source().map(|src| (src, format!("jf-poster-{}", t.id), 780)),
         };
         if let Id::Person(..) = id {
             return self.people().into_iter().find(|(i, _)| *i == id).and_then(|(_, p)| p.photo.clone()).map(|src| (src, format!("jf-person-{id}"), 185));
         }
         match self.node(id)? {
-            Node::Movie(t) | Node::Series(t) | Node::Season(t, _) => title_art(t),
-            Node::Episode(t, e) if wide => e.still.clone().map(|src| (src, format!("jf-still-{}", e.id), 960)).or_else(|| title_art(t)),
-            Node::Episode(t, e) => e.still.clone().map(|src| (src, format!("jf-still-{}", e.id), 960)).or_else(|| t.fanart.clone().map(|src| (src, format!("jf-fanart-{}", t.id), 1920))),
+            Node::Movie(t) | Node::Series(t) => title_art(t),
+            // A season's own poster, where the folder has one.
+            Node::Season(t, n) if !wide => self.season_poster(t, n).map(|src| (src, format!("jf-season-{}-{n}", t.id), 780)).or_else(|| title_art(t)),
+            Node::Season(t, _) => title_art(t),
+            Node::Episode(t, e) if wide => self.episode_still(t, e).map(|src| (src, format!("jf-still-{}", e.id), 960)).or_else(|| title_art(t)),
+            Node::Episode(t, e) => self.episode_still(t, e).map(|src| (src, format!("jf-still-{}", e.id), 960)).or_else(|| t.fanart_source().map(|src| (src, format!("jf-fanart-{}", t.id), 1920))),
             Node::Set(c) if wide => c.fanart.clone().map(|src| (src, format!("jf-setwide-{}", c.id), 1920)),
             Node::Set(c) => c.poster.clone().map(|src| (src, format!("jf-set-{}", c.id), 780)),
             Node::View(_) => None,

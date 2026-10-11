@@ -35,10 +35,11 @@ impl Art {
             Art::Fanart => 1280,
         }
     }
-    fn source(self, t: &Title) -> Option<&str> {
+    /// A picture kept in the title's folder comes before the one the metadata source has.
+    fn source(self, t: &Title) -> Option<String> {
         match self {
-            Art::Poster => t.poster.as_deref(),
-            Art::Fanart => t.fanart.as_deref(),
+            Art::Poster => t.poster_source(),
+            Art::Fanart => t.fanart_source(),
         }
     }
 }
@@ -65,12 +66,12 @@ pub fn saved_small_url(nzb_id: i64, src: &str) -> String {
 
 /// The address the web app should use for a title's artwork, or None if it has none.
 pub fn local_url(t: &Title, art: Art) -> Option<String> {
-    art.source(t).map(|src| format!("/api/art/{}/{}?v={}", t.id, art.name(), &tag(src)[..10]))
+    art.source(t).map(|src| format!("/api/art/{}/{}?v={}", t.id, art.name(), &tag(&src)[..10]))
 }
 
 /// The address of a title's poster at the size a grid or a list shows it.
 pub fn small_url(t: &Title) -> Option<String> {
-    t.poster.as_deref().map(|src| format!("/api/art/{}/small?v={}", t.id, &tag(src)[..10]))
+    t.poster_source().map(|src| format!("/api/art/{}/small?v={}", t.id, &tag(&src)[..10]))
 }
 
 /// How wide the small poster is. A phone draws a grid tile about 330 of its own pixels across.
@@ -110,10 +111,15 @@ impl App {
     /// Bytes of the cached image, fetching and shrinking it first if this is the first request.
     pub async fn art(&self, title_id: i64, art: Art) -> Result<Vec<u8>> {
         let t = self.db.title(title_id)?.ok_or_else(|| anyhow!("no such title"))?;
-        let src = art.source(&t).ok_or_else(|| anyhow!("no artwork"))?.to_string();
+        let src = art.source(&t).ok_or_else(|| anyhow!("no artwork"))?;
         let path = self.art_path(&t, art, &src);
         if let Ok(bytes) = tokio::fs::read(&path).await {
             return Ok(bytes);
+        }
+        // A picture on a location that is away is not asked for: a share that has gone can
+        // keep the asker waiting.
+        if crate::local::art_file(&src).is_some() && !self.title_online(&t) {
+            bail!("the picture is on a location that cannot be reached");
         }
         let prefix = format!("{}-{}-", t.id, art.name());
         let (url, presized) = sized_source(&src, art);
@@ -124,7 +130,7 @@ impl App {
     /// can show. It is made from the full poster, which stays as it is beside it.
     pub async fn art_small(&self, title_id: i64) -> Result<Vec<u8>> {
         let t = self.db.title(title_id)?.ok_or_else(|| anyhow!("no such title"))?;
-        let src = t.poster.clone().ok_or_else(|| anyhow!("no artwork"))?;
+        let src = t.poster_source().ok_or_else(|| anyhow!("no artwork"))?;
         let path = self.small_path(&t, &src);
         if let Ok(bytes) = tokio::fs::read(&path).await {
             return Ok(bytes);
@@ -193,11 +199,17 @@ impl App {
         if let Ok(bytes) = tokio::fs::read(path).await {
             return Ok(bytes);
         }
-        let resp = self.http.get(url).timeout(std::time::Duration::from_secs(30)).send().await.map_err(|e| anyhow!("{}", e.without_url()))?;
-        if !resp.status().is_success() {
-            bail!("artwork source answered HTTP {}", resp.status().as_u16());
-        }
-        let raw = resp.bytes().await.map_err(|e| anyhow!("{}", e.without_url()))?.to_vec();
+        let raw = match crate::local::art_file(url) {
+            // The user's own picture, read where it lies and never changed.
+            Some(file) => tokio::fs::read(file).await.map_err(|e| anyhow!("reading {file}: {e}"))?,
+            None => {
+                let resp = self.http.get(url).timeout(std::time::Duration::from_secs(30)).send().await.map_err(|e| anyhow!("{}", e.without_url()))?;
+                if !resp.status().is_success() {
+                    bail!("artwork source answered HTTP {}", resp.status().as_u16());
+                }
+                resp.bytes().await.map_err(|e| anyhow!("{}", e.without_url()))?.to_vec()
+            }
+        };
         let out = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
             let img = image::load_from_memory(&raw)?;
             // Already the right size and already JPEG: keep the source's own encoding.
@@ -238,7 +250,7 @@ impl App {
     pub async fn warm_art(&self) -> usize {
         let mut fetched = 0;
         for t in self.db.titles(None).unwrap_or_default() {
-            let Some(src) = t.poster.clone() else { continue };
+            let Some(src) = t.poster_source() else { continue };
             let had = self.art_path(&t, Art::Poster, &src).exists();
             if had && self.small_path(&t, &src).exists() {
                 continue;

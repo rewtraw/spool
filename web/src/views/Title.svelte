@@ -8,7 +8,7 @@
 
   let { id }: { id: number } = $props();
 
-  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string } };
+  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string }; local?: { extras: any[]; art: any[]; themes: string[]; notes: any } };
   let t = $state<Detail | null>(null);
   let missing = $state(false);
   let searching = $state('');
@@ -155,7 +155,35 @@
 
   const seasonOf = (n: number) => t?.seasons.find((s) => s.number === n)?.monitored ?? true;
   const media = (f: MediaFile) => [f.media_info?.dynamic_range_type, f.media_info?.video_codec, f.media_info ? `${f.media_info.audio_codec} ${f.media_info.audio_channels || ''}`.trim() : '', f.release_group].filter(Boolean).join(' · ');
-  const HISTORY: Record<string, string> = { grabbed: 'Sent to download', would_grab: 'Would have grabbed', imported: 'Imported', upgraded: 'Upgraded', download_failed: 'Download failed', file_deleted: 'File deleted', file_missing: 'File went missing' };
+  const HISTORY: Record<string, string> = { grabbed: 'Sent to download', would_grab: 'Would have grabbed', imported: 'Imported', upgraded: 'Upgraded', download_failed: 'Download failed', file_deleted: 'File deleted', file_missing: 'File went missing', adopted: 'Brought in where it lay', not_the_film: 'Recognised as an extra, not the film' };
+
+  // What lies in the folder beside the film or the episodes.
+  const EXTRA: Record<string, string> = { trailer: 'Trailers', behind_the_scenes: 'Behind the scenes', deleted_scene: 'Deleted scenes', featurette: 'Featurettes', interview: 'Interviews', scene: 'Scenes', short: 'Shorts', clip: 'Clips', other: 'Other extras', sample: 'Samples', theme_video: 'Theme videos' };
+  const ART: Record<string, string> = { poster: 'poster', backdrop: 'backdrop', banner: 'banner', logo: 'logo', thumb: 'thumbnail', clear_art: 'clear art', disc: 'disc art', square: 'square art' };
+  const extraGroups = $derived.by(() => {
+    const groups: { kind: string; items: any[] }[] = [];
+    for (const e of t?.local?.extras ?? []) {
+      const g = groups.find((x) => x.kind === e.kind);
+      if (g) g.items.push(e);
+      else groups.push({ kind: e.kind, items: [e] });
+    }
+    return groups.sort((a, b) => Object.keys(EXTRA).indexOf(a.kind) - Object.keys(EXTRA).indexOf(b.kind));
+  });
+  const artSummary = $derived.by(() => {
+    const own: Record<string, number> = {};
+    let seasons = 0;
+    let frames = 0;
+    for (const a of t?.local?.art ?? []) {
+      if (a.of) frames++;
+      else if (a.season != null) seasons++;
+      else own[a.kind] = (own[a.kind] ?? 0) + 1;
+    }
+    const parts = Object.entries(own).map(([k, n]) => (n > 1 ? `${n} ${ART[k] ?? k}s` : `a ${ART[k] ?? k}`));
+    if (seasons) parts.push(`${seasons} season ${seasons === 1 ? 'picture' : 'pictures'}`);
+    if (frames) parts.push(`${frames} episode ${frames === 1 ? 'frame' : 'frames'}`);
+    return parts;
+  });
+  const hasLocal = $derived(!!t?.local && (t.local.extras.length || t.local.art.length || t.local.themes.length || t.local.notes.rel_path));
 </script>
 
 {#if missing}
@@ -296,6 +324,39 @@
           </div>
         {/each}
         {#if !seasons.length}<div class="card empty">No episodes are known for this series yet.</div>{/if}
+      </div>
+    </section>
+  {/if}
+
+  {#if hasLocal && t.local}
+    {@const L = t.local}
+    <section>
+      <div class="section-title">Also in the folder</div>
+      <div class="card pad local">
+        <p class="muted">Found beside the {t.kind === 'movie' ? 'film' : 'episodes'}, under the names Plex, Jellyfin, Emby and Kodi use. Spool leaves these where they are: an upgrade replaces only the {t.kind === 'movie' ? 'film' : 'episode'} itself.</p>
+        {#each extraGroups as g}
+          <div class="group">
+            <div class="label">{EXTRA[g.kind] ?? g.kind} <span class="faint">{g.items.length}</span></div>
+            {#each g.items as e}
+              <div class="row line"><span class="grow truncate">{e.name || 'Trailer'}</span><span class="faint small mono truncate path">{e.rel_path}</span><span class="faint small">{bytes(e.size)}</span></div>
+            {/each}
+          </div>
+        {/each}
+        {#if artSummary.length}
+          <div class="group">
+            <div class="label">Artwork</div>
+            <div class="line">{artSummary.join(', ')}.{#if L.art.some((a: any) => (a.kind === 'poster' || a.kind === 'backdrop') && a.season == null && !a.of)} The folder's own poster and backdrop are shown in place of the ones from {t.kind === 'movie' ? 'TMDB' : 'TVmaze'}.{/if}</div>
+          </div>
+        {/if}
+        {#if L.themes.length}
+          <div class="group"><div class="label">Theme music</div><div class="line mono small">{L.themes.join(', ')}</div></div>
+        {/if}
+        {#if L.notes.rel_path}
+          <div class="group">
+            <div class="label">A media server's notes</div>
+            <div class="line"><span class="mono small">{L.notes.rel_path}</span>{#if L.notes.tmdb_id || L.notes.imdb_id || L.notes.tvdb_id} names it as {[L.notes.tmdb_id ? `TMDB ${L.notes.tmdb_id}` : '', L.notes.imdb_id ? `IMDb ${L.notes.imdb_id}` : '', L.notes.tvdb_id ? `TVDB ${L.notes.tvdb_id}` : ''].filter(Boolean).join(', ')}.{:else} names no id.{/if}</div>
+          </div>
+        {/if}
       </div>
     </section>
   {/if}
@@ -454,6 +515,26 @@
   }
   .meta {
     font-size: 14px;
+  }
+  .local {
+    display: grid;
+    gap: 14px;
+  }
+  .local p {
+    margin: 0;
+  }
+  .local .label {
+    font-weight: 600;
+    font-size: 13.5px;
+    margin-bottom: 4px;
+  }
+  .local .line {
+    gap: 12px;
+    padding: 3px 0;
+    font-size: 14px;
+  }
+  .local .path {
+    max-width: 46%;
   }
   .where {
     margin: 0;

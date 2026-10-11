@@ -37,6 +37,12 @@ Two rules follow from that, and every part of Spool that touches files asks the 
 
 Bringing in what is already on a location (`adopt.rs`) is two steps: looking reads each folder's name, asks the metadata sources and reports what it is sure of, what is already in the library, what is unclear and what it could not place; adding records the sure ones, and any the user settles, where they lie.
 
+## What else is in a folder
+
+A title's folder usually holds more than the film: extras, artwork, theme music and the notes of whichever media server looked after it before. `local.rs` says what each file is from where it lies and what it is called, following the conventions of Plex, Jellyfin, Emby and Kodi ([local-files.md](local-files.md) lists them). What it finds is kept on the title as `local` and refreshed when the folder is scanned, after each import and once a night.
+
+Only a video that is the film, a version or part of it, or an episode becomes a library file. That is what keeps an upgrade from sweeping away a featurette: the import replaces the film's main file and nothing else. Where a film folder holds several films' worth of video, the largest is the film and the rest are versions kept beside it, unless they are the numbered parts of one film. When an upgrade gives the film a new name, the artwork and notes a media server had named after the old file are renamed to follow it; nothing else in the folder is touched.
+
 ## Knowing what changed
 
 The database keeps a count of changes to the library. Triggers move it on by one for every write to a title, episode or file that alters it, and note in a `changes` table where that row now stands: one entry per row, holding its latest position, with removals kept for three months. Because the database does this itself, no part of Spool can change the library without it being recorded. Saving a row as it already was does not count, and neither does a title whose only news is when it was last searched or refreshed.

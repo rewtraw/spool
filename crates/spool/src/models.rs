@@ -159,6 +159,29 @@ pub struct Title {
     /// When the fields above were last fetched. Zero for titles added before they were kept.
     #[serde(default)]
     pub details_at: i64,
+    /// What lies in the title's folder beside the film or the episodes: extras, artwork,
+    /// theme music and a media server's notes. Read from disk, never written.
+    #[serde(default)]
+    pub local: crate::local::Local,
+}
+
+impl Title {
+    /// A picture in the title's own folder, written as an address: "file:" and its path, then
+    /// its size and date, so the address changes when the picture does.
+    fn local_art(&self, kind: crate::local::ArtKind) -> Option<String> {
+        self.local.art(kind).map(|a| crate::local::art_address(&self.path, a))
+    }
+
+    /// Where the poster comes from: one the user keeps in the title's folder, before the one
+    /// the metadata source offers.
+    pub fn poster_source(&self) -> Option<String> {
+        self.local_art(crate::local::ArtKind::Poster).or_else(|| self.poster.clone())
+    }
+
+    /// The same for the wide picture behind the title.
+    pub fn fanart_source(&self) -> Option<String> {
+        self.local_art(crate::local::ArtKind::Backdrop).or_else(|| self.fanart.clone())
+    }
 }
 
 fn yes() -> bool {

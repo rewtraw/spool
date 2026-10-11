@@ -4,7 +4,7 @@ use crate::app::{App, Event};
 use crate::db::now;
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};
-use spool_core::parser::{is_video_file, parse_episode_path, parse_movie_path};
+use spool_core::parser::{parse_episode_path, parse_movie_path};
 use std::path::Path;
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -13,6 +13,8 @@ pub struct ScanReport {
     pub files_found: usize,
     pub files_added: usize,
     pub files_missing: usize,
+    /// Records that had taken a trailer or another extra for the film, now put right.
+    pub extras: usize,
     pub unmatched: Vec<String>,
 }
 
@@ -154,22 +156,23 @@ impl App {
             return Ok(());
         }
         let root = Path::new(&title.path);
-        let mut on_disk = vec![];
-        collect(root, &mut on_disk);
-        let on_disk: Vec<String> = on_disk
-            .into_iter()
-            .filter(|p| !p.to_string_lossy().contains("/.spool-recycle/"))
-            .filter_map(|p| p.strip_prefix(root).ok().map(|r| r.to_string_lossy().to_string()))
-            .filter(|r| is_video_file(r))
-            .collect();
+        // Only the film or the episodes are library files. Trailers, featurettes, samples and
+        // artwork are noted beside the title and otherwise left out of everything.
+        let (on_disk, local) = self.look_in_folder(&title).await;
         report.files_found += on_disk.len();
         let known = self.db.files(id)?;
 
         for f in &known {
             if !on_disk.contains(&f.rel_path) {
-                report.files_missing += 1;
                 self.db.with(|c| c.execute("DELETE FROM files WHERE id = ?1", [f.id]))?;
-                self.db.add_history(Some(id), "file_missing", serde_json::json!({"path": root.join(&f.rel_path).to_string_lossy()}))?;
+                if local.extras.iter().any(|e| e.rel_path == f.rel_path) {
+                    // An earlier scan took an extra for the film. The file is still there.
+                    report.extras += 1;
+                    self.db.add_history(Some(id), "not_the_film", serde_json::json!({"path": root.join(&f.rel_path).to_string_lossy()}))?;
+                } else {
+                    report.files_missing += 1;
+                    self.db.add_history(Some(id), "file_missing", serde_json::json!({"path": root.join(&f.rel_path).to_string_lossy()}))?;
+                }
             }
         }
         let episodes = if title.kind == Kind::Series { self.db.episodes(id)? } else { vec![] };
@@ -221,7 +224,84 @@ impl App {
             })?;
             report.files_added += 1;
         }
+        self.settle_versions(&title, &known)?;
+        self.keep_local(id, local)?;
         Ok(())
+    }
+
+    /// Read a title's folder off to one side: a slow disk must not hold everything else up.
+    async fn look_in_folder(&self, title: &Title) -> (Vec<String>, crate::local::Local) {
+        let (root, kind) = (std::path::PathBuf::from(&title.path), title.kind);
+        tokio::task::spawn_blocking(move || crate::local::survey(&root, kind)).await.unwrap_or_default()
+    }
+
+    /// Note what a title's folder holds beside the film, if that has changed.
+    fn keep_local(&self, id: i64, local: crate::local::Local) -> Result<()> {
+        let Some(mut t) = self.db.title(id)? else { return Ok(()) };
+        if t.local != local {
+            t.local = local;
+            self.db.save_title(&mut t)?;
+            self.emit(Event::Title { id });
+        }
+        Ok(())
+    }
+
+    /// A film folder with several films' worth of video holds one film and versions of it kept
+    /// beside it, unless they are the parts of one film split across files. One is the main
+    /// file, which an upgrade replaces; the rest are marked as versions, which it leaves alone.
+    /// `before` is what was on record ahead of this look at the folder.
+    fn settle_versions(&self, title: &Title, before: &[MediaFile]) -> Result<()> {
+        if title.kind != Kind::Movie {
+            return Ok(());
+        }
+        let files = self.db.files(title.id)?;
+        let stem = |f: &MediaFile| Path::new(&f.rel_path).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let main: Vec<&MediaFile> = files.iter().filter(|f| !f.extra).collect();
+        if main.len() < 2 || main.iter().all(|f| crate::local::is_part(&stem(f))) {
+            return Ok(());
+        }
+        // The file already known as the film stays the film; failing that, the largest is. (By
+        // path as well as number: a record just removed can lend its number to a new one.)
+        let was: Vec<&&MediaFile> = main.iter().filter(|f| before.iter().any(|b| b.id == f.id && b.rel_path == f.rel_path && !b.extra)).collect();
+        let keep = match was.as_slice() {
+            [one] => one.id,
+            _ => main.iter().max_by_key(|f| f.size).map(|f| f.id).unwrap_or(0),
+        };
+        for f in main.into_iter().filter(|f| f.id != keep) {
+            let mut f = f.clone();
+            f.extra = true;
+            self.db.save_file(&f)?;
+        }
+        Ok(())
+    }
+
+    /// Look again at what a title's folder holds beside the film, without concluding anything
+    /// about files that are not there. Records that took an extra for the film are corrected.
+    pub async fn survey_title(&self, id: i64) -> Result<()> {
+        let title = self.db.title(id)?.ok_or_else(|| anyhow!("no such title"))?;
+        if title.path.is_empty() || !self.title_online(&title) {
+            return Ok(());
+        }
+        let (_, local) = self.look_in_folder(&title).await;
+        let known = self.db.files(id)?;
+        for f in known.iter().filter(|f| local.extras.iter().any(|e| e.rel_path == f.rel_path)) {
+            self.db.with(|c| c.execute("DELETE FROM files WHERE id = ?1", [f.id]))?;
+            self.db.add_history(Some(id), "not_the_film", serde_json::json!({"path": Path::new(&title.path).join(&f.rel_path).to_string_lossy()}))?;
+        }
+        self.settle_versions(&title, &known)?;
+        self.keep_local(id, local)
+    }
+
+    /// The same for every title, a little at a time.
+    pub async fn survey_all(&self) -> usize {
+        let mut looked = 0;
+        for t in self.db.titles(None).unwrap_or_default() {
+            if self.survey_title(t.id).await.is_ok() {
+                looked += 1;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+        }
+        looked
     }
 
     pub async fn scan_all(&self) -> Result<ScanReport> {

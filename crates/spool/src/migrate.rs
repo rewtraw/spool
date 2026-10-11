@@ -427,6 +427,7 @@ impl App {
                     people: existing.as_ref().map(|e| e.people.clone()).unwrap_or_default(),
                     collection: existing.as_ref().and_then(|e| e.collection.clone()),
                     details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
+                    local: existing.as_ref().map(|e| e.local.clone()).unwrap_or_default(),
                 };
                 self.db.save_title(&mut t)?;
                 report.movies += 1;
@@ -549,6 +550,7 @@ impl App {
                     people: existing.as_ref().map(|e| e.people.clone()).unwrap_or_default(),
                     collection: existing.as_ref().and_then(|e| e.collection.clone()),
                     details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
+                    local: existing.as_ref().map(|e| e.local.clone()).unwrap_or_default(),
                 };
                 self.db.save_title(&mut t)?;
                 report.series += 1;

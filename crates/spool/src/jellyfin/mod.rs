@@ -306,6 +306,9 @@ impl Call {
             Ok(l) => l,
             Err(r) => return r,
         };
+        if let Id::Extra(..) = id {
+            return lib.extra_json(id).map(|v| Json(v).into_response()).unwrap_or_else(missing);
+        }
         if let Id::Person(..) = id {
             return match lib.people().into_iter().find(|(i, _)| *i == id) {
                 Some((i, p)) => Json(lib.person_json(i, p)).into_response(),
@@ -328,6 +331,10 @@ impl Call {
             Ok(l) => l,
             Err(r) => return r,
         };
+        if let Id::Extra(..) = id {
+            let Some(item) = lib.extra_json(id) else { return missing() };
+            return Json(json!({"MediaSources": item["MediaSources"], "PlaySessionId": crate::settings::new_key()[..32]})).into_response();
+        }
         let lib = match media::with_streams(&self.app, lib, id).await {
             Ok(l) => l,
             Err(r) => return r,
@@ -544,7 +551,13 @@ impl Call {
                 let none = json!({"Items": [], "TotalRecordCount": 0, "StartIndex": 0, "OwnerId": "00000000000000000000000000000000"});
                 Json(json!({"ThemeVideosResult": none, "ThemeSongsResult": none, "SoundtrackSongsResult": none})).into_response()
             }
-            (true, ["items", _, "specialfeatures" | "localtrailers" | "remotetrailers" | "criticreviews" | "externalidinfos" | "images"] | ["users", _, "items", _, "specialfeatures" | "localtrailers"]) => Json(json!([])).into_response(),
+            // Trailers and other extras kept in the title's folder.
+            (true, ["items", id, which @ ("specialfeatures" | "localtrailers")] | ["users", _, "items", id, which @ ("specialfeatures" | "localtrailers")]) => match (Id::parse(id), self.library()) {
+                (Some(id), Ok(lib)) => Json(json!(lib.extras_of(id, *which == "localtrailers"))).into_response(),
+                (_, Err(r)) => r,
+                _ => Json(json!([])).into_response(),
+            },
+            (true, ["items", _, "remotetrailers" | "criticreviews" | "externalidinfos" | "images"]) => Json(json!([])).into_response(),
             (true, ["movies", "recommendations"] | ["plugins"] | ["scheduledtasks"] | ["sessions"] | ["users", _, "groupingoptions"] | ["userviews", "groupingoptions"] | ["localization", ..] | ["devices"] | ["channels"]) => Json(json!([])).into_response(),
             // Last, so the named routes under /Items above are tried first.
             (true, ["items", id] | ["users", _, "items", id]) => self.detail(id).await,

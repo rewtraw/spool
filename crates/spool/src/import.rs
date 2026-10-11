@@ -508,6 +508,12 @@ impl App {
             for p in old_subs {
                 let _ = std::fs::remove_file(p);
             }
+            // A poster or notes a media server named after the old file follow it to the new name.
+            for (_, old, _) in &op.replaces {
+                for (from, to) in crate::local::follow_rename(Path::new(old), Path::new(&op.dst)) {
+                    tracing::info!(from = %from.display(), to = %to.display(), "renamed to follow the new file");
+                }
+            }
             imported.push(op);
         }
         // Subtitles that came with the release go in beside the video.
@@ -526,6 +532,8 @@ impl App {
             }
         }
 
+        // What else is in the folder may have changed with the import.
+        let _ = self.survey_title(title.id).await;
         let upgraded = ops.iter().any(|o| !o.replaces.is_empty());
         for op in &imported {
             self.db.add_history(

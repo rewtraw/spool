@@ -102,6 +102,8 @@
     download_failed: 'Download failed',
     file_deleted: 'File deleted',
     file_missing: 'File went missing',
+    adopted: 'Brought in where it lay',
+    not_the_film: 'Recognised as an extra, not the film',
   };
   const tone = (k: string) => (k === 'download_failed' || k === 'file_missing' ? 'bad' : k === 'imported' || k === 'upgraded' ? 'ok' : k === 'would_grab' ? 'warn' : '');
 </script>

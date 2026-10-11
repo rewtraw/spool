@@ -1711,6 +1711,11 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     lay("films/Mystery Thing (2001)/thing.mkv");
     lay("films/Alpha (2001)/alpha.mkv");
     lay("films/Notes/readme.txt");
+    // A folder whose name says nothing, with the notes a media server left in it; and one
+    // holding only a trailer, which is no film.
+    lay("films/Sci Fi Night/film.mkv");
+    std::fs::write(there.join("films/Sci Fi Night/movie.nfo"), "<movie><title>Solaris</title><tmdbid>2103</tmdbid></movie>").unwrap();
+    lay("films/Coming Soon/Trailers/teaser.mkv");
     lay("tv/Example World/Season 01/Example.World.S01E01.1080p.BluRay.x264-GRP.mkv");
     // One of them is in the main library already.
     let mut alpha = w.movie("Alpha", 2001, "tt0000001");
@@ -1751,16 +1756,19 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     assert_eq!(state(&found, "Alpha (2001)").as_deref(), Some("have"));
     assert_eq!(state(&found, "Example World").as_deref(), Some("new"));
     assert_eq!(state(&found, "Notes"), None, "a folder with no video is not a title");
+    assert_eq!(state(&found, "Sci Fi Night").as_deref(), Some("new"), "its notes name it");
+    assert_eq!(state(&found, "Coming Soon"), None, "a trailer alone is not a film");
     assert_eq!(w.app.db.titles(None).unwrap().len(), 1);
 
     // Adding takes the sure ones and the one settled by hand, where they lie.
     let before = tree(&there);
     assert_eq!(call(&api, "POST", "/api/locations/1/add", json!({"picks": [{"folder": there.join("films/Solaris"), "tmdb_id": 593}]})).await.0, 200);
     let added = finished(api.clone()).await;
-    assert_eq!(added["message"], "Added 3 titles", "{added}");
+    assert_eq!(added["message"], "Added 4 titles", "{added}");
     assert_eq!(tree(&there), before, "nothing on the location was touched");
     let titles = w.app.db.titles(None).unwrap();
-    let by = |name: &str| titles.iter().find(|t| t.title == name).cloned().unwrap();
+    let by = |name: &str| titles.iter().find(|t| t.title == name && t.year != 2002).cloned().unwrap();
+    assert!(titles.iter().any(|t| t.year == 2002 && t.path.ends_with("Sci Fi Night") && t.local.notes.tmdb_id == Some(2103)));
     let (heat, solaris, show) = (by("Heat"), by("Solaris"), by("Example World"));
     assert_eq!((heat.path.as_str(), heat.monitored, solaris.year), (there.join("films/Heat (1995)").to_str().unwrap(), false, 1972));
     let heat_file = w.app.db.files(heat.id).unwrap().remove(0);
@@ -1795,7 +1803,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
         names.sort();
         names
     };
-    assert_eq!(films(jf.clone(), token.clone()).await, ["Heat", "Solaris"]);
+    assert_eq!(films(jf.clone(), token.clone()).await, ["Heat", "Solaris", "Solaris"]);
 
     // The location goes away. Its titles stay, marked offline, and nothing is concluded from
     // files that cannot be seen.
@@ -1804,7 +1812,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     let row = listed(api.clone(), heat.id).await;
     assert_eq!((row["offline"].as_bool(), row["file_count"].as_u64()), (Some(true), Some(1)));
     let (_, status) = call(&api, "GET", "/api/status", Value::Null).await;
-    assert!(status["warnings"].as_array().unwrap().iter().any(|m| m.as_str().unwrap().starts_with("Elsewhere cannot be reached. Its 3 titles are offline")), "{status}");
+    assert!(status["warnings"].as_array().unwrap().iter().any(|m| m.as_str().unwrap().starts_with("Elsewhere cannot be reached. Its 4 titles are offline")), "{status}");
     w.app.scan_all().await.unwrap();
     assert_eq!(w.app.db.files(heat.id).unwrap().len(), 1, "a file that cannot be seen is not a file that has gone");
     assert!(films(jf.clone(), token.clone()).await.is_empty(), "players are not offered what cannot be played");
@@ -1814,7 +1822,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     std::fs::rename(&away, &there).unwrap();
     w.app.watch_locations();
     assert_eq!(listed(api.clone(), heat.id).await["offline"], false);
-    assert_eq!(films(jf.clone(), token.clone()).await, ["Heat", "Solaris"]);
+    assert_eq!(films(jf.clone(), token.clone()).await, ["Heat", "Solaris", "Solaris"]);
 
     // Allowed to manage the location, Spool treats it as it does the main one, and can be
     // told to put new titles there.
@@ -1838,4 +1846,103 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     assert!(later.path.starts_with(w.root.join("Movies").to_str().unwrap()), "{}", later.path);
     let blocked = w.app.search(solaris.id, Scope::Movie, true, true).await.unwrap();
     assert!(blocked.message.contains("cannot be reached right now"), "{}", blocked.message);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn what_lies_beside_a_film_is_recognised_shown_and_left_alone_by_an_upgrade() {
+    use serde_json::{json, Value};
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let mut movie = w.movie("Heat", 1995, "tt0113277");
+    let folder = w.root.join("Movies/Heat (1995)");
+    movie.path = folder.to_string_lossy().to_string();
+    w.app.db.save_title(&mut movie).unwrap();
+
+    // A folder as someone who used Plex or Jellyfin for years might have left it.
+    let lay = |rel: &str, bytes: &[u8]| {
+        let p = folder.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, bytes).unwrap();
+    };
+    let mut poster = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut poster, 90).encode_image(&image::RgbImage::from_pixel(200, 300, image::Rgb([180, 20, 20]))).unwrap();
+    lay("Heat (1995) HDTV-1080p.mkv", &[7u8; 4000]);
+    lay("Heat (1995) - Directors Cut HDTV-720p.mkv", &[7u8; 1000]);
+    lay("Heat (1995)-trailer.mkv", b"the trailer");
+    lay("Featurettes/Making Of.mkv", b"how it was made");
+    lay("heat.sample.mkv", b"a sample");
+    lay("poster.jpg", &poster);
+    lay("Heat (1995) HDTV-1080p-fanart.jpg", &poster);
+    lay("Heat (1995) HDTV-1080p.nfo", b"<movie><title>Heat</title><uniqueid type=\"tmdb\">949</uniqueid></movie>");
+    lay("theme.mp3", b"music");
+    lay("holiday.jpg", &poster);
+    // An earlier scan had taken the trailer for the film.
+    let wrong: MediaFile = serde_json::from_value(json!({"title_id": movie.id, "rel_path": "Heat (1995)-trailer.mkv", "size": 11, "quality": {"quality": "unknown"}})).unwrap();
+    w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, ?2, 11, ?3)", rusqlite::params![movie.id, wrong.rel_path, serde_json::to_string(&wrong).unwrap()])).unwrap();
+
+    let mut report = spool::catalog::ScanReport::default();
+    w.app.scan_title(movie.id, &mut report).await.unwrap();
+    assert_eq!((report.files_found, report.files_added, report.extras, report.files_missing), (2, 2, 1, 0));
+    // The film is the larger file; the other cut is a version kept beside it.
+    let files = w.app.db.files(movie.id).unwrap();
+    assert_eq!(files.iter().map(|f| (f.rel_path.as_str(), f.extra)).collect::<Vec<_>>(), [("Heat (1995) - Directors Cut HDTV-720p.mkv", true), ("Heat (1995) HDTV-1080p.mkv", false)]);
+    assert!(folder.join("Heat (1995)-trailer.mkv").exists(), "putting the record right touches no file");
+    let local = w.app.db.title(movie.id).unwrap().unwrap().local;
+    assert_eq!(local.extras.iter().map(|e| (format!("{:?}", e.kind), e.name.as_str())).collect::<Vec<_>>(), [("Featurette".into(), "Making Of"), ("Trailer".into(), "Heat (1995)"), ("Sample".into(), "heat")]);
+    assert_eq!(local.art.iter().map(|a| (a.rel_path.as_str(), format!("{:?}", a.kind))).collect::<Vec<_>>(), [("Heat (1995) HDTV-1080p-fanart.jpg", "Backdrop".into()), ("poster.jpg", "Poster".into())]);
+    assert_eq!((local.notes.tmdb_id, local.themes.as_slice()), (Some(949), ["theme.mp3".to_string()].as_slice()));
+
+    // The app says what is there, and shows the folder's own poster.
+    let (_, detail) = call(&api, "GET", &format!("/api/titles/{}", movie.id), Value::Null).await;
+    assert_eq!(detail["local"]["extras"].as_array().map(Vec::len), Some(3));
+    let (_, list) = call(&api, "GET", "/api/titles", Value::Null).await;
+    assert_eq!((list[0]["trailers"].as_u64(), list[0]["extras"].as_u64(), list[0]["own_poster"].as_bool(), list[0].get("local")), (Some(1), Some(1), Some(true), None));
+    let shown = w.app.art(movie.id, spool::art::Art::Poster).await.unwrap();
+    assert_eq!(image::load_from_memory(&shown).unwrap().width(), 200, "the picture from the folder, not one fetched");
+    assert_eq!(std::fs::read(folder.join("poster.jpg")).unwrap(), poster, "which is itself left as it was");
+
+    // A player is offered the trailer and the featurette, and can play them.
+    let mut g = w.app.settings.general();
+    g.players_enabled = true;
+    w.app.settings.set_general(&g).unwrap();
+    let jf = spool::jellyfin::router(w.app.clone());
+    let (_, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "spool", "Pw": ""})).await;
+    let token = serde_json::from_slice::<Value>(&body).unwrap()["AccessToken"].as_str().unwrap().to_string();
+    let get = |jf: axum::Router, token: String, uri: String| async move {
+        let (status, _, body) = player(&jf, "GET", &uri, Some(&token), Value::Null).await;
+        (status, body)
+    };
+    let (_, body) = get(jf.clone(), token.clone(), "/Items?Recursive=true&IncludeItemTypes=Movie".into()).await;
+    let item = serde_json::from_slice::<Value>(&body).unwrap()["Items"][0].clone();
+    assert_eq!((item["LocalTrailerCount"].as_u64(), item["SpecialFeatureCount"].as_u64()), (Some(1), Some(1)));
+    let id = item["Id"].as_str().unwrap().to_string();
+    let (_, body) = get(jf.clone(), token.clone(), format!("/Items/{id}/LocalTrailers")).await;
+    let trailers = serde_json::from_slice::<Value>(&body).unwrap();
+    assert_eq!((trailers.as_array().map(Vec::len), trailers[0]["Type"].as_str(), trailers[0]["ExtraType"].as_str()), (Some(1), Some("Trailer"), Some("Trailer")));
+    let (status, body) = get(jf.clone(), token.clone(), format!("/Videos/{}/stream?Static=true", trailers[0]["Id"].as_str().unwrap())).await;
+    assert_eq!((status, body.as_slice()), (200, b"the trailer".as_slice()));
+    let (_, body) = get(jf.clone(), token.clone(), format!("/Items/{id}/SpecialFeatures")).await;
+    let features = serde_json::from_slice::<Value>(&body).unwrap();
+    assert_eq!(features.as_array().unwrap().iter().map(|f| (f["Name"].as_str().unwrap(), f["ExtraType"].as_str().unwrap())).collect::<Vec<_>>(), [("Making Of", "Featurette")]);
+    let (status, body) = get(jf.clone(), token.clone(), format!("/Items/{}", features[0]["Id"].as_str().unwrap())).await;
+    assert_eq!((status, serde_json::from_slice::<Value>(&body).unwrap()["MediaSources"][0]["Container"].as_str().map(str::to_string)), (200, Some("mkv".into())));
+
+    // A better copy arrives. It takes the place of the film and of nothing else.
+    w.release("Heat.1995.1080p.BluRay.x264-GRP", &[("heat.mkv", &video)]);
+    let outcome = w.app.search(movie.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    w.wait_state(movie.id, AcqState::Imported).await;
+    let new_stem = "Heat (1995) {imdb-tt0113277} [Bluray-1080p][AAC 2.0][x264]-GRP";
+    let there = tree(&folder);
+    for kept in ["Heat (1995) - Directors Cut HDTV-720p.mkv", "Heat (1995)-trailer.mkv", "Featurettes/Making Of.mkv", "heat.sample.mkv", "poster.jpg", "theme.mp3", "holiday.jpg"] {
+        assert!(there.iter().any(|f| f == kept), "{kept} is still there: {there:?}");
+    }
+    assert!(there.contains(&format!("{new_stem}.mkv")) && !there.iter().any(|f| f == "Heat (1995) HDTV-1080p.mkv"), "{there:?}");
+    // What a media server named after the old file now carries the new file's name.
+    assert!(there.contains(&format!("{new_stem}.nfo")) && there.contains(&format!("{new_stem}-fanart.jpg")), "{there:?}");
+    let files = w.app.db.files(movie.id).unwrap();
+    assert_eq!(files.iter().map(|f| f.extra).collect::<Vec<_>>(), [true, false]);
+    let local = w.app.db.title(movie.id).unwrap().unwrap().local;
+    assert_eq!((local.extras.len(), local.notes.rel_path.as_str(), local.notes.tmdb_id), (3, format!("{new_stem}.nfo").as_str(), Some(949)));
 }

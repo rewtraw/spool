@@ -221,6 +221,10 @@ fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashMap<i64, (u3
     if places.0.len() > 1 {
         v["location"] = json!(places.of(&t.path).map(|p| p.0.name.clone()));
     }
+    // What the folder holds beside the film, in brief; the title's own page has it in full.
+    v["trailers"] = json!(t.local.trailers().count());
+    v["extras"] = json!(t.local.features().count());
+    v["own_poster"] = json!(t.local.art(crate::local::ArtKind::Poster).is_some());
     v["offline"] = json!(!t.path.is_empty() && !places.online(t));
     v["read_only"] = json!(places.read_only(t));
     v
@@ -249,7 +253,7 @@ fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<Vec<Value>> 
         .map(|t| {
             let mut v = summarize(t, &files, &eps, &profiles, &active, &places);
             if let Some(o) = v.as_object_mut() {
-                for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at", "people", "tagline", "collection", "details_at"] {
+                for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at", "people", "tagline", "collection", "details_at", "local"] {
                     o.remove(k);
                 }
             }

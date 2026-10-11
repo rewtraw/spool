@@ -13,6 +13,8 @@ pub enum Id {
     Season(i64, u32),
     Episode(i64),
     File(i64),
+    /// A trailer or another extra: the title's id and which of its extras.
+    Extra(i64, u32),
     /// The metadata source (1 TMDB, 2 TVmaze) and its id for the person.
     Person(u8, u64),
     Collection(u32),
@@ -32,6 +34,7 @@ impl Id {
             Id::Season(id, n) => (0x12, n as u64, id as u64),
             Id::Episode(id) => (0x13, 0, id as u64),
             Id::File(id) => (0x14, 0, id as u64),
+            Id::Extra(id, n) => (0x15, n as u64, id as u64),
             Id::Person(source, id) => (0x20, source as u64, id),
             Id::Collection(id) => (0x21, 0, id as u64),
             Id::Genre(h) => (0x22, 0, h),
@@ -57,6 +60,7 @@ impl Id {
             0x12 => Id::Season(b as i64, a as u32),
             0x13 => Id::Episode(b as i64),
             0x14 => Id::File(b as i64),
+            0x15 => Id::Extra(b as i64, a as u32),
             0x20 => Id::Person(a as u8, b),
             0x21 => Id::Collection(b as u32),
             0x22 => Id::Genre(b),

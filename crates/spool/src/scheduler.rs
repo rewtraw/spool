@@ -135,6 +135,8 @@ impl App {
 
     async fn housekeeping(&self) -> anyhow::Result<String> {
         let recycled = self.clean_recycle(false).unwrap_or(0) / (1 << 20);
+        // Trailers, artwork and notes come and go in the library's folders without Spool's doing.
+        self.survey_all().await;
         // Removals are remembered for three months so that anything keeping a copy of the library
         // can be told what went; after that it is told to read everything again.
         let _ = self.db.prune_changes(crate::db::now() - 90 * 86400);

@@ -10,6 +10,7 @@ pub mod catalog;
 pub mod db;
 pub mod import;
 pub mod jellyfin;
+pub mod local;
 pub mod locations;
 pub mod mcp;
 pub mod metadata;
