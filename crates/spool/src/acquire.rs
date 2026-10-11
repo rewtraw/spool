@@ -65,6 +65,20 @@ struct Judged {
 /// or a number in the title itself), so only one that follows the full title counts.
 pub(crate) fn names_an_episode(name: &str, t: &Title) -> bool {
     let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    let names: Vec<String> = std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
+    // Said outright: "E05", "Ep 5", "Episode 5". Not for a film with the word in its own title.
+    let whole = plain(name);
+    if names.iter().any(|n| whole.contains(n.as_str())) && !names.iter().any(|n| n.contains("episode")) {
+        let words: Vec<String> = name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
+        let number = |w: &str| (1..=3).contains(&w.len()) && w.bytes().all(|b| b.is_ascii_digit());
+        let said = words.iter().enumerate().any(|(i, w)| match w.as_str() {
+            "e" | "ep" | "episode" => words.get(i + 1).is_some_and(|n| number(n)),
+            w => w.strip_prefix("ep").or_else(|| w.strip_prefix('e')).is_some_and(number),
+        });
+        if said {
+            return true;
+        }
+    }
     let Some(p) = parse_episode_title(name) else { return false };
     if p.full_season || p.is_multi_season() || (p.episode_numbers.is_empty() && p.absolute_episode_numbers.is_empty()) {
         return false;
@@ -76,7 +90,7 @@ pub(crate) fn names_an_episode(name: &str, t: &Title) -> bool {
         }
     }
     let before = plain(&p.series_title);
-    std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).any(|n| !n.is_empty() && before.contains(&n))
+    names.iter().any(|n| before.contains(n.as_str()))
 }
 
 fn rej(code: &str, message: impl Into<String>) -> Rejection {
@@ -1142,6 +1156,8 @@ mod tests {
             "[ZetaRebel] Mobile Suit Gundam - 0080 War in the Pocket - 05 - Say it Ain't So, Bernie! (BD x264 1080p DTS)",
             "[ZetaRebel] Mobile Suit Gundam - 0080 War in the Pocket - 01 - How Many Miles to the Battlefield (BD x264 1080p 8-bit FLAC)",
             "[Group] Mobile Suit Gundam 0080 War in the Pocket 01-06 (BD 1080p)",
+            "[Reaktor]Mobile Suit Gundam - 0080 War in the Pocket - E03 [1080p][x265][10-bit]",
+            "Mobile Suit Gundam 0080: War in the Pocket [1080p x265 10bit AAC] [1/7] - \"Episode 4.mkv\" yEnc",
         ] {
             assert!(names_an_episode(name, &gundam), "{name}");
         }
@@ -1149,6 +1165,7 @@ mod tests {
         for name in ["Mobile.Suit.Gundam.0080.War.in.the.Pocket.1989.1080p.BluRay.x264-GRP", "[ZetaRebel] Mobile Suit Gundam 0080 War in the Pocket (BD x264 1080p DTS)"] {
             assert!(!names_an_episode(name, &gundam), "{name}");
         }
+        assert!(!names_an_episode("Star.Wars.Episode.1.The.Phantom.Menace.1999.1080p.BluRay.x264-GRP", &film("Star Wars: Episode I - The Phantom Menace", 1999)));
         assert!(!names_an_episode("2001.A.Space.Odyssey.1968.1080p.BluRay.x264-GRP", &film("2001: A Space Odyssey", 1968)));
         assert!(!names_an_episode("The.Matrix.1999.1080p.BluRay.x264-GRP", &film("The Matrix", 1999)));
     }
