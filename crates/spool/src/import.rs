@@ -144,8 +144,21 @@ impl App {
 
     /// Make sure the title has a folder path, deriving one from the naming settings if not.
     pub fn ensure_title_path(&self, title: &mut Title) -> Result<()> {
+        self.ensure_title_path_on(title, None)
+    }
+
+    /// As [`ensure_title_path`], on the location the user named. Naming one that cannot take
+    /// the title, because it is away or only read, is an error and not a quiet change of place.
+    pub fn ensure_title_path_on(&self, title: &mut Title, on: Option<u32>) -> Result<()> {
         if !title.path.is_empty() {
             return Ok(());
+        }
+        if let Some(wanted) = on.filter(|w| *w != 0) {
+            let places = self.placement();
+            if places.for_new(title.kind, wanted).map(|l| l.id) != Some(wanted) {
+                let name = places.0.iter().find(|p| p.0.id == wanted).map(|p| p.0.name.clone()).unwrap_or_else(|| "that location".into());
+                bail!("{name} cannot take a new {} right now: it is away, only read, or has no folder for it", if title.kind == Kind::Movie { "film" } else { "series" });
+            }
         }
         let g = self.settings.general();
         let naming_cfg = self.settings.naming();
@@ -154,7 +167,7 @@ impl App {
             Kind::Series => naming::series_folder_name(&naming_cfg, &title.title, title.year),
         };
         // The location chosen for new titles, or the main one when that cannot take this.
-        let root = self.placement().for_new(title.kind, g.new_titles_location).map(|l| l.root(title.kind).to_string()).unwrap_or_default();
+        let root = self.placement().for_new(title.kind, on.unwrap_or(g.new_titles_location)).map(|l| l.root(title.kind).to_string()).unwrap_or_default();
         if root.is_empty() {
             bail!("no library folder is configured for {}", if title.kind == Kind::Movie { "movies" } else { "television" });
         }
@@ -312,7 +325,8 @@ impl App {
         }
         let flavor = title.kind.flavor();
         let episodes = self.db.episodes(title.id).map_err(|e| Blocked::Retry(e.to_string()))?;
-        let files = self.db.files(title.id).map_err(|e| Blocked::Retry(e.to_string()))?;
+        // The title's own files. A copy kept on another location is never replaced or renamed around.
+        let files: Vec<MediaFile> = self.db.files(title.id).map_err(|e| Blocked::Retry(e.to_string()))?.into_iter().filter(|f| f.base.is_none()).collect();
         let profile = self.title_context(title.clone()).map_err(|e| Blocked::Retry(e.to_string()))?.profile;
 
         // A person who has seen the notice and said "import anyway" is not asked twice.
@@ -417,6 +431,7 @@ impl App {
                 added_at: now(),
                 extra: false,
                 subtitles: vec![],
+                base: None,
             };
             let file = MediaFile { extra: acq.extra_version && title.kind == Kind::Movie && !files.is_empty(), ..file };
             let mut rel = self.library_rel_path(title, &eps, &file, &ext);
@@ -623,6 +638,9 @@ impl App {
         let title = self.db.title(file.title_id)?.ok_or_else(|| anyhow!("no such title"))?;
         if let Some(why) = self.title_locked(&title) {
             bail!(why);
+        }
+        if file.base.is_some() {
+            bail!("this copy of {} is on another location, where Spool changes nothing", title.title);
         }
         let abs = Path::new(&title.path).join(&file.rel_path);
         for s in &file.subtitles {

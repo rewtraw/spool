@@ -28,6 +28,8 @@ pub struct Library {
     pub sets: Vec<Collection>,
     /// Per collection, its titles in the order they came out.
     set_members: HashMap<u32, Vec<i64>>,
+    /// Per folder of a copy kept on another location, that location's name.
+    copy_names: HashMap<String, String>,
 }
 
 #[derive(Clone, Copy)]
@@ -121,9 +123,16 @@ impl Library {
     }
 
     fn load(app: &App) -> Result<Library> {
+        // Only what can be played now: a file on a location that is away is left out until it
+        // is back, and so is a title with no file left to play.
+        let places = app.placement();
+        let folders: HashMap<i64, String> = app.db.titles(None)?.into_iter().map(|t| (t.id, t.path)).collect();
         let mut files: HashMap<i64, Vec<MediaFile>> = HashMap::new();
         for f in app.db.all_files()? {
-            files.entry(f.title_id).or_default().push(f);
+            let folder = f.base.as_deref().or(folders.get(&f.title_id).map(String::as_str)).unwrap_or_default();
+            if places.online_at(folder) {
+                files.entry(f.title_id).or_default().push(f);
+            }
         }
         for list in files.values_mut() {
             list.sort_by_key(|f| f.extra);
@@ -136,13 +145,11 @@ impl Library {
                 episodes.entry(e.title_id).or_default().push(e);
             }
         }
-        // Only what can be played now: titles on a location that is away are left out until it is back.
-        let places = app.placement();
         let titles: Vec<Title> = app
             .db
             .titles(None)?
             .into_iter()
-            .filter(|t| places.online(t))
+            .filter(|t| places.playable(t))
             .filter(|t| match t.kind {
                 Kind::Movie => files.contains_key(&t.id),
                 Kind::Series => episodes.contains_key(&t.id),
@@ -163,7 +170,9 @@ impl Library {
             .collect();
         let sets = groups.into_iter().map(|g| Collection { id: g.id, name: g.name, poster: g.poster, fanart: g.fanart }).collect();
         let index = titles.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
-        Ok(Library { server_id: super::server_id(app), titles, index, files, episodes, episode_title, watched: app.db.watched_all()?, sets, set_members })
+        // A copy kept elsewhere is offered by the name of the place it is on.
+        let copy_names = files.values().flatten().filter_map(|f| f.base.clone()).map(|b| (places.of(&b).map(|p| p.0.name.clone()).unwrap_or_default(), b)).map(|(name, b)| (b, name)).collect();
+        Ok(Library { server_id: super::server_id(app), titles, index, files, episodes, episode_title, watched: app.db.watched_all()?, sets, set_members, copy_names })
     }
 
     /// The titles whose posters stand for a whole view, Movies or Shows: the five most lately
@@ -511,7 +520,7 @@ impl Library {
                 }
                 if fields.has("path") {
                     put!("Path", json!(match self.files_of(t.id).first().filter(|_| movie) {
-                        Some(f) => format!("{}/{}", t.path, f.rel_path),
+                        Some(f) => t.file_path(f).to_string_lossy().to_string(),
                         None => t.path.clone(),
                     }));
                 }
@@ -571,7 +580,7 @@ impl Library {
                 }
                 if fields.has("path") {
                     if let Some(f) = self.episode_file(e) {
-                        put!("Path", json!(format!("{}/{}", t.path, f.rel_path)));
+                        put!("Path", json!(t.file_path(f).to_string_lossy().to_string()));
                     }
                 }
                 self.put_series_art(&mut o, t);
@@ -659,8 +668,8 @@ impl Library {
                 let audio = streams.iter().position(|s| s["Type"] == "Audio" && s["IsDefault"] == true).or_else(|| streams.iter().position(|s| s["Type"] == "Audio"));
                 let secs = if info.runtime_secs > 0.0 { info.runtime_secs } else { runtime };
                 let mut source = json!({
-                    "Protocol": "File", "Id": id.to_string(), "Path": format!("{}/{}", t.path, f.rel_path), "Type": "Default", "Container": container(f),
-                    "Size": f.size, "Name": version_name(f), "IsRemote": false, "ETag": format!("{:x}{:x}", f.id, f.size), "RunTimeTicks": ticks(secs),
+                    "Protocol": "File", "Id": id.to_string(), "Path": t.file_path(f).to_string_lossy().to_string(), "Type": "Default", "Container": container(f),
+                    "Size": f.size, "Name": match f.base.as_ref().and_then(|b| self.copy_names.get(b)).filter(|n| !n.is_empty()) { Some(place) => format!("{} · {place}", version_name(f)), None => version_name(f) }, "IsRemote": false, "ETag": format!("{:x}{:x}", f.id, f.size), "RunTimeTicks": ticks(secs),
                     "ReadAtNativeFramerate": false, "IgnoreDts": false, "IgnoreIndex": false, "GenPtsInput": false,
                     "SupportsTranscoding": false, "SupportsDirectStream": true, "SupportsDirectPlay": true, "IsInfiniteStream": false,
                     "RequiresOpening": false, "RequiresClosing": false, "RequiresLooping": false, "SupportsProbing": true, "HasSegments": false,

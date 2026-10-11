@@ -2,6 +2,7 @@
   import { api, type Kind, type Title } from '../lib/api';
   import { app, act, go, loadTitles } from '../lib/state.svelte';
   import Poster from '../components/Poster.svelte';
+  import { bytes } from '../lib/format';
 
   let kind = $state<Kind>('movie');
   let query = $state('');
@@ -19,6 +20,11 @@
   let monitored = $state(true);
   let searchNow = $state(true);
   let saving = $state(false);
+  // Where the new title is kept, when there is more than one place that can take it.
+  let places = $state<any[]>([]);
+  let placeId = $state(0);
+  api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
+  const choices = $derived(places.filter((p) => p.manage && p.online && (addingKind === 'movie' ? p.movie_root : p.series_root)));
 
   const addingKind = $derived(adding?.kind ?? kind);
   const profiles = $derived(app.profiles.filter((p) => p.kind === (addingKind === 'movie' ? 'movie' : 'tv')));
@@ -62,12 +68,13 @@
     profileId = of.find((p) => p.id === preferred)?.id ?? of[0]?.id ?? 0;
     monitored = true;
     searchNow = app.status?.mode === 'active';
+    placeId = places.find((p) => p.new_titles)?.id ?? 0;
   }
 
   async function add() {
     if (!adding) return;
     saving = true;
-    const t = await act(() => api.post<Title>('/titles', { kind: adding!.kind, tmdb_id: adding!.tmdb_id, tvmaze_id: adding!.tvmaze_id, profile_id: profileId, monitored, search: searchNow && monitored }), `Added ${adding.title}`);
+    const t = await act(() => api.post<Title>('/titles', { kind: adding!.kind, tmdb_id: adding!.tmdb_id, tvmaze_id: adding!.tvmaze_id, profile_id: profileId, monitored, search: searchNow && monitored, location: choices.length > 1 ? placeId : undefined }), `Added ${adding.title}`);
     saving = false;
     if (t) {
       adding = null;
@@ -137,6 +144,13 @@
           {#each profiles as p}<option value={p.id}>{p.name}</option>{/each}
         </select>
       </label>
+      {#if choices.length > 1}
+        <label class="field">Keep it on
+          <select class="input" bind:value={placeId}>
+            {#each choices as p}<option value={p.id}>{p.name}{p.free != null ? ` (${bytes(p.free)} free)` : ''}</option>{/each}
+          </select>
+        </label>
+      {/if}
       <label class="check"><input type="checkbox" bind:checked={monitored} /> Monitor, and get it when an acceptable release appears</label>
       <label class="check"><input type="checkbox" bind:checked={searchNow} disabled={!monitored || app.status?.mode !== 'active'} /> Search for it right away</label>
       {#if app.status?.mode !== 'active'}<p class="faint small">Spool is in shadow mode, so nothing will be downloaded.</p>{/if}

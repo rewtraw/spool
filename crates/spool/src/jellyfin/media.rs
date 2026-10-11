@@ -239,7 +239,7 @@ async fn learn_streams(app: &App, title: &Title, file: &MediaFile) -> bool {
     if file.media_info.as_ref().is_some_and(|m| !m.streams.is_empty()) {
         return false;
     }
-    let path = Path::new(&title.path).join(&file.rel_path);
+    let path = title.file_path(&file);
     let name = file.scene_name.clone().unwrap_or_else(|| file.rel_path.clone());
     let Ok(Some(probed)) = app.probe(&path, &name).await else { return false };
     if probed.streams.is_empty() {

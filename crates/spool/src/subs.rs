@@ -538,6 +538,10 @@ impl App {
     /// what it has learned about them; ones that have gone are forgotten.
     pub fn find_sidecars(&self, file_id: i64) -> Result<Vec<Sidecar>> {
         let (mut file, title) = self.file_and_title(file_id)?;
+        // A copy kept on another location is played as it is; what lies beside it is not tracked.
+        if file.base.is_some() {
+            return Ok(vec![]);
+        }
         let video = Path::new(&title.path).join(&file.rel_path);
         let Some(dir) = video.parent() else { return Ok(file.subtitles) };
         let name = stem(&video);
@@ -665,7 +669,7 @@ impl App {
     pub fn reference_for(&self, file_id: i64) -> Result<Reference> {
         let (file, title) = self.file_and_title(file_id)?;
         let info = file.media_info.as_ref();
-        Ok(Reference::new(&Path::new(&title.path).join(&file.rel_path), info.map(|m| m.audio_channels).unwrap_or(2.0), info.map(|m| m.runtime_secs).unwrap_or(0.0)))
+        Ok(Reference::new(&title.file_path(&file), info.map(|m| m.audio_channels).unwrap_or(2.0), info.map(|m| m.runtime_secs).unwrap_or(0.0)))
     }
 
     /// Say how a set of cues sits against a video, by its own subtitles if they settle it and
@@ -760,6 +764,9 @@ impl App {
                 }
             }
         }
+        if file.base.is_some() {
+            bail!("this copy is on another location, where Spool changes nothing");
+        }
         let video = Path::new(&title.path).join(&file.rel_path);
         if let Ok(Ok(hash)) = tokio::task::spawn_blocking(move || movie_hash(&video)).await {
             q.push(("moviehash".into(), hash));
@@ -842,6 +849,9 @@ impl App {
         if let Some(why) = self.title_locked(&title) {
             bail!(why);
         }
+        if file.base.is_some() {
+            bail!("this copy is on another location, where Spool changes nothing");
+        }
         let video = Path::new(&title.path).join(&file.rel_path);
         let tag = if c.hearing_impaired { format!("{}.sdh", c.language) } else { c.language.clone() };
         let path = video.with_file_name(format!("{}.{tag}.srt", stem(&video)));
@@ -896,7 +906,7 @@ impl App {
         let places = self.placement();
         // Only where a subtitle file could be put beside the video.
         for t in self.db.titles(None)?.into_iter().filter(|t| places.locked(t).is_none()) {
-            for f in self.db.files(t.id)? {
+            for f in self.db.files(t.id)?.into_iter().filter(|f| f.base.is_none()) {
                 let have: Vec<String> = embedded_languages(&f).into_iter().chain(f.subtitles.iter().map(|s| s.language.clone())).collect();
                 let missing: Vec<String> = wanted.iter().filter(|w| !have.contains(w)).cloned().collect();
                 if !missing.is_empty() {

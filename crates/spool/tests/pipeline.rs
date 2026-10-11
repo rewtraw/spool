@@ -2271,6 +2271,120 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_new_title_is_kept_on_the_location_the_user_chooses() {
+    use serde_json::{json, Value};
+    let source = details_source().await;
+    let w = World::with_sources(Mode::Shadow, Some((&source, &source))).await;
+    let api = spool::api::router(w.app.clone());
+    let (shelf, vault) = (w.root.join("Shelf"), w.root.join("Vault"));
+    for d in [&shelf, &vault] {
+        std::fs::create_dir_all(d.join("films")).unwrap();
+    }
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["tmdb_api_key"] = json!("key");
+    g["locations"] = json!([{"name": "Shelf", "movie_root": shelf.join("films"), "manage": true}, {"name": "Vault", "movie_root": vault.join("films"), "manage": false}]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    let add = |tmdb: u32, location: Value| {
+        let api = api.clone();
+        let profile = w.profile("movie");
+        async move { call(&api, "POST", "/api/titles", json!({"kind": "movie", "tmdb_id": tmdb, "profile_id": profile, "search": false, "location": location})).await }
+    };
+    // With none named, where new titles go by default: the main library.
+    let (_, heat) = add(949, Value::Null).await;
+    assert!(heat["path"].as_str().unwrap().starts_with(w.root.join("Movies").to_str().unwrap()), "{heat}");
+    // Named: on that location.
+    let (_, alpha) = add(111, json!(1)).await;
+    assert!(alpha["path"].as_str().unwrap().starts_with(shelf.join("films").to_str().unwrap()), "{alpha}");
+    // A location Spool only reads cannot take it, and says so; the title is not added elsewhere.
+    let (status, refused) = add(593, json!(2)).await;
+    assert!(status >= 400 && refused.to_string().contains("Vault cannot take a new film"), "{status} {refused}");
+    assert_eq!(w.app.db.titles(None).unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_title_may_be_held_in_two_places_and_played_from_whichever_is_there() {
+    use serde_json::{json, Value};
+    let source = details_source().await;
+    let w = World::with_sources(Mode::Active, Some((&source, &source))).await;
+    let api = spool::api::router(w.app.clone());
+    let lay = |path: PathBuf| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"not really video").unwrap();
+    };
+    // A film and the first episode of a series, in the main library.
+    let mut heat = w.movie("Heat", 1995, "tt0113277");
+    (heat.tmdb_id, heat.path) = (Some(949), w.root.join("Movies/Heat (1995)").to_string_lossy().to_string());
+    w.app.db.save_title(&mut heat).unwrap();
+    lay(w.root.join("Movies/Heat (1995)/Heat.1995.1080p.BluRay.x264-GRP.mkv"));
+    let (mut show, _) = w.series("Example World", 296762, &[(1, 1, "The Original"), (1, 2, "Chestnut")]);
+    show.path = w.root.join("TV Shows/Example World").to_string_lossy().to_string();
+    w.app.db.save_title(&mut show).unwrap();
+    lay(w.root.join("TV Shows/Example World/Season 01/Example.World.S01E01.1080p.BluRay.x264-GRP.mkv"));
+    w.app.scan_all().await.unwrap();
+    assert_eq!((w.app.db.files(heat.id).unwrap().len(), w.app.db.files(show.id).unwrap().len()), (1, 1));
+
+    // Elsewhere: another copy of the film, and both episodes of the series.
+    let (there, away) = (w.root.join("Elsewhere"), w.root.join("Elsewhere.away"));
+    lay(there.join("films/Heat (1995)/Heat.1995.2160p.UHD.BluRay.x265-GRP.mkv"));
+    lay(there.join("tv/Example World/Season 01/Example.World.S01E01.720p.HDTV.x264-GRP.mkv"));
+    lay(there.join("tv/Example World/Season 01/Example.World.S01E02.720p.HDTV.x264-GRP.mkv"));
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["tmdb_api_key"] = json!("key");
+    g["locations"] = json!([{"name": "Elsewhere", "movie_root": there.join("films"), "series_root": there.join("tv"), "manage": false}]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    let finished = |api: axum::Router| async move {
+        for _ in 0..200 {
+            let (_, f) = call(&api, "GET", "/api/locations/1/found", Value::Null).await;
+            if f["running"] == false {
+                return f;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the location was never finished with");
+    };
+    call(&api, "POST", "/api/locations/1/look", Value::Null).await;
+    let found = finished(api.clone()).await;
+    let notes: Vec<(String, String)> = found["found"].as_array().unwrap().iter().map(|f| (f["state"].as_str().unwrap().to_string(), f["note"].as_str().unwrap().to_string())).collect();
+    assert!(notes.iter().all(|(state, note)| state == "new" && note.contains("kept as another copy")), "{notes:?}");
+    let before = tree(&there);
+    assert_eq!(call(&api, "POST", "/api/locations/1/add", json!({})).await.0, 200);
+    finished(api.clone()).await;
+    assert_eq!(tree(&there), before, "nothing on the location was touched");
+    assert_eq!(w.app.db.titles(None).unwrap().len(), 2, "the same two titles, not copies of them");
+
+    // The film has two files: its own, and the copy as a version beside it.
+    let films = w.app.db.files(heat.id).unwrap();
+    let copy = films.iter().find(|f| f.base.is_some()).expect("the copy");
+    assert_eq!((films.len(), copy.extra, copy.base.as_deref()), (2, true, there.join("films/Heat (1995)").to_str()));
+    assert!(films.iter().any(|f| f.base.is_none() && !f.extra));
+    // The series takes from the copy only the episode it lacked.
+    let episodes = w.app.db.episodes(show.id).unwrap();
+    let files = w.app.db.files(show.id).unwrap();
+    let file_of = |n: u32| files.iter().find(|f| Some(f.id) == episodes.iter().find(|e| e.episode == n).unwrap().file_id).unwrap();
+    assert_eq!((files.len(), file_of(1).base.is_none(), file_of(2).base.is_some()), (2, true, true));
+
+    // A copy is played and never changed.
+    assert!(w.app.delete_file(copy.id).is_err());
+    let (_, page) = call(&api, "GET", &format!("/api/titles/{}", heat.id), Value::Null).await;
+    let shown = page["files"].as_array().unwrap().iter().find(|f| f["base"].is_string()).unwrap().clone();
+    assert_eq!((shown["copy_on"]["name"].as_str(), shown["copy_on"]["online"].as_bool()), (Some("Elsewhere"), Some(true)));
+    assert_eq!(call(&api, "DELETE", &format!("/api/titles/{}?delete_files=true", show.id), Value::Null).await.0, 200, "removing a title deletes its own files only");
+    assert!(there.join("tv/Example World/Season 01/Example.World.S01E02.720p.HDTV.x264-GRP.mkv").exists());
+
+    // The other place goes away: the copy is kept on record, and the film is still here.
+    std::fs::rename(&there, &away).unwrap();
+    w.app.watch_locations();
+    w.app.scan_all().await.unwrap();
+    assert_eq!(w.app.db.files(heat.id).unwrap().len(), 2, "a file that cannot be seen is not a file that has gone");
+    let heat_now = w.app.db.title(heat.id).unwrap().unwrap();
+    assert!(w.app.placement().playable(&heat_now) && w.app.title_online(&heat_now));
+    // And when it is the main library that is away, the copy alone keeps the film playable.
+    std::fs::rename(&away, &there).unwrap();
+    w.app.watch_locations();
+    assert!(w.app.placement().online_at(copy.base.as_deref().unwrap()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn what_lies_beside_a_film_is_recognised_shown_and_left_alone_by_an_upgrade() {
     use serde_json::{json, Value};
     let video = video_or_skip!();

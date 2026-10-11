@@ -57,7 +57,17 @@ impl Placement {
     /// Whether this title's files can be read right now. A title somewhere no location covers
     /// is taken to be on the main volume, as every title was before there were locations.
     pub fn online(&self, t: &Title) -> bool {
-        self.of(&t.path).map(|p| p.1).unwrap_or_else(|| self.main_online())
+        self.online_at(&t.path)
+    }
+
+    /// Whether the location a folder is on can be reached.
+    pub fn online_at(&self, path: &str) -> bool {
+        self.of(path).map(|p| p.1).unwrap_or_else(|| self.main_online())
+    }
+
+    /// Whether any of a title's files can be reached: in its own folder or a copy's.
+    pub fn playable(&self, t: &Title) -> bool {
+        self.online(t) || t.also.iter().any(|f| self.online_at(f))
     }
 
     /// Whether Spool leaves this title's files as they are.

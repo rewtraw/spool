@@ -21,6 +21,12 @@ pub struct ScanReport {
 impl App {
     /// Add a title from a metadata lookup.
     pub async fn add_title(&self, kind: Kind, tmdb_id: Option<u32>, tvmaze_id: Option<u32>, profile_id: i64, monitored: bool, search: bool) -> Result<Title> {
+        self.add_title_on(kind, tmdb_id, tvmaze_id, profile_id, monitored, search, None).await
+    }
+
+    /// Add a title, on the location named or, with none named, the one new titles go to.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_title_on(&self, kind: Kind, tmdb_id: Option<u32>, tvmaze_id: Option<u32>, profile_id: i64, monitored: bool, search: bool, location: Option<u32>) -> Result<Title> {
         let g = self.settings.general();
         let (mut title, episodes) = match kind {
             Kind::Movie => (self.meta.movie(&g.tmdb_api_key, tmdb_id.ok_or_else(|| anyhow!("a TMDB id is required"))?).await?, vec![]),
@@ -36,7 +42,7 @@ impl App {
         // Before anything is searched for: is it anime, and is this film a series somewhere else?
         self.learn_anime(&mut title).await;
         self.ask_series_source(&mut title).await;
-        self.ensure_title_path(&mut title)?;
+        self.ensure_title_path_on(&mut title, location)?;
         self.db.save_title(&mut title)?;
         for mut e in episodes {
             e.title_id = title.id;
@@ -254,20 +260,40 @@ impl App {
         Ok(())
     }
 
-    /// Compare one title's folder with the database. Never writes to the media volume.
+    /// Compare one title's folders with the database: its own, and any others that hold it on
+    /// other locations. Never writes to the media volume. A folder that cannot be reached is
+    /// passed over: files that cannot be seen are not files that have gone.
     pub async fn scan_title(&self, id: i64, report: &mut ScanReport) -> Result<()> {
         let title = self.db.title(id)?.ok_or_else(|| anyhow!("no such title"))?;
         report.titles += 1;
-        // Files that cannot be seen are not files that have gone.
-        if title.path.is_empty() || !self.title_online(&title) {
+        if title.path.is_empty() {
             return Ok(());
         }
-        let root = Path::new(&title.path);
+        let places = self.placement();
+        if places.online(&title) {
+            self.scan_folder(&title, None, report).await?;
+        }
+        for folder in title.also.iter().filter(|f| places.online_at(f)) {
+            self.scan_folder(&title, Some(folder), report).await?;
+        }
+        Ok(())
+    }
+
+    /// One folder of a title: its own when `copy` is None, else a copy of it kept elsewhere.
+    /// In the title's own folder every film and episode is a library file. In a copy, a film
+    /// is a version kept beside the title's own, and an episode is taken only where the
+    /// title has no file for it, so that a series may have its seasons in two places.
+    async fn scan_folder(&self, title: &Title, copy: Option<&String>, report: &mut ScanReport) -> Result<()> {
+        let id = title.id;
+        let root = Path::new(copy.map(String::as_str).unwrap_or(&title.path));
         // Only the film or the episodes are library files. Trailers, featurettes, samples and
         // artwork are noted beside the title and otherwise left out of everything.
-        let (on_disk, local) = self.look_in_folder(&title).await;
+        let (on_disk, local) = {
+            let (root, kind) = (root.to_path_buf(), title.kind);
+            tokio::task::spawn_blocking(move || crate::local::survey(&root, kind)).await.unwrap_or_default()
+        };
         report.files_found += on_disk.len();
-        let known = self.db.files(id)?;
+        let known: Vec<MediaFile> = self.db.files(id)?.into_iter().filter(|f| f.base.as_ref() == copy).collect();
 
         for f in &known {
             if !on_disk.contains(&f.rel_path) {
@@ -288,6 +314,22 @@ impl App {
             let size = std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0);
             let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let flavor = title.kind.flavor();
+            let episode_ids: Vec<i64> = match title.kind {
+                Kind::Movie => vec![],
+                Kind::Series => {
+                    let ids: Vec<i64> = parse_episode_path(&abs.to_string_lossy())
+                        .map(|p| episodes.iter().filter(|e| e.season == p.season_number() && p.episode_numbers.contains(&e.episode)).filter(|e| copy.is_none() || e.file_id.is_none()).map(|e| e.id).collect())
+                        .unwrap_or_default();
+                    if ids.is_empty() {
+                        // In a copy, an episode the title already has is simply not needed.
+                        if copy.is_none() {
+                            report.unmatched.push(abs.to_string_lossy().to_string());
+                        }
+                        continue;
+                    }
+                    ids
+                }
+            };
             let mut file = MediaFile {
                 id: 0,
                 title_id: id,
@@ -300,27 +342,15 @@ impl App {
                 scene_name: None,
                 languages: vec![],
                 added_at: now(),
-                extra: false,
+                extra: copy.is_some() && title.kind == Kind::Movie,
                 subtitles: vec![],
+                base: copy.cloned(),
             };
-            let episode_ids: Vec<i64> = match title.kind {
-                Kind::Movie => {
-                    if let Some(p) = parse_movie_path(&abs.to_string_lossy()) {
-                        file.edition = p.edition;
-                    }
-                    vec![]
+            if title.kind == Kind::Movie {
+                if let Some(p) = parse_movie_path(&abs.to_string_lossy()) {
+                    file.edition = p.edition;
                 }
-                Kind::Series => {
-                    let ids: Vec<i64> = parse_episode_path(&abs.to_string_lossy())
-                        .map(|p| episodes.iter().filter(|e| e.season == p.season_number() && p.episode_numbers.contains(&e.episode)).map(|e| e.id).collect())
-                        .unwrap_or_default();
-                    if ids.is_empty() {
-                        report.unmatched.push(abs.to_string_lossy().to_string());
-                        continue;
-                    }
-                    ids
-                }
-            };
+            }
             self.db.tx(|tx| {
                 tx.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1,?2,?3,?4)", rusqlite::params![id, file.rel_path, file.size as i64, serde_json::to_string(&file)?])?;
                 let fid = tx.last_insert_rowid();
@@ -331,12 +361,13 @@ impl App {
             })?;
             report.files_added += 1;
         }
-        self.settle_versions(&title, &known)?;
-        self.keep_local(id, local)?;
+        if copy.is_none() {
+            self.settle_versions(title, &known)?;
+            self.keep_local(id, local)?;
+        }
         Ok(())
     }
 
-    /// Read a title's folder off to one side: a slow disk must not hold everything else up.
     async fn look_in_folder(&self, title: &Title) -> (Vec<String>, crate::local::Local) {
         let (root, kind) = (std::path::PathBuf::from(&title.path), title.kind);
         tokio::task::spawn_blocking(move || crate::local::survey(&root, kind)).await.unwrap_or_default()
@@ -440,6 +471,9 @@ impl App {
                 if expected == f.rel_path {
                     same += 1;
                 } else {
+                    if f.base.is_some() {
+                        continue;
+                    }
                     differ.push((format!("{}/{}", t.path, f.rel_path), format!("{}/{}", t.path, expected)));
                 }
             }

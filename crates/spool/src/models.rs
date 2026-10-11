@@ -182,6 +182,10 @@ pub struct Title {
     /// When the anime sources were last asked about it.
     #[serde(default)]
     pub anime_checked_at: i64,
+    /// Other folders that hold this title too, each on another location: a second copy of a
+    /// film, or the seasons of a series the title's own folder lacks.
+    #[serde(default)]
+    pub also: Vec<String>,
 }
 
 impl Default for Title {
@@ -203,6 +207,16 @@ pub struct SeriesTwin {
 }
 
 impl Title {
+    /// The folder a file of this title is in: the title's own, or the copy's.
+    pub fn folder_of<'a>(&'a self, f: &'a MediaFile) -> &'a str {
+        f.base.as_deref().unwrap_or(&self.path)
+    }
+
+    /// Where a file of this title is.
+    pub fn file_path(&self, f: &MediaFile) -> std::path::PathBuf {
+        std::path::Path::new(self.folder_of(f)).join(&f.rel_path)
+    }
+
     /// A picture in the title's own folder, written as an address: "file:" and its path, then
     /// its size and date, so the address changes when the picture does.
     fn local_art(&self, kind: crate::local::ArtKind) -> Option<String> {
@@ -336,6 +350,10 @@ pub struct MediaFile {
     /// Subtitle files kept beside the video.
     #[serde(default)]
     pub subtitles: Vec<crate::subs::Sidecar>,
+    /// The folder the file is in, when that is not the title's own: a copy of the title kept
+    /// on another location. Spool lists and plays such a file and never changes it.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 /// Where one row of the library stands in the order of changes.

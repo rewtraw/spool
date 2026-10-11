@@ -54,11 +54,23 @@ The result comes in groups:
 | Already in the library | The title is already recorded with a file, here or on another location. It is skipped. |
 | Not recognised | Nothing matched. Renaming the folder to `Title (Year)` and looking again usually settles it. |
 
-A title that is in the library **without a file**, while the folder here has one, is listed under To add. This is what a library looks like after coming over from Radarr and Sonarr: the catalogue came across, and the files are where they always were. Adding does not make a second copy of the title; it points the one you have at the folder that holds its file, and keeps its monitoring and profile.
+A folder may turn out to hold a title that is already in the library. It is still listed under To add, and adding does not make a second entry for it:
+
+- **The title has no file yet.** This is what a library looks like after coming over from Radarr and Sonarr: the catalogue came across, and the files are where they always were. The title is pointed at the folder that holds its file, and keeps its monitoring and profile.
+- **The title has its files somewhere else.** The folder is kept as another copy of it. See [One title in two places](#one-title-in-two-places).
 
 Then **Add to the library**. On a managed location you can choose to monitor what is added, so that Spool looks for upgrades and missing episodes; leave that off for a library you want left as it is. A location that is only read does not offer the choice, since nothing there is ever searched for.
 
 After adding, a title whose file runs much longer or shorter than the film it was matched to is noted, so a wrong match stands out.
+
+## One title in two places
+
+A title has one folder of its own, where Spool files what it downloads for it. It may also be held in folders on other locations:
+
+- **A film** kept in two places has both copies listed on its page, and players are offered both as versions, the copy named for the place it is on.
+- **A series** takes from the other folder the episodes its own folder lacks, so its seasons can be split between two places. An episode held in both is played from the title's own folder.
+
+Spool plays a copy and never changes it, whatever kind of location it is on: it is not replaced by an upgrade, renamed, given subtitles or deleted, and removing the title's files leaves it where it is. If one place is away, the title stays playable from the other.
 
 ## When a location cannot be reached
 
@@ -76,7 +88,7 @@ Spool checks each location on a thread of its own with a short wait, because a n
 
 ## Where new titles go
 
-Once there is a managed location beside the main one, "Put new titles on" chooses which receives titles you add. Titles already in the library stay where they are. If the chosen location cannot be reached when a title is added, the title goes to the main library.
+Once there is a managed location beside the main one, "Put new titles on" chooses which receives titles you add, and the box for adding a title under Discover offers the same choice for that one title. Titles already in the library stay where they are. If the chosen location cannot be reached when a title is added, the title goes to the main library.
 
 The downloads folder is one folder, under Settings, General, Folders. A download filed onto a different disk is copied there and checked instead of moved, which takes longer for a large file.
 
@@ -92,6 +104,6 @@ NFS suits a share that is only read. If Spool is to manage the location, the use
 
 ## Limits
 
-- A title lives in one location. If the same film has a file on two, the second is reported as already in the library and skipped.
+- New downloads for a title go to its own folder only. Copies elsewhere are found by looking through a location, not made by Spool.
 - Looking through folders is offered for further locations, not for the main one. A main library comes in through `spool migrate` or from Plex; see [Your library and what Spool does to it](your-library.md#bringing-in-a-library-you-already-have).
 - Each location has its own recycle folder, so recycling never copies a file from one disk to another.

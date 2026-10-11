@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#one-title-in-two-places">One title in two places</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -222,9 +222,20 @@
 <td>Nothing matched. Renaming the folder to <code>Title (Year)</code> and looking again usually settles it.</td>
 </tr>
 </tbody></table></div>
-<p>A title that is in the library <strong>without a file</strong>, while the folder here has one, is listed under To add. This is what a library looks like after coming over from Radarr and Sonarr: the catalogue came across, and the files are where they always were. Adding does not make a second copy of the title; it points the one you have at the folder that holds its file, and keeps its monitoring and profile.</p>
+<p>A folder may turn out to hold a title that is already in the library. It is still listed under To add, and adding does not make a second entry for it:</p>
+<ul>
+<li><strong>The title has no file yet.</strong> This is what a library looks like after coming over from Radarr and Sonarr: the catalogue came across, and the files are where they always were. The title is pointed at the folder that holds its file, and keeps its monitoring and profile.</li>
+<li><strong>The title has its files somewhere else.</strong> The folder is kept as another copy of it. See <a href="#one-title-in-two-places">One title in two places</a>.</li>
+</ul>
 <p>Then <strong>Add to the library</strong>. On a managed location you can choose to monitor what is added, so that Spool looks for upgrades and missing episodes; leave that off for a library you want left as it is. A location that is only read does not offer the choice, since nothing there is ever searched for.</p>
 <p>After adding, a title whose file runs much longer or shorter than the film it was matched to is noted, so a wrong match stands out.</p>
+<h2 id="one-title-in-two-places"><a href="#one-title-in-two-places">One title in two places</a></h2>
+<p>A title has one folder of its own, where Spool files what it downloads for it. It may also be held in folders on other locations:</p>
+<ul>
+<li><strong>A film</strong> kept in two places has both copies listed on its page, and players are offered both as versions, the copy named for the place it is on.</li>
+<li><strong>A series</strong> takes from the other folder the episodes its own folder lacks, so its seasons can be split between two places. An episode held in both is played from the title&#39;s own folder.</li>
+</ul>
+<p>Spool plays a copy and never changes it, whatever kind of location it is on: it is not replaced by an upgrade, renamed, given subtitles or deleted, and removing the title&#39;s files leaves it where it is. If one place is away, the title stays playable from the other.</p>
 <h2 id="when-a-location-cannot-be-reached"><a href="#when-a-location-cannot-be-reached">When a location cannot be reached</a></h2>
 <p>A NAS that is switched off, or a disk that is unplugged, takes its titles offline:</p>
 <ul>
@@ -237,7 +248,7 @@
 <p>When the location comes back, its titles come back with it. Nothing needs doing.</p>
 <p>Spool checks each location on a thread of its own with a short wait, because a network share that has gone can otherwise keep a program waiting for minutes.</p>
 <h2 id="where-new-titles-go"><a href="#where-new-titles-go">Where new titles go</a></h2>
-<p>Once there is a managed location beside the main one, &quot;Put new titles on&quot; chooses which receives titles you add. Titles already in the library stay where they are. If the chosen location cannot be reached when a title is added, the title goes to the main library.</p>
+<p>Once there is a managed location beside the main one, &quot;Put new titles on&quot; chooses which receives titles you add, and the box for adding a title under Discover offers the same choice for that one title. Titles already in the library stay where they are. If the chosen location cannot be reached when a title is added, the title goes to the main library.</p>
 <p>The downloads folder is one folder, under Settings, General, Folders. A download filed onto a different disk is copied there and checked instead of moved, which takes longer for a large file.</p>
 <h2 id="mounting-a-share"><a href="#mounting-a-share">Mounting a share</a></h2>
 <p>How to mount a share is the system&#39;s business, not Spool&#39;s. What matters to Spool is that it is mounted at the same path each time and comes back by itself after a restart.</p>
@@ -249,7 +260,7 @@
 <p>NFS suits a share that is only read. If Spool is to manage the location, the user Spool runs as needs to be able to write there.</p>
 <h2 id="limits"><a href="#limits">Limits</a></h2>
 <ul>
-<li>A title lives in one location. If the same film has a file on two, the second is reported as already in the library and skipped.</li>
+<li>New downloads for a title go to its own folder only. Copies elsewhere are found by looking through a location, not made by Spool.</li>
 <li>Looking through folders is offered for further locations, not for the main one. A main library comes in through <code>spool migrate</code> or from Plex; see <a href="your-library.html#bringing-in-a-library-you-already-have">Your library and what Spool does to it</a>.</li>
 <li>Each location has its own recycle folder, so recycling never copies a file from one disk to another.</li>
 </ul>

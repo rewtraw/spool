@@ -221,7 +221,7 @@ impl App {
             named.year = f.notes.year;
         }
         let mut found = Found { folder: folder.to_string_lossy().to_string(), kind, name: named.name.clone(), year: named.year, files, bytes, state: "unknown".into(), note: String::new(), matches: vec![] };
-        if let Some(t) = here.iter().find(|t| Path::new(&t.path) == folder) {
+        if let Some(t) = here.iter().find(|t| Path::new(&t.path) == folder || t.also.iter().any(|a| Path::new(a) == folder)) {
             found.state = "have".into();
             found.note = "already in the library".into();
             found.matches = vec![as_match(t)];
@@ -279,6 +279,12 @@ impl App {
                     Some(mine) if files > 0 && self.db.files(mine.id).map(|f| f.is_empty()).unwrap_or(false) => {
                         found.state = "new".into();
                         found.note = "in the library without a file; it will be pointed at this folder".into();
+                    }
+                    // In the library with its files somewhere else: this folder is a second copy
+                    // of it, or holds the seasons the other lacks. Recorded beside the first.
+                    Some(mine) if files > 0 && !mine.path.is_empty() => {
+                        found.state = "new".into();
+                        found.note = format!("also in the library, at {}; this folder will be kept as another copy of it", mine.path);
                     }
                     Some(mine) => {
                         found.state = "have".into();
@@ -345,13 +351,35 @@ impl App {
         Ok((mine, String::new()))
     }
 
+    /// Record a folder on another location as a further copy of a title that has its files
+    /// elsewhere. A film there becomes a version to choose from; of a series, the episodes
+    /// the title's own folder lacks are taken from it.
+    async fn copy_here(&self, mut mine: Title, folder: &str) -> Result<(Title, String)> {
+        if !mine.also.iter().any(|a| a == folder) {
+            mine.also.push(folder.to_string());
+            self.db.save_title(&mut mine)?;
+        }
+        let mut report = crate::catalog::ScanReport::default();
+        self.scan_title(mine.id, &mut report).await?;
+        self.db.add_history(Some(mine.id), "adopted", serde_json::json!({"path": folder, "files": report.files_added, "copy": true}))?;
+        Ok((mine, String::new()))
+    }
+
+    /// A title already in the library that a folder turns out to hold: pointed at the folder
+    /// if it had no file, or given the folder as a further copy if it had.
+    async fn known_here(&self, mine: Title, folder: &str) -> Result<(Title, String)> {
+        if self.db.files(mine.id)?.is_empty() {
+            self.point_here(mine, folder).await
+        } else {
+            self.copy_here(mine, folder).await
+        }
+    }
+
     async fn adopt_one(&self, kind: Kind, folder: &str, m: &Match, monitor: bool) -> Result<(Title, String)> {
         let g = self.settings.general();
         // Known already by the ids the match carries: no need to ask the sources about it.
         if let Some(mine) = self.db.find_title(kind, m.tmdb_id, m.tvdb_id)? {
-            if self.db.files(mine.id)?.is_empty() {
-                return self.point_here(mine, folder).await;
-            }
+            return self.known_here(mine, folder).await;
         }
         let (mut title, episodes) = match kind {
             Kind::Movie => (self.meta.movie(&g.tmdb_api_key, m.tmdb_id.ok_or_else(|| anyhow!("no TMDB id"))?).await?, vec![]),
@@ -362,10 +390,7 @@ impl App {
             },
         };
         if let Some(mine) = self.db.find_title(kind, title.tmdb_id, title.tvdb_id)? {
-            if self.db.files(mine.id)?.is_empty() {
-                return self.point_here(mine, folder).await;
-            }
-            bail!("{} is already in the library{}", title.title, if mine.path.is_empty() { String::new() } else { format!(", at {}", mine.path) });
+            return self.known_here(mine, folder).await;
         }
         title.path = folder.to_string();
         title.monitored = monitor;

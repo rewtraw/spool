@@ -441,6 +441,7 @@ impl App {
                         added_at: chrono::DateTime::parse_from_rfc3339(&st(f, "dateAdded")).map(|d| d.timestamp()).unwrap_or_else(|_| now()),
                         extra: false,
                         subtitles: vec![],
+                        base: None,
                     };
                     self.db.tx(|tx| {
                         tx.execute("DELETE FROM files WHERE title_id = ?1", [t.id])?;
@@ -562,6 +563,7 @@ impl App {
                         added_at: chrono::DateTime::parse_from_rfc3339(&st(f, "dateAdded")).map(|d| d.timestamp()).unwrap_or_else(|_| now()),
                         extra: false,
                         subtitles: vec![],
+                        base: None,
                     };
                     let id = self.db.with(|c| {
                         c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1,?2,?3,?4)", rusqlite::params![t.id, file.rel_path, file.size as i64, serde_json::to_string(&file).unwrap_or_default()])?;

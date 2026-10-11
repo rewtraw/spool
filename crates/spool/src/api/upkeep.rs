@@ -150,7 +150,7 @@ pub(super) async fn free_title(State(app): State<App>, Path(id): Path<i64>) -> R
     for a in app.db.title_acquisitions(id)?.into_iter().filter(|a| a.state.is_active()) {
         app.cancel_acquisition(a.id, false).await?;
     }
-    let files = app.db.files(id)?;
+    let files: Vec<MediaFile> = app.db.files(id)?.into_iter().filter(|f| f.base.is_none()).collect();
     let bytes: u64 = files.iter().map(|f| f.size).sum();
     for f in &files {
         app.delete_file(f.id)?;

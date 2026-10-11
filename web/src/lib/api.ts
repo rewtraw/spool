@@ -181,6 +181,9 @@ export interface Episode {
 export interface MediaFile {
   id: number;
   rel_path: string;
+  /** The folder the file is in when it is a copy kept on another location, and that location. */
+  base?: string | null;
+  copy_on?: { name: string; online: boolean } | null;
   size: number;
   quality: Quality;
   release_group?: string | null;

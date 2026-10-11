@@ -312,12 +312,15 @@
         {#each t.files as f (f.id)}
           <div class="card pad file">
             <div class="grow">
-              <div class="row wrap"><span class="chip ok">{qualityName(f.quality, 'movie')}</span>{#if f.edition}<span class="chip">{f.edition}</span>{/if}{#if t.files.length > 1}<span class="chip {f.extra ? '' : 'accent'}">{f.extra ? 'Extra version' : 'Main'}</span>{/if}<span class="muted">{bytes(f.size)}</span><span class="muted">{media(f)}</span></div>
-              <div class="mono faint break" style="margin-top:6px">{t.path}/{f.rel_path}</div>
-              <Subtitles fileId={f.id} />
+              <div class="row wrap"><span class="chip ok">{qualityName(f.quality, 'movie')}</span>{#if f.edition}<span class="chip">{f.edition}</span>{/if}{#if f.base}<span class="chip">Copy on {f.copy_on?.name ?? 'another location'}</span>{:else if t.files.length > 1}<span class="chip {f.extra ? '' : 'accent'}">{f.extra ? 'Extra version' : 'Main'}</span>{/if}<span class="muted">{bytes(f.size)}</span><span class="muted">{media(f)}</span></div>
+              <div class="mono faint break" style="margin-top:6px">{f.base ?? t.path}/{f.rel_path}</div>
+              {#if f.base}<p class="faint small" style="margin:6px 0 0">A copy kept on {f.copy_on?.name ?? 'another location'}{f.copy_on && !f.copy_on.online ? ', which cannot be reached right now' : ''}. Spool plays it and changes nothing there.</p>
+              {:else}<Subtitles fileId={f.id} />{/if}
             </div>
+            {#if !f.base}
             {#if t.files.length > 1}<button class="btn small ghost" title={f.extra ? 'Upgrades and smaller copies will replace this file' : 'Keep this file whatever else is downloaded; upgrades replace only the main file'} onclick={() => setExtra(f, !f.extra)}>{f.extra ? 'Make main' : 'Keep as extra'}</button>{/if}
             <button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>
+            {/if}
           </div>
         {/each}
         {#if t.files.length > 1}<p class="faint small" style="margin-top:8px">Upgrades and smaller copies replace the main file. Extra versions stay until you delete them. To add one, use "Keep both" on a release below.</p>{/if}

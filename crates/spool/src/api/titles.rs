@@ -103,7 +103,19 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
     let (files, eps, profiles, active) = (app.db.file_counts()?, app.db.episode_counts()?, app.db.profiles()?, app.db.active_acquisitions()?);
     let mut v = summarize(&t, &files, &eps, &profiles, &active, &app.placement());
     v["episodes"] = json!(app.db.episodes(id)?);
-    v["files"] = json!(app.db.files(id)?);
+    // Each file with the place it is on, when it is a copy kept elsewhere than the title's own folder.
+    let places = app.placement();
+    v["files"] = json!(app
+        .db
+        .files(id)?
+        .into_iter()
+        .map(|f| {
+            let place = f.base.as_deref().and_then(|b| places.of(b)).map(|p| json!({"name": p.0.name, "online": p.1}));
+            let mut row = serde_json::to_value(&f).unwrap_or(Value::Null);
+            row["copy_on"] = place.unwrap_or(Value::Null);
+            row
+        })
+        .collect::<Vec<_>>());
     v["decisions"] = json!(app.rejudge(&app.title_context(t.clone())?, app.db.decisions(id)?));
     v["history"] = json!(app.db.history(Some(id), 100)?);
     v["acquisitions"] = json!(app.db.title_acquisitions(id)?);
@@ -126,13 +138,16 @@ pub(super) struct AddTitle {
     monitored: bool,
     #[serde(default)]
     search: bool,
+    /// The location to keep it on; the one new titles go to when not given.
+    #[serde(default)]
+    location: Option<u32>,
 }
 pub(super) fn yes() -> bool {
     true
 }
 
 pub(super) async fn add_title(State(app): State<App>, Json(b): Json<AddTitle>) -> R<Title> {
-    Ok(Json(app.add_title(b.kind, b.tmdb_id, b.tvmaze_id, b.profile_id, b.monitored, b.search).await?))
+    Ok(Json(app.add_title_on(b.kind, b.tmdb_id, b.tvmaze_id, b.profile_id, b.monitored, b.search, b.location).await?))
 }
 
 /// Turn a film that is posted in episodes into the series it is listed as.
@@ -166,7 +181,8 @@ pub(super) async fn delete_title(State(app): State<App>, Path(id): Path<i64>, Qu
         app.cancel_acquisition(a.id, false).await?;
     }
     if q.get("delete_files").map(|v| v == "true").unwrap_or(false) {
-        for f in app.db.files(id)? {
+        // Its own files. A copy kept on another location stays where it is.
+        for f in app.db.files(id)?.into_iter().filter(|f| f.base.is_none()) {
             app.delete_file(f.id)?;
         }
     }
@@ -213,7 +229,7 @@ pub(super) async fn bulk_titles(State(app): State<App>, Json(b): Json<Value>) ->
                     app.cancel_acquisition(a.id, false).await?;
                 }
                 if delete_files {
-                    for f in app.db.files(*id)? {
+                    for f in app.db.files(*id)?.into_iter().filter(|f| f.base.is_none()) {
                         bytes += f.size;
                         app.delete_file(f.id)?;
                     }
