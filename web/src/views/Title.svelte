@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type Decision, type Episode, type MediaFile, type Title } from '../lib/api';
-  import { app, act, go, loadTitles } from '../lib/state.svelte';
+  import { app, act, go, loadTitles, toast } from '../lib/state.svelte';
   import { age, ago, bytes, fullDate, pct, qualityName, STATE_LABEL } from '../lib/format';
   import Subtitles from '../components/Subtitles.svelte';
   import Poster from '../components/Poster.svelte';
@@ -112,6 +112,42 @@
     }
   }
 
+  // ---- compact versions: a smaller copy made here and kept beside the original
+  const compactOf = (fileId: number) => (t?.files ?? []).find((f) => f.compact_of === fileId);
+  const compactCount = $derived((t?.files ?? []).filter((f) => f.compact_of).length);
+  const compacting = $derived((t?.files ?? []).some((f) => f.compacting));
+  let making = $state<any>(null);
+  // An encode sends no events as it goes, so the page asks while one of this title's is in line.
+  $effect(() => {
+    if (!compacting) {
+      making = null;
+      return;
+    }
+    const look = async () => {
+      making = (await api.get<any>('/activity').catch(() => null))?.compact?.now ?? null;
+      if (making?.title_id !== id) load();
+    };
+    look();
+    const timer = setInterval(look, 3000);
+    return () => clearInterval(timer);
+  });
+  async function makeCompact(f?: MediaFile) {
+    const r = await act(() => api.post<any>('/compact', f ? { file_ids: [f.id] } : { title_ids: [id] }));
+    if (r) toast(r.queued ? `${r.queued === 1 ? 'A compact version is' : `${r.queued} compact versions are`} in line. Progress is in Activity.${r.refused?.length ? ` ${r.refused.length} left out: ${r.refused[0].why}.` : ''}` : `None to make: ${r.refused?.[0]?.why ?? 'nothing would gain from one'}.`);
+    load();
+  }
+  async function cancelCompact(f?: MediaFile) {
+    const ids = f ? [f.id] : (t?.files ?? []).filter((x) => x.compacting).map((x) => x.id);
+    await act(() => api.post('/compact/cancel', { file_ids: ids }), 'Cancelled');
+    load();
+  }
+  async function keepCompact(f: MediaFile) {
+    const from = fileById.get(f.compact_of ?? 0);
+    if (!confirm(`Keep only the compact version of ${t?.title}?\n\nThe original${from ? ` (${bytes(from.size)})` : ''} is deleted${recycleDays > 0 ? ` and kept ${recycleDays} days in the recycle folder` : ' for good'}, and this ${bytes(f.size)} copy becomes the film.`)) return;
+    await act(() => api.post(`/files/${f.id}/keep-compact`), 'The compact version is now the film');
+    load();
+  }
+
   let openSubs = $state<Record<number, boolean>>({});
   async function setExtra(f: any, extra: boolean) {
     await act(() => api.patch(`/files/${f.id}`, { extra }));
@@ -201,6 +237,11 @@
     load();
   }
   async function deleteFile(f: MediaFile) {
+    if (f.compact_of) {
+      if (!confirm(`Delete this compact version? The original is not touched, and another can be made.\n\n${f.rel_path}`)) return;
+      await act(() => api.del(`/files/${f.id}`), 'Compact version deleted');
+      return load();
+    }
     const keep = recycleDays > 0;
     if (!confirm(`${keep ? `Delete this file? It is kept for ${recycleDays} days before it is removed for good.` : 'Permanently delete this file?'}\n\n${f.rel_path}`)) return;
     await act(() => api.del(`/files/${f.id}`), keep ? 'Deleted. Kept in the recycle folder for now.' : 'Deleted');
@@ -331,6 +372,10 @@
         {#if isActive}<button class="btn" disabled={!!searching} onclick={() => search({}, false, 'look')}>{searching === 'look' ? 'Searching…' : 'Show releases'}</button>{/if}
         {#if isActive && oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ compact: true }, true, 'compact')}>{searching === 'compact' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
         {/if}
+        {#if t.kind === 'series' && t.files.length}
+          {#if compacting}<button class="btn ghost" onclick={() => cancelCompact()}>Cancel compact versions</button>
+          {:else}<button class="btn ghost" title="Make a smaller copy of each episode that would gain from one, kept beside it for playing away from home" onclick={() => makeCompact()}>Make compact versions</button>{/if}
+        {/if}
         <button class="btn ghost" onclick={async () => { await act(() => api.post(`/titles/${id}/refresh`), 'Details refreshed'); load(); }}>Refresh details</button>
         <button class="btn ghost" onclick={async () => { const r = await act(() => api.post(`/titles/${id}/scan`)); if (r) { searchMessage = `Scan: ${r.files_found} files on disk, ${r.files_added} added, ${r.files_missing} missing`; load(); } }}>Rescan folder</button>
         <button class="btn ghost danger" onclick={() => (confirmDelete = true)}>Remove</button>
@@ -366,13 +411,28 @@
         {#each t.files as f (f.id)}
           <div class="card pad file">
             <div class="grow">
-              <div class="row wrap"><span class="chip ok">{qualityName(f.quality, 'movie')}</span>{#if f.edition}<span class="chip">{f.edition}</span>{/if}{#if f.base}<span class="chip">Copy on {f.copy_on?.name ?? 'another location'}</span>{:else if t.files.length > 1}<span class="chip {f.extra ? '' : 'accent'}">{f.extra ? 'Extra version' : 'Main'}</span>{/if}<span class="muted">{bytes(f.size)}</span><span class="muted">{media(f)}</span></div>
+              <div class="row wrap"><span class="chip ok">{qualityName(f.quality, 'movie')}</span>{#if f.edition}<span class="chip">{f.edition}</span>{/if}{#if f.compact_of}<span class="chip accent">Compact version</span>{#if f.base}<span class="chip">On {f.copy_on?.name ?? 'another location'}</span>{/if}{:else if f.base}<span class="chip">Copy on {f.copy_on?.name ?? 'another location'}</span>{:else if t.files.length > 1}<span class="chip {f.extra ? '' : 'accent'}">{f.extra ? 'Extra version' : 'Main'}</span>{/if}<span class="muted">{bytes(f.size)}</span><span class="muted">{media(f)}</span></div>
               <div class="mono faint break" style="margin-top:6px">{f.base ?? t.path}/{f.rel_path}</div>
-              {#if f.base}<p class="faint small" style="margin:6px 0 0">A copy kept on {f.copy_on?.name ?? 'another location'}{f.copy_on && !f.copy_on.online ? ', which cannot be reached right now' : ''}. Spool plays it and changes nothing there.</p>
+              {#if f.compact_of}
+                {@const from = fileById.get(f.compact_of)}
+                <p class="faint small" style="margin:6px 0 0">A smaller copy Spool made{from ? ` of the ${bytes(from.size)} file above, at ${Math.round((f.size / from.size) * 100)}% of its size` : ''}. Players are offered it as a version; searches and upgrades go on treating the original as the film.</p>
+              {:else if f.base}<p class="faint small" style="margin:6px 0 0">A copy kept on {f.copy_on?.name ?? 'another location'}{f.copy_on && !f.copy_on.online ? ', which cannot be reached right now' : ''}. Spool plays it and changes nothing there.</p>
               {:else}<Subtitles fileId={f.id} />{/if}
+              {#if !f.compact_of && !compactOf(f.id)}
+                {#if f.compacting}
+                  <p class="where warn" style="margin:8px 0 0">{#if making?.file_id === f.id && making.total_ms}Making a compact version: {Math.round(pct(making.done_ms, making.total_ms))}%{making.speed ? `, at ${making.speed.toFixed(1)}× the speed it plays` : ''}.{:else}Waiting for a compact version to be made.{/if} <button class="btn small" onclick={() => cancelCompact(f)}>Cancel</button></p>
+                {:else if f.compact?.can}
+                  <p class="faint small" style="margin:8px 0 0"><button class="btn small" onclick={() => makeCompact(f)}>Make a compact version</button> About {bytes(f.compact.bytes ?? 0)}, kept beside this file for playing away from home.</p>
+                {:else if f.compact?.why}
+                  <p class="faint small" style="margin:8px 0 0">No compact version: {f.compact.why}.</p>
+                {/if}
+              {/if}
             </div>
-            {#if !f.base}
-            {#if t.files.length > 1}<button class="btn small ghost" title={f.extra ? 'Upgrades and smaller copies will replace this file' : 'Keep this file whatever else is downloaded; upgrades replace only the main file'} onclick={() => setExtra(f, !f.extra)}>{f.extra ? 'Make main' : 'Keep as extra'}</button>{/if}
+            {#if f.compact_of}
+              {#if !f.base && fileById.get(f.compact_of) && !fileById.get(f.compact_of)?.base}<button class="btn small ghost" title="Delete the original and keep this smaller copy as the film, to make room" onclick={() => keepCompact(f)}>Keep only this</button>{/if}
+              <button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>
+            {:else if !f.base}
+            {#if t.files.filter((x) => !x.compact_of).length > 1}<button class="btn small ghost" title={f.extra ? 'Upgrades and smaller copies will replace this file' : 'Keep this file whatever else is downloaded; upgrades replace only the main file'} onclick={() => setExtra(f, !f.extra)}>{f.extra ? 'Make main' : 'Keep as extra'}</button>{/if}
             <button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>
             {/if}
           </div>
@@ -415,6 +475,8 @@
                       <div class="faint small">{e.air_date ? fullDate(e.air_date) : 'No air date'}{f ? ` · ${bytes(f.size)}${f.release_group ? ' · ' + f.release_group : ''}` : ''}</div>
                     </div>
                     {#if f}<span class="chip ok">{qualityName(f.quality, 'series')}</span>{/if}
+                    {#if f && compactOf(f.id)}<span class="chip" title="A compact version of {bytes(compactOf(f.id)?.size ?? 0)} is kept beside it">Compact</span>
+                    {:else if f?.compacting}<span class="chip accent" title="A compact version is being made or waiting to be">{making?.file_id === f.id && making.total_ms ? `Compact ${Math.round(pct(making.done_ms, making.total_ms))}%` : 'Compact soon'}</span>{/if}
                     {#if coming.get(e.id)}<span class="chip accent">{coming.get(e.id)}</span>
                     {:else if !f && !aired(e)}<span class="chip">Not aired</span>
                     {:else if !f && e.monitored}<span class="chip warn">Missing</span>

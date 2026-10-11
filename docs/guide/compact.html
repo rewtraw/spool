@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compact versions · Spool</title>
+<meta name="description" content="A compact version is a smaller copy of a film or an episode that Spool makes itself and keeps beside the original. It is for playing away from home, over a slow connection, or on a device with little room: a 47 GB film on disc becomes about 5 GB at 1080p. The original is never touched.">
+<link rel="icon" href="../assets/mark.svg">
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
+    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
+      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(../assets/mark.svg) center / contain no-repeat; mask: url(../assets/mark.svg) center / contain no-repeat; }
+  .brand small { font: 500 15px/1 var(--sans); color: var(--muted); margin-left: 4px; }
+  header nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
+  header nav a:hover { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 40px; }
+  .side { font-size: 14.5px; }
+  .side .inner { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; display: grid; gap: 2px; padding-bottom: 24px; }
+  .side summary { display: none; }
+  .side p { margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+  .side a:hover { color: var(--text); }
+  .side a.on { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+  .side a.sub { padding: 3px 10px 3px 22px; font-size: 13.5px; }
+
+  article { max-width: 740px; min-width: 0; }
+  h1 { font: 600 clamp(32px, 4.6vw, 44px)/1.1 var(--serif); letter-spacing: -0.012em; margin: 0 0 20px; text-wrap: balance; }
+  h2 { font: 600 26px/1.2 var(--serif); margin: 52px 0 12px; padding-top: 4px; }
+  h3 { font: 600 19px/1.3 var(--serif); margin: 34px 0 8px; }
+  h2 a:hover::after, h3 a:hover::after { content: ' #'; color: var(--faint); }
+  h1 + p { font-size: 18.5px; color: var(--muted); }
+  p, ul, ol { margin: 0 0 16px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 5px 0; }
+  li > p { margin-bottom: 8px; }
+  li > ul, li > ol, li > .scroll { margin-top: 8px; }
+  strong { font-weight: 600; }
+  article p a, article li a, article td a { color: var(--accent); }
+  article p a:hover, article li a:hover, article td a:hover { text-decoration: underline; }
+  code { font: 0.88em var(--mono); background: var(--raised); padding: 2px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  pre { margin: 0 0 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14px/1.7 var(--mono); overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .scroll { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--surface); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { min-width: 150px; }
+
+  .around { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 56px; }
+  .around a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: 600 17px/1.3 var(--serif); }
+  .around a:hover { border-color: var(--muted); }
+  .around a span { display: block; font: 600 12px/1.6 var(--sans); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); }
+  .around .next { text-align: right; }
+
+  footer { margin-top: 72px; padding: 26px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: flex; gap: 8px 26px; flex-wrap: wrap; }
+  footer a { color: var(--accent); }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 22px; padding-top: 20px; }
+    .brand small { display: none; }
+    .side { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .side summary { display: block; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+    .side .inner { position: static; max-height: none; padding: 0 8px 12px; }
+    .side a.sub { display: none; }
+    h2 { margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<!-- Made from docs/compact.md by web/scripts/build-docs.mjs. Change that file, not this one. -->
+<div class="wrap">
+  <header>
+    <a class="brand" href="../"><span class="mark"></span>Spool<small>Guides</small></a>
+    <nav>
+      <a href="./">All guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <details open>
+        <summary>Guides</summary>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a class="on" aria-current="page" href="compact.html">Compact versions</a><a class="sub" href="#what-one-is">What one is</a><a class="sub" href="#making-them">Making them</a><a class="sub" href="#how-long-and-with-what">How long, and with what</a><a class="sub" href="#the-settings">The settings</a><a class="sub" href="#where-they-are-kept">Where they are kept</a><a class="sub" href="#playing-one">Playing one</a><a class="sub" href="#keeping-only-the-compact-version">Keeping only the compact version</a><a class="sub" href="#what-happens-when-things-change">What happens when things change</a><a class="sub" href="#limits">Limits</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+      </details>
+    </aside>
+    <article>
+<h1>Compact versions</h1>
+<p>A compact version is a smaller copy of a film or an episode that Spool makes itself and keeps beside the original. It is for playing away from home, over a slow connection, or on a device with little room: a 47 GB film on disc becomes about 5 GB at 1080p. The original is never touched.</p>
+<p>This part of Spool is new. It is tested end to end with small files, and timed on one real machine; few compact versions have been watched yet.</p>
+<h2 id="what-one-is"><a href="#what-one-is">What one is</a></h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th></th>
+<th>The original</th>
+<th>Its compact version</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Picture</td>
+<td>As it came</td>
+<td>HEVC, made to fit a screen of the height you choose, at the rate you choose. Ten-bit and HDR10 are kept where the original has them.</td>
+</tr>
+<tr>
+<td>Sound</td>
+<td>As it came</td>
+<td>Sound that is already small (AAC, Dolby Digital, Dolby Digital Plus) is copied. The rest, such as TrueHD and DTS-HD, becomes Dolby Digital Plus in 5.1. Every sound track is kept.</td>
+</tr>
+<tr>
+<td>Subtitles, chapters, fonts</td>
+<td>As they came</td>
+<td>Carried over as they are.</td>
+</tr>
+<tr>
+<td>File</td>
+<td>Its own name</td>
+<td>The same name with <code> - Compact 1080p</code> on the end, in a Matroska file, in the same folder.</td>
+</tr>
+<tr>
+<td>To Spool</td>
+<td>The title&#39;s file</td>
+<td>A version of it. Searches, upgrades and size targets go on looking at the original.</td>
+</tr>
+</tbody></table></div>
+<p>Not carried over:</p>
+<ul>
+<li><strong>Dolby Vision.</strong> A file that is Dolby Vision over an HDR10 layer comes out as HDR10. One that is Dolby Vision with nothing under it is left alone, with the reason: it cannot be re-encoded without its colours coming out wrong.</li>
+<li><strong>Atmos and other object sound.</strong> It becomes plain 5.1.</li>
+<li><strong>Subtitle files beside the video.</strong> Subtitles inside the file are kept; a subtitle file Spool or you put beside the original is offered with the original only.</li>
+</ul>
+<h2 id="making-them"><a href="#making-them">Making them</a></h2>
+<p><strong>One film.</strong> On its page, under the file: <strong>Make a compact version</strong>, with roughly how big it will be. A file that would not gain from one says why.</p>
+<p><strong>A series.</strong> On its page: <strong>Make compact versions</strong>, which takes every episode that would gain from one.</p>
+<p><strong>Several titles.</strong> In the library, select them and choose <strong>Make compact versions</strong> in the bar.</p>
+<p><strong>The whole library.</strong> Settings, Compact versions shows how many files would gain from one, how much room they would take and how much film that is to get through, with a button to put them all in line.</p>
+<p><strong>Whatever arrives.</strong> The same tab has &quot;Make one of whatever arrives&quot;. Each download that is filed is then put in line, if it would gain from one.</p>
+<p>They are made one at a time, in the background. Activity shows the one being made, how far it has got and how fast, and those waiting. Any of them can be cancelled there, and a cancelled one leaves nothing behind.</p>
+<p>A file is passed over when it is less than half again as big as its compact version would be, so a small film is not re-encoded for nothing.</p>
+<h2 id="how-long-and-with-what"><a href="#how-long-and-with-what">How long, and with what</a></h2>
+<p>Spool uses ffmpeg, and the machine&#39;s video hardware where ffmpeg offers it. The settings tab says which it found.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Machine</th>
+<th>From a 4K film on disc to 1080p</th>
+<th>A two-hour film takes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A Mac with Apple silicon, on its video hardware</td>
+<td>About ten times the speed it plays</td>
+<td>About 12 minutes</td>
+</tr>
+<tr>
+<td>The same, keeping the picture at 4K</td>
+<td>About two and a half to four times</td>
+<td>30 to 50 minutes</td>
+</tr>
+<tr>
+<td>On the processor alone</td>
+<td>About one and a half times, less on a small machine</td>
+<td>Over an hour</td>
+</tr>
+</tbody></table></div>
+<p>Measured on a Mac mini with an M4. The video hardware does the reading, the resizing and the writing, and the processor is left nearly idle; when it cannot read a file, Spool falls back to the processor for the reading, and then, if you allow it, for everything.</p>
+<p>On Linux Spool encodes on the processor.</p>
+<p>A <a href="helper.html">helper</a> does not make compact versions. They are made on the machine Spool runs on, which reads the original across the share and writes the result back.</p>
+<h2 id="the-settings"><a href="#the-settings">The settings</a></h2>
+<p>Under Settings, Compact versions.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Picture height</td>
+<td>The picture is made to fit a screen this high: 1080 fits within 1920 by 1080. A picture that fits already is not made bigger.</td>
+</tr>
+<tr>
+<td>Picture, kilobits a second</td>
+<td>8,000 is a good 1080p. A two-hour film at 8,000 comes to about 8 GB; at 4,000, about 4 GB.</td>
+</tr>
+<tr>
+<td>Surround sound, kilobits a second</td>
+<td>The rate for sound that has to be converted. 640 is the most Dolby Digital Plus is usually given.</td>
+</tr>
+<tr>
+<td>Use the processor when the video hardware cannot</td>
+<td>Off, a file the hardware cannot do is reported and left.</td>
+</tr>
+<tr>
+<td>For titles on a location Spool only reads</td>
+<td>Where their compact versions go. See below.</td>
+</tr>
+<tr>
+<td>Make one of whatever arrives</td>
+<td>Puts each filed download in line.</td>
+</tr>
+</tbody></table></div>
+<p>Changing the settings does not remake what has been made. Delete a compact version and make it again for that.</p>
+<h2 id="where-they-are-kept"><a href="#where-they-are-kept">Where they are kept</a></h2>
+<p>Beside the original, wherever Spool may write.</p>
+<p>A title on <a href="locations.html#managed-or-only-read">a location Spool only reads</a> cannot have anything put beside it. Choose a location for the compact versions of such titles, and each is put there in a folder of the title&#39;s name, which becomes <a href="locations.html#one-title-in-two-places">one more place the title is held</a>. With none chosen, those titles get none.</p>
+<p>That has a use of its own: with the archive on a NAS that is switched off, a title whose compact version is on a disk that is on can still be played.</p>
+<h2 id="playing-one"><a href="#playing-one">Playing one</a></h2>
+<p>A player is offered the original first and the compact version as a version of it, named <strong>Compact 1080p</strong>. In Infuse, hold Play and choose <strong>Version</strong>. Nothing is chosen for you: a player away from home has to be told to take the smaller one.</p>
+<p>Plex and Jellyfin, reading the same folders, should take a film&#39;s two files for versions of one film by the way they are named; that has not been tried.</p>
+<h2 id="keeping-only-the-compact-version"><a href="#keeping-only-the-compact-version">Keeping only the compact version</a></h2>
+<p>On a film&#39;s page, a compact version has <strong>Keep only this</strong>. The original is deleted, as any file is: it goes to the <a href="your-library.html#getting-something-back">recycle folder</a> for as long as the settings keep things there. The compact version becomes the film.</p>
+<p>This is the way to make room without losing a title. Because the compact version is then the title&#39;s file, a monitored title may be upgraded again by a later search; stop monitoring it, or give it a profile that is content with what it has.</p>
+<h2 id="what-happens-when-things-change"><a href="#what-happens-when-things-change">What happens when things change</a></h2>
+<ul>
+<li><strong>The original is replaced</strong> by an upgrade: its compact version was made from a file that is gone, and is removed. With &quot;Make one of whatever arrives&quot; on, a new one is made from the new file.</li>
+<li><strong>The original is deleted</strong>: its compact version goes with it.</li>
+<li><strong>A compact version is deleted</strong>: only that file goes. It is not kept in the recycle folder, since it can be made again.</li>
+<li><strong>Spool is restarted</strong>: the one being made is started again from the beginning, and the line carries on.</li>
+<li><strong>The database is lost</strong>: a compact version is known by its name, and is tied again to the file it was made from when the folder is read.</li>
+</ul>
+<h2 id="limits"><a href="#limits">Limits</a></h2>
+<ul>
+<li>Films and episodes only, one compact version of each file.</li>
+<li>A film that has several cuts gets a compact version of its main file.</li>
+<li>Nothing is converted while it is played. A player asking for a smaller stream of a file that has no compact version gets the original.</li>
+</ul>
+<nav class="around" aria-label="Other guides"><a class="prev" href="collections.html"><span>Before</span>Collections and anime</a><a class="next" href="local-files.html"><span>Next</span>Files Spool recognises in a title's folder</a></nav>
+    </article>
+  </div>
+  <footer>
+    <a href="https://github.com/rewtraw/spool/blob/main/docs/compact.md">Change this page on GitHub</a>
+    <a href="../">Spool's front page</a>
+    <span>Spool is free software under the GNU GPL v3.</span>
+  </footer>
+</div>
+<script>if (matchMedia('(max-width: 860px)').matches) document.querySelector('.side details').open = false;</script>
+</body>
+</html>

@@ -584,7 +584,9 @@ impl Library {
                     }
                 }
                 self.put_series_art(&mut o, t);
-                self.put_file_facts(&mut o, id, t, self.episode_file(e).map(std::slice::from_ref).unwrap_or(&[]), runtime, fields);
+                // The episode's file, then any compact version made of it, offered as versions.
+                let versions: Vec<MediaFile> = self.episode_file(e).into_iter().flat_map(|f| std::iter::once(f).chain(self.files_of(t.id).iter().filter(move |c| c.compact_of == Some(f.id)))).cloned().collect();
+                self.put_file_facts(&mut o, id, t, &versions, runtime, fields);
             }
             Node::Set(c) => {
                 put!("Type", json!("BoxSet"));
@@ -1118,6 +1120,15 @@ fn version_name(f: &MediaFile) -> String {
         return format!("Part {n}");
     }
     let height = f.media_info.as_ref().map(|m| (m.width, m.height)).unwrap_or((0, 0));
+    // A smaller copy Spool made is offered as that, whatever cut it is of.
+    if f.compact_of.is_some() {
+        return match height {
+            (w, h) if w >= 3000 || h >= 2000 => "Compact 4K".into(),
+            (w, h) if w >= 1800 || h >= 1000 => "Compact 1080p".into(),
+            (w, h) if w >= 1200 || h >= 700 => "Compact 720p".into(),
+            _ => "Compact".into(),
+        };
+    }
     let size = match height {
         (w, h) if w >= 3000 || h >= 2000 => "4K",
         (w, h) if w >= 1800 || h >= 1000 => "1080p",

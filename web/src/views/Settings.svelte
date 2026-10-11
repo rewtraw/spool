@@ -10,9 +10,10 @@
   import Naming from './settings/Naming.svelte';
   import Plex from './settings/Plex.svelte';
   import Space from './settings/Space.svelte';
+  import Compact from './settings/Compact.svelte';
   import Maintenance from './settings/Maintenance.svelte';
 
-  const tabs = [['general', 'General'], ['usenet', 'Usenet'], ['indexers', 'Indexers'], ['profiles', 'Profiles'], ['naming', 'Naming'], ['plex', 'Plex'], ['space', 'Disk space'], ['maintenance', 'Maintenance']];
+  const tabs = [['general', 'General'], ['usenet', 'Usenet'], ['indexers', 'Indexers'], ['profiles', 'Profiles'], ['naming', 'Naming'], ['plex', 'Plex'], ['compact', 'Compact versions'], ['space', 'Disk space'], ['maintenance', 'Maintenance']];
   const tab = $derived(route.arg || 'general');
 </script>
 
@@ -28,6 +29,7 @@
   {:else if tab === 'profiles'}<Profiles />
   {:else if tab === 'naming'}<Naming />
   {:else if tab === 'plex'}<Plex />
+  {:else if tab === 'compact'}<Compact />
   {:else if tab === 'space'}<Space />
   {:else if tab === 'maintenance'}<Maintenance />
   {/if}

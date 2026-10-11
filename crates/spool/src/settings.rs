@@ -122,6 +122,8 @@ pub struct General {
     pub new_titles_location: u32,
     /// Helpers on other machines that do file work on their own disks.
     pub helpers: Vec<HelperConf>,
+    /// How compact versions are made.
+    pub compact: crate::compact::Compact,
 }
 
 impl Default for General {
@@ -168,6 +170,7 @@ impl Default for General {
             locations: vec![],
             new_titles_location: 0,
             helpers: vec![],
+            compact: Default::default(),
         }
     }
 }

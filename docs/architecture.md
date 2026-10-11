@@ -67,6 +67,14 @@ Two rules follow from that, and every part of Spool that touches files asks the 
 
 Bringing in what is already on a location (`adopt.rs`) is two steps: looking reads each folder's name, asks the metadata sources and reports what it is sure of, what is already in the library, what is unclear and what it could not place; adding records the sure ones, and any the user settles, where they lie.
 
+## Compact versions
+
+A compact version (`compact.rs`) is one more file of a title, marked with the file it was made from (`compact_of`) and flagged, like any version kept beside a film, so that upgrades and searches pass it by. Nothing else distinguishes it: players are offered it by the code that offers versions, and it is deleted by the code that deletes files.
+
+It is made by ffmpeg under a hidden name, read back, and only then given its own. Three ways are tried in order: the video hardware for reading, resizing and writing; the processor for reading and the hardware for writing; the processor for everything. The line of files waiting is written down like the line of moves, and taken up again after a restart.
+
+A compact version is known on disk by the end of its name, so a folder read from nothing ties it to its original again. One whose original is no longer on record stands by itself from then on.
+
 ## A helper on another machine
 
 A location on a NAS can be served by a helper (`helper.rs`): the same program started with `helper`, running on the NAS, with a download engine of its own and no catalogue. It is given the folders it may touch and checks every path against them.

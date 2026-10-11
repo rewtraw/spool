@@ -199,7 +199,9 @@ impl App {
         if played < 120 {
             reasons.push(format!("a player was playing {played} seconds ago"));
         }
-        Busy { busy: !reasons.is_empty(), reasons, resumable: jobs.iter().filter(|j| matches!(j.state, JobState::Downloading | JobState::Queued)).count() }
+        // A compact version under way is started again after a restart, like a download.
+        let encoding = self.encodes.lock().now.is_some() as usize;
+        Busy { busy: !reasons.is_empty(), reasons, resumable: encoding + jobs.iter().filter(|j| matches!(j.state, JobState::Downloading | JobState::Queued)).count() }
     }
 
     /// Try a location out: is each folder there, can it be listed and read, can it be written

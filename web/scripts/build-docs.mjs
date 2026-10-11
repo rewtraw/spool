@@ -18,7 +18,7 @@ const REPO = 'https://github.com/rewtraw/spool';
 // The order of the menu. Every guide in docs/ has to be listed here.
 const MENU = [
   ['Start here', [['getting-started', 'Getting started'], ['your-library', 'Your library']]],
-  ['Using it', [['locations', 'More than one place'], ['helper', 'A helper on the NAS'], ['players', 'On a television'], ['plex', 'Beside Plex'], ['collections', 'Collections and anime'], ['local-files', 'Files it recognises'], ['assistants', 'AI assistants']]],
+  ['Using it', [['locations', 'More than one place'], ['helper', 'A helper on the NAS'], ['players', 'On a television'], ['plex', 'Beside Plex'], ['collections', 'Collections and anime'], ['compact', 'Compact versions'], ['local-files', 'Files it recognises'], ['assistants', 'AI assistants']]],
   ['Reference', [['api', 'The HTTP API'], ['architecture', 'How it is put together'], ['ideas', 'Ideas']]],
 ];
 const ORDER = MENU.flatMap(([, pages]) => pages.map(([name]) => name));

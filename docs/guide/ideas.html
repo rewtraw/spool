@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a><a class="sub" href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a><a class="sub" href="#helpers-that-are-found-and-linked-by-themselves">Helpers that are found and linked by themselves</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a><a class="sub" href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a><a class="sub" href="#helpers-that-are-found-and-linked-by-themselves">Helpers that are found and linked by themselves</a><a class="sub" href="#converting-while-it-plays">Converting while it plays</a><a class="sub" href="#sharing-a-library-between-households">Sharing a library between households</a><a class="sub" href="#titles-worth-having-found-without-being-asked-for">Titles worth having, found without being asked for</a></nav>
       </details>
     </aside>
     <article>
@@ -323,6 +323,70 @@
 <p><strong>What it would cost.</strong> About a day: the announcement and the listening are small, and most of the work is the linking and the matching, with their tests.</p>
 <p><strong>Why it is waiting.</strong> A helper is set up once. The four things typed today take a few minutes, and the settings page says at once whether they were right.</p>
 <p><strong>When to build it.</strong> With <a href="#from-one-spool-and-its-helpers-to-a-cluster">helpers that report in</a>, since both are a helper making itself known; or when a second helper is added and setting one up is no longer something done once.</p>
+<h2 id="converting-while-it-plays"><a href="#converting-while-it-plays">Converting while it plays</a></h2>
+<p><strong>What it is.</strong> <a href="compact.html">Compact versions</a> are made ahead of time. A player that asks for a smaller stream of a file with no compact version gets the original. Spool could instead convert the file as it is played, as Jellyfin and Plex do, and Infuse can ask for exactly that since its version 8.5.</p>
+<p><strong>What it would take.</strong> Starting ffmpeg for each player that asks, cutting what it makes into short pieces, serving those in the form players expect (HLS), following the player when it skips about, and clearing up when it stops. The part of the players&#39; protocol that asks for a converted stream would have to be answered, where today Spool says every file is to be played as it is.</p>
+<p><strong>What is known.</strong> A Mac mini with an M4 turns a 4K film on disc into 1080p at about ten times the speed it plays, on its video hardware, and two at once each get half of that. So one such machine could serve eight or so players at once, each with a film converted as it goes.</p>
+<p><strong>Why it is waiting.</strong> A compact version made once serves every player from then on and survives a restart; converting as it plays serves one player once. For a library whose titles are known ahead of time, making them ahead of time is less to build and less to go wrong.</p>
+<p><strong>When to build it.</strong> Titles are often played away from home before anyone thought to make a compact version of them; or the library is shared with people on connections of every kind, as in <a href="#sharing-a-library-between-households">sharing between households</a>.</p>
+<h2 id="sharing-a-library-between-households"><a href="#sharing-a-library-between-households">Sharing a library between households</a></h2>
+<p><strong>What it is.</strong> Several people each run their own Spool, and each sees the others&#39; libraries in their own, as one. A title only one of them has is played from that one&#39;s machine, through the player&#39;s own Spool, so a player still knows one server.</p>
+<p><strong>How it fits what is there.</strong> Another household&#39;s Spool looks like <a href="locations.html#managed-or-only-read">a location that is only read</a>, reached over the internet and not through a mount.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Wanted</th>
+<th>Already there</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Titles hidden while their owner&#39;s machine is off</td>
+<td>A location that cannot be reached takes its titles offline.</td>
+</tr>
+<tr>
+<td>One entry for a film two people have</td>
+<td>A title in more than one place, each offered to players as a version.</td>
+</tr>
+<tr>
+<td>Nothing of someone else&#39;s ever changed</td>
+<td>Locations that are only read.</td>
+</tr>
+<tr>
+<td>A player sees one server</td>
+<td>The door players use; the other Spool is only where the film comes from.</td>
+</tr>
+<tr>
+<td>The same film known as the same</td>
+<td>Every Spool keeps the same ids for a title.</td>
+</tr>
+</tbody></table></div>
+<p><strong>What is new.</strong> Two Spools linked by invitation, with a code, each choosing what it shares; one asking the other what it has; and one fetching a file from the other to hand to a player.</p>
+<p><strong>What stands in the way.</strong></p>
+<ul>
+<li>A film is sent at the rate it was made at. From a home whose line is slow upstream, a film on disc will not play. <a href="compact.html">Compact versions</a> are the answer that exists: share those.</li>
+<li>Two homes cannot reach each other without help. A private network between them (Tailscale&#39;s sharing of one machine is the least to set up) or an open port with a certificate.</li>
+<li>What each owner must be able to set: which locations are shared, how much may be sent at once, how many players at once, and an end to the arrangement.</li>
+<li>What one household learns of another&#39;s watching. No more than that a film was sent.</li>
+</ul>
+<p><strong>The line not to cross.</strong> By invitation, between people who know each other, as a library is shared with family. No list of Spools to browse and no way to find a stranger&#39;s: that would be something else.</p>
+<p><strong>When to build it.</strong> Someone to share with runs Spool too.</p>
+<h2 id="titles-worth-having-found-without-being-asked-for"><a href="#titles-worth-having-found-without-being-asked-for">Titles worth having, found without being asked for</a></h2>
+<p><strong>What it is.</strong> Spool looks for what it has been told to look for. With an indexer that sets no limit on how much it may be asked, it could also keep an eye out for films worth having that nobody has added: new ones that are being talked about, and old ones that are well thought of, each at a quality the profile would accept.</p>
+<p><strong>How it would go.</strong></p>
+<ol>
+<li>A list of films to consider is kept up from sources that say how a film is regarded: TMDB&#39;s ratings and counts of votes, which Spool reads already; lists such as Letterboxd&#39;s highest rated or most popular; and what is trending this week.</li>
+<li>Rules say which of them are wanted: a rating above some mark (a Letterboxd average over 3.5, say) with enough votes to mean something, within years and kinds you choose, leaving out what you have turned down before.</li>
+<li>Each film that passes is offered. Either it waits on a page to be accepted or turned down, or, if you say so, it is added, monitored and looked for like any other.</li>
+</ol>
+<p><strong>What it needs.</strong></p>
+<ul>
+<li>Somewhere to read ratings. TMDB&#39;s are there now. Letterboxd has no open API; its lists can be read through TMDB ids that others publish, or it can be left out.</li>
+<li>A cap. Without one a rule such as &quot;every film rated over 3.5&quot; is tens of thousands of films. So many a week, so much room in all, and nothing added while the disk is short.</li>
+<li>A memory of what was turned down, so the same film is not offered every week.</li>
+<li>A place to put them. A location of their own, so that what was found for you can be told from what you asked for and cleared out together.</li>
+</ul>
+<p><strong>Why it is waiting.</strong> It is a different thing from the rest of Spool, which does what it is asked. Left to add by itself it can fill a disk with films nobody watches; kept to offering, it is a list to work through. Which of the two is wanted decides most of the design.</p>
+<p><strong>When to build it.</strong> With room to spare on a location and an indexer that does not count requests, and once it is settled whether it should offer or add.</p>
 <nav class="around" aria-label="Other guides"><a class="prev" href="architecture.html"><span>Before</span>How Spool is put together</a><span></span></nav>
     </article>
   </div>

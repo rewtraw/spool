@@ -440,6 +440,7 @@ impl App {
                         languages: f["languages"].as_array().map(|l| l.iter().map(|x| st(x, "name").to_lowercase()).collect()).unwrap_or_default(),
                         added_at: chrono::DateTime::parse_from_rfc3339(&st(f, "dateAdded")).map(|d| d.timestamp()).unwrap_or_else(|_| now()),
                         extra: false,
+                        compact_of: None,
                         subtitles: vec![],
                         base: None,
                     };
@@ -562,6 +563,7 @@ impl App {
                         languages: f["languages"].as_array().map(|l| l.iter().map(|x| st(x, "name").to_lowercase()).collect()).unwrap_or_default(),
                         added_at: chrono::DateTime::parse_from_rfc3339(&st(f, "dateAdded")).map(|d| d.timestamp()).unwrap_or_else(|_| now()),
                         extra: false,
+                        compact_of: None,
                         subtitles: vec![],
                         base: None,
                     };

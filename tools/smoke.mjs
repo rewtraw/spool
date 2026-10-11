@@ -121,6 +121,7 @@ const pages = [
   ['settings-profiles', '#/settings/profiles', ['Hard size limits'], true],
   ['settings-naming', '#/settings/naming', ['Renaming'], true],
   ['settings-plex', '#/settings/plex', [/Library match|Plex is not set up/], true],
+  ['settings-compact', '#/settings/compact', ['How they are made', 'The library'], true],
   ['settings-space', '#/settings/space', ['Free'], true],
   ['settings-maintenance', '#/settings/maintenance', ['Read indexer feeds', 'Recycled files'], true],
 ];

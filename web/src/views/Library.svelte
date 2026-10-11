@@ -7,7 +7,7 @@
 
   const saved = JSON.parse(localStorage.getItem('spool.library') ?? '{}');
   let kind = $state<'all' | 'movie' | 'series'>(saved.kind ?? 'all');
-  let show = $state<'all' | 'have' | 'missing' | 'incomplete' | 'monitored' | 'unmonitored'>(saved.show ?? 'all');
+  let show = $state<'all' | 'have' | 'missing' | 'incomplete' | 'compact' | 'nocompact' | 'monitored' | 'unmonitored'>(saved.show ?? 'all');
   let sort = $state<'title' | 'added' | 'year' | 'size'>(saved.sort ?? 'title');
   let layout = $state<'grid' | 'table'>(saved.layout ?? 'grid');
   /** Show each collection as one tile in place of its titles. */
@@ -51,6 +51,8 @@
       if (show === 'missing' && (have(t) || !t.monitored || !t.available)) return false;
       // A series with some of its aired episodes and not all, whether or not it is monitored.
       if (show === 'incomplete' && !(t.kind === 'series' && t.episodes_have > 0 && t.episodes_have < t.episodes_aired)) return false;
+      if (show === 'compact' && !t.compact_count) return false;
+      if (show === 'nocompact' && (t.compact_count || !have(t))) return false;
       if (show === 'monitored' && !t.monitored) return false;
       if (show === 'unmonitored' && t.monitored) return false;
       if (q && !t.title.toLowerCase().includes(q) && String(t.year) !== q) return false;
@@ -117,6 +119,13 @@
   let places = $state<any[]>([]);
   api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
   const targets = $derived(places.filter((p) => p.manage && p.online));
+  async function bulkCompact() {
+    const r = await act(() => api.post<any>('/compact', { title_ids: chosen.map((t) => t.id) }));
+    if (!r) return;
+    const first = r.refused?.[0];
+    toast(r.queued ? `${r.queued} compact ${r.queued === 1 ? 'version is' : 'versions are'} in line. Progress is in Activity.${first ? ` ${r.refused.length} left out: ${first.why}.` : ''}` : `None to make${first ? `: ${first.why}` : ': nothing selected would gain from one'}.`);
+    picked = {};
+  }
   async function bulkMove(where: string) {
     const place = places.find((p) => String(p.id) === where);
     if (!place) return;
@@ -209,6 +218,8 @@
     <option value="have">Have files</option>
     <option value="missing">Missing (wanted)</option>
     <option value="incomplete">Incomplete series</option>
+    <option value="compact">Have a compact version</option>
+    <option value="nocompact">Have files, no compact version</option>
     <option value="monitored">Monitored</option>
     <option value="unmonitored">Not monitored</option>
   </select>
@@ -302,6 +313,7 @@
       </select>
       <button class="btn small" onclick={() => bulk('search', {}, (r) => `Searching ${many(r.started)} in the background. Downloads appear in Activity.`)}>Search</button>
       <button class="btn small" onclick={() => bulk('refresh', {}, (r) => `Refreshing ${many(r.started)} in the background`)}>Refresh</button>
+      <button class="btn small" title="Make a smaller copy of each, kept beside the original, for playing away from home" onclick={bulkCompact}>Make compact versions</button>
       {#if targets.length > 1}
         <select class="input small-select" value={''} onchange={(e) => { bulkMove(e.currentTarget.value); e.currentTarget.value = ''; }} aria-label="Move to a location">
           <option value="">Move to…</option>

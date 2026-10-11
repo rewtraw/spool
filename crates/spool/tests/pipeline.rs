@@ -2956,3 +2956,190 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
     assert!(w.root.join("Movies/Alpha (2001)/Alpha (2001).mkv").exists() && !nas.join("films/Alpha (2001)").exists());
     assert_eq!(helper.work_done().1, 1, "the helper had no part in that one");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_compact_version_is_made_beside_the_original_and_kept_as_a_version_of_it() {
+    use serde_json::{json, Value};
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let made = |file: i64| {
+        let app = w.app.clone();
+        async move {
+            for _ in 0..600 {
+                if !app.compacting(file) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            panic!("the compact version was never finished");
+        }
+    };
+
+    // A film and one episode of a series, as they would lie in a library.
+    let home = w.root.join("Movies/Heat (1995)");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("Heat (1995) [Bluray-1080p].mkv"), &video).unwrap();
+    let mut heat = w.movie("Heat", 1995, "tt0113277");
+    heat.path = home.to_string_lossy().to_string();
+    w.app.db.save_title(&mut heat).unwrap();
+    let (mut show, _) = w.series("Example World", 296762, &[(1, 1, "The Original")]);
+    let season = w.root.join("TV Shows/Example World/Season 01");
+    std::fs::create_dir_all(&season).unwrap();
+    std::fs::write(season.join("Example World - S01E01 - The Original.mkv"), &video).unwrap();
+    show.path = w.root.join("TV Shows/Example World").to_string_lossy().to_string();
+    w.app.db.save_title(&mut show).unwrap();
+    w.app.scan_all().await.unwrap();
+    let film = w.app.db.files(heat.id).unwrap().remove(0);
+    let rate = film.media_info.as_ref().unwrap().bit_rate;
+
+    // At the usual settings so small a file is refused, with the reason.
+    let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [heat.id]})).await;
+    assert!(status == 409 && said.to_string().contains("small already"), "{status} {said}");
+    let (_, page) = call(&api, "GET", &format!("/api/titles/{}", heat.id), Value::Null).await;
+    assert_eq!(page["files"][0]["compact"]["can"].as_bool(), Some(false), "{}", page["files"][0]["compact"]);
+
+    // Asked for something a good deal smaller than it is, it is made.
+    let mut g = w.app.settings.general();
+    g.compact = spool::compact::Compact { height: 120, video_kbps: (rate / 4000).max(10) as u32, audio_kbps: 0, ..Default::default() };
+    w.app.settings.set_general(&g).unwrap();
+    let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [heat.id, show.id]})).await;
+    assert_eq!((status, said["queued"].as_u64()), (200, Some(2)), "{said}");
+    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    assert!(activity["compact"]["now"].is_object() || activity["compact"]["waiting_count"].as_u64() > Some(0), "Activity shows what is being made: {}", activity["compact"]);
+    made(film.id).await;
+    let episode_file = w.app.db.episodes(show.id).unwrap()[0].file_id.unwrap();
+    made(episode_file).await;
+    for _ in 0..100 {
+        if w.app.db.get_setting::<Vec<i64>>("compact_waiting").is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let notices: Vec<String> = w.app.db.attention(false).unwrap().iter().map(|a| a.message.clone()).collect();
+    assert_eq!(tree(&home), ["Heat (1995) [Bluray-1080p] - Compact 120p.mkv", "Heat (1995) [Bluray-1080p].mkv"], "{notices:?}");
+    let files = w.app.db.files(heat.id).unwrap();
+    let (original, compact) = (files.iter().find(|f| f.compact_of.is_none()).unwrap(), files.iter().find(|f| f.compact_of.is_some()).unwrap());
+    assert_eq!((original.id, original.extra, compact.compact_of, compact.extra), (film.id, false, Some(film.id), true), "the original is still the film");
+    let info = compact.media_info.as_ref().unwrap();
+    // (Not its size: two seconds of test pattern is already smaller than any encoder will go.)
+    assert!(info.height == 120 && info.video_codec.to_lowercase().contains("265") && compact.size > 0, "{}x{} {} {} bytes", info.width, info.height, info.video_codec, compact.size);
+    assert_eq!(std::fs::read(home.join("Heat (1995) [Bluray-1080p].mkv")).unwrap(), video, "the original is untouched");
+    assert!(w.app.db.history(Some(heat.id), 10).unwrap().iter().any(|h| h.kind == "compact_made"));
+    assert!(w.app.db.get_setting::<Vec<i64>>("compact_waiting").is_empty(), "nothing is left written down once the line is done");
+
+    // An episode's compact version is a version of its file; the episode's file is still the original.
+    assert_eq!(tree(&season), ["Example World - S01E01 - The Original - Compact 120p.mkv", "Example World - S01E01 - The Original.mkv"], "{notices:?}");
+    assert_eq!(w.app.db.episodes(show.id).unwrap()[0].file_id, Some(episode_file));
+
+    // The library says which titles have one, and a second is refused.
+    let (_, listed) = call(&api, "GET", "/api/titles", Value::Null).await;
+    let row = listed.as_array().unwrap().iter().find(|t| t["id"] == heat.id).unwrap().clone();
+    assert_eq!(row["compact_count"].as_u64(), Some(1), "{row}");
+    let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [heat.id]})).await;
+    assert!(status == 409 && said.to_string().contains("already has a compact version"), "{status} {said}");
+    let (_, report) = call(&api, "GET", "/api/compact", Value::Null).await;
+    assert_eq!((report["made"]["files"].as_u64(), report["would"]["files"].as_u64()), (Some(2), Some(0)), "{report}");
+
+    // Players are offered it as a version, of the film and of the episode.
+    let mut g = w.app.settings.general();
+    g.players_enabled = true;
+    w.app.settings.set_general(&g).unwrap();
+    let jf = spool::jellyfin::router(w.app.clone());
+    let (_, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "spool", "Pw": ""})).await;
+    let token = serde_json::from_slice::<Value>(&body).unwrap()["AccessToken"].as_str().unwrap().to_string();
+    for kind in ["Movie", "Episode"] {
+        let (_, _, body) = player(&jf, "GET", &format!("/Items?Recursive=true&IncludeItemTypes={kind}&Fields=MediaSources"), Some(&token), Value::Null).await;
+        let item = serde_json::from_slice::<Value>(&body).unwrap()["Items"][0].clone();
+        let names: Vec<String> = item["MediaSources"].as_array().unwrap().iter().map(|s| s["Name"].as_str().unwrap_or_default().to_string()).collect();
+        assert!(names.len() == 2 && names[1] == "Compact" && names[0] != "Compact", "{kind}: {names:?}");
+        let small = &item["MediaSources"][1];
+        let (status, _, played) = player(&jf, "GET", &format!("/Videos/{}/stream?MediaSourceId={}&Static=true", item["Id"].as_str().unwrap(), small["Id"].as_str().unwrap()), Some(&token), Value::Null).await;
+        assert_eq!((status, played.len() as u64), (200, small["Size"].as_u64().unwrap()), "{kind}: the compact version is what is sent");
+    }
+
+    // Reading the folders again changes nothing; and with its record lost, a compact version
+    // is known again by its name and tied to the file it was made from.
+    w.app.scan_all().await.unwrap();
+    assert_eq!(w.app.db.files(heat.id).unwrap().len(), 2);
+    w.app.db.with(|c| c.execute("DELETE FROM files WHERE id = ?1", [compact.id])).unwrap();
+    w.app.scan_all().await.unwrap();
+    let again = w.app.db.files(heat.id).unwrap().into_iter().find(|f| f.rel_path.contains("Compact")).unwrap();
+    assert_eq!((again.compact_of, again.extra), (Some(film.id), true));
+    assert_eq!(w.app.db.episodes(show.id).unwrap()[0].file_id, Some(episode_file), "a scan does not take the compact version for the episode's file");
+
+    // Keeping only the compact version lets the original go, and the compact one is then the film.
+    let (status, said) = call(&api, "POST", &format!("/api/files/{}/keep-compact", again.id), Value::Null).await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(tree(&home), ["Heat (1995) [Bluray-1080p] - Compact 120p.mkv"]);
+    let files = w.app.db.files(heat.id).unwrap();
+    assert_eq!((files.len(), files[0].compact_of, files[0].extra), (1, None, false));
+    w.app.scan_all().await.unwrap();
+    let files = w.app.db.files(heat.id).unwrap();
+    assert_eq!((files.len(), files[0].id, files[0].compact_of, files[0].extra), (1, again.id, None, false), "and it stays the film when the folder is read again");
+
+    // When an episode's file goes, the compact version made from it goes too.
+    let small = w.app.db.files(show.id).unwrap().into_iter().find(|f| f.compact_of.is_some()).unwrap();
+    assert_eq!(call(&api, "DELETE", &format!("/api/files/{episode_file}"), Value::Null).await.0, 200);
+    assert!(w.app.db.file(small.id).unwrap().is_none() && !season.join("Example World - S01E01 - The Original - Compact 120p.mkv").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_title_on_a_location_spool_only_reads_gets_its_compact_version_somewhere_else() {
+    use serde_json::{json, Value};
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let (shelf, vault) = (w.root.join("Shelf/films"), w.root.join("Vault/films"));
+    for d in [&shelf, &vault] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["locations"] = json!([{"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert_eq!(status, 200, "{said}");
+    let kept = vault.join("Alpha (2001)");
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::write(kept.join("Alpha (2001).mkv"), &video).unwrap();
+    let mut alpha = w.movie("Alpha", 2001, "tt0000001");
+    alpha.path = kept.to_string_lossy().to_string();
+    w.app.db.save_title(&mut alpha).unwrap();
+    w.app.scan_all().await.unwrap();
+    let film = w.app.db.files(alpha.id).unwrap().remove(0);
+    let rate = film.media_info.as_ref().unwrap().bit_rate;
+    let mut g = w.app.settings.general();
+    g.compact = spool::compact::Compact { height: 120, video_kbps: (rate / 4000).max(10) as u32, audio_kbps: 0, ..Default::default() };
+    w.app.settings.set_general(&g).unwrap();
+
+    // With nowhere chosen for them, there is to be none, and the reason says what to do.
+    let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [alpha.id]})).await;
+    assert!(status == 409 && said.to_string().contains("no location is chosen for compact versions"), "{status} {said}");
+
+    // With a location chosen, it is made there, and that folder becomes one more place the title is held.
+    let mut g = w.app.settings.general();
+    g.compact.location = 1;
+    w.app.settings.set_general(&g).unwrap();
+    let (status, said) = call(&api, "POST", "/api/compact", json!({"file_ids": [film.id]})).await;
+    assert_eq!((status, said["queued"].as_u64()), (200, Some(1)), "{said}");
+    for _ in 0..600 {
+        if !w.app.compacting(film.id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let notices: Vec<String> = w.app.db.attention(false).unwrap().iter().map(|a| a.message.clone()).collect();
+    assert_eq!(tree(&shelf), ["Alpha (2001)/Alpha (2001) - Compact 120p.mkv"], "{notices:?}");
+    assert_eq!(tree(&vault), ["Alpha (2001)/Alpha (2001).mkv"], "nothing is written where Spool only reads");
+    let now = w.app.db.title(alpha.id).unwrap().unwrap();
+    assert_eq!(now.also, [shelf.join("Alpha (2001)").to_string_lossy().to_string()]);
+    let compact = w.app.db.files(alpha.id).unwrap().into_iter().find(|f| f.compact_of.is_some()).unwrap();
+    assert_eq!(compact.base.as_deref(), now.also.first().map(String::as_str));
+    w.app.scan_all().await.unwrap();
+    assert_eq!(w.app.db.files(alpha.id).unwrap().len(), 2, "reading both folders again finds the same two files");
+
+    // Taken away again, the folder that held nothing else is no longer one of the title's.
+    assert_eq!(call(&api, "DELETE", &format!("/api/files/{}", compact.id), Value::Null).await.0, 200);
+    assert!(tree(&shelf).is_empty() && w.app.db.title(alpha.id).unwrap().unwrap().also.is_empty());
+    assert!(kept.join("Alpha (2001).mkv").exists());
+    let _ = Value::Null;
+}

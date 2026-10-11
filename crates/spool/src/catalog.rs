@@ -309,13 +309,33 @@ impl App {
             }
         }
         let episodes = if title.kind == Kind::Series { self.db.episodes(id)? } else { vec![] };
-        for rel in on_disk.iter().filter(|r| !known.iter().any(|f| f.rel_path == **r)) {
+        let stem = |rel: &str| Path::new(rel).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        // The originals first, so that a compact version finds the file it was made from
+        // already on record when its turn comes.
+        let mut fresh: Vec<&String> = on_disk.iter().filter(|r| !known.iter().any(|f| f.rel_path == **r)).collect();
+        fresh.sort_by_key(|r| crate::compact::compact_source_stem(&stem(r)).is_some());
+        for rel in fresh {
             let abs = root.join(rel);
+            // A compact version is known by its name, and belongs to the file it was made
+            // from: the one of that name, wherever the title keeps it, or failing that the
+            // file of the episode it names.
+            let compact_of: Option<i64> = match crate::compact::compact_source_stem(&stem(rel)) {
+                None => None,
+                Some(from) => {
+                    let all = self.db.files(id)?;
+                    all.iter().find(|f| f.compact_of.is_none() && stem(&f.rel_path) == from).map(|f| f.id).or_else(|| {
+                        let named = parse_episode_path(&abs.to_string_lossy()).filter(|_| title.kind == Kind::Series)?;
+                        episodes.iter().find(|e| e.season == named.season_number() && named.episode_numbers.contains(&e.episode)).and_then(|e| e.file_id).filter(|f| all.iter().any(|x| x.id == *f && x.compact_of.is_none()))
+                    })
+                }
+            };
             let size = std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0);
             let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let flavor = title.kind.flavor();
             let episode_ids: Vec<i64> = match title.kind {
                 Kind::Movie => vec![],
+                // It is a version of an episode's file, not the episode's file.
+                Kind::Series if compact_of.is_some() => vec![],
                 Kind::Series => {
                     let ids: Vec<i64> = parse_episode_path(&abs.to_string_lossy())
                         .map(|p| episodes.iter().filter(|e| e.season == p.season_number() && p.episode_numbers.contains(&e.episode)).filter(|e| copy.is_none() || e.file_id.is_none()).map(|e| e.id).collect())
@@ -342,9 +362,10 @@ impl App {
                 scene_name: None,
                 languages: vec![],
                 added_at: now(),
-                extra: copy.is_some() && title.kind == Kind::Movie,
+                extra: compact_of.is_some() || (copy.is_some() && title.kind == Kind::Movie),
                 subtitles: vec![],
                 base: copy.cloned(),
+                compact_of,
             };
             if title.kind == Kind::Movie {
                 if let Some(p) = parse_movie_path(&abs.to_string_lossy()) {
@@ -360,6 +381,22 @@ impl App {
                 Ok(())
             })?;
             report.files_added += 1;
+        }
+        // A compact version whose original is no longer on record stands by itself from now
+        // on: it is the film if there is no other, and an episode's file if the episode has none.
+        let all = self.db.files(id)?;
+        for f in all.iter().filter(|f| f.compact_of.is_some_and(|from| !all.iter().any(|x| x.id == from))) {
+            let mut f = f.clone();
+            f.compact_of = None;
+            f.extra = title.kind == Kind::Movie && all.iter().any(|x| !x.extra);
+            self.db.save_file(&f)?;
+            if title.kind == Kind::Series {
+                if let Some(named) = parse_episode_path(&title.file_path(&f).to_string_lossy()) {
+                    for e in episodes.iter().filter(|e| e.season == named.season_number() && named.episode_numbers.contains(&e.episode)) {
+                        self.db.with(|c| c.execute("UPDATE episodes SET file_id = ?2 WHERE id = ?1 AND file_id IS NULL", rusqlite::params![e.id, f.id]))?;
+                    }
+                }
+            }
         }
         if copy.is_none() {
             self.settle_versions(title, &known)?;

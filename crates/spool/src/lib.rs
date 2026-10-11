@@ -20,6 +20,7 @@ pub mod models;
 pub mod names;
 pub mod newznab;
 pub mod plex;
+pub mod compact;
 pub mod demo;
 pub mod helper;
 pub mod relocate;

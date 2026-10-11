@@ -168,6 +168,9 @@ export interface Title {
   size: number;
   episodes_aired: number;
   episodes_have: number;
+  /** How many compact versions the title has, and how big they are together. */
+  compact_count?: number;
+  compact_bytes?: number;
   active?: string | null;
   available: boolean;
   library_id?: number | null;
@@ -199,6 +202,12 @@ export interface MediaFile {
   scene_name?: string | null;
   added_at: number;
   extra?: boolean;
+  /** The file this is a compact version of: a smaller copy Spool made of it. */
+  compact_of?: number | null;
+  /** A compact version of this file is being made, or waiting to be. */
+  compacting?: boolean;
+  /** For a film's own file: whether a compact version could be made of it, and how big. */
+  compact?: { can: boolean; bytes?: number; why?: string };
 }
 
 export interface Release {

@@ -10,6 +10,7 @@
   let upcoming = $state<any[]>([]);
   let activity = $state<any[]>([]);
   let moves = $state<any>({ now: null, waiting: [] });
+  let compact = $state<any>({ now: null, waiting: [], waiting_count: 0 });
   let loaded = $state(false);
 
   // Room on each place the library lives, not only where downloads land.
@@ -28,14 +29,18 @@
     upcoming = c.filter((x: any) => x.date >= today && x.monitored && !x.have).slice(0, 14);
     activity = act_.items.filter((i: any) => ['downloading', 'importing'].includes(i.acquisition.state));
     moves = act_.moves ?? moves;
+    compact = act_.compact ?? compact;
     loaded = true;
   }
   // A move sends no events as it goes, so its line is asked for again while one is under way.
   $effect(() => {
-    if (!moves.now && !moves.waiting.length) return;
+    if (!moves.now && !moves.waiting.length && !compact.now && !compact.waiting_count) return;
     const timer = setInterval(async () => {
       const a = await api.get('/activity').catch(() => null);
-      if (a) moves = a.moves ?? { now: null, waiting: [] };
+      if (a) {
+        moves = a.moves ?? { now: null, waiting: [] };
+        compact = a.compact ?? { now: null, waiting: [], waiting_count: 0 };
+      }
     }, 5000);
     return () => clearInterval(timer);
   });
@@ -123,7 +128,7 @@
   </section>
 {/if}
 
-{#if activity.length || moves.now || moves.waiting.length}
+{#if activity.length || moves.now || moves.waiting.length || compact.now || compact.waiting_count}
   <section>
     <div class="row"><div class="section-title grow">In progress</div><a class="more" href="#/activity">All activity</a></div>
     <div class="card list">
@@ -138,6 +143,21 @@
             {#if m?.total}
               <div class="progress" style="margin:8px 0 5px" role="progressbar" aria-label="Move progress" aria-valuenow={Math.round(pct(m.done, m.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(m.done, m.total)}%"></i></div>
               <div class="faint small">{bytes(m.done)} of {bytes(m.total)}</div>
+            {/if}
+          </div>
+        </a>
+      {/if}
+      {#if compact.now || compact.waiting_count}
+        {@const c = compact.now}
+        <a class="line" href="#/activity">
+          <div class="grow">
+            <div class="truncate">
+              {#if c}<b>{c.title}{c.episode ? ` ${c.episode}` : ''}</b> <span class="muted">compact version being made</span>{:else}<b>Compact versions waiting to be made</b>{/if}
+              {#if compact.waiting_count}<span class="muted"> · {compact.waiting_count} more waiting</span>{/if}
+            </div>
+            {#if c?.total_ms}
+              <div class="progress" style="margin:8px 0 5px" role="progressbar" aria-label="Compact version progress" aria-valuenow={Math.round(pct(c.done_ms, c.total_ms))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(c.done_ms, c.total_ms)}%"></i></div>
+              <div class="faint small">{Math.round(pct(c.done_ms, c.total_ms))}%{c.speed > 0 ? ` · ${c.speed.toFixed(1)}× the speed it plays` : ''}</div>
             {/if}
           </div>
         </a>

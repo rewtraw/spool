@@ -80,6 +80,8 @@ There is one entry per row, holding where it stands now, not one per write. `rem
 
 [How Spool is put together](architecture.md#knowing-what-changed) explains how the count is kept.
 
+Compact versions: `GET /api/compact` says how the library stands for them and what is being made; `POST /api/compact` with `{"title_ids": [...]}` or `{"file_ids": [...]}` puts files in line and names those refused; `POST /api/compact/cancel` with `{"file_ids": [...]}` calls them off, or all that wait when none are named; `POST /api/files/{id}/keep-compact` lets the original go. A file that is a compact version carries `compact_of`, the id of the file it was made from, and `GET /api/activity` lists the one being made and those waiting under `compact`.
+
 The helpers on other machines, what each serves and how it was last found, are at `GET /api/helpers`. A download that runs on one has an id beginning `@`, and its entry in `GET /api/activity` names the helper under `on`.
 
 ## Following events

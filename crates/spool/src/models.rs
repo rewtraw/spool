@@ -354,6 +354,10 @@ pub struct MediaFile {
     /// on another location. Spool lists and plays such a file and never changes it.
     #[serde(default)]
     pub base: Option<String>,
+    /// The file this is a compact version of: a smaller copy Spool made of it. See
+    /// [`crate::compact`]. It is kept as a version beside the original and never taken for it.
+    #[serde(default)]
+    pub compact_of: Option<i64>,
 }
 
 /// Where one row of the library stands in the order of changes.

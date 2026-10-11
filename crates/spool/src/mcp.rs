@@ -233,6 +233,9 @@ const TOOLS: &[Tool] = &[
         schema: || obj(json!({"location_id": {"type": "integer"}, "picks": {"type": "array", "items": {"type": "object", "properties": {"folder": {"type": "string"}, "tmdb_id": {"type": "integer"}, "tvdb_id": {"type": "integer"}}, "required": ["folder"]}}, "monitor": {"type": "boolean"}}), &["location_id"]),
     },
     Tool { name: "move_titles", read: false, destructive: false, description: "Move titles to another location that Spool manages, one at a time in the background. Each title's whole folder is copied, checked against the original, and the title pointed at the copy before the original is removed; from a location Spool only reads, the original stays as a further copy. Refused with the reason when the other location is away, only read, short of room or already has a folder of that name, or the title has a download under way.", schema: || obj(json!({"title_ids": {"type": "array", "items": {"type": "integer"}}, "location_id": {"type": "integer"}}), &["title_ids", "location_id"]) },
+    Tool { name: "compact_versions", read: true, destructive: false, description: "How the library stands for compact versions, the smaller copies Spool makes of a film or episode and keeps beside the original for playing away from home: what they are made with on this machine, how many there are and their size, how many more files would gain from one and what that would take, why the rest get none, and what is being made now.", schema: || obj(json!({}), &[]) },
+    Tool { name: "make_compact_versions", read: false, destructive: false, description: "Put titles in line for compact versions: a film's file, or every episode of a series that would gain from one. They are made one at a time in the background and the originals are not touched. Files that are small already, or already have one, are passed over; anything else refused comes back with the reason. Give title_ids, or everything: true for the whole library, which can be days of work: say so before starting it.", schema: || obj(json!({"title_ids": {"type": "array", "items": {"type": "integer"}}, "everything": {"type": "boolean"}}), &[]) },
+    Tool { name: "cancel_compact_versions", read: false, destructive: false, description: "Call off compact versions that are waiting to be made; the one being made carries on. Nothing already made is removed.", schema: || obj(json!({}), &[]) },
     Tool { name: "helpers", read: true, destructive: false, description: "The helpers on other machines, such as a NAS: which locations each serves, whether it answers and can be used, how many downloads it is running, how much room it has for them, and what is wrong if anything is. A download running on a helper has an id beginning with @.", schema: || obj(json!({}), &[]) },
     Tool { name: "cancel_moves", read: false, destructive: false, description: "Call off moves to another location. Give title_ids, or leave it out to take every waiting title out of the line. The move under way is stopped only when its title is named: what was copied so far is removed and the title stays where it was; once its copy is complete it is past stopping and finishes. `activity` shows which title is being moved and which wait.", schema: || obj(json!({"title_ids": {"type": "array", "items": {"type": "integer"}}}), &[]) },
     Tool { name: "collections", read: true, destructive: false, description: "The library's collections: a series of films, or an anime's series, films and side stories, each with its members in order of release, what each is to the story (recap, side story, alternative telling, spin-off), which has been watched, what to watch next, and the works of the same story that are not in the library with the ids to add them by.", schema: || obj(json!({}), &[]) },
@@ -840,6 +843,25 @@ impl Mcp {
                 Ok(json!({"result": found["message"], "to_add": count("new"), "added": count("added"), "already_in_library": count("have"), "unclear": folders("unclear"), "not_recognised": folders("unknown"), "failed": folders("failed")}))
             }
             "move_titles" => self.post("/api/titles/move", json!({"ids": a["title_ids"], "location": int("location_id")?})).await,
+            "compact_versions" => {
+                let r = self.get("/api/compact").await?;
+                Ok(json!({
+                    "made_with": r["means"],
+                    "made": {"files": r["made"]["files"], "gb": gb(&r["made"]["bytes"]), "originals_gb": gb(&r["made"]["original_bytes"])},
+                    "would_gain": {"files": r["would"]["files"], "gb": gb(&r["would"]["bytes"]), "originals_gb": gb(&r["would"]["original_bytes"]), "hours_of_film": (r["would"]["running_secs"].as_f64().unwrap_or(0.0) / 360.0).round() / 10.0},
+                    "get_none_because": r["why_not"],
+                    "being_made": r["making"]["now"],
+                    "waiting": r["making"]["waiting_count"],
+                }))
+            }
+            "make_compact_versions" => {
+                if a["everything"].as_bool() == Some(true) {
+                    self.post("/api/compact/everything", json!({})).await
+                } else {
+                    self.post("/api/compact", json!({"title_ids": a["title_ids"]})).await
+                }
+            }
+            "cancel_compact_versions" => self.post("/api/compact/cancel", json!({})).await,
             "helpers" => self.get("/api/helpers").await,
             "cancel_moves" => self.post("/api/titles/move/cancel", if a["title_ids"].is_array() { json!({"ids": a["title_ids"]}) } else { json!({}) }).await,
             "collections" => {

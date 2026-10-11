@@ -31,6 +31,7 @@ mod settings;
 mod upkeep;
 mod collections;
 mod locations;
+mod compact;
 use titles::*;
 use subtitles::*;
 use activity::*;
@@ -38,6 +39,7 @@ use settings::*;
 use upkeep::*;
 use collections::*;
 use locations::*;
+use compact::*;
 
 #[derive(rust_embed::RustEmbed)]
 #[folder = "../../web/dist"]
@@ -279,6 +281,10 @@ fn api_routes() -> Router<App> {
         .route("/api/episodes/{id}", patch(patch_episode))
         .route("/api/decisions/{id}/grab", post(grab_decision))
         .route("/api/files/{id}", delete(delete_file).patch(patch_file))
+        .route("/api/files/{id}/keep-compact", post(compact_keep))
+        .route("/api/compact", get(compact_state).post(compact_make))
+        .route("/api/compact/cancel", post(compact_cancel))
+        .route("/api/compact/everything", post(compact_everything))
         .route("/api/files/{id}/subtitles", get(file_subtitles).delete(delete_file_subtitle))
         .route("/api/files/{id}/subtitles/search", post(search_file_subtitles))
         .route("/api/files/{id}/subtitles/add", post(add_file_subtitle))

@@ -40,6 +40,7 @@ pub(super) fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashM
 pub(super) fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<Vec<Value>> {
     let (files, eps, profiles, active) = (app.db.file_counts()?, app.db.episode_counts()?, app.db.profiles()?, app.db.active_acquisitions()?);
     let places = app.placement();
+    let compact = app.db.compact_counts()?;
     let titles = match only {
         // A few are quicker fetched one by one than read with everything else.
         Some(ids) if ids.len() <= 20 => {
@@ -59,6 +60,10 @@ pub(super) fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<V
             let mut v = summarize(t, &files, &eps, &profiles, &active, &places);
             if app.moving(t.id) {
                 v["moving"] = json!(true);
+            }
+            if let Some((n, bytes)) = compact.get(&t.id) {
+                v["compact_count"] = json!(n);
+                v["compact_bytes"] = json!(bytes);
             }
             if let Some(o) = v.as_object_mut() {
                 for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at", "people", "tagline", "collection", "details_at", "local"] {
@@ -128,6 +133,16 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
             let place = f.base.as_deref().and_then(|b| places.of(b)).map(|p| json!({"name": p.0.name, "online": p.1}));
             let mut row = serde_json::to_value(&f).unwrap_or(Value::Null);
             row["copy_on"] = place.unwrap_or(Value::Null);
+            if app.compacting(f.id) {
+                row["compacting"] = json!(true);
+            }
+            // For a film, whether a compact version could be made of this file, and how big.
+            if t.kind == Kind::Movie && f.compact_of.is_none() {
+                row["compact"] = match app.compact_estimate(&t, &f) {
+                    Ok(bytes) => json!({"can": true, "bytes": bytes}),
+                    Err(why) => json!({"can": false, "why": why}),
+                };
+            }
             row
         })
         .collect::<Vec<_>>());

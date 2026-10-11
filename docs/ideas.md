@@ -152,3 +152,63 @@ It would also remove the need for the helper's downloads folder to be shared wit
 **Why it is waiting.** A helper is set up once. The four things typed today take a few minutes, and the settings page says at once whether they were right.
 
 **When to build it.** With [helpers that report in](#from-one-spool-and-its-helpers-to-a-cluster), since both are a helper making itself known; or when a second helper is added and setting one up is no longer something done once.
+
+## Converting while it plays
+
+**What it is.** [Compact versions](compact.md) are made ahead of time. A player that asks for a smaller stream of a file with no compact version gets the original. Spool could instead convert the file as it is played, as Jellyfin and Plex do, and Infuse can ask for exactly that since its version 8.5.
+
+**What it would take.** Starting ffmpeg for each player that asks, cutting what it makes into short pieces, serving those in the form players expect (HLS), following the player when it skips about, and clearing up when it stops. The part of the players' protocol that asks for a converted stream would have to be answered, where today Spool says every file is to be played as it is.
+
+**What is known.** A Mac mini with an M4 turns a 4K film on disc into 1080p at about ten times the speed it plays, on its video hardware, and two at once each get half of that. So one such machine could serve eight or so players at once, each with a film converted as it goes.
+
+**Why it is waiting.** A compact version made once serves every player from then on and survives a restart; converting as it plays serves one player once. For a library whose titles are known ahead of time, making them ahead of time is less to build and less to go wrong.
+
+**When to build it.** Titles are often played away from home before anyone thought to make a compact version of them; or the library is shared with people on connections of every kind, as in [sharing between households](#sharing-a-library-between-households).
+
+## Sharing a library between households
+
+**What it is.** Several people each run their own Spool, and each sees the others' libraries in their own, as one. A title only one of them has is played from that one's machine, through the player's own Spool, so a player still knows one server.
+
+**How it fits what is there.** Another household's Spool looks like [a location that is only read](locations.md#managed-or-only-read), reached over the internet and not through a mount.
+
+| Wanted | Already there |
+| --- | --- |
+| Titles hidden while their owner's machine is off | A location that cannot be reached takes its titles offline. |
+| One entry for a film two people have | A title in more than one place, each offered to players as a version. |
+| Nothing of someone else's ever changed | Locations that are only read. |
+| A player sees one server | The door players use; the other Spool is only where the film comes from. |
+| The same film known as the same | Every Spool keeps the same ids for a title. |
+
+**What is new.** Two Spools linked by invitation, with a code, each choosing what it shares; one asking the other what it has; and one fetching a file from the other to hand to a player.
+
+**What stands in the way.**
+
+- A film is sent at the rate it was made at. From a home whose line is slow upstream, a film on disc will not play. [Compact versions](compact.md) are the answer that exists: share those.
+- Two homes cannot reach each other without help. A private network between them (Tailscale's sharing of one machine is the least to set up) or an open port with a certificate.
+- What each owner must be able to set: which locations are shared, how much may be sent at once, how many players at once, and an end to the arrangement.
+- What one household learns of another's watching. No more than that a film was sent.
+
+**The line not to cross.** By invitation, between people who know each other, as a library is shared with family. No list of Spools to browse and no way to find a stranger's: that would be something else.
+
+**When to build it.** Someone to share with runs Spool too.
+
+## Titles worth having, found without being asked for
+
+**What it is.** Spool looks for what it has been told to look for. With an indexer that sets no limit on how much it may be asked, it could also keep an eye out for films worth having that nobody has added: new ones that are being talked about, and old ones that are well thought of, each at a quality the profile would accept.
+
+**How it would go.**
+
+1. A list of films to consider is kept up from sources that say how a film is regarded: TMDB's ratings and counts of votes, which Spool reads already; lists such as Letterboxd's highest rated or most popular; and what is trending this week.
+2. Rules say which of them are wanted: a rating above some mark (a Letterboxd average over 3.5, say) with enough votes to mean something, within years and kinds you choose, leaving out what you have turned down before.
+3. Each film that passes is offered. Either it waits on a page to be accepted or turned down, or, if you say so, it is added, monitored and looked for like any other.
+
+**What it needs.**
+
+- Somewhere to read ratings. TMDB's are there now. Letterboxd has no open API; its lists can be read through TMDB ids that others publish, or it can be left out.
+- A cap. Without one a rule such as "every film rated over 3.5" is tens of thousands of films. So many a week, so much room in all, and nothing added while the disk is short.
+- A memory of what was turned down, so the same film is not offered every week.
+- A place to put them. A location of their own, so that what was found for you can be told from what you asked for and cleared out together.
+
+**Why it is waiting.** It is a different thing from the rest of Spool, which does what it is asked. Left to add by itself it can fill a disk with films nobody watches; kept to offering, it is a list to work through. Which of the two is wanted decides most of the design.
+
+**When to build it.** With room to spare on a location and an indexer that does not count requests, and once it is settled whether it should offer or add.

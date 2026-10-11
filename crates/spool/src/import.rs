@@ -434,6 +434,7 @@ impl App {
                 languages: parsed_movie.map(|p| p.languages).unwrap_or_default(),
                 added_at: now(),
                 extra: false,
+                compact_of: None,
                 subtitles: vec![],
                 base: None,
             };
@@ -577,6 +578,10 @@ impl App {
             for p in old_subs {
                 let _ = std::fs::remove_file(p);
             }
+            // A compact version made from a file that has been replaced is of the old one.
+            for (old, _, _) in &op.replaces {
+                self.drop_compacts_of(*old);
+            }
             // A poster or notes a media server named after the old file follow it to the new name.
             for (_, old, _) in &op.replaces {
                 for (from, to) in crate::local::follow_rename(Path::new(old), Path::new(&op.dst)) {
@@ -626,6 +631,7 @@ impl App {
         self.emit(Event::Title { id: title.id });
         self.emit(Event::Attention);
         tracing::info!(title = %title.title, release = %acq.release.title, upgraded, "imported");
+        self.compact_arrivals(title.id);
 
         let folders: Vec<String> = ops.iter().filter_map(|o| Path::new(&o.dst).parent().map(|p| p.to_string_lossy().to_string())).collect();
         let app = self.clone();
@@ -643,12 +649,18 @@ impl App {
     pub fn delete_file(&self, file_id: i64) -> Result<()> {
         let file = self.db.file(file_id)?.ok_or_else(|| anyhow!("no such file"))?;
         let title = self.db.title(file.title_id)?.ok_or_else(|| anyhow!("no such title"))?;
+        // A compact version is Spool's own, wherever the title itself is kept.
+        if file.compact_of.is_some() {
+            return self.delete_compact(file_id);
+        }
         if let Some(why) = self.title_locked(&title) {
             bail!(why);
         }
         if file.base.is_some() {
             bail!("this copy of {} is on another location, where Spool changes nothing", title.title);
         }
+        // Its compact versions go with it.
+        self.drop_compacts_of(file_id);
         let abs = Path::new(&title.path).join(&file.rel_path);
         for s in &file.subtitles {
             let _ = std::fs::remove_file(Path::new(&title.path).join(&s.rel_path));

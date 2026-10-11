@@ -37,6 +37,20 @@
     await act(() => api.post('/titles/move/cancel', id ? { ids: [id] } : {}), id ? 'Taken out of the line. It stays where it is.' : 'The waiting moves are cancelled. Those titles stay where they are.');
     load();
   }
+  // ---- compact versions being made
+  const compact = $derived(data.compact ?? { now: null, waiting: [], waiting_count: 0 });
+  const encoding = $derived(!!compact.now || compact.waiting_count > 0);
+  $effect(() => {
+    if (tab !== 'queue' || !encoding || moving) return;
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
+  });
+  const named = (c: any) => `${c.title ?? 'Unknown title'}${c.episode ? ` ${c.episode}` : ''}`;
+  async function cancelCompact(c?: any) {
+    if (c && compact.now?.file_id === c.file_id && !confirm(`Stop making the compact version of ${named(c)}? What has been made of it so far is thrown away.`)) return;
+    await act(() => api.post('/compact/cancel', c ? { file_ids: [c.file_id] } : {}), c ? 'Cancelled' : 'The waiting compact versions are cancelled');
+    load();
+  }
   /** Call off the move under way. What was copied is removed and the title stays where it was. */
   async function stopMove(m: any) {
     if (!confirm(`Cancel the move of ${m.title ?? 'this title'}? What has been copied so far is removed, and it stays where it is.`)) return;
@@ -142,6 +156,9 @@
     file_missing: 'File went missing',
     adopted: 'Brought in where it lay',
     moved: 'Moved to another location',
+    compact_made: 'Compact version made',
+    compact_removed: 'Compact version removed',
+    compact_kept: 'Original let go; compact version kept',
     not_the_film: 'Recognised as an extra, not the film',
     was_film: 'Switched from a film to a series',
     in_episodes: 'Found to be posted in episodes',
@@ -220,6 +237,50 @@
               <button class="btn small ghost" aria-label="Cancel the move of {m.title ?? 'this title'}" onclick={() => cancelMoves(m.title_id)}>Cancel</button>
             </div>
           {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+  {#if encoding}
+    <div class="section-title movehead">Making compact versions</div>
+    <div class="stack moves">
+      {#if compact.now}
+        {@const c = compact.now}
+        <div class="card item">
+          <div class="grow">
+            <div class="row wrap top">
+              <a class="t" href="#/title/{c.title_id}">{named(c)}</a>
+              <span class="chip {c.stopping ? 'warn' : 'accent'}">{c.stopping ? 'Stopping' : !c.total_ms ? 'Getting ready' : c.done_ms >= c.total_ms ? 'Checking' : 'Encoding'}</span>
+              {#if c.how}<span class="chip" title={c.how === 'hardware' ? "On this machine's video hardware" : 'On the processor, which is slower'}>{c.how === 'hardware' ? 'Hardware' : 'Software'}</span>{/if}
+            </div>
+            {#if c.total_ms}
+              <div class="progress" role="progressbar" aria-label="Compact version progress" aria-valuenow={Math.round(pct(c.done_ms, c.total_ms))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(c.done_ms, c.total_ms)}%"></i></div>
+              <div class="faint why">
+                {#if c.stopping}Cancelled. Throwing away what was made; the original is untouched.
+                {:else if c.done_ms >= c.total_ms}Made. Reading it back to check it before it is given its name.
+                {:else}{duration(c.done_ms / 1000)} of {duration(c.total_ms / 1000)} of the film{c.speed > 0 ? ` · ${c.speed.toFixed(1)}× the speed it plays · about ${duration((c.total_ms - c.done_ms) / 1000 / c.speed)} left` : ''}{c.size ? ` · from ${bytes(c.size)}` : ''}{/if}
+              </div>
+            {:else}
+              <div class="faint why">Working out what is in the file.</div>
+            {/if}
+          </div>
+          {#if !c.stopping}<div class="buttons"><button class="btn small ghost danger" onclick={() => cancelCompact(c)}>Cancel</button></div>{/if}
+        </div>
+      {/if}
+      {#if compact.waiting_count}
+        <div class="card waiting">
+          <div class="row">
+            <span class="muted grow">{compact.waiting_count} waiting {compact.waiting_count === 1 ? 'its' : 'their'} turn</span>
+            {#if compact.waiting_count > 1}<button class="btn small ghost" onclick={() => cancelCompact()}>Cancel all waiting</button>{/if}
+          </div>
+          {#each compact.waiting.slice(0, 8) as c (c.file_id)}
+            <div class="row">
+              <a class="grow truncate" href="#/title/{c.title_id}">{named(c)}</a>
+              <span class="faint dest">{c.size ? bytes(c.size) : ''}</span>
+              <button class="btn small ghost" aria-label="Cancel the compact version of {named(c)}" onclick={() => cancelCompact(c)}>Cancel</button>
+            </div>
+          {/each}
+          {#if compact.waiting_count > 8}<div class="faint small">and {compact.waiting_count - 8} more</div>{/if}
         </div>
       {/if}
     </div>

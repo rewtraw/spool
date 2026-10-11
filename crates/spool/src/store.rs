@@ -322,6 +322,15 @@ impl Db {
         })
     }
 
+    /// How many compact versions each title has, and how big they are together.
+    pub fn compact_counts(&self) -> Result<std::collections::HashMap<i64, (u32, u64)>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT title_id, COUNT(*), COALESCE(SUM(size), 0) FROM files WHERE json_extract(data, '$.compact_of') IS NOT NULL GROUP BY title_id")?;
+            let rows = s.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get::<_, u32>(1)?, r.get::<_, i64>(2)? as u64))))?;
+            rows.collect()
+        })
+    }
+
     pub fn episode_counts(&self) -> Result<std::collections::HashMap<i64, (u32, u32)>> {
         self.with(|c| {
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();

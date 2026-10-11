@@ -58,6 +58,7 @@ pub struct Inner {
     pub last_playing: std::sync::atomic::AtomicI64,
     /// Titles being moved between locations.
     pub moves: Mutex<crate::relocate::Moves>,
+    pub encodes: Mutex<crate::compact::Encodes>,
     /// The anime id list, once read.
     pub anime_list: Mutex<Option<Arc<crate::anime::Ids>>>,
     pub sessions: Mutex<HashSet<String>>,
@@ -163,6 +164,7 @@ impl App {
             adoption: Mutex::new(None),
             anime_list: Mutex::new(None),
             moves: Mutex::new(Default::default()),
+            encodes: Mutex::new(Default::default()),
             last_playing: Default::default(),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
