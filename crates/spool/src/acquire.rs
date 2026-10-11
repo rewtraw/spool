@@ -801,7 +801,7 @@ impl App {
         // Remember a title turned away only for space, so the backlog leaves it alone until
         // the disk has more to give.
         if no_room && grabbed.is_empty() {
-            if let Some(headroom) = self.space_headroom() {
+            if let Some(headroom) = self.space_headroom(Some(&tc.title)) {
                 if self.space_blocked.lock().insert(title_id, headroom).is_none() {
                     tracing::info!(title = %tc.title.title, "nothing for this title fits on the disk right now; leaving it until space frees up");
                 }
@@ -1050,7 +1050,7 @@ impl App {
         if let Some(existing) = already(self)? {
             return Ok(Some(existing));
         }
-        self.check_space(d.release.size, user)?;
+        self.check_space(title, d.release.size, user)?;
         // A release already in the archive needs no indexer at all.
         let saved = match App::archive_id_from_link(&d.release.link) {
             Some(id) => self.archive_get(id)?,
@@ -1119,7 +1119,7 @@ impl App {
                 return Err(gone.into());
             }
         }
-        let job_id = self.engine.add(&nzb, &d.release.title, None).map_err(|e| anyhow!("{}: {e}", d.release.indexer))?;
+        let job_id = self.job_add(title, &nzb, &d.release.title).map_err(|e| anyhow!("{}: {e}", d.release.indexer))?;
         // Hold it at once if the disk has no room yet, before a byte is fetched.
         self.watch_space();
         if !from_archive {
@@ -1152,10 +1152,11 @@ impl App {
     /// Refuse to start a download the disk cannot hold. A packed release needs room for the
     /// archive and for what comes out of it at the same time, and downloads already running have
     /// claimed their share.
-    pub fn check_space(&self, release_bytes: u64, user: bool) -> Result<()> {
+    pub fn check_space(&self, title: &Title, release_bytes: u64, user: bool) -> Result<()> {
         let g = self.settings.general();
-        let dir = self.engine.config().incomplete_dir;
-        let Some(free) = crate::app::free_space(&dir) else { return Ok(()) };
+        // The disk it would download onto: this machine's, or that of the helper it is for.
+        let (free, jobs) = self.download_room(Some(title));
+        let Some(free) = free else { return Ok(()) };
         let gb = |b: u64| b as f64 / (1u64 << 30) as f64;
         let reserve = g.min_free_gb as u64 * (1 << 30);
         // Room to download it, plus half again while a packed release is unpacked.
@@ -1166,7 +1167,6 @@ impl App {
         // Otherwise it may join the queue and wait there for room. What Spool queues on its own
         // account is bounded, so a long backlog cannot pile up behind a full disk.
         if !user {
-            let jobs = self.engine.jobs();
             let pending: u64 = jobs.iter().filter(|j| !j.state.is_terminal()).map(|j| j.total_bytes.saturating_sub(j.done_bytes)).sum();
             let cap = g.space_wait_gb as u64 * (1 << 30);
             if free < alone + reserve + pending && pending + release_bytes > free.saturating_sub(reserve) + cap {
@@ -1178,10 +1178,11 @@ impl App {
 
     /// Room left for new downloads: what is free, less the reserve and what the queue still has
     /// to fetch. Negative when the queue already wants more than the disk has.
-    pub fn space_headroom(&self) -> Option<i128> {
-        let free = crate::app::free_space(&self.engine.config().incomplete_dir)? as i128;
+    pub fn space_headroom(&self, title: Option<&Title>) -> Option<i128> {
+        let (free, jobs) = self.download_room(title);
+        let free = free? as i128;
         let reserve = self.settings.general().min_free_gb as i128 * (1 << 30);
-        let pending: i128 = self.engine.jobs().iter().filter(|j| !j.state.is_terminal()).map(|j| j.total_bytes.saturating_sub(j.done_bytes) as i128).sum();
+        let pending: i128 = jobs.iter().filter(|j| !j.state.is_terminal()).map(|j| j.total_bytes.saturating_sub(j.done_bytes) as i128).sum();
         Some(free - reserve - pending)
     }
 
@@ -1190,7 +1191,7 @@ impl App {
     pub fn still_short_of_space(&self, title_id: i64) -> bool {
         const WORTH_ANOTHER_LOOK: i128 = 5 << 30;
         let Some(then) = self.space_blocked.lock().get(&title_id).copied() else { return false };
-        self.space_headroom().is_some_and(|now| now < then + WORTH_ANOTHER_LOOK)
+        self.space_headroom(self.db.title(title_id).ok().flatten().as_ref()).is_some_and(|now| now < then + WORTH_ANOTHER_LOOK)
     }
 
     /// Download a release from the archive for the title it was saved for.
@@ -1220,7 +1221,7 @@ impl App {
             bail!(why);
         }
         let quality = spool_core::quality::parse_quality(name, title.kind.flavor());
-        let job_id = self.engine.add(nzb, name, None)?;
+        let job_id = self.job_add(title, nzb, name)?;
         let manual = Release { title: name.trim_end_matches(".nzb").to_string(), indexer: "Manual".into(), size: spool_nntp::nzb::parse(nzb).map(|n| n.bytes()).unwrap_or(0), ..Default::default() };
         let _ = self.archive_save(title, &manual, quality, "", "manual", nzb);
         let mut acq = Acquisition {

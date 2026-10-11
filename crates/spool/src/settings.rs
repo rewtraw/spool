@@ -35,6 +35,23 @@ pub struct Location {
     pub series_profile: i64,
 }
 
+/// A helper on the machine that holds some of the disks. See [`crate::remote`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HelperConf {
+    /// Given when the helper is added and never reused.
+    pub id: u32,
+    pub name: String,
+    /// Where the helper answers, such as `http://nas:7978`.
+    pub url: String,
+    pub key: String,
+    /// The folder this machine sees the other machine's disks under, and the folder the
+    /// helper sees the same thing under. A path is turned from one to the other by swapping
+    /// these at its start.
+    pub here: String,
+    pub there: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct General {
@@ -103,6 +120,8 @@ pub struct General {
     /// The location new titles are put in; zero is the main one, which is also used whenever
     /// the chosen one cannot take them.
     pub new_titles_location: u32,
+    /// Helpers on other machines that do file work on their own disks.
+    pub helpers: Vec<HelperConf>,
 }
 
 impl Default for General {
@@ -148,6 +167,7 @@ impl Default for General {
             default_series_profile: 0,
             locations: vec![],
             new_titles_location: 0,
+            helpers: vec![],
         }
     }
 }

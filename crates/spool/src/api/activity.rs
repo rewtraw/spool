@@ -3,7 +3,7 @@
 use super::*;
 
 pub(super) async fn activity(State(app): State<App>) -> R<Value> {
-    let jobs = app.engine.jobs();
+    let jobs = app.jobs();
     let titles: HashMap<i64, Title> = app.db.titles(None)?.into_iter().map(|t| (t.id, t)).collect();
     // Everything still in progress, however long the queue, then the most recent finished ones.
     let mut recent = app.db.active_acquisitions()?;
@@ -20,6 +20,9 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
             recent.push(a);
         }
     }
+    // A download that runs on a helper is marked with whose it is.
+    let helpers: Vec<(String, String)> = app.remotes().iter().map(|r| (format!("@{}:", r.conf.id), r.conf.name.clone())).collect();
+    let on = |job: Option<&String>| job.and_then(|id| helpers.iter().find(|h| id.starts_with(&h.0))).map(|h| h.1.clone());
     let rows: Vec<Value> = recent
         .iter()
         .map(|a| {
@@ -30,6 +33,7 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
                 "kind": t.map(|t| t.kind),
                 "poster": t.and_then(crate::art::small_url),
                 "job": a.job_id.as_ref().and_then(|id| jobs.iter().find(|j| j.id == *id)),
+                "on": on(a.job_id.as_ref()),
             })
         })
         .collect();
@@ -57,14 +61,14 @@ pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): 
         "pause" => {
             if let Some(j) = &acq.job_id {
                 app.waiting_for_space.lock().remove(j);
-                app.engine.pause(j)?;
+                app.job_pause(j)?;
             }
         }
         "resume" => {
             if let Some(j) = &acq.job_id {
                 // The user's word overrides the free-space hold for this job.
                 app.waiting_for_space.lock().insert(j.clone());
-                app.engine.resume(j)?;
+                app.job_resume(j)?;
             }
         }
         "retry_import" => {
@@ -86,15 +90,15 @@ pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): 
 
 pub(super) async fn queue_action(State(app): State<App>, Path(action): Path<String>) -> R<Value> {
     match action.as_str() {
-        "pause" => app.engine.pause_all(),
-        "resume" => app.engine.resume_all(),
+        "pause" => app.queue_pause(true),
+        "resume" => app.queue_pause(false),
         _ => return Err(ApiError(StatusCode::BAD_REQUEST, "unknown action".into())),
     }
     Ok(Json(json!({"paused": app.engine.is_paused()})))
 }
 
 pub(super) async fn job_remove(State(app): State<App>, Path(id): Path<String>) -> R<Value> {
-    app.engine.remove(&id, true)?;
+    app.job_remove(&id, true)?;
     Ok(Json(json!({"ok": true})))
 }
 

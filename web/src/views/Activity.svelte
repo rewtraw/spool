@@ -241,6 +241,7 @@
             <a class="t" href="#/title/{a.title_id}">{i.title ?? 'Unknown title'}</a>
             <span class="chip {a.state === 'import_blocked' ? 'warn' : 'accent'}">{a.state === 'downloading' ? STATE_LABEL[j?.state ?? 'queued'] : STATE_LABEL[a.state]}</span>
             <span class="chip">{qualityName(a.quality, i.kind)}</span>
+            {#if i.on}<span class="chip" title="Downloaded, unpacked and filed by the helper on {i.on}, on its own disks">On {i.on}</span>{/if}
           </div>
           <div class="mono faint break rel">{a.release.title}</div>
           <JobLine job={j} state={a.state} error={a.error} size={a.release.size} />

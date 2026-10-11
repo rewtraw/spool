@@ -9,6 +9,7 @@
 #   SPOOL_BIND           address to listen on (default: 0.0.0.0:7979)
 #   SPOOL_API_KEY        Spool's key, if the app has a password, so the script may ask it things
 #   SPOOL_FORCE          set to restart even though Spool says it is in the middle of something
+#   SPOOL_HELPER_HOST    if set, the helper on that machine is updated afterwards; see deploy/helper.sh
 #
 # A Spool that is already running is asked first whether a restart would interrupt anything:
 # a download being unpacked, an import, a title being moved, someone playing. If so the
@@ -82,3 +83,7 @@ if [ -n "$RESUME" ]; then
   done
 fi
 echo "Deployed. Open $URL"
+# A helper on another machine is kept at the same version.
+if [ -n "${SPOOL_HELPER_HOST:-}" ]; then
+  deploy/helper.sh || echo "Spool is deployed, but its helper was not updated; run deploy/helper.sh when it can be."
+fi

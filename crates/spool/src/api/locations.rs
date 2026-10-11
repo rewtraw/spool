@@ -7,6 +7,11 @@ pub(super) async fn locations(State(app): State<App>) -> Json<Value> {
     Json(json!(app.location_report()))
 }
 
+/// Each helper: what it serves, and how it was last found.
+pub(super) async fn helpers(State(app): State<App>) -> Json<Value> {
+    Json(json!(app.helper_report()))
+}
+
 /// Start looking through a location for films and shows to bring in. Nothing is changed.
 pub(super) async fn location_look(State(app): State<App>, Path(id): Path<u32>) -> R<Value> {
     if !app.placement().0.iter().any(|p| p.0.id == id && p.1) {

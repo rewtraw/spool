@@ -93,6 +93,13 @@ impl Placement {
     }
 }
 
+/// Whether a folder can be listed, waiting only a few seconds to find out: a share that has
+/// gone can otherwise keep whoever asks waiting for minutes.
+pub fn listable(dir: &Path) -> bool {
+    let dir = dir.to_path_buf();
+    crate::upkeep::within(std::time::Duration::from_secs(4), move || std::fs::read_dir(&dir).is_ok()).unwrap_or(false)
+}
+
 impl App {
     /// Every location, the main one first.
     pub fn locations(&self) -> Vec<Location> {

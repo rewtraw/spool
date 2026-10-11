@@ -73,7 +73,7 @@ pub fn video_files(root: &Path) -> Vec<(PathBuf, u64)> {
     vids
 }
 
-fn move_file(src: &Path, dst: &Path) -> Result<()> {
+pub(crate) fn move_file(src: &Path, dst: &Path) -> Result<()> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
@@ -243,7 +243,7 @@ impl App {
             if dst.exists() {
                 bail!("{} already exists and is not a file Spool is replacing", dst.display());
             }
-            move_file(src, dst)?;
+            self.file_move(src, dst)?;
         } else if !dst.exists() {
             bail!("neither the downloaded file nor its destination exists");
         }
@@ -300,6 +300,10 @@ impl App {
         let mut done = 0;
         for (id, data) in pending {
             let Ok(op) = serde_json::from_str::<Operation>(&data) else { continue };
+            // What a helper is to file waits for the helper, and is taken up when it answers.
+            if self.remotes().iter().any(|r| r.covers(Path::new(&op.src)) && !r.seen().usable) {
+                continue;
+            }
             match self.execute(id, &op) {
                 Ok(()) => {
                     done += 1;
@@ -520,6 +524,12 @@ impl App {
             self.db.save_acquisition(&mut acq)?;
             return Ok(());
         }
+        // Downloaded by a helper, it is filed by the helper, and waits for it if it is away.
+        if let Some(r) = self.remotes().into_iter().find(|r| r.covers(&root) && !r.seen().usable) {
+            acq.error = Some(format!("{}'s helper cannot be reached; the import will be retried when it answers", r.conf.name));
+            self.db.save_acquisition(&mut acq)?;
+            return Ok(());
+        }
         acq.state = AcqState::Importing;
         acq.error = None;
         self.db.save_acquisition(&mut acq)?;
@@ -603,12 +613,9 @@ impl App {
             )?;
         }
         // The download folder has served its purpose.
-        let complete_dir = self.engine.config().complete_dir;
-        if root.starts_with(&complete_dir) && root != complete_dir {
-            let _ = tokio::fs::remove_dir_all(&root).await;
-        }
+        self.remove_download_folder(acq.job_id.as_deref(), &root).await;
         if let Some(job) = &acq.job_id {
-            let _ = self.engine.remove(job, true);
+            let _ = self.job_remove(job, true);
         }
         acq.state = AcqState::Imported;
         acq.error = None;

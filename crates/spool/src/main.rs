@@ -45,6 +45,13 @@ enum Command {
     },
     /// Compare where every library file is with where Spool would put it.
     CheckPaths,
+    /// Run as a helper on the machine that holds the disks: download, unpack and file there,
+    /// as told by a Spool elsewhere. Told what it may touch by SPOOL_HELPER_KEY,
+    /// SPOOL_HELPER_ROOTS, SPOOL_HELPER_READ_ROOTS and SPOOL_HELPER_DOWNLOADS.
+    Helper {
+        #[arg(long, default_value = "0.0.0.0:7979", env = "SPOOL_BIND")]
+        bind: String,
+    },
     /// Lay out a made-up library under a folder and record it, to look at. Give it a data
     /// folder of its own with --data-dir.
     Demo { folder: PathBuf },
@@ -134,9 +141,14 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).with_target(false).with_writer(move || log.clone()).init();
     let dir = data_dir(&cli);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    // A helper keeps no catalogue, so it opens no database.
+    if let Command::Helper { bind } = &cli.command {
+        return spool::helper::serve(bind, &dir, spool::helper::Conf::from_env()?).await;
+    }
     let db = Db::open(&dir.join("spool.db"))?;
 
     match cli.command {
+        Command::Helper { .. } => unreachable!("handled above"),
         Command::Serve { bind } => {
             let app = App::start(&dir, db).await?;
             // Ask for access to the media volume now, so any consent prompt appears at startup

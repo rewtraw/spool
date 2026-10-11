@@ -67,6 +67,16 @@ Two rules follow from that, and every part of Spool that touches files asks the 
 
 Bringing in what is already on a location (`adopt.rs`) is two steps: looking reads each folder's name, asks the metadata sources and reports what it is sure of, what is already in the library, what is unclear and what it could not place; adding records the sure ones, and any the user settles, where they lie.
 
+## A helper on another machine
+
+A location on a NAS can be served by a helper (`helper.rs`): the same program started with `helper`, running on the NAS, with a download engine of its own and no catalogue. It is given the folders it may touch and checks every path against them.
+
+The server reaches downloads through one set of functions (`remote.rs`: `jobs`, `job_add`, `job_pause`, `file_move` and the rest), and those decide whether a download runs in this process or on a helper. A download on a helper is named `@helper:job`, so the two never collide and each can be traced to where it runs. Spool asks each helper once a second how its downloads stand and treats what has changed exactly as it treats an event from its own engine.
+
+Paths are turned from one machine's to the other's by swapping a prefix. Spool still reads a finished download itself, across the share, to plan the import; the moves the plan calls for are then carried out by the helper. A move of a title between two folders the helper serves is handed to it whole.
+
+A download on a helper that cannot be asked is neither failed nor forgotten: looking it up answers "unknown", and it is waited for.
+
 ## What else is in a folder
 
 A title's folder usually holds more than the film: extras, artwork, theme music and the notes of whichever media server looked after it before. `local.rs` says what each file is from where it lies and what it is called, following the conventions of Plex, Jellyfin, Emby and Kodi ([local-files.md](local-files.md) lists them). What it finds is kept on the title as `local` and refreshed when the folder is scanned, after each import and once a night.

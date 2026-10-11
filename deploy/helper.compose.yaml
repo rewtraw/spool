@@ -1,0 +1,36 @@
+# Spool's helper: the same image as Spool, started with `helper`. It runs on the machine that
+# holds the disks, such as a NAS, and does file work there for a Spool elsewhere. See
+# docs/helper.md. This is the definition to give TrueNAS SCALE as a custom app, or to
+# `docker compose -f deploy/helper.compose.yaml up -d` anywhere else.
+#
+# The folders are mounted at the same paths inside as outside, so the path the helper
+# reports is the path on the NAS, and "the same folder, as the helper sees it" in Spool's
+# settings is simply where the NAS keeps it.
+services:
+  spool-helper:
+    image: ghcr.io/rewtraw/spool:latest
+    command: ["helper"]
+    restart: unless-stopped
+    # The user that owns the media. On TrueNAS SCALE the apps user is 568:568.
+    user: "568:568"
+    ports:
+      - "7978:7979"
+    environment:
+      TZ: Etc/UTC
+      # At least 16 characters; Spool is given the same one. `openssl rand -hex 24` makes one.
+      SPOOL_HELPER_KEY: "change-me-to-a-long-random-key"
+      # Folders it may file into and move titles within, separated by colons.
+      SPOOL_HELPER_ROOTS: "/mnt/tank/movies:/mnt/tank/tv"
+      # Folders it may read and copy from, and never changes. Mounted read-only below as well.
+      SPOOL_HELPER_READ_ROOTS: ""
+      # Where it downloads to: a folder of its own. On the same dataset as the library, a
+      # finished download is filed by renaming it; on another, by a copy within the NAS.
+      SPOOL_HELPER_DOWNLOADS: "/mnt/tank/downloads/spool"
+    volumes:
+      # Its own small state: the Usenet servers Spool gives it. Owned by the user above.
+      - /mnt/tank/apps/spool-helper:/data
+      - /mnt/tank/movies:/mnt/tank/movies
+      - /mnt/tank/tv:/mnt/tank/tv
+      - /mnt/tank/downloads:/mnt/tank/downloads
+      # A folder it only reads is mounted so that it cannot be written, whatever is asked:
+      # - /mnt/archive/movies:/mnt/archive/movies:ro

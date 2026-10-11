@@ -22,7 +22,7 @@ The same settings can make a second, read-only key. A session using it can use t
 | --- | --- |
 | The overall picture | `status`, `activity`, `logs`, `disk_space`, `restart_check` |
 | Titles | `find_title`, `title_detail`, `discover`, `add_title`, `update_title`, `refresh_title`, `remove_title`, `bulk_titles`, `film_to_series` |
-| Locations | `locations`, `check_location`, `look_through_location`, `add_from_location`, `move_titles`, `cancel_moves` |
+| Locations | `helpers`, `locations`, `check_location`, `look_through_location`, `add_from_location`, `move_titles`, `cancel_moves` |
 | Collections | `collections`, `add_missing_work` |
 | Profiles | `profile_fit` |
 | Why something has not arrived | `diagnose` |

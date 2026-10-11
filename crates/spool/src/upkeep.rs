@@ -55,7 +55,7 @@ pub struct Fit {
 
 /// Run something that may never return, a call into a share that has gone, and give up on it
 /// after a while. The thread is left to finish by itself.
-fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+pub(crate) fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(f());
@@ -175,6 +175,7 @@ impl App {
     pub fn busy(&self) -> Busy {
         let mut reasons = vec![];
         let many = |n: usize, one: &str, more: &str| format!("{n} {}", if n == 1 { one } else { more });
+        // What a helper is checking or unpacking carries on without this Spool.
         let jobs = self.engine.jobs();
         let working = jobs.iter().filter(|j| matches!(j.state, JobState::Verifying | JobState::Repairing | JobState::Extracting | JobState::Finishing)).count();
         if working > 0 {
@@ -206,7 +207,35 @@ impl App {
     /// share that has gone is reported and not waited on.
     pub async fn check_up(&self, location: &Location) -> Vec<Checked> {
         let l = location.clone();
-        tokio::task::spawn_blocking(move || {
+        let mut helped = vec![];
+        for (label, root) in [("Movies", &location.movie_root), ("Series", &location.series_root)] {
+            let Some(r) = self.remotes().into_iter().find(|r| !root.is_empty() && r.covers(Path::new(root))) else { continue };
+            let seen = r.seen();
+            let what = format!("{label}: {}'s helper", r.conf.name);
+            if !seen.usable {
+                helped.push(Checked { what, ok: false, detail: if seen.problem.is_empty() { "it has not answered yet".into() } else { seen.problem.clone() } });
+                continue;
+            }
+            // The two must be looking at the same folder: something this machine sees in it
+            // has to be there for the helper too.
+            let dir = PathBuf::from(root);
+            let first = within(Duration::from_secs(8), move || std::fs::read_dir(&dir).ok().and_then(|d| d.flatten().map(|e| e.path()).find(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))))).flatten();
+            let same = match first.as_ref().and_then(|p| r.there(p)) {
+                Some(there) => match r.stat(&there).await {
+                    Ok(said) if said["exists"].as_bool() == Some(true) => Ok(format!("it sees the same folder, as {}", r.there(Path::new(root)).unwrap_or_default().display())),
+                    Ok(_) => Err(format!("it does not see {} where this machine does; the two folders given for the helper do not match", there.display())),
+                    Err(e) => Err(format!("{e:#}")),
+                },
+                None => Ok("it answers; the folder is empty, so there is nothing to compare".into()),
+            };
+            let detail = match (&same, seen.downloads_seen) {
+                (Ok(said), true) => format!("{said}. Downloads for this folder run on it, and moves within its disks stay there"),
+                (Ok(said), false) => format!("{said}. {}", seen.problem),
+                (Err(why), _) => why.clone(),
+            };
+            helped.push(Checked { what, ok: same.is_ok() && seen.downloads_seen, detail });
+        }
+        let mut found = tokio::task::spawn_blocking(move || {
             let mut out = vec![];
             for (label, root) in [("Movies", &l.movie_root), ("Series", &l.series_root)] {
                 if !root.is_empty() {
@@ -219,7 +248,9 @@ impl App {
             out
         })
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+        found.extend(helped);
+        found
     }
 
     /// The profile new titles get on a location: the one set for that location, or the usual one.

@@ -29,6 +29,8 @@ pub struct Inner {
     pub db: Db,
     pub settings: Settings,
     pub engine: Engine,
+    /// The helpers on other machines, as the settings name them. See [`crate::remote`].
+    pub remotes: Mutex<Vec<std::sync::Arc<crate::remote::Remote>>>,
     pub http: reqwest::Client,
     pub meta: Metadata,
     pub events: broadcast::Sender<Event>,
@@ -145,6 +147,7 @@ impl App {
             db,
             settings,
             engine,
+            remotes: Mutex::new(vec![]),
             meta,
             http,
             events,

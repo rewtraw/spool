@@ -126,6 +126,8 @@ How to mount a share is the system's business, not Spool's. What matters to Spoo
   macOS guards network volumes as a matter of privacy, and without leave a program that lists one simply waits, with no error. Give Spool's program **Full Disk Access** under System Settings, Privacy & Security, or it will find the folders there and never be able to read them. The same applies to setting the mount up over SSH: Remote Login has its own "Allow full disk access for remote users", without which `/etc/auto_master` cannot be changed even by an administrator. "Check this location" names this when it is the cause.
 - **A container.** Mount the share on the host and pass it in as a volume, or use the container system's own NFS or SMB volume.
 
+If the share comes from a NAS that can run a container, [a helper](helper.md) on the NAS downloads and files there directly, and moves titles between its disks without the network.
+
 NFS suits a share that is only read. If Spool is to manage the location, the user Spool runs as needs to be able to write there.
 
 ## Limits

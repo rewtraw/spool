@@ -99,7 +99,7 @@ fn sweep(dir: &Path) {
 
 /// For looking at a move as it goes: bytes a second to hold the copy to, which also has a
 /// move within one disk copied instead of renamed. See tools/demo.mjs.
-fn pace() -> Option<u64> {
+pub(crate) fn pace() -> Option<u64> {
     std::env::var("SPOOL_MOVE_PACE").ok().and_then(|p| p.parse().ok()).filter(|p| *p > 0)
 }
 
@@ -109,7 +109,7 @@ fn same_disk(a: &Path, b: &Path) -> bool {
 }
 
 /// What a move that was called off ends with, so it is not reported as a failure.
-const CALLED_OFF: &str = "the move was cancelled";
+pub(crate) const CALLED_OFF: &str = "the move was cancelled";
 
 fn count<S: serde::Serializer>(n: &Arc<AtomicU64>, s: S) -> std::result::Result<S::Ok, S::Error> {
     s.serialize_u64(n.load(Ordering::Relaxed))
@@ -118,7 +118,7 @@ fn count<S: serde::Serializer>(n: &Arc<AtomicU64>, s: S) -> std::result::Result<
 /// Every file under a folder, relative to it, with its size: the film or episodes and all
 /// that lies beside them, a media server's hidden notes such as `.plexmatch` included. What
 /// a file system keeps for itself, and recycle folders, are left behind.
-fn listing(root: &Path) -> Vec<(PathBuf, u64)> {
+pub(crate) fn listing(root: &Path) -> Vec<(PathBuf, u64)> {
     let mut files = vec![];
     walk(root, &mut files);
     files.into_iter().filter_map(|p| Some((p.strip_prefix(root).ok()?.to_path_buf(), std::fs::metadata(&p).ok()?.len()))).collect()
@@ -126,7 +126,7 @@ fn listing(root: &Path) -> Vec<(PathBuf, u64)> {
 
 /// Copy a folder's files to another, counting bytes as they go, and check each against its
 /// original by size.
-fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64, stop: &AtomicBool) -> Result<()> {
+pub(crate) fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64, stop: &AtomicBool) -> Result<()> {
     use std::io::{Read, Write};
     let mut buffer = vec![0u8; 4 << 20];
     let pace = pace();
@@ -164,7 +164,7 @@ fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64, 
 }
 
 /// Take away the files that were copied, and the folders left empty by that.
-fn remove_all(root: &Path, files: &[(PathBuf, u64)]) {
+pub(crate) fn remove_all(root: &Path, files: &[(PathBuf, u64)]) {
     for (rel, _) in files {
         let _ = std::fs::remove_file(root.join(rel));
     }
@@ -451,11 +451,18 @@ impl App {
         // A location Spool only reads gives nothing up: the original stays, as a copy.
         let keep_original = places.read_only(&title);
         let from = PathBuf::from(&title.path);
-        let files = {
-            let from = from.clone();
-            tokio::task::spawn_blocking(move || listing(&from)).await?
+        // When both ends are on one helper's disks, the helper moves it there and nothing
+        // crosses the network.
+        let helper = self.remotes().into_iter().find(|r| r.covers(&from) && r.covers(&target) && r.seen().usable);
+        let files = match helper {
+            // The helper reads the folder itself.
+            Some(_) => vec![],
+            None => {
+                let from = from.clone();
+                tokio::task::spawn_blocking(move || listing(&from)).await?
+            }
         };
-        let total: u64 = files.iter().map(|f| f.1).sum();
+        let mut total: u64 = if helper.is_some() { self.needs(&title, target.parent().unwrap_or(&target)) } else { files.iter().map(|f| f.1).sum() };
         if let Some(free) = crate::app::free_space(target.parent().unwrap_or(&target)) {
             if (keep_original || !same_disk(&from, target.parent().unwrap_or(&target))) && free < total + SPARE {
                 bail!("{to_name} has {:.1} GB free and the title needs {:.1} GB", free as f64 / 1e9, total as f64 / 1e9);
@@ -477,20 +484,64 @@ impl App {
 
         // Under a working name first, so a half-made folder is never taken for the title's.
         let working = target.with_file_name(format!(".spool-moving-{id}"));
-        let (w, t, f, fl, d, st) = (working.clone(), target.clone(), from.clone(), files.clone(), done.clone(), stop.clone());
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let _ = std::fs::remove_dir_all(&w);
-            // On the same disk a folder is moved by renaming it, which takes no time.
-            if !keep_original && pace().is_none() && std::fs::rename(&f, &t).is_ok() {
-                return Ok(());
+        let mut handed: Option<(Arc<crate::remote::Remote>, String)> = None;
+        if let Some(r) = helper {
+            let there = |p: &Path| r.there(p).ok_or_else(|| anyhow!("{} is not on {}'s disks", p.display(), r.conf.name));
+            let op = r.move_start(&there(&from)?, &there(&target)?, &there(&working)?, keep_original).await?;
+            let (mut told, mut silent) = (false, 0u32);
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                if stop.load(Ordering::Relaxed) && !told {
+                    told = r.move_cancel(&op).await.is_ok();
+                }
+                let said = match r.move_state(&op).await {
+                    Ok(said) => said,
+                    // A helper that has restarted has forgotten the move, and cleared away
+                    // what it had copied; the title is where it was.
+                    Err(e) if e.to_string().contains("no such move") => bail!("{}'s helper was restarted in the middle of the move", r.conf.name),
+                    // One that has gone quiet is waited for: it may well be copying still.
+                    Err(e) => {
+                        silent += 1;
+                        if silent > 1200 {
+                            bail!("{e:#}. If it finished the copy without Spool, a folder for {} is on {to_name} as well as where it was", title.title);
+                        }
+                        continue;
+                    }
+                };
+                silent = 0;
+                done.store(said["done"].as_u64().unwrap_or(0), Ordering::Relaxed);
+                if let Some(now) = said["total"].as_u64().filter(|t| *t > 0 && *t != total) {
+                    total = now;
+                    if let Some(m) = self.moves.lock().now.as_mut() {
+                        m.total = now;
+                    }
+                }
+                match said["state"].as_str().unwrap_or_default() {
+                    "running" => continue,
+                    "done" => break,
+                    ended => {
+                        let _ = r.move_finish(&op, false).await;
+                        bail!("{}", if ended == "cancelled" { CALLED_OFF } else { ended });
+                    }
+                }
             }
-            let copied = copy_all(&f, &w, &fl, &d, &st).and_then(|_| std::fs::rename(&w, &t).with_context(|| format!("naming {}", t.display())));
-            if copied.is_err() {
+            handed = Some((r, op));
+        } else {
+            let (w, t, f, fl, d, st) = (working.clone(), target.clone(), from.clone(), files.clone(), done.clone(), stop.clone());
+            tokio::task::spawn_blocking(move || -> Result<()> {
                 let _ = std::fs::remove_dir_all(&w);
-            }
-            copied
-        })
-        .await??;
+                // On the same disk a folder is moved by renaming it, which takes no time.
+                if !keep_original && pace().is_none() && std::fs::rename(&f, &t).is_ok() {
+                    return Ok(());
+                }
+                let copied = copy_all(&f, &w, &fl, &d, &st).and_then(|_| std::fs::rename(&w, &t).with_context(|| format!("naming {}", t.display())));
+                if copied.is_err() {
+                    let _ = std::fs::remove_dir_all(&w);
+                }
+                copied
+            })
+            .await??;
+        }
 
         // The title now lives at the new place. Its files keep their names within the folder.
         let mut moved = self.db.title(id)?.ok_or_else(|| anyhow!("the title was removed"))?;
@@ -500,9 +551,18 @@ impl App {
         }
         self.db.save_title(&mut moved)?;
         self.db.add_history(Some(id), "moved", serde_json::json!({"from": from, "to": target, "bytes": total, "kept_original": keep_original}))?;
-        if !keep_original && from.exists() {
-            let (f, fl) = (from.clone(), files);
-            tokio::task::spawn_blocking(move || remove_all(&f, &fl)).await?;
+        match handed {
+            // The helper takes the original away, now that the move is on record.
+            Some((r, op)) => {
+                if let Err(e) = r.move_finish(&op, !keep_original).await {
+                    tracing::warn!(title = %title.title, error = %format!("{e:#}"), "the helper did not take the original away; it is still in its old folder");
+                }
+            }
+            None if !keep_original && from.exists() => {
+                let (f, fl) = (from.clone(), files);
+                tokio::task::spawn_blocking(move || remove_all(&f, &fl)).await?;
+            }
+            None => {}
         }
         let mut report = crate::catalog::ScanReport::default();
         self.scan_title(id, &mut report).await?;

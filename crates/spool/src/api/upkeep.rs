@@ -98,7 +98,7 @@ pub(super) async fn space(State(app): State<App>) -> R<Value> {
     let profiles = app.db.profiles()?;
     let saved = app.archive_all()?;
     let (recycled_files, recycled_bytes) = app.recycle_usage();
-    let jobs = app.engine.jobs();
+    let jobs = app.jobs();
     let waiting: Vec<&spool_nntp::JobStatus> = jobs.iter().filter(|j| j.state == spool_nntp::JobState::Paused && j.message == "Waiting for free space").collect();
     let mut rows: Vec<(u64, Value)> = titles
         .iter()

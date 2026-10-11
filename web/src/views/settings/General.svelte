@@ -53,6 +53,21 @@
     checks[id] = 'running';
     checks[id] = await api.post(`/locations/${id}/check`).catch((e) => ({ ok: false, checks: [{ what: 'check', ok: false, detail: e.message }] }));
   }
+  // ---- helpers: a small Spool on the machine that holds some of the disks
+  let helpers = $state<any[]>([]);
+  let helperTimer: ReturnType<typeof setInterval> | undefined;
+  async function loadHelpers() {
+    helpers = await api.get<any[]>('/helpers').catch(() => helpers);
+  }
+  const helperOf = (id: number) => helpers.find((h) => h.id === id);
+  function addHelper() {
+    (general.helpers ??= []).push({ id: 0, name: '', url: '', key: '', here: '', there: '' });
+  }
+  $effect(() => {
+    loadHelpers();
+    helperTimer = setInterval(loadHelpers, 5000);
+    return () => clearInterval(helperTimer);
+  });
   function addPlace() {
     general.locations.push({ id: 0, name: '', movie_root: '', series_root: '', volume: '', manage: false });
   }
@@ -101,6 +116,7 @@
     load();
     // The players' door follows the settings within a few seconds.
     setTimeout(loadPlayers, 4000);
+    setTimeout(loadHelpers, 1500);
   }
 </script>
 
@@ -250,6 +266,43 @@
       {/each}
       <div><button class="btn" type="button" onclick={addPlace}>Add a location</button></div>
       <p class="hint">Titles already in the library stay where they are. When the place chosen for new titles cannot be reached, they go to the first location above. A title being added can be put somewhere else from its own box.</p>
+    </fieldset>
+
+    <fieldset class="card">
+      <legend>Helpers</legend>
+      <p class="muted">A helper is a small Spool that runs on the machine that holds some of the disks, such as a NAS. It downloads, unpacks and files onto its own disks, and moves titles between them, so that nothing crosses the network to this machine and back. Spool here still decides everything and serves the library. <a class="link" href="https://rewtraw.github.io/spool/guide/helper.html" target="_blank" rel="noreferrer">Setting one up</a></p>
+      {#each general.helpers ?? [] as h, i (i)}
+        {@const now = helperOf(h.id)}
+        <div class="place">
+          <div class="cols">
+            <label class="field">Name<input class="input" bind:value={h.name} placeholder="The NAS's name" /></label>
+            <label class="field">Address<input class="input mono" bind:value={h.url} placeholder="http://nas:7978" /></label>
+          </div>
+          <label class="field">Key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with.</span></label>
+          <div class="cols">
+            <label class="field">The other machine's disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="/Volumes/nas" /></label>
+            <label class="field">The same folder, as the helper sees it<input class="input mono" bind:value={h.there} placeholder="/mnt" /></label>
+          </div>
+          <span class="hint">Every location whose folders lie under the first is served by this helper. A path is turned from one machine's to the other's by swapping these two at its start, so they must name the same folder.</span>
+          <div class="row wrap">
+            {#if now}
+              <span class="small" class:warn={!now.seen.usable || !now.seen.downloads_seen}>
+                {[!now.seen.asked ? 'Not asked yet' : !now.seen.reachable ? 'Cannot be reached' : !now.seen.usable ? 'Cannot be used' : 'Answering',
+                  now.serves.length ? `serves ${now.serves.join(' and ')}` : 'serves no location yet',
+                  now.seen.usable && now.downloads ? `${now.downloads} ${now.downloads === 1 ? 'download' : 'downloads'} running` : '',
+                  now.seen.free != null ? `${bytes(now.seen.free)} free for downloads` : ''].filter(Boolean).join(' · ')}
+              </span>
+            {:else}
+              <span class="faint small">Save to start using it.</span>
+            {/if}
+            <span class="grow"></span>
+            <button class="btn small ghost danger" type="button" onclick={() => general.helpers.splice(i, 1)}>Remove</button>
+          </div>
+          {#if now?.seen.problem}<p class="small warn">{now.seen.problem}</p>{/if}
+        </div>
+      {/each}
+      <div><button class="btn" type="button" onclick={addHelper}>Add a helper</button></div>
+      <p class="hint">Without a helper, or while one cannot be reached, a location on another machine works as before: downloads run here and are filed across the share. "Check this location" says what a location's helper sees.</p>
     </fieldset>
 
     <fieldset class="card">

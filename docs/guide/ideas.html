@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#a-helper-on-the-machine-that-holds-the-disks">A helper on the machine that holds the disks</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a></nav>
       </details>
     </aside>
     <article>
@@ -148,64 +148,36 @@
 <li>It can only be tested with a real Apple TV in Library Mode, over several rounds of adding and removing things.</li>
 </ul>
 <p><strong>When to build it.</strong> Someone uses Library Mode, prefers it, and finds the sync after new downloads slow.</p>
-<h2 id="a-helper-on-the-machine-that-holds-the-disks"><a href="#a-helper-on-the-machine-that-holds-the-disks">A helper on the machine that holds the disks</a></h2>
-<p><strong>What it is.</strong> Spool runs on one machine and may keep part of its library on another, a NAS, reached over a network share. Everything Spool does to files there crosses the network, twice or more for anything that has to be repaired or unpacked. A helper would be a small program on the NAS itself that does only the file work, told what to do by Spool. Spool stays the one place that knows the catalogue, makes the choices and serves the web app and players.</p>
-<p><strong>What the helper would do.</strong></p>
+<h2 id="more-for-the-helper-to-do"><a href="#more-for-the-helper-to-do">More for the helper to do</a></h2>
+<p><strong>What it is.</strong> <a href="helper.html">A helper</a> on the machine that holds the disks already downloads, unpacks, files and moves there. Three jobs it could also take are still done by Spool across the share.</p>
 <div class="scroll"><table>
 <thead>
 <tr>
 <th>Job</th>
-<th>Today, over a share</th>
-<th>With a helper</th>
+<th>Today</th>
+<th>With the helper doing it</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>Download</td>
-<td>Bytes arrive at Spool&#39;s machine and are written across the network</td>
-<td>Fetched from Usenet by the NAS, written to its own disks</td>
-</tr>
-<tr>
-<td>Repair and unpack</td>
-<td>Read from the NAS and written back, both across the network</td>
-<td>Local</td>
-</tr>
-<tr>
-<td>Filing into the library</td>
-<td>A copy across the network when downloads are staged elsewhere; a rename only if the downloads folder is in the same dataset</td>
-<td>Always a local move</td>
-</tr>
-<tr>
 <td>Reading a folder and each file&#39;s details</td>
-<td>Every file opened across the network</td>
-<td>Local; only the findings cross</td>
+<td>Every file opened across the network when a location is looked through or scanned</td>
+<td>Read on the NAS; only the findings cross</td>
 </tr>
 <tr>
 <td>Checking subtitles against the sound</td>
 <td>The sound track read across the network</td>
-<td>Local</td>
+<td>On the NAS</td>
 </tr>
 <tr>
 <td>Playing</td>
 <td>NAS to Spool&#39;s machine to the player</td>
-<td>Could go from the NAS to the player directly</td>
+<td>From the NAS to the player directly</td>
 </tr>
 </tbody></table></div>
-<p>It would also remove the dependence on the share being mounted on Spool&#39;s machine for anything but playing, and with that the Mac&#39;s privacy consent for network volumes.</p>
-<p><strong>How it would be built.</strong></p>
-<ul>
-<li>The download engine is already a crate of its own (<code>spool-nntp</code>), with no knowledge of the catalogue. The helper is that engine, the import step&#39;s file moves, and the folder survey, behind a small HTTP API with a key.</li>
-<li>Spool gains a second kind of engine: one it drives over HTTP where today it drives one in its own process. A location names the helper that serves it; a location without one works as now.</li>
-<li>Jobs are owned by the helper and reported back, so a restart of either side resumes. The import journal stays with Spool: the helper is told each move and confirms it.</li>
-<li>It ships as the container image Spool already has, started in a helper mode, which is how it would run on TrueNAS SCALE and similar.</li>
-</ul>
-<p><strong>What it would cost.</strong></p>
-<ul>
-<li>A second thing to install and keep at the same version as Spool, and an API between them that has to stay compatible or refuse clearly when it is not.</li>
-<li>The server calls the engine directly in many places today. Putting an interface between them is the bulk of the work: two to three days, with the end-to-end tests run against both kinds.</li>
-<li>Usenet credentials have to be given to the helper, so it holds secrets too.</li>
-</ul>
-<p><strong>Why it is waiting.</strong> A managed location on a NAS works without it, more slowly. How much more slowly is not yet measured on a real network, and the answer decides whether this is worth a second moving part.</p>
-<p><strong>When to build it.</strong> Downloads onto a share prove slow or fragile in practice; or the machine Spool runs on is short of disk to stage downloads and the NAS is the only place with room; or playing through Spool&#39;s machine becomes the limit.</p>
+<p>It would also remove the need for the helper&#39;s downloads folder to be shared with Spool&#39;s machine, since Spool would no longer read a download before filing it.</p>
+<p><strong>What it would cost.</strong> Each is a part of Spool that reads files directly today and would have to ask the helper instead: the import plan, the library scan and the subtitle check. Playing from the NAS means the helper serving files to players, which gives it a door to the outside that it does not have now.</p>
+<p><strong>Why it is waiting.</strong> The jobs that move whole films across the network are the ones that were slow, and those are done. These read a little of each file.</p>
+<p><strong>When to build it.</strong> A nightly scan of a large share proves slow in practice, or sharing the downloads folder is in the way.</p>
 <nav class="around" aria-label="Other guides"><a class="prev" href="architecture.html"><span>Before</span>How Spool is put together</a><span></span></nav>
     </article>
   </div>

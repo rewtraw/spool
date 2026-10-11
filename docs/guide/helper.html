@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A helper on the machine that holds the disks · Spool</title>
+<meta name="description" content="Spool runs on one machine and may keep part of its library on another, such as a NAS, which it reaches over a network share. Without help, everything it does to files there crosses the network: a download arrives at Spool&amp;#39;s machine and is copied over, and a title moved between two of the NAS&amp;#39;s own disks is read to Spool&amp;#39;s machine and written back.">
+<link rel="icon" href="../assets/mark.svg">
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
+    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
+      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(../assets/mark.svg) center / contain no-repeat; mask: url(../assets/mark.svg) center / contain no-repeat; }
+  .brand small { font: 500 15px/1 var(--sans); color: var(--muted); margin-left: 4px; }
+  header nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
+  header nav a:hover { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 40px; }
+  .side { font-size: 14.5px; }
+  .side .inner { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; display: grid; gap: 2px; padding-bottom: 24px; }
+  .side summary { display: none; }
+  .side p { margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+  .side a:hover { color: var(--text); }
+  .side a.on { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+  .side a.sub { padding: 3px 10px 3px 22px; font-size: 13.5px; }
+
+  article { max-width: 740px; min-width: 0; }
+  h1 { font: 600 clamp(32px, 4.6vw, 44px)/1.1 var(--serif); letter-spacing: -0.012em; margin: 0 0 20px; text-wrap: balance; }
+  h2 { font: 600 26px/1.2 var(--serif); margin: 52px 0 12px; padding-top: 4px; }
+  h3 { font: 600 19px/1.3 var(--serif); margin: 34px 0 8px; }
+  h2 a:hover::after, h3 a:hover::after { content: ' #'; color: var(--faint); }
+  h1 + p { font-size: 18.5px; color: var(--muted); }
+  p, ul, ol { margin: 0 0 16px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 5px 0; }
+  li > p { margin-bottom: 8px; }
+  li > ul, li > ol, li > .scroll { margin-top: 8px; }
+  strong { font-weight: 600; }
+  article p a, article li a, article td a { color: var(--accent); }
+  article p a:hover, article li a:hover, article td a:hover { text-decoration: underline; }
+  code { font: 0.88em var(--mono); background: var(--raised); padding: 2px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  pre { margin: 0 0 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14px/1.7 var(--mono); overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .scroll { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--surface); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { min-width: 150px; }
+
+  .around { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 56px; }
+  .around a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: 600 17px/1.3 var(--serif); }
+  .around a:hover { border-color: var(--muted); }
+  .around a span { display: block; font: 600 12px/1.6 var(--sans); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); }
+  .around .next { text-align: right; }
+
+  footer { margin-top: 72px; padding: 26px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: flex; gap: 8px 26px; flex-wrap: wrap; }
+  footer a { color: var(--accent); }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 22px; padding-top: 20px; }
+    .brand small { display: none; }
+    .side { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .side summary { display: block; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+    .side .inner { position: static; max-height: none; padding: 0 8px 12px; }
+    .side a.sub { display: none; }
+    h2 { margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<!-- Made from docs/helper.md by web/scripts/build-docs.mjs. Change that file, not this one. -->
+<div class="wrap">
+  <header>
+    <a class="brand" href="../"><span class="mark"></span>Spool<small>Guides</small></a>
+    <nav>
+      <a href="./">All guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <details open>
+        <summary>Guides</summary>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+      </details>
+    </aside>
+    <article>
+<h1>A helper on the machine that holds the disks</h1>
+<p>Spool runs on one machine and may keep part of its library on another, such as a NAS, which it reaches over a <a href="locations.html">network share</a>. Without help, everything it does to files there crosses the network: a download arrives at Spool&#39;s machine and is copied over, and a title moved between two of the NAS&#39;s own disks is read to Spool&#39;s machine and written back.</p>
+<p>A helper is a small Spool that runs on the NAS itself and does only the file work, on the NAS&#39;s own disks. The Spool you already have stays in charge: it holds the catalogue, makes every choice, and serves the web app and players. It tells the helper what to fetch and what goes where.</p>
+<p>This part of Spool is new. It is tested end to end, with a helper and a Spool in one test; it has had little use yet on a real network.</p>
+<h2 id="what-the-helper-does-and-what-it-leaves-alone"><a href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a></h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Without a helper</th>
+<th>With one</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Downloading for a title kept on the NAS</td>
+<td>Fetched by Spool&#39;s machine, then copied across the network</td>
+<td>Fetched from Usenet by the NAS, onto its own disks</td>
+</tr>
+<tr>
+<td>Repairing and unpacking</td>
+<td>On Spool&#39;s machine</td>
+<td>On the NAS</td>
+</tr>
+<tr>
+<td>Filing into the library</td>
+<td>A copy across the network</td>
+<td>A rename, or a copy from one of the NAS&#39;s disks to another</td>
+</tr>
+<tr>
+<td>Moving a title between two folders on the NAS</td>
+<td>Read to Spool&#39;s machine and written back</td>
+<td>Disk to disk inside the NAS</td>
+</tr>
+</tbody></table></div>
+<p>Still done by Spool across the share, as before:</p>
+<ul>
+<li>reading folders and each file&#39;s details, when a location is looked through or scanned;</li>
+<li>playing, subtitles, recycling and deleting;</li>
+<li>everything on a location the helper does not serve.</li>
+</ul>
+<p>A helper that cannot be reached takes nothing with it. Downloads for its part of the library run on Spool&#39;s machine and are filed across the share, as they would be without it; a notice says the helper is away; and what it was already downloading is waited for, not written off.</p>
+<h2 id="what-it-may-touch"><a href="#what-it-may-touch">What it may touch</a></h2>
+<p>A helper is started with a list of folders and works only inside them. Every path it is given is checked against the list.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SPOOL_HELPER_KEY</code></td>
+<td>Sent by Spool with every request. At least 16 characters. Nothing is answered without it.</td>
+</tr>
+<tr>
+<td><code>SPOOL_HELPER_ROOTS</code></td>
+<td>Folders it may file into and move titles within, separated by colons.</td>
+</tr>
+<tr>
+<td><code>SPOOL_HELPER_READ_ROOTS</code></td>
+<td>Folders it may read and copy from. It never writes to them, moves anything out of them or removes anything from them.</td>
+</tr>
+<tr>
+<td><code>SPOOL_HELPER_DOWNLOADS</code></td>
+<td>The folder it downloads into. It clears away only finished downloads of its own there.</td>
+</tr>
+</tbody></table></div>
+<p>Mount a folder it should only read as read-only in the container as well, so that the system refuses a write whatever is asked.</p>
+<p>The helper keeps one file of its own, in <code>/data</code>: the Usenet servers and limits Spool gives it, so that downloads carry on after the helper restarts. It holds your Usenet passwords and is readable only by the helper&#39;s user.</p>
+<h2 id="setting-one-up"><a href="#setting-one-up">Setting one up</a></h2>
+<h3 id="1-start-the-helper-on-the-nas"><a href="#1-start-the-helper-on-the-nas">1. Start the helper on the NAS</a></h3>
+<p>It is the same container image as Spool, started with <code>helper</code>. <a href="https://github.com/rewtraw/spool/blob/main/deploy/helper.compose.yaml">deploy/helper.compose.yaml</a> is the definition, for <code>docker compose</code> or for a custom app on TrueNAS SCALE:</p>
+<pre><code class="language-yaml">services:
+  spool-helper:
+    image: ghcr.io/rewtraw/spool:latest
+    command: [&quot;helper&quot;]
+    user: &quot;568:568&quot;                     # the user that owns the media
+    ports: [&quot;7978:7979&quot;]
+    environment:
+      SPOOL_HELPER_KEY: &quot;a long random key&quot;
+      SPOOL_HELPER_ROOTS: &quot;/mnt/tank/movies:/mnt/tank/tv&quot;
+      SPOOL_HELPER_READ_ROOTS: &quot;/mnt/archive/movies&quot;
+      SPOOL_HELPER_DOWNLOADS: &quot;/mnt/tank/downloads/spool&quot;
+    volumes:
+      - /mnt/tank/apps/spool-helper:/data
+      - /mnt/tank/movies:/mnt/tank/movies
+      - /mnt/tank/tv:/mnt/tank/tv
+      - /mnt/tank/downloads:/mnt/tank/downloads
+      - /mnt/archive/movies:/mnt/archive/movies:ro
+</code></pre>
+<p>Mount each folder at the same path inside the container as outside. The paths the helper reports are then the paths on the NAS, which keeps the next step simple.</p>
+<p>Put the downloads folder on the same dataset as the library if you can: a finished download is then filed by renaming it. On another dataset it is copied, inside the NAS.</p>
+<h3 id="2-let-spools-machine-see-the-downloads-folder"><a href="#2-let-spools-machine-see-the-downloads-folder">2. Let Spool&#39;s machine see the downloads folder</a></h3>
+<p>Spool reads what was downloaded before it files it: which file is the film, how long it runs, what is in it. So the helper&#39;s downloads folder has to be shared and mounted on Spool&#39;s machine, beside the library folders. Reading is enough; the share can be read-only.</p>
+<h3 id="3-tell-spool-about-the-helper"><a href="#3-tell-spool-about-the-helper">3. Tell Spool about the helper</a></h3>
+<p>Under Settings, General, Helpers, choose <strong>Add a helper</strong>:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What to put</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Name</td>
+<td>What to call it, such as the NAS&#39;s name.</td>
+</tr>
+<tr>
+<td>Address</td>
+<td>Where it answers, such as <code>http://nas:7978</code>.</td>
+</tr>
+<tr>
+<td>Key</td>
+<td>The key it was started with.</td>
+</tr>
+<tr>
+<td>The other machine&#39;s disks, as this machine sees them</td>
+<td>The folder the shares are mounted under here, such as <code>/Volumes/nas</code>.</td>
+</tr>
+<tr>
+<td>The same folder, as the helper sees it</td>
+<td>Where the NAS keeps them, such as <code>/mnt</code>.</td>
+</tr>
+</tbody></table></div>
+<p>The two folders must name the same place. A path is turned from one machine&#39;s to the other&#39;s by swapping them at its start: with the example above, <code>/Volumes/nas/tank/movies/Heat (1995)</code> here is <code>/mnt/tank/movies/Heat (1995)</code> to the helper.</p>
+<p>There is nothing to set on a location. Every location whose folders lie under the first folder is served by the helper, and the settings page says which those are.</p>
+<h3 id="4-check"><a href="#4-check">4. Check</a></h3>
+<p><strong>Check this location</strong>, on a location the helper serves, asks the helper whether it sees the same folder Spool does, and says whether Spool can see the helper&#39;s downloads. Anything that fails comes with what to do about it.</p>
+<p>From then on, a download for a title on that location shows <strong>On</strong> and the helper&#39;s name in Activity.</p>
+<h2 id="keeping-the-two-in-step"><a href="#keeping-the-two-in-step">Keeping the two in step</a></h2>
+<p>The helper and Spool must be the same version. Spool asks when it connects, and if the helper does not speak as it does, it leaves the helper unused and says so in a notice, until the two are updated together.</p>
+<p><code>deploy/helper.sh</code> updates a helper on TrueNAS SCALE over SSH: it waits for the image of the current commit to be built, asks the helper whether a restart would interrupt anything, pulls the image and restarts the app. <code>deploy/deploy.sh</code> runs it after updating Spool when <code>SPOOL_HELPER_HOST</code> is set.</p>
+<p>A helper that restarts in the middle of things picks up its downloads where they stopped. A title it was moving stays where it was: the half-made copy is cleared away, and Spool reports that the move did not finish.</p>
+<h2 id="limits"><a href="#limits">Limits</a></h2>
+<ul>
+<li>The Usenet speed limit applies to Spool&#39;s machine and to each helper separately, so together they may use more than the limit.</li>
+<li>The folders a location is looked through or scanned from are still read across the share.</li>
+<li>A film played from the NAS still goes through Spool&#39;s machine to the player.</li>
+<li>A move between a helper&#39;s disks and anywhere else is Spool&#39;s own to carry out, across the share.</li>
+</ul>
+<nav class="around" aria-label="Other guides"><a class="prev" href="locations.html"><span>Before</span>A library in more than one place</a><a class="next" href="players.html"><span>Next</span>Playing on a television</a></nav>
+    </article>
+  </div>
+  <footer>
+    <a href="https://github.com/rewtraw/spool/blob/main/docs/helper.md">Change this page on GitHub</a>
+    <a href="../">Spool's front page</a>
+    <span>Spool is free software under the GNU GPL v3.</span>
+  </footer>
+</div>
+<script>if (matchMedia('(max-width: 860px)').matches) document.querySelector('.side details').open = false;</script>
+</body>
+</html>

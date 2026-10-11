@@ -604,7 +604,7 @@ async fn a_download_the_disk_cannot_hold_is_not_started() {
     g.min_free_gb = (free >> 30) as u32 + 50;
     w.app.settings.set_general(&g).unwrap();
 
-    let err = w.app.check_space(3 << 30, false).unwrap_err().to_string();
+    let err = w.app.check_space(&movie, 3 << 30, false).unwrap_err().to_string();
     assert!(err.contains("not enough free space"), "{err}");
     let outcome = w.app.search(movie.id, Scope::Movie, false, true).await.unwrap();
     assert!(outcome.grabbed.is_empty());
@@ -2763,4 +2763,196 @@ async fn what_lies_beside_a_film_is_recognised_shown_and_left_alone_by_an_upgrad
     assert_eq!(files.iter().map(|f| f.extra).collect::<Vec<_>>(), [true, false]);
     let local = w.app.db.title(movie.id).unwrap().unwrap().local;
     assert_eq!((local.extras.len(), local.notes.rel_path.as_str(), local.notes.tmdb_id), (3, format!("{new_stem}.nfo").as_str(), Some(949)));
+}
+
+/// A stand-in for a NAS: a folder the helper sees as `nas`, which Spool sees as `mnt`, as it
+/// would a share. The helper files into `films`, only reads `vault`, and downloads into its own
+/// folder. Spool is told of two locations there and of the helper.
+async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, PathBuf) {
+    use serde_json::json;
+    let (nas, mnt) = (w.root.join("nas"), w.root.join("mnt"));
+    for d in ["films", "vault", "downloads/complete", "downloads/incomplete"] {
+        std::fs::create_dir_all(nas.join(d)).unwrap();
+    }
+    std::os::unix::fs::symlink(&nas, &mnt).unwrap();
+    let key = "a-key-of-sufficient-length".to_string();
+    let conf = spool::helper::Conf { key: key.clone(), roots: vec![nas.join("films")], read_roots: vec![nas.join("vault")], downloads: nas.join("downloads") }.checked().unwrap();
+    let helper = spool::helper::Helper::start(&w.root.join("helper-data"), conf).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let router = helper.router();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+    let api = spool::api::router(w.app.clone());
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["locations"] = json!([{"name": "Shelf", "movie_root": mnt.join("films"), "manage": true}, {"name": "Vault", "movie_root": mnt.join("vault"), "manage": false}]);
+    g["helpers"] = json!([{"name": "Nas", "url": url, "key": key, "here": mnt, "there": nas}]);
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert_eq!(status, 200, "{said}");
+    w.app.ask_remotes().await;
+    (helper, url, nas, mnt)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_helper_downloads_and_files_on_its_own_disks() {
+    use serde_json::{json, Value};
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (helper, _, nas, mnt) = with_helper(&w).await;
+    let api = spool::api::router(w.app.clone());
+
+    // Spool knows the helper, what it serves, and that it can read what the helper downloads.
+    let (_, helpers) = call(&api, "GET", "/api/helpers", Value::Null).await;
+    assert_eq!((helpers[0]["name"].as_str(), helpers[0]["serves"].to_string().as_str(), helpers[0]["seen"]["usable"].as_bool(), helpers[0]["seen"]["downloads_seen"].as_bool()), (Some("Nas"), r#"["Shelf","Vault"]"#, Some(true), Some(true)), "{helpers}");
+    // Its key is not handed back to the browser.
+    let (_, general) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    assert_eq!(general["helpers"][0]["key"], "********");
+    // And the helper was given the Usenet servers to download with.
+    let saved: Value = serde_json::from_slice(&std::fs::read(w.root.join("helper-data/helper.json")).unwrap()).unwrap();
+    assert_eq!(saved["servers"].as_array().map(Vec::len), Some(1));
+
+    // A film that lives on the helper's disks is downloaded by the helper, not here.
+    let mut film = w.movie("Night of the Example", 2020, "tt1234567");
+    film.path = mnt.join("films/Night of the Example (2020)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut film).unwrap();
+    w.release("Night.of.the.Example.2020.1080p.BluRay.x264-GRP", &[("night.of.the.example.2020.1080p.bluray.x264-grp.mkv", &video), ("night.nfo", b"info")]);
+    let outcome = w.app.search(film.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    let job = outcome.grabbed[0].job_id.clone().unwrap();
+    assert!(job.starts_with("@1:"), "the download is the helper's: {job}");
+    assert!(w.app.engine.jobs().is_empty(), "nothing was started on this machine");
+    assert_eq!(helper.engine().jobs().len(), 1);
+
+    // It arrives in the library on the helper's disks, filed there by the helper.
+    for _ in 0..600 {
+        w.app.ask_remotes().await;
+        if w.app.db.title_acquisitions(film.id).unwrap().iter().any(|a| a.state == AcqState::Imported) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    w.wait_state(film.id, AcqState::Imported).await;
+    assert_eq!(tree(&nas.join("films")), ["Night of the Example (2020)/Night of the Example (2020) {imdb-tt1234567} [Bluray-1080p][AAC 2.0][x264]-GRP.mkv"]);
+    let files = w.app.db.files(film.id).unwrap();
+    assert_eq!((files.len(), files[0].size), (1, video.len() as u64));
+    assert_eq!(helper.work_done().0, 1, "the helper moved the file into place itself");
+    for _ in 0..60 {
+        if tree(&nas.join("downloads")).is_empty() && helper.engine().jobs().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(tree(&nas.join("downloads")).is_empty() && helper.engine().jobs().is_empty(), "the helper cleared the download away: {:?}", tree(&nas.join("downloads")));
+    assert!(tree(&w.root.join("downloads")).is_empty(), "and nothing passed through this machine's downloads folder");
+
+    // The check-up of a location says what its helper sees.
+    let (_, checked) = call(&api, "POST", "/api/locations/1/check", Value::Null).await;
+    let line = checked.to_string();
+    assert!(line.contains("Nas's helper") && line.contains("sees the same folder"), "{line}");
+
+    // With the helper away, what it was doing is waited for, and new downloads run here.
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["helpers"][0]["url"] = json!("http://127.0.0.1:9");
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    w.app.ask_remotes().await;
+    let (_, helpers) = call(&api, "GET", "/api/helpers", Value::Null).await;
+    assert_eq!(helpers[0]["seen"]["reachable"].as_bool(), Some(false), "{helpers}");
+    assert!(w.app.db.attention(false).unwrap().iter().any(|a| a.message.contains("Nas's helper did not answer")), "a notice says the helper is away");
+    let mut waiting = w.app.db.title_acquisitions(film.id).unwrap().remove(0);
+    (waiting.id, waiting.state, waiting.job_id) = (0, AcqState::Downloading, Some("@1:still-running".into()));
+    w.app.db.save_acquisition(&mut waiting).unwrap();
+    w.app.reconcile_all().await.unwrap();
+    assert_eq!(w.app.db.acquisition(waiting.id).unwrap().unwrap().state, AcqState::Downloading, "a download on a helper that cannot be asked is not written off");
+
+    let mut second = w.movie("Second Example", 2021, "tt7654321");
+    second.path = mnt.join("films/Second Example (2021)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut second).unwrap();
+    w.release("Second.Example.2021.1080p.BluRay.x264-GRP", &[("second.example.2021.1080p.bluray.x264-grp.mkv", &video)]);
+    let outcome = w.app.search(second.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    assert!(!outcome.grabbed[0].job_id.clone().unwrap().starts_with('@'), "it runs here while the helper is away");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else() {
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let (helper, url, nas, mnt) = with_helper(&w).await;
+    let api = spool::api::router(w.app.clone());
+    let lay = |path: PathBuf, bytes: &[u8]| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    };
+
+    // A film on the folder the helper only reads, moved to the one it files into: the helper
+    // copies it there, and the original stays.
+    let kept = nas.join("vault/Alpha (2001)");
+    lay(kept.join("Alpha (2001).mkv"), b"a film on the vault");
+    lay(kept.join("Alpha (2001).en.srt"), b"1\n");
+    let mut alpha = w.movie("Alpha", 2001, "tt0000001");
+    alpha.path = mnt.join("vault/Alpha (2001)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut alpha).unwrap();
+    w.app.scan_all().await.unwrap();
+    let (status, said) = call(&api, "POST", "/api/titles/move", json!({"ids": [alpha.id], "location": 1})).await;
+    assert_eq!((status, said["queued"].as_u64()), (200, Some(1)), "{said}");
+    for _ in 0..400 {
+        if !w.app.moving(alpha.id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(!w.app.moving(alpha.id), "the move finished");
+    assert_eq!(tree(&nas.join("films")), ["Alpha (2001)/Alpha (2001).en.srt", "Alpha (2001)/Alpha (2001).mkv"], "{:?}", w.app.db.attention(false).unwrap().iter().map(|a| a.message.clone()).collect::<Vec<_>>());
+    assert_eq!(std::fs::read(kept.join("Alpha (2001).mkv")).unwrap(), b"a film on the vault", "nothing is taken from a folder the helper only reads");
+    assert_eq!(helper.work_done().1, 1, "the helper did the copying");
+    let now = w.app.db.title(alpha.id).unwrap().unwrap();
+    assert_eq!((now.path.as_str(), now.also.len()), (mnt.join("films/Alpha (2001)").to_str().unwrap(), 1));
+
+    // The helper answers nobody without its key, and works only inside what it was given.
+    let http = reqwest::Client::new();
+    let ask = |key: &'static str, path: &'static str, body: Value| {
+        let (http, url) = (http.clone(), url.clone());
+        async move {
+            let resp = http.post(format!("{url}{path}")).bearer_auth(key).json(&body).send().await.unwrap();
+            (resp.status().as_u16(), resp.text().await.unwrap())
+        }
+    };
+    const KEY: &str = "a-key-of-sufficient-length";
+    assert_eq!(http.get(format!("{url}/helper/info")).send().await.unwrap().status().as_u16(), 401);
+    assert_eq!(ask("not-the-key", "/helper/fs/stat", json!({"path": nas.join("films/Alpha (2001)")})).await.0, 401);
+    let outside = w.root.join("Movies/Elsewhere (1999)");
+    lay(outside.join("Elsewhere (1999).mkv"), b"not the helper's");
+    let film = nas.join("films/Alpha (2001)/Alpha (2001).mkv");
+    for (path, body, status, why) in [
+        // Out of its folders, by either end.
+        ("/helper/fs/move", json!({"from": film, "to": outside.join("taken.mkv")}), 403, "outside the folders"),
+        ("/helper/fs/move", json!({"from": outside.join("Elsewhere (1999).mkv"), "to": nas.join("films/taken.mkv")}), 403, "outside the folders"),
+        // Out of them by climbing.
+        ("/helper/fs/move", json!({"from": film, "to": format!("{}/films/../../Movies/taken.mkv", nas.display())}), 400, "not a plain full path"),
+        // Out of the folder it only reads: nothing is moved away from it or removed.
+        ("/helper/fs/move", json!({"from": kept.join("Alpha (2001).mkv"), "to": nas.join("films/taken.mkv")}), 403, "only reads"),
+        ("/helper/moves", json!({"from": kept, "to": nas.join("films/Taken (2001)"), "working": nas.join("films/.spool-moving-9"), "keep_original": false}), 403, "only reads"),
+        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("vault/Taken (2001)"), "working": nas.join("vault/.spool-moving-9"), "keep_original": true}), 403, "only reads"),
+        // Only a finished download is ever cleared away, never a library folder or a whole root.
+        ("/helper/fs/remove", json!({"path": nas.join("films/Alpha (2001)")}), 403, "not a finished download"),
+        ("/helper/fs/remove", json!({"path": nas.join("downloads/complete")}), 403, "not a finished download"),
+        ("/helper/fs/remove", json!({"path": nas.join("films")}), 403, "outside the folders"),
+    ] {
+        let (got, said) = ask(KEY, path, body.clone()).await;
+        assert!(got == status && said.contains(why), "{path} {body}: {got} {said}");
+    }
+    assert!(outside.join("Elsewhere (1999).mkv").exists() && film.exists() && kept.join("Alpha (2001).mkv").exists(), "and nothing was touched by any of it");
+    assert_eq!(ask(KEY, "/helper/fs/stat", json!({"path": film})).await.1.contains(r#""exists":true"#), true);
+
+    // Off the helper's disks altogether, a move is Spool's own to carry out, as before.
+    let (status, said) = call(&api, "POST", "/api/titles/move", json!({"ids": [alpha.id], "location": 0})).await;
+    assert_eq!((status, said["queued"].as_u64()), (200, Some(1)), "{said}");
+    for _ in 0..400 {
+        if !w.app.moving(alpha.id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(w.root.join("Movies/Alpha (2001)/Alpha (2001).mkv").exists() && !nas.join("films/Alpha (2001)").exists());
+    assert_eq!(helper.work_done().1, 1, "the helper had no part in that one");
 }

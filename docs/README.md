@@ -14,6 +14,7 @@ Spool finds, downloads, verifies, files and plays movies and television, in one 
 | Guide | What it covers |
 | --- | --- |
 | [A library in more than one place](locations.md) | Adding another disk or a share from a NAS, managed or only read, and what happens when it is switched off. |
+| [A helper on the machine that holds the disks](helper.md) | A small Spool on a NAS that downloads, unpacks, files and moves on the NAS's own disks, so nothing crosses the network and back. |
 | [Playing on a television](players.md) | Serving the library to Infuse and other players that speak to Jellyfin, at home and away. |
 | [Collections and anime](collections.md) | Series of films and an anime's series and films, grouped by themselves, in the library, on players and in Plex. |
 | [Beside Plex](plex.md) | What Spool reads from Plex and what it asks of it. |

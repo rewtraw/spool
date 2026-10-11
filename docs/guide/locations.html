@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#one-title-in-two-places">One title in two places</a><a class="sub" href="#moving-a-title-to-another-location">Moving a title to another location</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#one-title-in-two-places">One title in two places</a><a class="sub" href="#moving-a-title-to-another-location">Moving a title to another location</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -278,6 +278,7 @@
 <li><p><strong>A container.</strong> Mount the share on the host and pass it in as a volume, or use the container system&#39;s own NFS or SMB volume.</p>
 </li>
 </ul>
+<p>If the share comes from a NAS that can run a container, <a href="helper.html">a helper</a> on the NAS downloads and files there directly, and moves titles between its disks without the network.</p>
 <p>NFS suits a share that is only read. If Spool is to manage the location, the user Spool runs as needs to be able to write there.</p>
 <h2 id="limits"><a href="#limits">Limits</a></h2>
 <ul>
@@ -285,7 +286,7 @@
 <li>Looking through folders is offered for further locations, not for the main one. A main library comes in through <code>spool migrate</code> or from Plex; see <a href="your-library.html#bringing-in-a-library-you-already-have">Your library and what Spool does to it</a>.</li>
 <li>Each location has its own recycle folder, so recycling never copies a file from one disk to another.</li>
 </ul>
-<nav class="around" aria-label="Other guides"><a class="prev" href="your-library.html"><span>Before</span>Your library and what Spool does to it</a><a class="next" href="players.html"><span>Next</span>Playing on a television</a></nav>
+<nav class="around" aria-label="Other guides"><a class="prev" href="your-library.html"><span>Before</span>Your library and what Spool does to it</a><a class="next" href="helper.html"><span>Next</span>A helper on the machine that holds the disks</a></nav>
     </article>
   </div>
   <footer>

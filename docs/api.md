@@ -80,6 +80,8 @@ There is one entry per row, holding where it stands now, not one per write. `rem
 
 [How Spool is put together](architecture.md#knowing-what-changed) explains how the count is kept.
 
+The helpers on other machines, what each serves and how it was last found, are at `GET /api/helpers`. A download that runs on one has an id beginning `@`, and its entry in `GET /api/activity` names the helper under `on`.
+
 ## Following events
 
 `GET /api/events` is a stream of server-sent events, one JSON object each, sent as things happen: a title changed, a download progressed, a location came or went. A client that falls behind receives `{"type":"resync"}` and should read its state again.

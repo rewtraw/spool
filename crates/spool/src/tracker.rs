@@ -23,7 +23,7 @@ impl App {
                         return Ok(());
                     }
                     if let Some(id) = &acq.job_id {
-                        let _ = self.engine.remove(id, true);
+                        let _ = self.job_remove(id, true);
                     }
                     acq.state = AcqState::Failed;
                     acq.error = Some(why.clone());
@@ -34,7 +34,7 @@ impl App {
                     return Ok(());
                 }
                 if let Some(id) = &acq.job_id {
-                    let _ = self.engine.remove(id, true);
+                    let _ = self.job_remove(id, true);
                 }
                 self.fail_acquisition(acq, &why, true).await
             }
@@ -131,41 +131,52 @@ impl App {
     pub fn watch_space(&self) {
         const WAITING: &str = "Waiting for free space";
         let g = self.settings.general();
-        let Some(free) = crate::app::free_space(&self.engine.config().incomplete_dir) else { return };
-        let mut budget = free.saturating_sub(g.min_free_gb as u64 * (1 << 30)) as i128;
         // Jobs the user resumed by hand are theirs to run, whatever the arithmetic says.
         let overridden = self.waiting_for_space.lock().clone();
-        let (mut waiting, mut waiting_bytes, mut short) = (0u32, 0u64, 0i128);
-        for job in self.engine.jobs() {
-            // The hold is recognised by its message, so it survives a restart of Spool.
-            let held = job.state == JobState::Paused && job.message == WAITING;
-            let remaining = job.total_bytes.saturating_sub(job.done_bytes) as i128;
-            match job.state {
-                JobState::Verifying | JobState::Repairing | JobState::Extracting | JobState::Finishing => budget -= job.total_bytes as i128,
-                // A download under way is held too if the disk cannot take the rest of it; stopping
-                // costs nothing, and running the disk full costs every other job.
-                JobState::Queued | JobState::Downloading | JobState::Paused if job.state != JobState::Paused || held => {
-                    if overridden.contains(&job.id) {
-                        budget -= remaining;
-                        continue;
-                    }
-                    // Room to download it, plus half again while a packed release is unpacked.
-                    let needed = remaining + (job.total_bytes / 2) as i128;
-                    if needed <= budget {
-                        budget -= remaining;
-                        if held {
-                            let _ = self.engine.resume(&job.id);
+        let (mut waiting, mut waiting_bytes, mut short, mut free) = (0u32, 0u64, 0i128, 0u64);
+        // Each place downloads run has its own disk and its own queue: this machine, and
+        // every helper.
+        let mut places: Vec<(Option<u64>, Vec<JobStatus>)> = vec![(crate::app::free_space(&self.engine.config().incomplete_dir), self.engine.jobs())];
+        places.extend(self.remotes().iter().filter(|r| r.seen().reachable).map(|r| (r.seen().free, r.jobs())));
+        for (room, jobs) in places {
+            let Some(room) = room else { continue };
+            let mut budget = room.saturating_sub(g.min_free_gb as u64 * (1 << 30)) as i128;
+            let (before, mut wanted) = (waiting, 0i128);
+            for job in jobs {
+                // The hold is recognised by its message, so it survives a restart of Spool.
+                let held = job.state == JobState::Paused && job.message == WAITING;
+                let remaining = job.total_bytes.saturating_sub(job.done_bytes) as i128;
+                match job.state {
+                    JobState::Verifying | JobState::Repairing | JobState::Extracting | JobState::Finishing => budget -= job.total_bytes as i128,
+                    // A download under way is held too if the disk cannot take the rest of it; stopping
+                    // costs nothing, and running the disk full costs every other job.
+                    JobState::Queued | JobState::Downloading | JobState::Paused if job.state != JobState::Paused || held => {
+                        if overridden.contains(&job.id) {
+                            budget -= remaining;
+                            continue;
                         }
-                    } else {
-                        waiting += 1;
-                        waiting_bytes += job.total_bytes;
-                        short += needed;
-                        if !held && self.engine.pause_because(&job.id, WAITING).is_ok() {
-                            tracing::info!(job = %job.name, "holding a download until there is room for it");
+                        // Room to download it, plus half again while a packed release is unpacked.
+                        let needed = remaining + (job.total_bytes / 2) as i128;
+                        if needed <= budget {
+                            budget -= remaining;
+                            if held {
+                                let _ = self.job_resume(&job.id);
+                            }
+                        } else {
+                            waiting += 1;
+                            waiting_bytes += job.total_bytes;
+                            wanted += needed;
+                            if !held && self.job_hold(&job.id, WAITING).is_ok() {
+                                tracing::info!(job = %job.name, "holding a download until there is room for it");
+                            }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
+            }
+            if waiting > before {
+                free += room;
+                short += wanted - budget.max(0);
             }
         }
         // One standing notice for however many are waiting, kept current and closed when none are.
@@ -177,7 +188,7 @@ impl App {
                 gb(waiting_bytes as i128),
                 if waiting == 1 { "is" } else { "are" },
                 gb(free as i128),
-                gb(short - budget.max(0)),
+                gb(short),
                 if waiting == 1 { "it" } else { "them all" }
             )
         });
@@ -191,7 +202,13 @@ impl App {
         for mut acq in self.db.active_acquisitions()? {
             match acq.state {
                 AcqState::Downloading => {
-                    let job = acq.job_id.as_deref().and_then(|id| self.engine.job(id));
+                    let job = match acq.job_id.as_deref().map(|id| self.job_lookup(id)) {
+                        Some(crate::remote::Found::Job(j)) => Some(j),
+                        // It runs on a helper that cannot be asked right now. It is waited
+                        // for, not written off.
+                        Some(crate::remote::Found::Unknown) => continue,
+                        _ => None,
+                    };
                     if let Err(e) = self.reconcile(&mut acq, job).await {
                         tracing::warn!(acquisition = acq.id, error = %e, "reconcile failed");
                     }
@@ -208,47 +225,47 @@ impl App {
         Ok(())
     }
 
-    /// Forward engine events to clients and react to finished jobs as they happen.
+    /// Pass a download's progress on to whoever is watching, and file it when it is done.
+    pub fn on_job(&self, job: JobStatus) {
+        let terminal = job.state.is_terminal();
+        let id = job.id.clone();
+        self.emit(Event::Job { job: job.clone() });
+        if terminal {
+            if let Ok(Some(mut acq)) = self.db.acquisition_by_job(&id) {
+                let app = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = app.reconcile(&mut acq, Some(job)).await {
+                        tracing::warn!(error = %e, "could not finish a download");
+                    }
+                });
+            }
+        }
+    }
+
+    /// Follow downloads as they happen, here and on every helper.
     pub fn spawn_tracker(&self) {
         let app = self.clone();
         let mut rx = self.engine.subscribe();
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(job) => {
-                        let terminal = job.state.is_terminal();
-                        let id = job.id.clone();
-                        app.emit(Event::Job { job: job.clone() });
-                        if terminal {
-                            if let Ok(Some(mut acq)) = app.db.acquisition_by_job(&id) {
-                                let app2 = app.clone();
-                                tokio::spawn(async move {
-                                    if let Err(e) = app2.reconcile(&mut acq, Some(job)).await {
-                                        tracing::warn!(error = %e, "could not finish a download");
-                                    }
-                                });
-                            }
-                        }
-                    }
+                    Ok(job) => app.on_job(job),
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(_) => break,
                 }
             }
         });
+        self.spawn_remotes();
     }
 
     /// Stop a download and forget it. The release is not blocklisted: the user chose to stop.
     pub async fn cancel_acquisition(&self, id: i64, blocklist: bool) -> Result<()> {
         let Some(mut acq) = self.db.acquisition(id)? else { return Ok(()) };
         if let Some(job) = &acq.job_id {
-            let _ = self.engine.remove(job, true);
+            let _ = self.job_remove(job, true);
         }
         if let Some(out) = &acq.output_path {
-            let complete = self.engine.config().complete_dir;
-            let p = std::path::Path::new(out);
-            if p.starts_with(&complete) && p != complete {
-                let _ = tokio::fs::remove_dir_all(p).await;
-            }
+            self.remove_download_folder(acq.job_id.as_deref(), std::path::Path::new(out)).await;
         }
         acq.state = AcqState::Cancelled;
         self.db.save_acquisition(&mut acq)?;
