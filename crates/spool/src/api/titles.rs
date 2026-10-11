@@ -52,6 +52,9 @@ pub(super) fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<V
         .filter(|t| only.is_none_or(|ids| ids.contains(&t.id)))
         .map(|t| {
             let mut v = summarize(t, &files, &eps, &profiles, &active, &places);
+            if app.moving(t.id) {
+                v["moving"] = json!(true);
+            }
             if let Some(o) = v.as_object_mut() {
                 for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at", "people", "tagline", "collection", "details_at", "local"] {
                     o.remove(k);
@@ -102,6 +105,11 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
     let t = app.db.title(id)?.ok_or_else(|| not_found("title"))?;
     let (files, eps, profiles, active) = (app.db.file_counts()?, app.db.episode_counts()?, app.db.profiles()?, app.db.active_acquisitions()?);
     let mut v = summarize(&t, &files, &eps, &profiles, &active, &app.placement());
+    // Being moved to another location, or waiting its turn, with how far the move has got.
+    if app.moving(id) {
+        v["moving"] = json!(true);
+        v["move"] = json!(app.moves.lock().now.clone().filter(|m| m.title_id == id));
+    }
     v["episodes"] = json!(app.db.episodes(id)?);
     // Each file with the place it is on, when it is a copy kept elsewhere than the title's own folder.
     let places = app.placement();
@@ -148,6 +156,18 @@ pub(super) fn yes() -> bool {
 
 pub(super) async fn add_title(State(app): State<App>, Json(b): Json<AddTitle>) -> R<Title> {
     Ok(Json(app.add_title_on(b.kind, b.tmdb_id, b.tvmaze_id, b.profile_id, b.monitored, b.search, b.location).await?))
+}
+
+/// Move titles to another location: `{"ids": [...], "location": id}`. They are moved one at a
+/// time in the background; the reply says how many were put in line.
+pub(super) async fn move_titles(State(app): State<App>, Json(b): Json<Value>) -> R<Value> {
+    let ids: Vec<i64> = b["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default();
+    let location = b["location"].as_u64().ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "which location?".into()))? as u32;
+    let queued = app.move_titles(&ids, location).map_err(|e| ApiError(StatusCode::CONFLICT, format!("{e:#}")))?;
+    for id in &ids {
+        app.emit(Event::Title { id: *id });
+    }
+    Ok(Json(json!({"queued": queued, "asked": ids.len()})))
 }
 
 /// Turn a film that is posted in episodes into the series it is listed as.

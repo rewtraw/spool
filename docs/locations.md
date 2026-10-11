@@ -72,6 +72,21 @@ A title has one folder of its own, where Spool files what it downloads for it. I
 
 Spool plays a copy and never changes it, whatever kind of location it is on: it is not replaced by an upgrade, renamed, given subtitles or deleted, and removing the title's files leaves it where it is. If one place is away, the title stays playable from the other.
 
+## Moving a title to another location
+
+**Move to…** on a title's page, or in the bar that appears when titles are selected in the library, takes a title's folder to another location Spool manages. Titles are moved one at a time, and a title stays playable where it is until its move is done.
+
+1. The whole folder is copied to the other location under a working name: the film or episodes, subtitles, extras, artwork and notes.
+2. Every file is checked against its original.
+3. The copy is given the folder's name and the title is pointed at it.
+4. Only then is the original taken away.
+
+If anything fails before the last step, the title is left where it was and a notice says why. On one disk the folder is simply renamed into place.
+
+A location Spool only reads gives nothing up. Moving a title off one copies it, and the original stays there as [a further copy](#one-title-in-two-places).
+
+A move is refused, with the reason, when the other location is away, is only read, has no room, or already has a folder of that name; and while the title has a download under way.
+
 ## When a location cannot be reached
 
 A NAS that is switched off, or a disk that is unplugged, takes its titles offline:

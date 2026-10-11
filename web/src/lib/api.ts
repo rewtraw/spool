@@ -133,6 +133,10 @@ export interface Title {
   offline?: boolean;
   /** Its location is one Spool only reads. */
   read_only?: boolean;
+  /** Being moved to another location, or waiting its turn. */
+  moving?: boolean;
+  /** How far the move has got, on the title's own page. */
+  move?: { to: string; done: number; total: number } | null;
   /** A film that is posted as its episodes, so single episodes are turned down. */
   in_episodes?: boolean;
   /** The same work as the series source lists it. */

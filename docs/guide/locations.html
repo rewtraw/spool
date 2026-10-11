@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#one-title-in-two-places">One title in two places</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#one-title-in-two-places">One title in two places</a><a class="sub" href="#moving-a-title-to-another-location">Moving a title to another location</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -236,6 +236,17 @@
 <li><strong>A series</strong> takes from the other folder the episodes its own folder lacks, so its seasons can be split between two places. An episode held in both is played from the title&#39;s own folder.</li>
 </ul>
 <p>Spool plays a copy and never changes it, whatever kind of location it is on: it is not replaced by an upgrade, renamed, given subtitles or deleted, and removing the title&#39;s files leaves it where it is. If one place is away, the title stays playable from the other.</p>
+<h2 id="moving-a-title-to-another-location"><a href="#moving-a-title-to-another-location">Moving a title to another location</a></h2>
+<p><strong>Move to…</strong> on a title&#39;s page, or in the bar that appears when titles are selected in the library, takes a title&#39;s folder to another location Spool manages. Titles are moved one at a time, and a title stays playable where it is until its move is done.</p>
+<ol>
+<li>The whole folder is copied to the other location under a working name: the film or episodes, subtitles, extras, artwork and notes.</li>
+<li>Every file is checked against its original.</li>
+<li>The copy is given the folder&#39;s name and the title is pointed at it.</li>
+<li>Only then is the original taken away.</li>
+</ol>
+<p>If anything fails before the last step, the title is left where it was and a notice says why. On one disk the folder is simply renamed into place.</p>
+<p>A location Spool only reads gives nothing up. Moving a title off one copies it, and the original stays there as <a href="#one-title-in-two-places">a further copy</a>.</p>
+<p>A move is refused, with the reason, when the other location is away, is only read, has no room, or already has a folder of that name; and while the title has a download under way.</p>
 <h2 id="when-a-location-cannot-be-reached"><a href="#when-a-location-cannot-be-reached">When a location cannot be reached</a></h2>
 <p>A NAS that is switched off, or a disk that is unplugged, takes its titles offline:</p>
 <ul>

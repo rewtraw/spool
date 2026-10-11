@@ -106,6 +106,19 @@
   const chosen = $derived(app.titles.filter((t) => picked[t.id]));
   const chosenBytes = $derived(chosen.reduce((s, t) => s + (t.size || 0), 0));
   let bulkProfile = $state('');
+  // Moving a selection to another location.
+  let places = $state<any[]>([]);
+  api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
+  const targets = $derived(places.filter((p) => p.manage && p.online));
+  async function bulkMove(where: string) {
+    const place = places.find((p) => String(p.id) === where);
+    if (!place) return;
+    const n = chosen.length;
+    if (!confirm(`Move ${n} ${n === 1 ? 'title' : 'titles'} (${bytes(chosenBytes)}) to ${place.name}? They are moved one at a time; each original is removed once its copy has been checked, or kept as a copy where Spool only reads.`)) return;
+    const r = await act(() => api.post<any>('/titles/move', { ids: chosen.map((t) => t.id), location: place.id }));
+    if (r) toast(r.queued === r.asked ? `Moving ${r.queued} to ${place.name}` : `Moving ${r.queued} of ${r.asked} to ${place.name}; the rest are already there, have a download under way, or have a folder there`);
+    picked = {};
+  }
 
   function stopSelecting() {
     selecting = false;
@@ -267,6 +280,12 @@
       </select>
       <button class="btn small" onclick={() => bulk('search', {}, (r) => `Searching ${many(r.started)} in the background. Downloads appear in Activity.`)}>Search</button>
       <button class="btn small" onclick={() => bulk('refresh', {}, (r) => `Refreshing ${many(r.started)} in the background`)}>Refresh</button>
+      {#if targets.length > 1}
+        <select class="input small-select" value={''} onchange={(e) => { bulkMove(e.currentTarget.value); e.currentTarget.value = ''; }} aria-label="Move to a location">
+          <option value="">Move to…</option>
+          {#each targets as p}<option value={p.id}>{p.name}{p.free != null ? ` (${bytes(p.free)} free)` : ''}</option>{/each}
+        </select>
+      {/if}
       <button class="btn small ghost danger" onclick={bulkFree}>Delete files</button>
       <button class="btn small ghost danger" onclick={() => bulkRemove(false)}>Remove</button>
       <button class="btn small ghost danger" onclick={() => bulkRemove(true)}>Remove and delete files</button>

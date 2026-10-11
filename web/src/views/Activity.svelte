@@ -103,6 +103,7 @@
     file_deleted: 'File deleted',
     file_missing: 'File went missing',
     adopted: 'Brought in where it lay',
+    moved: 'Moved to another location',
     not_the_film: 'Recognised as an extra, not the film',
     was_film: 'Switched from a film to a series',
     in_episodes: 'Found to be posted in episodes',

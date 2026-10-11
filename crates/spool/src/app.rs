@@ -52,6 +52,8 @@ pub struct Inner {
     pub location_changes: std::sync::atomic::AtomicU64,
     /// The last look through a location for titles to bring in, and what came of it.
     pub adoption: Mutex<Option<crate::adopt::Adoption>>,
+    /// Titles being moved between locations.
+    pub moves: Mutex<crate::relocate::Moves>,
     /// The anime id list, once read.
     pub anime_list: Mutex<Option<Arc<crate::anime::Ids>>>,
     pub sessions: Mutex<HashSet<String>>,
@@ -155,6 +157,7 @@ impl App {
             location_changes: std::sync::atomic::AtomicU64::new(0),
             adoption: Mutex::new(None),
             anime_list: Mutex::new(None),
+            moves: Mutex::new(Default::default()),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),

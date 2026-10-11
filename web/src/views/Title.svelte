@@ -124,6 +124,25 @@
   const inCollection = $derived(app.collections.find((c) => c.members.some((m) => m.title_id === id)));
   const myRole = $derived(inCollection?.members.find((m) => m.title_id === id)?.role ?? '');
 
+  // The other places this title could be moved to: those Spool may write to, that are there.
+  let places = $state<any[]>([]);
+  api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
+  const elsewhere = $derived(places.filter((p) => p.manage && p.online && p.name !== t?.location && (t?.kind === 'movie' ? p.movie_root : p.series_root)));
+  async function moveTo(where: string) {
+    const place = places.find((p) => String(p.id) === where);
+    if (!place || !t) return;
+    const leaves = t.read_only ? ` ${t.location} is only read, so the original stays there as a copy.` : ' The original is removed once the copy has been checked.';
+    if (!confirm(`Move ${t.title} to ${place.name}?${leaves}`)) return;
+    await act(() => api.post('/titles/move', { ids: [id], location: place.id }), `Moving ${t.title} to ${place.name}`);
+    load();
+  }
+  // While a move is under way, look again every few seconds for how far it has got.
+  $effect(() => {
+    if (!t?.moving) return;
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
+  });
+
   /** Put this title in a collection, a new one, none, or back where its sources have it. */
   async function place(where: string) {
     if (!where) return;
@@ -183,7 +202,7 @@
 
   const seasonOf = (n: number) => t?.seasons.find((s) => s.number === n)?.monitored ?? true;
   const media = (f: MediaFile) => [f.media_info?.dynamic_range_type, f.media_info?.video_codec, f.media_info ? `${f.media_info.audio_codec} ${f.media_info.audio_channels || ''}`.trim() : '', f.release_group].filter(Boolean).join(' · ');
-  const HISTORY: Record<string, string> = { grabbed: 'Sent to download', would_grab: 'Would have grabbed', imported: 'Imported', upgraded: 'Upgraded', download_failed: 'Download failed', file_deleted: 'File deleted', file_missing: 'File went missing', adopted: 'Brought in where it lay', not_the_film: 'Recognised as an extra, not the film', was_film: 'Switched from a film to a series', in_episodes: 'Found to be posted in episodes' };
+  const HISTORY: Record<string, string> = { grabbed: 'Sent to download', would_grab: 'Would have grabbed', imported: 'Imported', upgraded: 'Upgraded', download_failed: 'Download failed', file_deleted: 'File deleted', file_missing: 'File went missing', adopted: 'Brought in where it lay', moved: 'Moved to another location', not_the_film: 'Recognised as an extra, not the film', was_film: 'Switched from a film to a series', in_episodes: 'Found to be posted in episodes' };
 
   // What lies in the folder beside the film or the episodes.
   const EXTRA: Record<string, string> = { trailer: 'Trailers', behind_the_scenes: 'Behind the scenes', deleted_scene: 'Deleted scenes', featurette: 'Featurettes', interview: 'Interviews', scene: 'Scenes', short: 'Shorts', clip: 'Clips', other: 'Other extras', sample: 'Samples', theme_video: 'Theme videos' };
@@ -231,6 +250,16 @@
       {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
       {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
       {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
+      {#if t.moving}
+        <p class="where warn">{#if t.move?.total}Being moved to {t.move.to}: {bytes(t.move.done)} of {bytes(t.move.total)}.{:else}Waiting to be moved.{/if} It stays playable where it is until the move is done.</p>
+      {:else if elsewhere.length && t.path && !t.offline}
+        <p class="where">
+          <select class="pick" aria-label="Move to another location" value={''} onchange={(e) => { moveTo(e.currentTarget.value); e.currentTarget.value = ''; }}>
+            <option value="">Move to…</option>
+            {#each elsewhere as p}<option value={p.id}>{p.name}{p.free != null ? ` (${bytes(p.free)} free)` : ''}</option>{/each}
+          </select>
+        </p>
+      {/if}
       <p class="where">
         {#if inCollection}Part of <a class="link" href="#/collection/{inCollection.id}">{inCollection.name}</a>{#if myRole}, as {myRole === 'Alternative telling' ? 'an alternative telling' : `a ${myRole.toLowerCase()}`}{/if}.{/if}
         <select class="pick" aria-label="Collection" value={''} onchange={(e) => { place(e.currentTarget.value); e.currentTarget.value = ''; }}>

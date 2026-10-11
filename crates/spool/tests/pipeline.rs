@@ -2302,6 +2302,90 @@ async fn a_new_title_is_kept_on_the_location_the_user_chooses() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_its_original() {
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let (shelf, vault) = (w.root.join("Shelf/films"), w.root.join("Vault/films"));
+    for d in [&shelf, &vault] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["locations"] = json!([{"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    let lay = |path: PathBuf, bytes: &[u8]| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    };
+    let film = |name: &str, year: u32, imdb: &str, folder: PathBuf| {
+        let mut t = w.movie(name, year, imdb);
+        t.path = folder.to_string_lossy().to_string();
+        w.app.db.save_title(&mut t).unwrap();
+        t
+    };
+    let settled = |id: i64| {
+        let app = w.app.clone();
+        async move {
+            for _ in 0..200 {
+                if !app.moving(id) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            panic!("the move never finished");
+        }
+    };
+
+    // A film in the main library, with what lies beside it.
+    let home = w.root.join("Movies/Heat (1995)");
+    lay(home.join("Heat (1995).mkv"), b"the film");
+    lay(home.join("Heat (1995).en.srt"), b"1\n");
+    lay(home.join("Trailers/teaser.mkv"), b"teaser");
+    lay(home.join("poster.jpg"), b"jpg");
+    let heat = film("Heat", 1995, "tt0113277", home.clone());
+    w.app.scan_all().await.unwrap();
+    let before = tree(&home);
+
+    // Moved to a location Spool manages: everything in the folder goes, and nothing is left.
+    let (status, said) = call(&api, "POST", "/api/titles/move", json!({"ids": [heat.id], "location": 1})).await;
+    assert_eq!((status, said["queued"].as_u64()), (200, Some(1)), "{said}");
+    settled(heat.id).await;
+    let there = shelf.join("Heat (1995)");
+    assert_eq!(tree(&there), before, "{:?}", w.app.db.attention(false).unwrap().iter().map(|a| a.message.clone()).collect::<Vec<_>>());
+    assert!(!home.exists(), "the original folder is gone");
+    assert_eq!(tree(&shelf), before.iter().map(|f| format!("Heat (1995)/{f}")).collect::<Vec<_>>(), "and no working folder is left");
+    let moved = w.app.db.title(heat.id).unwrap().unwrap();
+    assert_eq!(moved.path, there.to_string_lossy());
+    let files = w.app.db.files(heat.id).unwrap();
+    assert_eq!((files.len(), files[0].rel_path.as_str(), files[0].base.as_deref()), (1, "Heat (1995).mkv", None));
+    assert!(w.app.db.history(Some(heat.id), 10).unwrap().iter().any(|h| h.kind == "moved"));
+    let (_, row) = call(&api, "GET", &format!("/api/titles/{}", heat.id), Value::Null).await;
+    assert_eq!((row["location"].as_str(), row["moving"].as_bool()), (Some("Shelf"), None));
+
+    // Off a location Spool only reads: copied, and the original kept as a further copy.
+    let kept = vault.join("Alpha (2001)");
+    lay(kept.join("Alpha (2001).mkv"), b"another film");
+    let alpha = film("Alpha", 2001, "tt0000001", kept.clone());
+    w.app.scan_all().await.unwrap();
+    assert_eq!(call(&api, "POST", "/api/titles/move", json!({"ids": [alpha.id], "location": 1})).await.0, 200);
+    settled(alpha.id).await;
+    let now = w.app.db.title(alpha.id).unwrap().unwrap();
+    assert_eq!((now.path.as_str(), now.also.as_slice()), (shelf.join("Alpha (2001)").to_str().unwrap(), &[kept.to_string_lossy().to_string()][..]));
+    assert_eq!(std::fs::read(kept.join("Alpha (2001).mkv")).unwrap(), b"another film", "nothing is taken from a place Spool only reads");
+    let files = w.app.db.files(alpha.id).unwrap();
+    assert_eq!((files.len(), files.iter().filter(|f| f.base.is_some()).count()), (2, 1));
+
+    // What cannot be moved is refused, with the reason.
+    for (location, why) in [(2, "only reads"), (1, "already on Shelf"), (9, "no such location")] {
+        let (status, refused) = call(&api, "POST", "/api/titles/move", json!({"ids": [heat.id], "location": location})).await;
+        assert!(status == 409 && refused.to_string().contains(why), "{location}: {status} {refused}");
+    }
+    lay(w.root.join("Movies/Heat (1995)/leftover.txt"), b"x");
+    let (status, refused) = call(&api, "POST", "/api/titles/move", json!({"ids": [heat.id], "location": 0})).await;
+    assert!(status == 409 && refused.to_string().contains("already has a folder"), "{status} {refused}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_title_may_be_held_in_two_places_and_played_from_whichever_is_there() {
     use serde_json::{json, Value};
     let source = details_source().await;

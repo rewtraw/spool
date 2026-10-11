@@ -177,6 +177,9 @@ impl App {
 
     /// Why Spool may not change this title's files now; None when it may.
     pub fn title_locked(&self, t: &Title) -> Option<String> {
+        if self.moving(t.id) {
+            return Some(format!("{} is being moved to another location", t.title));
+        }
         self.placement().locked(t)
     }
 

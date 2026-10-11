@@ -11,6 +11,8 @@
   let activity = $state<any[]>([]);
   let loaded = $state(false);
 
+  // Room on each place the library lives, not only where downloads land.
+  let places = $state<any[]>([]);
   async function load() {
     const [a, h, c, act_] = await Promise.all([
       api.get('/attention').catch(() => []),
@@ -18,6 +20,7 @@
       api.get('/calendar').catch(() => []),
       api.get('/activity').catch(() => ({ items: [] })),
     ]);
+    api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
     attention = a;
     arrivals = h.filter((x: any) => x.kind === 'imported' || x.kind === 'upgraded').slice(0, 12);
     const today = new Date().toISOString().slice(0, 10);
@@ -55,7 +58,9 @@
     { label: 'Movies', value: app.status.movies },
     { label: 'Series', value: app.status.series },
     { label: 'In library', value: bytes(app.status.library_bytes) },
-    { label: 'Free', value: app.status.free_bytes != null ? bytes(app.status.free_bytes) : '—' },
+    ...(places.length > 1
+      ? places.map((p) => ({ label: `Free on ${p.name}`, value: !p.online ? 'Away' : p.free != null ? bytes(p.free) : '—' }))
+      : [{ label: 'Free', value: app.status.free_bytes != null ? bytes(app.status.free_bytes) : '—' }]),
   ] : []);
 </script>
 
