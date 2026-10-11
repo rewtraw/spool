@@ -2447,6 +2447,25 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
     let (_, row) = call(&api, "GET", &format!("/api/titles/{}", heat.id), Value::Null).await;
     assert_eq!((row["location"].as_str(), row["moving"].as_bool()), (Some("Shelf"), None));
 
+    // Activity shows the move under way and the titles waiting their turn, and nothing after.
+    let (_, idle) = call(&api, "GET", "/api/activity", Value::Null).await;
+    assert_eq!((idle["moves"]["now"].is_null(), idle["moves"]["waiting"].as_array().map(Vec::len)), (true, Some(0)), "{}", idle["moves"]);
+    {
+        use std::sync::{atomic::AtomicU64, Arc};
+        let mut moves = w.app.moves.lock();
+        moves.now = Some(spool::relocate::Moving { title_id: heat.id, to: "Main".into(), done: Arc::new(AtomicU64::new(300)), total: 1200 });
+        moves.queue.push_back((heat.id, 2));
+    }
+    let (_, busy) = call(&api, "GET", "/api/activity", Value::Null).await;
+    let (now, waiting) = (&busy["moves"]["now"], &busy["moves"]["waiting"]);
+    assert_eq!((now["title"].as_str(), now["from"].as_str(), now["to"].as_str(), now["done"].as_u64(), now["total"].as_u64()), (Some("Heat"), Some("Shelf"), Some("Main"), Some(300), Some(1200)), "{now}");
+    assert_eq!((waiting.as_array().map(Vec::len), waiting[0]["title"].as_str(), waiting[0]["to"].as_str()), (Some(1), Some("Heat"), Some("Vault")), "{waiting}");
+    {
+        let mut moves = w.app.moves.lock();
+        moves.now = None;
+        moves.queue.clear();
+    }
+
     // Off a location Spool only reads: copied, and the original kept as a further copy.
     let kept = vault.join("Alpha (2001)");
     lay(kept.join("Alpha (2001).mkv"), b"another film");

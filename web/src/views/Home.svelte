@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '../lib/api';
   import { app, act, go, loadTitles } from '../lib/state.svelte';
-  import { ago, bytes, day, qualityName } from '../lib/format';
+  import { ago, bytes, day, pct, qualityName } from '../lib/format';
   import Poster from '../components/Poster.svelte';
   import JobLine from '../components/JobLine.svelte';
 
@@ -9,6 +9,7 @@
   let arrivals = $state<any[]>([]);
   let upcoming = $state<any[]>([]);
   let activity = $state<any[]>([]);
+  let moves = $state<any>({ now: null, waiting: [] });
   let loaded = $state(false);
 
   // Room on each place the library lives, not only where downloads land.
@@ -26,8 +27,18 @@
     const today = new Date().toISOString().slice(0, 10);
     upcoming = c.filter((x: any) => x.date >= today && x.monitored && !x.have).slice(0, 14);
     activity = act_.items.filter((i: any) => ['downloading', 'importing'].includes(i.acquisition.state));
+    moves = act_.moves ?? moves;
     loaded = true;
   }
+  // A move sends no events as it goes, so its line is asked for again while one is under way.
+  $effect(() => {
+    if (!moves.now && !moves.waiting.length) return;
+    const timer = setInterval(async () => {
+      const a = await api.get('/activity').catch(() => null);
+      if (a) moves = a.moves ?? { now: null, waiting: [] };
+    }, 5000);
+    return () => clearInterval(timer);
+  });
 
   $effect(() => {
     app.tick;
@@ -112,10 +123,25 @@
   </section>
 {/if}
 
-{#if activity.length}
+{#if activity.length || moves.now || moves.waiting.length}
   <section>
     <div class="row"><div class="section-title grow">In progress</div><a class="more" href="#/activity">All activity</a></div>
     <div class="card list">
+      {#if moves.now || moves.waiting.length}
+        {@const m = moves.now}
+        <a class="line" href="#/activity">
+          <div class="grow">
+            <div class="truncate">
+              {#if m}<b>{m.title}</b> <span class="muted">being moved{m.to ? ` to ${m.to}` : ''}</span>{:else}<b>Titles waiting to be moved</b>{/if}
+              {#if moves.waiting.length}<span class="muted"> · {moves.waiting.length} more waiting</span>{/if}
+            </div>
+            {#if m?.total}
+              <div class="progress" role="progressbar" aria-label="Move progress" aria-valuenow={Math.round(pct(m.done, m.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(m.done, m.total)}%"></i></div>
+              <div class="faint small">{bytes(m.done)} of {bytes(m.total)}</div>
+            {/if}
+          </div>
+        </a>
+      {/if}
       {#each activity as i (i.acquisition.id)}
         <a class="line" href="#/title/{i.acquisition.title_id}">
           <div class="grow">

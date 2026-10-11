@@ -197,6 +197,45 @@ impl App {
         moves.now.as_ref().is_some_and(|m| m.title_id == id) || moves.queue.iter().any(|m| m.0 == id)
     }
 
+    /// The move under way and the titles waiting their turn, as Activity shows them.
+    pub fn moves_shown(&self) -> serde_json::Value {
+        let (now, waiting) = {
+            let moves = self.moves.lock();
+            (moves.now.clone(), moves.queue.iter().copied().collect::<Vec<_>>())
+        };
+        if now.is_none() && waiting.is_empty() {
+            return serde_json::json!({"now": null, "waiting": []});
+        }
+        let places = self.placement();
+        let shown = |id: i64| {
+            let t = self.db.title(id).ok().flatten();
+            let from = t.as_ref().and_then(|t| places.of(&t.path)).map(|p| p.0.name.clone());
+            serde_json::json!({
+                "title_id": id,
+                "title": t.as_ref().map(|t| t.title.clone()),
+                "kind": t.as_ref().map(|t| t.kind),
+                "poster": t.as_ref().and_then(crate::art::small_url),
+                "from": from,
+            })
+        };
+        let now = now.map(|m| {
+            let mut v = shown(m.title_id);
+            v["to"] = m.to.clone().into();
+            v["done"] = m.done.load(Ordering::Relaxed).min(m.total).into();
+            v["total"] = m.total.into();
+            v
+        });
+        let waiting: Vec<serde_json::Value> = waiting
+            .iter()
+            .map(|(id, location)| {
+                let mut v = shown(*id);
+                v["to"] = places.0.iter().find(|p| p.0.id == *location).map(|p| p.0.name.clone()).into();
+                v
+            })
+            .collect();
+        serde_json::json!({"now": now, "waiting": waiting})
+    }
+
     async fn move_one(&self, id: i64, location: u32) -> Result<String> {
         let title = self.db.title(id)?.ok_or_else(|| anyhow!("the title was removed"))?;
         let target = self.move_target(&title, location)?;

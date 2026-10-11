@@ -23,6 +23,33 @@
     load();
   });
 
+  // ---- titles being moved to another location
+  const moves = $derived(data.moves ?? { now: null, waiting: [] });
+  const moving = $derived(!!moves.now || moves.waiting.length > 0);
+  // A move sends no events as it goes, so the page asks again while one is under way.
+  $effect(() => {
+    if (tab !== 'queue' || !moving) return;
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
+  });
+  // How fast the copy is going, from what was counted the last time it was asked.
+  let seen: { id: number; done: number; at: number } | null = null;
+  let moveSpeed = $state(0);
+  $effect(() => {
+    const m = moves.now;
+    const at = Date.now();
+    if (!m?.total) {
+      seen = null;
+      moveSpeed = 0;
+      return;
+    }
+    if (seen && seen.id === m.title_id && at - seen.at >= 1000 && m.done >= seen.done) {
+      const rate = ((m.done - seen.done) * 1000) / (at - seen.at);
+      moveSpeed = moveSpeed > 0 ? moveSpeed * 0.5 + rate * 0.5 : rate;
+    } else if (!seen || seen.id !== m.title_id) moveSpeed = 0;
+    if (!seen || seen.id !== m.title_id || at - seen.at >= 1000) seen = { id: m.title_id, done: m.done, at };
+  });
+
   const live = (i: any) => app.jobs[i.acquisition.job_id] ?? i.job;
   const queue = $derived(data.items.filter((i: any) => ['downloading', 'importing', 'import_blocked'].includes(i.acquisition.state)));
   const recent = $derived(data.items.filter((i: any) => !['downloading', 'importing', 'import_blocked'].includes(i.acquisition.state)).slice(0, 25));
@@ -141,6 +168,40 @@
       <div class="progress" role="progressbar" aria-label="Queue progress" aria-valuenow={Math.round(pct(totals.done, totals.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(totals.done, totals.total)}%"></i></div>
     </div>
   {/if}
+  {#if moving}
+    <div class="section-title movehead">Moving to another location</div>
+    <div class="stack moves">
+      {#if moves.now}
+        {@const m = moves.now}
+        <div class="card item">
+          <div class="grow">
+            <div class="row wrap top">
+              <a class="t" href="#/title/{m.title_id}">{m.title ?? 'Unknown title'}</a>
+              <span class="chip accent">{m.total ? 'Copying' : 'Getting ready'}</span>
+              {#if m.to}<span class="chip">{m.from ? `${m.from} to ${m.to}` : `To ${m.to}`}</span>{/if}
+            </div>
+            {#if m.total}
+              <div class="progress" role="progressbar" aria-label="Move progress" aria-valuenow={Math.round(pct(m.done, m.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(m.done, m.total)}%"></i></div>
+              <div class="faint why">
+                {#if m.done >= m.total}Copied. Checking it and taking the original away.
+                {:else}{bytes(m.done)} of {bytes(m.total)}{moveSpeed > 0 ? ` · ${bytes(moveSpeed)}/s · about ${duration((m.total - m.done) / moveSpeed)} left` : ''}{/if}
+              </div>
+            {:else}
+              <div class="faint why">Reading what is in its folder.</div>
+            {/if}
+          </div>
+        </div>
+      {/if}
+      {#if moves.waiting.length}
+        <div class="card waiting">
+          <div class="muted">{moves.waiting.length} waiting {moves.waiting.length === 1 ? 'its' : 'their'} turn</div>
+          {#each moves.waiting as m (m.title_id)}
+            <div class="row"><a class="grow truncate" href="#/title/{m.title_id}">{m.title ?? 'Unknown title'}</a><span class="faint">{m.from && m.to ? `${m.from} to ${m.to}` : m.to ? `To ${m.to}` : ''}</span></div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
   {#if !queue.length && loaded}
     <div class="card empty">Nothing is downloading.</div>
   {/if}
@@ -254,6 +315,24 @@
 {/if}
 
 <style>
+  .movehead {
+    margin: 4px 0 10px;
+  }
+  .moves {
+    margin-bottom: 24px;
+  }
+  .moves .progress {
+    margin: 10px 0 6px;
+  }
+  .waiting {
+    padding: 12px 16px;
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+  }
+  .waiting .row {
+    gap: 12px;
+  }
   .pickall {
     gap: 8px;
     margin: 0 0 10px 2px;
