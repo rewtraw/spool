@@ -124,6 +124,16 @@
   const inCollection = $derived(app.collections.find((c) => c.members.some((m) => m.title_id === id)));
   const myRole = $derived(inCollection?.members.find((m) => m.title_id === id)?.role ?? '');
 
+  // Why Spool will not search or download for this title now, when it will not: said in
+  // place of the buttons, so that nothing is offered that cannot work.
+  const locked = $derived(
+    !t ? ''
+      : t.moving ? 'It is being moved to another location; searching is back when the move is done.'
+      : t.offline ? `It is kept on ${t.location ?? 'a location'} that cannot be reached right now, so Spool is leaving it alone.`
+      : t.read_only ? `It is kept on ${t.location}, which Spool only reads, so Spool does not search, download or upgrade for it.`
+      : '',
+  );
+
   // The other places this title could be moved to: those Spool may write to, that are there.
   let places = $state<any[]>([]);
   api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
@@ -280,6 +290,12 @@
           {/if}
         </div>
       {/if}
+      {#if locked}
+        <div class="notice lockednote">
+          <b>No searching here.</b> {locked}
+          {#if t.read_only && !t.offline && !t.moving}To get a different copy of it, use <b>Move to…</b> above to put it on a location Spool manages, or turn on "Let Spool change files here" for {t.location} under <a class="link" href="#/settings/general">Settings</a>.{/if}
+        </div>
+      {/if}
       {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url}
         <div class="links">
           {#if t.plex?.url}<a href={t.plex.url} target="_blank" rel="noopener noreferrer">Open in Plex <span aria-hidden="true">↗</span></a>{/if}
@@ -301,11 +317,13 @@
         {/if}
       </div>
       <div class="row wrap">
+        {#if !locked}
         <button class="btn primary" disabled={!!searching} onclick={() => search({}, true, 'all')}>
           {searching === 'all' ? 'Searching…' : !isActive ? 'Search' : t.kind === 'movie' ? 'Search and download' : 'Get missing episodes'}
         </button>
         {#if isActive}<button class="btn" disabled={!!searching} onclick={() => search({}, false, 'look')}>{searching === 'look' ? 'Searching…' : 'Show releases'}</button>{/if}
         {#if isActive && oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ compact: true }, true, 'compact')}>{searching === 'compact' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
+        {/if}
         <button class="btn ghost" onclick={async () => { await act(() => api.post(`/titles/${id}/refresh`), 'Details refreshed'); load(); }}>Refresh details</button>
         <button class="btn ghost" onclick={async () => { const r = await act(() => api.post(`/titles/${id}/scan`)); if (r) { searchMessage = `Scan: ${r.files_found} files on disk, ${r.files_added} added, ${r.files_missing} missing`; load(); } }}>Rescan folder</button>
         <button class="btn ghost danger" onclick={() => (confirmDelete = true)}>Remove</button>
@@ -376,7 +394,7 @@
                 <span class="chip {have >= airedCount && airedCount > 0 ? 'ok' : have < airedCount && seasonOf(n) ? 'warn' : ''}">{have} / {airedCount}{airedCount < eps.length ? ` of ${eps.length}` : ''}</span>
               </button>
               <label class="check small"><input type="checkbox" checked={seasonOf(n)} onchange={(e) => toggleSeason(n, e.currentTarget.checked)} /> Monitored</label>
-              {#if n > 0}<button class="btn small" disabled={!!searching} onclick={() => search({ season: n }, true, `s${n}`)}>{searching === `s${n}` ? 'Searching…' : 'Search season'}</button>{/if}
+              {#if n > 0 && !locked}<button class="btn small" disabled={!!searching} onclick={() => search({ season: n }, true, `s${n}`)}>{searching === `s${n}` ? 'Searching…' : 'Search season'}</button>{/if}
             </div>
             {#if openSeasons[n]}
               <div class="eps">
@@ -393,7 +411,7 @@
                     {#if coming.get(e.id)}<span class="chip accent">{coming.get(e.id)}</span>
                     {:else if !f && !aired(e)}<span class="chip">Not aired</span>
                     {:else if !f && e.monitored}<span class="chip warn">Missing</span>{/if}
-                    {#if aired(e)}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
+                    {#if aired(e) && !locked}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
                     {#if f}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}
                   </div>
@@ -620,6 +638,10 @@
     margin: 0;
     font-size: 13.5px;
     color: var(--faint);
+  }
+  .lockednote {
+    margin-top: 10px;
+    font-size: 14px;
   }
   .pick {
     font: inherit;
