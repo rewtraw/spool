@@ -28,7 +28,7 @@ pub(super) async fn location_look(State(app): State<App>, Path(id): Path<u32>) -
 
 /// What the last look found, or how far it has got.
 pub(super) async fn location_found(State(app): State<App>, Path(id): Path<u32>) -> Json<Value> {
-    Json(json!(app.adoption.lock().clone().filter(|a| a.location == id)))
+    Json(json!(app.adoption_of(id)))
 }
 
 #[derive(Deserialize)]
@@ -41,8 +41,13 @@ pub(super) struct LocationAdd {
 
 /// Add what the last look was sure of, and whichever unclear ones the caller has settled.
 pub(super) async fn location_add(State(app): State<App>, Path(id): Path<u32>, Json(b): Json<LocationAdd>) -> R<Value> {
-    if !app.adoption.lock().as_ref().is_some_and(|a| a.location == id && !a.running) {
-        return Err(ApiError(StatusCode::CONFLICT, "look through the location first".into()));
+    if app.adoption.lock().as_ref().is_some_and(|a| a.running) {
+        return Err(ApiError(StatusCode::CONFLICT, "a location is already being worked on".into()));
+    }
+    // What was found here may have been kept from before another location was looked through.
+    match app.adoption_of(id) {
+        Some(kept) => *app.adoption.lock() = Some(kept),
+        None => return Err(ApiError(StatusCode::CONFLICT, "look through the location first".into())),
     }
     if let Some(a) = app.adoption.lock().as_mut() {
         (a.running, a.done, a.total) = (true, 0, 0);

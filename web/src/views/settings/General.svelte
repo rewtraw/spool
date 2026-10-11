@@ -29,21 +29,20 @@
 
   // ---- further locations, and bringing in what is already on them
   let places = $state<any[]>([]);
-  let found = $state<any>(null);
+  // What was found on each location, by its id: kept by Spool, so it is still here after
+  // looking through another, or coming back another day.
+  let foundBy = $state<Record<number, any>>({});
   let picks = $state<Record<string, any>>({});
   let monitorAdopted = $state(false);
   let foundTimer: ReturnType<typeof setTimeout> | undefined;
+  const working = $derived(Object.values(foundBy).some((f: any) => f?.running));
   async function loadPlaces() {
     places = await api.get<any[]>('/locations').catch(() => []);
-    // Pick up a look that is under way, or the last one's findings, after coming back to the page.
-    if (!found) {
-      for (const p of places.filter((p) => p.id)) {
-        const last = await api.get<any>(`/locations/${p.id}/found`).catch(() => null);
-        if (last) {
-          found = last;
-          if (last.running) watchFound(p.id);
-          break;
-        }
+    for (const p of places.filter((p) => p.id)) {
+      const last = await api.get<any>(`/locations/${p.id}/found`).catch(() => null);
+      if (last) {
+        foundBy[p.id] = last;
+        if (last.running) watchFound(p.id);
       }
     }
   }
@@ -53,22 +52,25 @@
   }
   async function watchFound(id: number) {
     clearTimeout(foundTimer);
-    found = await api.get(`/locations/${id}/found`).catch(() => null);
-    if (found?.running) foundTimer = setTimeout(() => watchFound(id), 1500);
-    else if (found) loadPlaces();
+    const now = await api.get<any>(`/locations/${id}/found`).catch(() => null);
+    if (now) foundBy[id] = now;
+    if (now?.running) foundTimer = setTimeout(() => watchFound(id), 1500);
+    else if (now) places = await api.get<any[]>('/locations').catch(() => places);
   }
   async function lookThrough(id: number) {
-    picks = {};
     if ((await act(() => api.post(`/locations/${id}/look`))) !== undefined) watchFound(id);
   }
   async function addFound(id: number) {
-    const chosen = Object.entries(picks).map(([folder, m]) => ({ folder, tmdb_id: m.tmdb_id, tvmaze_id: m.tvmaze_id, tvdb_id: m.tvdb_id }));
+    const here = pickedOn(id);
+    const chosen = here.map(([folder, m]) => ({ folder, tmdb_id: m.tmdb_id, tvmaze_id: m.tvmaze_id, tvdb_id: m.tvdb_id }));
     if ((await act(() => api.post(`/locations/${id}/add`, { picks: chosen, monitor: monitorAdopted }))) !== undefined) {
-      picks = {};
+      for (const [folder] of here) delete picks[folder];
       watchFound(id);
     }
   }
-  const foundIn = (state: string) => (found?.found ?? []).filter((f: any) => f.state === state);
+  const foundIn = (found: any, state: string) => (found?.found ?? []).filter((f: any) => f.state === state);
+  /** The folders on this location the user has settled. */
+  const pickedOn = (id: number) => Object.entries(picks).filter(([folder]) => (foundBy[id]?.found ?? []).some((f: any) => f.folder === folder));
 
   let players = $state<any>(null);
   async function loadPlayers() {
@@ -143,23 +145,24 @@
             {#if p}
               <span class="small" class:warn={!p.online}>{[p.online ? 'Reachable' : 'Cannot be reached', `${p.titles} ${p.titles === 1 ? 'title' : 'titles'}`, p.bytes ? bytes(p.bytes) : '', p.free != null ? `${bytes(p.free)} free` : ''].filter(Boolean).join(' · ')}</span>
               <span class="grow"></span>
-              <button class="btn small" type="button" disabled={!p.online || found?.running} onclick={() => lookThrough(l.id)}>Look for films and shows</button>
+              <button class="btn small" type="button" disabled={!p.online || working} onclick={() => lookThrough(l.id)}>Look for films and shows</button>
             {:else}
               <span class="faint small grow">Save to start using it.</span>
             {/if}
             <button class="btn small ghost danger" type="button" onclick={() => general.locations.splice(i, 1)}>Remove</button>
           </div>
-          {#if found && found.location === l.id}
+          {#if foundBy[l.id]}
+            {@const found = foundBy[l.id]}
             <div class="found">
               {#if found.running}
                 <p class="muted">{found.step === 'adding' ? 'Adding' : 'Looking'}: {found.done} of {found.total || '…'} folders.</p>
               {:else}
                 <p><b>{found.message}.</b> Nothing on the location is moved or changed by adding.</p>
-                {#if foundIn('unclear').length}
+                {#if foundIn(found, 'unclear').length}
                   <details>
-                    <summary>Unclear ({foundIn('unclear').length}): choose what each is, or leave it out</summary>
+                    <summary>Unclear ({foundIn(found, 'unclear').length}): choose what each is, or leave it out</summary>
                     <div class="list">
-                      {#each foundIn('unclear') as f (f.folder)}
+                      {#each foundIn(found, 'unclear') as f (f.folder)}
                         <div class="item">
                           <div class="mono small">{f.folder}</div>
                           <div class="row wrap">
@@ -173,20 +176,20 @@
                   </details>
                 {/if}
                 {#each [['unknown', 'Not recognised'], ['have', 'Already in the library'], ['failed', 'Could not be added'], ['new', 'To add'], ['added', 'Added']] as [state, label]}
-                  {#if foundIn(state).length}
+                  {#if foundIn(found, state).length}
                     <details>
-                      <summary>{label} ({foundIn(state).length})</summary>
+                      <summary>{label} ({foundIn(found, state).length})</summary>
                       <div class="list">
-                        {#each foundIn(state) as f (f.folder)}
+                        {#each foundIn(found, state) as f (f.folder)}
                           <div class="item"><div class="mono small">{f.folder}</div><div class="faint small">{#if f.matches[0]}{f.matches[0].title}{f.matches[0].year ? ` (${f.matches[0].year})` : ''}{#if f.note} · {/if}{/if}{f.note}</div></div>
                         {/each}
                       </div>
                     </details>
                   {/if}
                 {/each}
-                {#if foundIn('new').length + Object.keys(picks).length}
+                {#if foundIn(found, 'new').length + pickedOn(l.id).length}
                   <div class="row wrap">
-                    <button class="btn primary" type="button" onclick={() => addFound(l.id)}>Add {foundIn('new').length + Object.keys(picks).length} to the library</button>
+                    <button class="btn primary" type="button" onclick={() => addFound(l.id)}>Add {foundIn(found, 'new').length + pickedOn(l.id).length} to the library</button>
                     {#if l.manage}<label class="check"><input type="checkbox" bind:checked={monitorAdopted} /> Monitor them, so Spool looks for upgrades and missing episodes</label>{/if}
                   </div>
                 {/if}

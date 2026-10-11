@@ -26,7 +26,7 @@ pub struct Match {
 }
 
 /// A folder on the location and what was made of it.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Found {
     pub folder: String,
     pub kind: Kind,
@@ -44,7 +44,8 @@ pub struct Found {
 }
 
 /// How far looking through a location, or adding from it, has got.
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Adoption {
     pub location: u32,
     pub running: bool,
@@ -200,6 +201,24 @@ impl App {
         if self.tasks.lock().get("adopt").is_some_and(|t| t.running) {
             self.task_end("adopt", why);
         }
+        self.adoption_keep();
+    }
+
+    /// Keep what the work on a location came to, so it is still there to act on after
+    /// another location has been looked through, or Spool has been restarted.
+    fn adoption_keep(&self) {
+        if let Some(a) = self.adoption.lock().clone().filter(|a| !a.running) {
+            let _ = self.db.set_setting(&format!("found_{}", a.location), &a);
+        }
+    }
+
+    /// What looking through a location found, or how far work on it has got: the work under
+    /// way if it is on this location, or else what was kept from the last time.
+    pub fn adoption_of(&self, location: u32) -> Option<Adoption> {
+        if let Some(now) = self.adoption.lock().clone().filter(|a| a.location == location) {
+            return Some(now);
+        }
+        Some(self.db.get_setting::<Adoption>(&format!("found_{location}"))).filter(|a| a.location == location && !a.message.is_empty())
     }
 
     fn adoption_set(&self, f: impl FnOnce(&mut Adoption)) {
@@ -336,6 +355,7 @@ impl App {
             a.message = message.clone();
         });
         self.task_end("adopt", &message);
+        self.adoption_keep();
         Ok(())
     }
 
@@ -469,6 +489,7 @@ impl App {
             a.message = message.clone();
         });
         self.task_end("adopt", &message);
+        self.adoption_keep();
         Ok(())
     }
 }
