@@ -2,6 +2,7 @@
   import { app, act, go, loadTitles } from '../lib/state.svelte';
   import { api } from '../lib/api';
   import Poster from '../components/Poster.svelte';
+  import Tile from '../components/Tile.svelte';
 
   let { id }: { id: number } = $props();
 
@@ -121,16 +122,10 @@
   <div class="grid">
     {#each members as m, i (m.title_id)}
       {@const t = m.t!}
-      <div class="tile">
-        <a href="#/title/{t.id}" class:dim={t.offline}>
-          <div class="art">
-            <Poster src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} />
-            {#if m.role}<span class="chip pin">{m.role}{m.role === 'Recap' ? ' · can be skipped' : ''}</span>{/if}
-            {#if m.watched}<span class="chip ok seen" title="Watched">✓</span>{/if}
-          </div>
-          <div class="name truncate">{t.title}</div>
-          <div class="faint small">{t.year || ''} · {t.kind === 'series' ? 'Series' : 'Film'}</div>
-        </a>
+      <div class="slot">
+        <Tile href="#/title/{t.id}" src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} sub={`${t.year || ''} · ${t.kind === 'series' ? 'Series' : 'Film'}`} chip={m.role ? `${m.role}${m.role === 'Recap' ? ' · can be skipped' : ''}` : ''} dim={t.offline}>
+          {#if m.watched}<span class="chip ok seen" title="Watched">✓</span>{/if}
+        </Tile>
         {#if editing}
           <div class="row moves">
             <button class="btn small" disabled={i === 0} onclick={() => move(i, -1)} aria-label="Move {t.title} earlier">←</button>
@@ -177,19 +172,11 @@
     gap: 18px 14px;
     margin-top: 18px;
   }
-  .tile {
+  .slot {
     display: grid;
     gap: 6px;
     min-width: 0;
     align-content: start;
-  }
-  .tile a {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-  }
-  .tile a.dim .art {
-    opacity: 0.55;
   }
   .tools {
     gap: 8px;
@@ -245,20 +232,6 @@
     height: 30px;
     font-size: 13px;
     padding: 0 8px;
-  }
-  .art {
-    position: relative;
-  }
-  .pin {
-    position: absolute;
-    left: 7px;
-    bottom: 7px;
-    backdrop-filter: blur(8px);
-    background: color-mix(in srgb, var(--bg) 78%, transparent);
-  }
-  .name {
-    font-weight: 600;
-    font-size: 14px;
   }
   /* Set apart from the grid above, with room between the heading, its note and the list. */
   .rest {

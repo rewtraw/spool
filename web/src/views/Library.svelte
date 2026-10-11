@@ -3,7 +3,7 @@
   import { api } from '../lib/api';
   import type { Collection, Title } from '../lib/api';
   import { bytes } from '../lib/format';
-  import Poster from '../components/Poster.svelte';
+  import Tile from '../components/Tile.svelte';
 
   const saved = JSON.parse(localStorage.getItem('spool.library') ?? '{}');
   let kind = $state<'all' | 'movie' | 'series'>(saved.kind ?? 'all');
@@ -206,26 +206,13 @@
   <div class="grid">
     {#each shown as e (e.c ? `c${e.c.id}` : e.t.id)}
       {#if e.c}
-        <a class="tile" href="#/collection/{e.c.id}">
-          <div class="art stack">
-            <Poster src={e.c.poster ?? e.inside[0].poster_small ?? e.inside[0].poster} title={e.c.name} kind="movie" />
-            <span class="chip pin">{e.c.missing.length ? `${e.c.members.length} of ${e.c.members.length + e.c.missing.length}` : `${e.inside.length} titles`}</span>
-          </div>
-          <div class="name truncate">{e.c.name}</div>
-          <div class="faint small">Collection</div>
-        </a>
+        <Tile href="#/collection/{e.c.id}" src={e.c.poster ?? e.inside[0].poster_small ?? e.inside[0].poster} title={e.c.name} sub="Collection" stack chip={e.c.missing.length ? `${e.c.members.length} of ${e.c.members.length + e.c.missing.length}` : `${e.inside.length} titles`} />
       {:else}
-      {@const t = e.t}
-      {@const s = statusOf(t)}
-      <a class="tile" href="#/title/{t.id}" class:dim={t.offline || (!t.monitored && !(t.file_count || t.episodes_have))} class:picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
-        <div class="art">
-          <Poster src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} />
+        {@const t = e.t}
+        {@const s = statusOf(t)}
+        <Tile href="#/title/{t.id}" src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} sub={`${t.year || ''}${t.kind === 'series' ? ' · Series' : ''}`} chip={s.label} tone={s.tone} dim={t.offline || (!t.monitored && !(t.file_count || t.episodes_have))} picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
           {#if selecting}<span class="check" class:on={picked[t.id]} aria-hidden="true">{picked[t.id] ? '✓' : ''}</span>{/if}
-          <span class="chip {s.tone} pin">{s.label}</span>
-        </div>
-        <div class="name truncate">{t.title}</div>
-        <div class="faint small">{t.year || ''}{t.kind === 'series' ? ' · Series' : ''}</div>
-      </a>
+        </Tile>
       {/if}
     {/each}
   </div>
@@ -344,39 +331,10 @@
     grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
     gap: 22px 16px;
   }
-  .tile {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-  }
   .toggle.on {
     background: var(--accent-soft);
     border-color: var(--accent);
     color: var(--text);
-  }
-  /* A collection's tile: a poster with the edges of others behind it. */
-  .art.stack {
-    margin: 0 6px 0 0;
-  }
-  .art.stack::before,
-  .art.stack::after {
-    content: '';
-    position: absolute;
-    inset: 4px -4px 4px 4px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: var(--raised);
-    z-index: -1;
-  }
-  .art.stack::after {
-    inset: 9px -8px 9px 8px;
-    z-index: -2;
-    opacity: 0.6;
-  }
-  .tile.picked .art {
-    outline: 3px solid var(--accent);
-    outline-offset: 2px;
-    border-radius: 10px;
   }
   .check {
     position: absolute;
@@ -405,29 +363,6 @@
     height: 30px;
     padding: 0 8px;
     font-size: 13.5px;
-  }
-  .tile.dim .art {
-    opacity: 0.55;
-  }
-  .art {
-    position: relative;
-    transition: transform 0.15s ease;
-  }
-  .tile:hover .art,
-  .tile:focus-visible .art {
-    transform: translateY(-3px);
-  }
-  .pin {
-    position: absolute;
-    left: 7px;
-    bottom: 7px;
-    backdrop-filter: blur(8px);
-    background: color-mix(in srgb, var(--bg) 78%, transparent);
-  }
-  .name {
-    font-weight: 600;
-    font-size: 14px;
-    margin-top: 4px;
   }
   .small {
     font-size: 12.5px;
