@@ -608,7 +608,7 @@ impl App {
         // the film's own name and the entry does not, that work is the film.
         let mut unsure = false;
         if let (Kind::Movie, Some(listed)) = (t.kind, entries.first().and_then(|i| self.db.anime(*i).ok().flatten())) {
-            let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+            use crate::names::plain;
             // The title itself is asked first, then its other names: those may hold a name
             // taken from the listed entry on an earlier reading, which would settle nothing.
             let own = vec![plain(&t.title)];

@@ -356,7 +356,7 @@ impl Metadata {
     /// failing that by a show of exactly the same name that began in the same year and runs
     /// about as long in all. Only a listing of two or more episodes counts. `Ok(None)` means the source has no such show.
     pub async fn series_twin(&self, imdb_id: Option<&str>, title: &str, year: u32, runtime: u32) -> Result<Option<SeriesTwin>> {
-        let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+        use crate::names::plain;
         let (mut show, mut by_name) = (None, false);
         if let Some(imdb) = imdb_id.filter(|i| !i.is_empty()) {
             match self.get(&format!("{}/lookup/shows?imdb={imdb}", self.tvmaze_base)).await {

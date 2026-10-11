@@ -2,12 +2,12 @@
 
 use crate::app::{App, Event};
 use crate::models::*;
+use crate::names::plain;
 use crate::newznab::{self, Query};
 use crate::settings::Mode;
 use anyhow::{anyhow, bail, Result};
 use spool_core::decision::{self, Candidate, Context, ExistingFile, Rejection};
 use spool_core::matching;
-use spool_core::parser::{parse_episode_title, parse_movie_title};
 use spool_core::profile::QualityProfile;
 use spool_core::{Quality, QualityModel};
 use std::collections::{HashMap, HashSet};
@@ -65,7 +65,6 @@ struct Judged {
 /// names (a year, or a number in the title itself), so only one that follows the full title
 /// counts.
 pub(crate) fn episodes_named(name: &str, t: &Title) -> Option<Vec<u32>> {
-    let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
     let names: Vec<String> = std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
     // Said outright: "E05", "Ep 5", "Episode 5". Not for a film with the word in its own title.
     let whole = plain(name);
@@ -90,7 +89,7 @@ pub(crate) fn episodes_named(name: &str, t: &Title) -> Option<Vec<u32>> {
             return Some(vec![n]);
         }
     }
-    let p = parse_episode_title(name)?;
+    let p = crate::names::episode(name)?;
     if p.full_season || p.is_multi_season() || (p.episode_numbers.is_empty() && p.absolute_episode_numbers.is_empty()) {
         return None;
     }
@@ -170,10 +169,6 @@ pub struct SeasonName {
     pub offset: u32,
     /// Lower-case letters and digits only.
     pub names: Vec<String>,
-}
-
-fn plain(s: &str) -> String {
-    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
 /// A season said at the end of a series' name in a release: "Show Season 2", "Show S2",
@@ -260,7 +255,7 @@ impl App {
         };
 
         let (quality, languages, group, covered, covers, full_season, multi_season, mut pre): (QualityModel, Vec<String>, Option<String>, Vec<&Episode>, String, bool, bool, Option<Rejection>) = match t.kind {
-            Kind::Movie => match parse_movie_title(&release.title, false) {
+            Kind::Movie => match crate::names::movie(&release.title) {
                 Some(p) => {
                     let by_id = release.imdb_id.is_some() && release.imdb_id == t.imdb_id;
                     let mut pre = None;
@@ -291,7 +286,7 @@ impl App {
                 None => return blank(rej("unparseable", "the release name could not be understood"), unknown),
             },
             Kind::Series => {
-                let Some(mut p) = parse_episode_title(&release.title) else {
+                let Some(mut p) = crate::names::episode(&release.title) else {
                     return blank(rej("unparseable", "the release name could not be understood"), unknown);
                 };
                 let q = p.quality.unwrap_or(unknown);
@@ -938,8 +933,8 @@ impl App {
             let mut per_title: HashMap<i64, Vec<Release>> = HashMap::new();
             for r in releases {
                 let id = match kind {
-                    Kind::Movie => r.imdb_id.as_deref().and_then(|i| by_imdb.get(i).copied()).or_else(|| parse_movie_title(&r.title, false).and_then(|p| matching::match_movie(&p, &keys).map(|k| k.id))),
-                    Kind::Series => r.tvdb_id.and_then(|i| by_tvdb.get(&i).copied()).or_else(|| parse_episode_title(&r.title).and_then(|p| matching::match_series(&p, &keys).map(|k| k.id))),
+                    Kind::Movie => r.imdb_id.as_deref().and_then(|i| by_imdb.get(i).copied()).or_else(|| crate::names::movie(&r.title).and_then(|p| matching::match_movie(&p, &keys).map(|k| k.id))),
+                    Kind::Series => r.tvdb_id.and_then(|i| by_tvdb.get(&i).copied()).or_else(|| crate::names::episode(&r.title).and_then(|p| matching::match_series(&p, &keys).map(|k| k.id))),
                 };
                 if let Some(id) = id {
                     per_title.entry(id).or_default().push(r);
@@ -1222,7 +1217,7 @@ fn runner_ups(judged: &[Judged], grabbed: &[Acquisition], profile: &QualityProfi
 /// out, since "Alien" is inside "Aliens" and a year is the only thing that tells them apart.
 fn names_film_without_year(t: &Title, release: &str) -> bool {
     let name = spool_core::parser::clean_movie_title(release);
-    let is_episode = parse_episode_title(release).is_some_and(|p| !p.episode_numbers.is_empty() || p.full_season);
+    let is_episode = crate::names::episode(release).is_some_and(|p| !p.episode_numbers.is_empty() || p.full_season);
     !is_episode
         && std::iter::once(&t.title).chain(t.alt_titles.iter()).any(|title| {
             let key = spool_core::parser::clean_movie_title(title);

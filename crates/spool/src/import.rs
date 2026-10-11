@@ -12,7 +12,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use spool_core::mediainfo::MediaInfo;
 use spool_core::naming::{self, EpisodeNameInput, MovieNameInput};
-use spool_core::parser::{is_video_file, parse_episode_path, parse_movie_title};
+use spool_core::parser::{is_video_file, parse_episode_path};
 use spool_core::quality::{parse_quality_name, Flavor};
 use spool_core::{Quality, QualityModel};
 use std::path::{Path, PathBuf};
@@ -383,7 +383,7 @@ impl App {
             // The release name is the better witness for quality; a file inside a pack may say more.
             let from_file = parse_quality_name(&file_name, flavor);
             let quality: QualityModel = if vids.len() > 1 && from_file.quality != Quality::Unknown { from_file } else if acq.quality.quality != Quality::Unknown { acq.quality } else { spool_core::quality::parse_quality(&file_name, flavor) };
-            let parsed_movie = if flavor == Flavor::Movie { parse_movie_title(&acq.release.title, false) } else { None };
+            let parsed_movie = if flavor == Flavor::Movie { crate::names::movie(&acq.release.title) } else { None };
             let release_group = parsed_movie
                 .as_ref()
                 .and_then(|p| p.release_group.clone())
