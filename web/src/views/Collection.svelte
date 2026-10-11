@@ -46,8 +46,8 @@
   </div>
 
   {#if c.missing.length}
-    <div class="section-title">Not in the library</div>
-    <p class="muted small">Other works of the same story, as AniList relates them to what you have.</p>
+    <div class="section-title rest">Not in the library</div>
+    <p class="muted small note">Other works of the same story, as AniList relates them to what you have.</p>
     <div class="card list">
       {#each c.missing as m (m.anilist_id)}
         <div class="row item">
@@ -96,6 +96,14 @@
   .name {
     font-weight: 600;
     font-size: 14px;
+  }
+  /* Set apart from the grid above, with room between the heading, its note and the list. */
+  .rest {
+    margin: 40px 0 6px;
+  }
+  .note {
+    margin: 0 0 14px;
+    line-height: 1.5;
   }
   .item {
     gap: 12px;
