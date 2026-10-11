@@ -30,6 +30,8 @@ const TITLE_KEPT: i64 = 30 * 86400;
 /// AniList allows thirty requests a minute. One request covers ten titles.
 const PER_REQUEST: usize = 10;
 const BETWEEN_REQUESTS: std::time::Duration = std::time::Duration::from_millis(2500);
+/// Raised when the way a title is matched to its entry changes, so the library is read again.
+const RULES: u32 = 2;
 
 /// Group ids for players and the web app share one space with TMDB's collection ids, which
 /// are small. An anime group is its first work's AniList id with this bit set.
@@ -51,6 +53,9 @@ pub struct Known {
     /// The season of the TVDB series this entry is; 0 for a special.
     pub season: u32,
     pub film: bool,
+    /// The list gives this entry several IMDb ids: it stands for a set of works, and which
+    /// of them a film is has to be settled some other way.
+    pub several: bool,
 }
 
 /// The community id list, read for the ids Spool can use.
@@ -81,7 +86,7 @@ impl Ids {
             if let Some(t) = tvdb {
                 ids.by_tvdb.entry(t).or_default().push((season, anilist));
             }
-            ids.back.insert(anilist, Known { imdb: imdb.first().cloned(), tvdb, season, film });
+            ids.back.insert(anilist, Known { imdb: imdb.first().cloned(), tvdb, season, film, several: imdb.len() > 1 });
         }
         if ids.back.is_empty() {
             bail!("the anime id list is empty");
@@ -424,10 +429,28 @@ impl App {
     /// itself. Returns whether anything changed.
     fn apply_anime(&self, t: &mut Title, entries: Vec<u32>) -> Result<bool> {
         let before = (t.anilist.clone(), t.alt_titles.clone(), t.in_episodes);
+        let mut entries = entries;
+        // The id list is not always exact for a film: it may tie the film's id to a set of
+        // specials that merely belongs to the same story. If a work beside the entry carries
+        // the film's own name and the entry does not, that work is the film.
+        let mut unsure = false;
+        if let (Kind::Movie, Some(listed)) = (t.kind, entries.first().and_then(|i| self.db.anime(*i).ok().flatten())) {
+            let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+            let ours: Vec<String> = std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
+            let named = |m: &Media| m.names.iter().any(|n| ours.contains(&plain(n)));
+            if !named(&listed) {
+                let beside = listed.edges.iter().filter_map(|e| self.db.anime(e.to).ok().flatten()).find(|m| named(m));
+                match beside {
+                    Some(m) => entries = vec![m.id],
+                    // Nothing settles which of the set it is: it is of this story, and no more is taken from the entry.
+                    None => unsure = self.anime_ids().is_some_and(|ids| ids.back.get(&listed.id).is_some_and(|k| k.several)),
+                }
+            }
+        }
         t.anilist = entries;
         // The names of the first entry only: a later season's name on a release numbered
         // from one would be read as the first season's episodes.
-        if let Some(m) = t.anilist.first().and_then(|i| self.db.anime(*i).ok().flatten()) {
+        if let Some(m) = t.anilist.first().and_then(|i| self.db.anime(*i).ok().flatten()).filter(|_| !unsure) {
             for name in &m.names {
                 if !name.eq_ignore_ascii_case(&t.title) && !t.alt_titles.iter().any(|a| a.eq_ignore_ascii_case(name)) {
                     t.alt_titles.push(name.clone());
@@ -436,6 +459,11 @@ impl App {
             // A "film" that is an OVA or a series: it is posted as its episodes.
             if t.kind == Kind::Movie && EPISODIC.contains(&m.format.as_str()) && m.episodes >= 2 {
                 t.in_episodes = true;
+            }
+            // And a film that AniList too calls a film, with no series listed for it
+            // anywhere, is not: this undoes a mark made from a wrong entry.
+            if t.kind == Kind::Movie && m.format == "MOVIE" && m.episodes <= 1 && t.as_series.is_none() {
+                t.in_episodes = false;
             }
         }
         Ok(before != (t.anilist.clone(), t.alt_titles.clone(), t.in_episodes))
@@ -469,7 +497,8 @@ impl App {
     /// The "anime" task: every title not yet asked about, or asked about a month ago.
     pub async fn anime_sweep(&self) -> Result<String> {
         let Some(ids) = self.fresh_anime_ids().await else { bail!("the anime id list is not available") };
-        let due: Vec<Title> = self.db.titles(None)?.into_iter().filter(|t| now() - t.anime_checked_at > TITLE_KEPT).collect();
+        let again = self.db.get_setting::<u32>("anime_rules") != RULES;
+        let due: Vec<Title> = self.db.titles(None)?.into_iter().filter(|t| again || now() - t.anime_checked_at > TITLE_KEPT).collect();
         let mut wanted: Vec<(i64, Vec<u32>)> = vec![];
         let mut plain = 0;
         for t in &due {
@@ -513,6 +542,9 @@ impl App {
             self.db.save_title(&mut t)?;
             self.emit(Event::Title { id });
             found += 1;
+        }
+        if !paused {
+            self.db.set_setting("anime_rules", &RULES)?;
         }
         Ok(format!("{found} anime titles read from AniList, {plain} others checked{}", if paused { "; the rest next time" } else { "" }))
     }

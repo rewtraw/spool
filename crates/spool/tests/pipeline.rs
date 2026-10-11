@@ -1375,7 +1375,8 @@ async fn anime_is_known_by_its_own_source_and_its_series_and_films_make_a_collec
 
     // The sweep reads the rest of the library, and the two are found to belong together.
     let said = w.app.anime_sweep().await.unwrap();
-    assert!(said.starts_with("1 anime titles"), "{said}");
+    // Its first run reads every title, the film included.
+    assert!(said.starts_with("2 anime titles"), "{said}");
     assert_eq!(w.app.db.title(show.id).unwrap().unwrap().anilist, [80]);
     let found = w.app.collections().unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
@@ -1385,6 +1386,11 @@ async fn anime_is_known_by_its_own_source_and_its_series_and_films_make_a_collec
     assert_eq!((roles[&show.id], roles[&film.id]), ("", "Side story"));
     // The sequel series is part of the story, is not here, and can be added by its ids.
     assert_eq!(c.missing.iter().map(|m| (m.anilist_id, m.title.as_str(), m.can_add)).collect::<Vec<_>>(), [(85, "Robot War Z", true)]);
+
+    // The id list ties this film's id to a set of specials. The work beside that set which
+    // carries the film's name is the film, and a film is not posted in episodes.
+    let border = w.app.add_title(Kind::Movie, Some(91), None, w.profile("movie"), true, false).await.unwrap();
+    assert_eq!((border.anilist.as_slice(), border.in_episodes), (&[91u32][..], false));
 
     // The web app and players are given the same collection.
     let router = spool::api::router(w.app.clone());
@@ -1937,6 +1943,7 @@ async fn details_source() -> String {
             json!({"id": 2103, "title": "Solaris", "release_date": "2002-11-27", "status": "Released"}),
             json!({"id": 111, "title": "Alpha", "release_date": "2001-01-01", "status": "Released"}),
             json!({"id": 80, "title": "Pocket Robot War", "release_date": "1989-03-25", "status": "Released", "runtime": 180, "imdb_id": "tt0000080"}),
+            json!({"id": 91, "title": "Border Two Example", "release_date": "2013-11-30", "status": "Released", "runtime": 57, "imdb_id": "tt0000091"}),
         ]
     }
     fn show() -> Value {
@@ -1983,6 +1990,8 @@ async fn details_source() -> String {
                     {"type": "OVA", "anilist_id": 82, "imdb_id": ["tt0000080"], "tvdb_id": 8088, "season": {"tvdb": 1}},
                     {"type": "TV", "anilist_id": 80, "tvdb_id": 296762, "season": {"tvdb": 1}},
                     {"type": "TV", "anilist_id": 85, "tvdb_id": 9085, "season": {"tvdb": 1}},
+                    // A set of specials that the list gives two films' ids to.
+                    {"type": "SPECIAL", "anilist_id": 90, "imdb_id": ["tt0000091", "tt0000092"], "tvdb_id": 9090, "season": {"tvdb": 0}},
                 ]))
             }),
         )
@@ -2004,7 +2013,9 @@ async fn details_source() -> String {
                 whole["relations"]["edges"][0]["node"] = with(brief(82, "OVA", 1989, "Pocket Robot War"), json!([{"relationType": "PARENT", "node": brief(80, "TV", 1979, "Robot War")}]));
                 whole["relations"]["edges"][1]["node"] = with(brief(85, "TV", 1985, "Robot War Z"), json!([{"relationType": "PREQUEL", "node": brief(80, "TV", 1979, "Robot War")}]));
                 let asked: Vec<u64> = q["variables"]["ids"].as_array().into_iter().flatten().filter_map(|x| x.as_u64()).collect();
-                let media: Vec<Value> = asked.iter().filter_map(|id| match id { 80 => Some(whole.clone()), 82 => Some(ova()), _ => None }).collect();
+                let mut shorts = with(brief(90, "SPECIAL", 2013, "Border Shorts"), json!([{"relationType": "PARENT", "node": with(brief(91, "MOVIE", 2013, "Border: Two Example"), json!([]))}]));
+                shorts["episodes"] = json!(4);
+                let media: Vec<Value> = asked.iter().filter_map(|id| match id { 80 => Some(whole.clone()), 82 => Some(ova()), 90 => Some(shorts.clone()), _ => None }).collect();
                 axum::Json(json!({"data": {"Page": {"media": media}}}))
             }),
         )
