@@ -2134,7 +2134,8 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     std::fs::write(there.join("films/Sci Fi Night/movie.nfo"), "<movie><title>Solaris</title><tmdbid>2103</tmdbid></movie>").unwrap();
     lay("films/Coming Soon/Trailers/teaser.mkv");
     lay("tv/Example World/Season 01/Example.World.S01E01.1080p.BluRay.x264-GRP.mkv");
-    // One of them is in the main library already.
+    // One of them is in the main library already, without a file: a title brought over
+    // from another manager, whose file was here all along.
     let mut alpha = w.movie("Alpha", 2001, "tt0000001");
     alpha.tmdb_id = Some(111);
     w.app.db.save_title(&mut alpha).unwrap();
@@ -2170,7 +2171,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     assert_eq!(state(&found, "Heat (1995)").as_deref(), Some("new"));
     assert_eq!(state(&found, "Solaris").as_deref(), Some("unclear"), "two films share the name and the folder gives no year");
     assert_eq!(state(&found, "Mystery Thing (2001)").as_deref(), Some("unknown"));
-    assert_eq!(state(&found, "Alpha (2001)").as_deref(), Some("have"));
+    assert_eq!(state(&found, "Alpha (2001)").as_deref(), Some("new"), "the same title, to be pointed at this folder");
     assert_eq!(state(&found, "Example World").as_deref(), Some("new"));
     assert_eq!(state(&found, "Notes"), None, "a folder with no video is not a title");
     assert_eq!(state(&found, "Sci Fi Night").as_deref(), Some("new"), "its notes name it");
@@ -2181,12 +2182,16 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     let before = tree(&there);
     assert_eq!(call(&api, "POST", "/api/locations/1/add", json!({"picks": [{"folder": there.join("films/Solaris"), "tmdb_id": 593}]})).await.0, 200);
     let added = finished(api.clone()).await;
-    assert_eq!(added["message"], "Added 4 titles", "{added}");
+    assert_eq!(added["message"], "Added 5 titles", "{added}");
     assert_eq!(tree(&there), before, "nothing on the location was touched");
     let titles = w.app.db.titles(None).unwrap();
     let by = |name: &str| titles.iter().find(|t| t.title == name && t.year != 2002).cloned().unwrap();
     assert!(titles.iter().any(|t| t.year == 2002 && t.path.ends_with("Sci Fi Night") && t.local.notes.tmdb_id == Some(2103)));
     let (heat, solaris, show) = (by("Heat"), by("Solaris"), by("Example World"));
+    // The title that was already in the library is the same one, now found where its file is.
+    let pointed = by("Alpha");
+    assert_eq!((pointed.id, pointed.path.as_str(), w.app.db.files(pointed.id).unwrap().len()), (alpha.id, there.join("films/Alpha (2001)").to_str().unwrap(), 1));
+    assert_eq!(titles.iter().filter(|t| t.title == "Alpha").count(), 1, "and not a second copy of it");
     assert_eq!((heat.path.as_str(), heat.monitored, solaris.year), (there.join("films/Heat (1995)").to_str().unwrap(), false, 1972));
     let heat_file = w.app.db.files(heat.id).unwrap().remove(0);
     assert_eq!(serde_json::to_value(&heat_file.quality).unwrap()["quality"], "bluray-1080p");
@@ -2220,7 +2225,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
         names.sort();
         names
     };
-    assert_eq!(films(jf.clone(), token.clone()).await, ["Heat", "Solaris", "Solaris"]);
+    assert_eq!(films(jf.clone(), token.clone()).await, ["Alpha", "Heat", "Solaris", "Solaris"]);
 
     // The location goes away. Its titles stay, marked offline, and nothing is concluded from
     // files that cannot be seen.
@@ -2229,7 +2234,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     let row = listed(api.clone(), heat.id).await;
     assert_eq!((row["offline"].as_bool(), row["file_count"].as_u64()), (Some(true), Some(1)));
     let (_, status) = call(&api, "GET", "/api/status", Value::Null).await;
-    assert!(status["warnings"].as_array().unwrap().iter().any(|m| m.as_str().unwrap().starts_with("Elsewhere cannot be reached. Its 4 titles are offline")), "{status}");
+    assert!(status["warnings"].as_array().unwrap().iter().any(|m| m.as_str().unwrap().starts_with("Elsewhere cannot be reached. Its 5 titles are offline")), "{status}");
     w.app.scan_all().await.unwrap();
     assert_eq!(w.app.db.files(heat.id).unwrap().len(), 1, "a file that cannot be seen is not a file that has gone");
     assert!(films(jf.clone(), token.clone()).await.is_empty(), "players are not offered what cannot be played");
@@ -2239,7 +2244,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     std::fs::rename(&away, &there).unwrap();
     w.app.watch_locations();
     assert_eq!(listed(api.clone(), heat.id).await["offline"], false);
-    assert_eq!(films(jf.clone(), token.clone()).await, ["Heat", "Solaris", "Solaris"]);
+    assert_eq!(films(jf.clone(), token.clone()).await, ["Alpha", "Heat", "Solaris", "Solaris"]);
 
     // Allowed to manage the location, Spool treats it as it does the main one, and can be
     // told to put new titles there.

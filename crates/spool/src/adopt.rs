@@ -245,18 +245,41 @@ impl App {
                 None => self.meta.search_series(&named.name).await,
             },
         };
-        let candidates = match looked {
+        let mut candidates = match looked {
             Ok(c) => c,
             Err(e) => {
                 found.note = format!("{e:#}");
                 return found;
             }
         };
+        // A folder cannot have a colon in its name, so "Show - The Subtitle" often stands for
+        // "Show: The Subtitle". Asked for that way when the name as written finds nothing.
+        if candidates.is_empty() && !by_id && named.name.contains(" - ") {
+            let retold = named.name.replace(" - ", ": ");
+            let again = match kind {
+                Kind::Movie if named.year > 0 => self.meta.search_movies(&key, &format!("{retold} ({})", named.year)).await,
+                Kind::Movie => self.meta.search_movies(&key, &retold).await,
+                Kind::Series => self.meta.search_series(&retold).await,
+            };
+            if let Ok(more) = again {
+                if !more.is_empty() {
+                    named.name = retold;
+                    candidates = more;
+                }
+            }
+        }
         let chosen = if by_id { candidates.first() } else { sure(&named, &candidates) };
         match chosen {
             Some(t) => {
                 found.matches = vec![as_match(t)];
                 match self.db.find_title(kind, t.tmdb_id, t.tvdb_id).ok().flatten() {
+                    // In the library and without a file, while this folder has one: a title
+                    // brought over from another manager, whose files were here all along. It
+                    // is the same title; what changes is where Spool looks for it.
+                    Some(mine) if files > 0 && self.db.files(mine.id).map(|f| f.is_empty()).unwrap_or(false) => {
+                        found.state = "new".into();
+                        found.note = "in the library without a file; it will be pointed at this folder".into();
+                    }
                     Some(mine) => {
                         found.state = "have".into();
                         found.note = if mine.path.is_empty() { "already in the library, with no files yet".into() } else { format!("already in the library, at {}", mine.path) };
@@ -311,8 +334,25 @@ impl App {
     }
 
     /// Record one folder as a title where it lies.
+    /// Point a title that is in the library without a file at the folder that holds it. Its
+    /// monitoring and profile stay as they were; nothing is moved on either disk.
+    async fn point_here(&self, mut mine: Title, folder: &str) -> Result<(Title, String)> {
+        let from = std::mem::replace(&mut mine.path, folder.to_string());
+        self.db.save_title(&mut mine)?;
+        let mut report = crate::catalog::ScanReport::default();
+        self.scan_title(mine.id, &mut report).await?;
+        self.db.add_history(Some(mine.id), "adopted", serde_json::json!({"path": folder, "files": report.files_added, "was_at": from}))?;
+        Ok((mine, String::new()))
+    }
+
     async fn adopt_one(&self, kind: Kind, folder: &str, m: &Match, monitor: bool) -> Result<(Title, String)> {
         let g = self.settings.general();
+        // Known already by the ids the match carries: no need to ask the sources about it.
+        if let Some(mine) = self.db.find_title(kind, m.tmdb_id, m.tvdb_id)? {
+            if self.db.files(mine.id)?.is_empty() {
+                return self.point_here(mine, folder).await;
+            }
+        }
         let (mut title, episodes) = match kind {
             Kind::Movie => (self.meta.movie(&g.tmdb_api_key, m.tmdb_id.ok_or_else(|| anyhow!("no TMDB id"))?).await?, vec![]),
             Kind::Series => match (m.tvmaze_id, m.tvdb_id) {
@@ -322,6 +362,9 @@ impl App {
             },
         };
         if let Some(mine) = self.db.find_title(kind, title.tmdb_id, title.tvdb_id)? {
+            if self.db.files(mine.id)?.is_empty() {
+                return self.point_here(mine, folder).await;
+            }
             bail!("{} is already in the library{}", title.title, if mine.path.is_empty() { String::new() } else { format!(", at {}", mine.path) });
         }
         title.path = folder.to_string();

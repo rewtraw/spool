@@ -51,8 +51,10 @@ The result comes in groups:
 | --- | --- |
 | To add | Spool is sure what it is. |
 | Unclear | More than one film or show fits. Choose one, or leave it out. |
-| Already in the library | The title is already recorded, here or on another location. It is skipped. |
+| Already in the library | The title is already recorded with a file, here or on another location. It is skipped. |
 | Not recognised | Nothing matched. Renaming the folder to `Title (Year)` and looking again usually settles it. |
+
+A title that is in the library **without a file**, while the folder here has one, is listed under To add. This is what a library looks like after coming over from Radarr and Sonarr: the catalogue came across, and the files are where they always were. Adding does not make a second copy of the title; it points the one you have at the folder that holds its file, and keeps its monitoring and profile.
 
 Then **Add to the library**. On a managed location you can choose to monitor what is added, so that Spool looks for upgrades and missing episodes; leave that off for a library you want left as it is. A location that is only read does not offer the choice, since nothing there is ever searched for.
 
@@ -90,6 +92,6 @@ NFS suits a share that is only read. If Spool is to manage the location, the use
 
 ## Limits
 
-- A title lives in one location. If the same film is on two, the second is reported as already in the library and skipped.
+- A title lives in one location. If the same film has a file on two, the second is reported as already in the library and skipped.
 - Looking through folders is offered for further locations, not for the main one. A main library comes in through `spool migrate` or from Plex; see [Your library and what Spool does to it](your-library.md#bringing-in-a-library-you-already-have).
 - Each location has its own recycle folder, so recycling never copies a file from one disk to another.
