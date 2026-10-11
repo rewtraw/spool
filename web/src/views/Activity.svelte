@@ -104,6 +104,8 @@
     file_missing: 'File went missing',
     adopted: 'Brought in where it lay',
     not_the_film: 'Recognised as an extra, not the film',
+    was_film: 'Switched from a film to a series',
+    in_episodes: 'Found to be posted in episodes',
   };
   const tone = (k: string) => (k === 'download_failed' || k === 'file_missing' ? 'bad' : k === 'imported' || k === 'upgraded' ? 'ok' : k === 'would_grab' ? 'warn' : '');
 </script>

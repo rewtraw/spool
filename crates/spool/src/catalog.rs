@@ -33,6 +33,8 @@ impl App {
         title.monitored = monitored;
         title.added_at = now();
         title.last_refresh_at = now();
+        // Before anything is searched for: is this film a series somewhere else?
+        self.ask_series_source(&mut title).await;
         self.ensure_title_path(&mut title)?;
         self.db.save_title(&mut title)?;
         for mut e in episodes {
@@ -50,6 +52,95 @@ impl App {
             });
         }
         Ok(title)
+    }
+
+    /// Ask the series source whether it lists this film as a series. A work that one source
+    /// calls a film and the other a run of episodes is usually posted as the episodes, and a
+    /// single episode's name carries the film's whole title; knowing beforehand is what keeps
+    /// one from being downloaded as the film. A source that cannot be reached is asked again
+    /// at the next refresh.
+    async fn ask_series_source(&self, t: &mut Title) {
+        if t.kind != Kind::Movie {
+            return;
+        }
+        match self.meta.series_twin(t.imdb_id.as_deref(), &t.title, t.year, t.runtime).await {
+            Ok(twin) => {
+                t.series_checked = true;
+                if twin.is_some() {
+                    t.in_episodes = true;
+                }
+                t.as_series = twin;
+            }
+            Err(e) => tracing::debug!(title = %t.title, error = %e, "could not ask whether a film is listed as a series"),
+        }
+    }
+
+    /// Turn a film that is posted in episodes into the series it is listed as elsewhere. The
+    /// series takes the film's monitoring; a download of the film that turned out to be an
+    /// episode is filed as that episode; the film's entry, which has no file, is removed.
+    pub async fn film_to_series(&self, id: i64, tvmaze_id: Option<u32>) -> Result<Title> {
+        let mut film = self.db.title(id)?.ok_or_else(|| anyhow!("no such title"))?;
+        if film.kind != Kind::Movie {
+            bail!("{} is already a series", film.title);
+        }
+        if !self.db.files(id)?.is_empty() {
+            bail!("{} has a file as a film; remove the file first, or keep it as a film", film.title);
+        }
+        if tvmaze_id.is_none() && film.as_series.is_none() {
+            self.ask_series_source(&mut film).await;
+            self.db.save_title(&mut film)?;
+        }
+        let Some(tvmaze) = tvmaze_id.or(film.as_series.as_ref().map(|s| s.tvmaze_id)) else {
+            bail!("no series called {} was found; add the series from Discover and remove the film", film.title);
+        };
+        let g = self.settings.general();
+        let (listed, _) = self.meta.series(tvmaze).await?;
+        let series = match self.db.find_title(Kind::Series, None, listed.tvdb_id)?.filter(|_| listed.tvdb_id.is_some()) {
+            Some(have) => have,
+            None => self.add_title(Kind::Series, None, Some(tvmaze), g.default_series_profile, film.monitored, false).await?,
+        };
+
+        // What was downloaded as the film and stopped: the release is judged again as part of
+        // the series, which says which episodes it is. Anything still on its way is stopped.
+        let tc = self.title_context(series.clone())?;
+        let mut carried = vec![];
+        for mut a in self.db.title_acquisitions(id)?.into_iter().filter(|a| a.state.is_active()) {
+            let on_disk = a.output_path.as_ref().is_some_and(|p| std::path::Path::new(p).exists());
+            if a.state != AcqState::ImportBlocked || !on_disk {
+                self.cancel_acquisition(a.id, false).await?;
+                continue;
+            }
+            a.episode_ids = self.episodes_of(&tc, &a.release);
+            a.reason = format!("downloaded as the film {}", film.title);
+            self.db.resolve_attention_for(a.id)?;
+            self.db.move_acquisition(&mut a, series.id)?;
+            carried.push(a.id);
+        }
+        self.db.add_history(Some(series.id), "was_film", serde_json::json!({"title": film.title, "year": film.year, "downloads": carried.len()}))?;
+        let folder = film.path.clone();
+        self.db.delete_title(id)?;
+        // The film's folder was made for a file that never came. Only an empty one goes.
+        if !folder.is_empty() {
+            let _ = std::fs::remove_dir(&folder);
+        }
+        self.emit(Event::Title { id });
+        self.emit(Event::Title { id: series.id });
+        self.emit(Event::Attention);
+
+        let (app, sid, monitored) = (self.clone(), series.id, series.monitored);
+        tokio::spawn(async move {
+            for a in carried {
+                if let Err(e) = app.import(a, None).await {
+                    tracing::warn!(error = %e, "filing a film's download as an episode failed");
+                }
+            }
+            if monitored {
+                if let Err(e) = app.search_with(sid, crate::acquire::Scope::Missing, false, true, true).await {
+                    tracing::warn!(error = %e, "search after turning a film into a series failed");
+                }
+            }
+        });
+        Ok(series)
     }
 
     /// Pull fresh metadata for one title. User choices (monitoring, profile, path) are kept.
@@ -84,6 +175,10 @@ impl App {
                     if !t.alt_titles.contains(&a) {
                         t.alt_titles.push(a);
                     }
+                }
+                // Only a film still to be found is worth the question.
+                if !t.series_checked && self.db.files(id)?.is_empty() {
+                    self.ask_series_source(&mut t).await;
                 }
             }
             Kind::Series => {

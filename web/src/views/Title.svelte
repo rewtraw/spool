@@ -121,6 +121,16 @@
     load();
   }
 
+  /** A film that is posted in episodes becomes the series it is listed as. */
+  async function toSeries() {
+    let made: any;
+    const ok = await act(async () => { made = await api.post(`/titles/${id}/to-series`); }, 'Now a series. Looking for its episodes.');
+    if (ok && made) {
+      await loadTitles();
+      go(`title/${made.id}`);
+    }
+  }
+
   async function remove() {
     const ok = await act(() => api.del(`/titles/${id}?delete_files=${deleteFiles}`), 'Removed from the library');
     if (ok) {
@@ -155,7 +165,7 @@
 
   const seasonOf = (n: number) => t?.seasons.find((s) => s.number === n)?.monitored ?? true;
   const media = (f: MediaFile) => [f.media_info?.dynamic_range_type, f.media_info?.video_codec, f.media_info ? `${f.media_info.audio_codec} ${f.media_info.audio_channels || ''}`.trim() : '', f.release_group].filter(Boolean).join(' · ');
-  const HISTORY: Record<string, string> = { grabbed: 'Sent to download', would_grab: 'Would have grabbed', imported: 'Imported', upgraded: 'Upgraded', download_failed: 'Download failed', file_deleted: 'File deleted', file_missing: 'File went missing', adopted: 'Brought in where it lay', not_the_film: 'Recognised as an extra, not the film' };
+  const HISTORY: Record<string, string> = { grabbed: 'Sent to download', would_grab: 'Would have grabbed', imported: 'Imported', upgraded: 'Upgraded', download_failed: 'Download failed', file_deleted: 'File deleted', file_missing: 'File went missing', adopted: 'Brought in where it lay', not_the_film: 'Recognised as an extra, not the film', was_film: 'Switched from a film to a series', in_episodes: 'Found to be posted in episodes' };
 
   // What lies in the folder beside the film or the episodes.
   const EXTRA: Record<string, string> = { trailer: 'Trailers', behind_the_scenes: 'Behind the scenes', deleted_scene: 'Deleted scenes', featurette: 'Featurettes', interview: 'Interviews', scene: 'Scenes', short: 'Shorts', clip: 'Clips', other: 'Other extras', sample: 'Samples', theme_video: 'Theme videos' };
@@ -203,6 +213,16 @@
       {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
       {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
       {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
+      {#if t.kind === 'movie' && t.in_episodes && !t.files.length}
+        <div class="notice warn episodes">
+          {#if t.as_series}
+            <span>This is listed as a film here and as a series of {t.as_series.episodes} episodes elsewhere, and it is posted as the episodes. Spool turns single episodes down for a film, so as a film it may never arrive.</span>
+            <button class="btn small" onclick={toSeries}>Switch to series</button>
+          {:else}
+            <span>This film is posted in episodes, and Spool turns single episodes down for a film. No series of the same name was found; if there is one, add it from Discover and remove this film.</span>
+          {/if}
+        </div>
+      {/if}
       {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url}
         <div class="links">
           {#if t.plex?.url}<a href={t.plex.url} target="_blank" rel="noopener noreferrer">Open in Plex <span aria-hidden="true">↗</span></a>{/if}
@@ -540,6 +560,16 @@
     margin: 0;
     font-size: 13.5px;
     color: var(--faint);
+  }
+  .episodes {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+  }
+  .episodes span {
+    flex: 1 1 260px;
   }
   .where.warn {
     color: var(--warn);

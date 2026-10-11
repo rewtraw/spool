@@ -117,6 +117,10 @@ export interface Title {
   offline?: boolean;
   /** Its location is one Spool only reads. */
   read_only?: boolean;
+  /** A film that is posted as its episodes, so single episodes are turned down. */
+  in_episodes?: boolean;
+  /** The same work as the series source lists it. */
+  as_series?: { tvmaze_id: number; title: string; episodes: number; minutes: number } | null;
   /** The poster at the size grids and lists show it. */
   poster_small?: string | null;
   fanart?: string | null;

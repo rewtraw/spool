@@ -60,37 +60,77 @@ struct Judged {
     candidate: Candidate,
 }
 
-/// Whether a release's name says it is episodes of this film: an episode number that comes
-/// after the film's whole title. The series parser finds numbers in most film names (a year,
-/// or a number in the title itself), so only one that follows the full title counts.
-pub(crate) fn names_an_episode(name: &str, t: &Title) -> bool {
+/// The episode numbers a release's name gives for this film, when it names any: a number
+/// that comes after the film's whole title. The series parser finds numbers in most film
+/// names (a year, or a number in the title itself), so only one that follows the full title
+/// counts.
+pub(crate) fn episodes_named(name: &str, t: &Title) -> Option<Vec<u32>> {
     let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
     let names: Vec<String> = std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
     // Said outright: "E05", "Ep 5", "Episode 5". Not for a film with the word in its own title.
     let whole = plain(name);
     if names.iter().any(|n| whole.contains(n.as_str())) && !names.iter().any(|n| n.contains("episode")) {
         let words: Vec<String> = name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
-        let number = |w: &str| (1..=3).contains(&w.len()) && w.bytes().all(|b| b.is_ascii_digit());
-        let said = words.iter().enumerate().any(|(i, w)| match w.as_str() {
-            "e" | "ep" | "episode" => words.get(i + 1).is_some_and(|n| number(n)),
-            w => w.strip_prefix("ep").or_else(|| w.strip_prefix('e')).is_some_and(number),
+        let number = |w: &str| if (1..=3).contains(&w.len()) && w.bytes().all(|b| b.is_ascii_digit()) { w.parse::<u32>().ok() } else { None };
+        let said = words.iter().enumerate().find_map(|(i, w)| match w.as_str() {
+            "e" | "ep" | "episode" => words.get(i + 1).and_then(|n| number(n)),
+            w => w.strip_prefix("ep").or_else(|| w.strip_prefix('e')).and_then(number),
         });
-        if said {
-            return true;
+        if let Some(n) = said {
+            return Some(vec![n]);
+        }
+        // Or a two- or three-figure number straight after the title: "Film - 05". One figure
+        // alone is more often a sequel, and a title that ends in a number confuses the parser.
+        let after = std::iter::once(&t.title).chain(&t.alt_titles).find_map(|n| {
+            let title: Vec<String> = n.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
+            let at = (!title.is_empty()).then(|| words.windows(title.len()).position(|w| w == title.as_slice())).flatten()?;
+            words.get(at + title.len()).filter(|w| w.len() >= 2).and_then(|w| number(w))
+        });
+        if let Some(n) = after {
+            return Some(vec![n]);
         }
     }
-    let Some(p) = parse_episode_title(name) else { return false };
+    let p = parse_episode_title(name)?;
     if p.full_season || p.is_multi_season() || (p.episode_numbers.is_empty() && p.absolute_episode_numbers.is_empty()) {
-        return false;
+        return None;
     }
     // "Film.1989.1080p" reads as season 19, episode 89.
     if let (Some(s), [e]) = (p.season_numbers.first(), p.episode_numbers.as_slice()) {
         if (1900..=2100).contains(&(s * 100 + e)) {
-            return false;
+            return None;
         }
     }
     let before = plain(&p.series_title);
-    names.iter().any(|n| before.contains(n.as_str()))
+    if !names.iter().any(|n| before.contains(n.as_str())) {
+        return None;
+    }
+    Some(p.episode_numbers.iter().chain(&p.absolute_episode_numbers).map(|n| *n as u32).collect())
+}
+
+/// Whether a release's name says it is episodes of this film.
+pub(crate) fn names_an_episode(name: &str, t: &Title) -> bool {
+    episodes_named(name, t).is_some()
+}
+
+/// Whether what a search for a film brought back shows that the film is posted in episodes:
+/// releases that carry its title and name at least three different episodes, and more of
+/// them than of releases that could be the whole film. One numbered release proves nothing;
+/// a run of them, usually from several groups, does, and no download is needed to see it.
+fn posted_in_episodes(t: &Title, judged: &[Judged]) -> bool {
+    let ours = |j: &&Judged| !j.record.rejections.iter().any(|r| r.code == "wrong_title" || r.code == "unparseable");
+    let mut numbers: HashSet<u32> = HashSet::new();
+    let (mut episodes, mut whole) = (0, 0);
+    for j in judged.iter().filter(ours) {
+        match episodes_named(&j.record.release.title, t) {
+            Some(n) if n.len() == 1 => {
+                numbers.insert(n[0]);
+                episodes += 1;
+            }
+            Some(_) => {}
+            None => whole += 1,
+        }
+    }
+    numbers.len() >= 3 && episodes > whole
 }
 
 fn rej(code: &str, message: impl Into<String>) -> Rejection {
@@ -517,6 +557,11 @@ impl App {
 
     /// Search the indexers for one title and record a verdict for every result.
     /// With `grab`, the best acceptable results are sent to the downloader.
+    /// Which of a series' episodes a release holds, going by its name.
+    pub(crate) fn episodes_of(&self, tc: &TitleContext, release: &Release) -> Vec<i64> {
+        self.judge(tc, release, "manual", None, true).record.episode_ids
+    }
+
     pub async fn search(&self, title_id: i64, scope: Scope, user: bool, grab: bool) -> Result<SearchOutcome> {
         self.search_with(title_id, scope, user, grab, user).await
     }
@@ -670,6 +715,17 @@ impl App {
                 }
             }
         }
+        // The results themselves can show that a film is posted in episodes. Remember it and
+        // judge them again, so that one is not downloaded to find out.
+        if t.kind == Kind::Movie && !t.in_episodes && posted_in_episodes(t, &judged) {
+            let mut marked = t.clone();
+            marked.in_episodes = true;
+            self.db.save_title(&mut marked)?;
+            self.db.add_history(Some(title_id), "in_episodes", serde_json::json!({"releases": judged.len()}))?;
+            self.emit(Event::Title { id: title_id });
+            let again = self.title_context(marked)?;
+            judged = releases.iter().map(|r| self.judge(&again, r, source, scope_filter, user)).collect();
+        }
         for j in &mut judged {
             // Only an archive result is condemned by a failed check; a live result with the same
             // name may be a fresh repost.
@@ -742,7 +798,8 @@ impl App {
         if !grabbed.is_empty() {
             self.archive_runner_ups(&tc.title, runner_ups(&judged, &grabbed, &tc.profile, self.settings.general().proper_policy, self.settings.general().archive_runner_ups as usize));
         }
-        let mut t2 = tc.title.clone();
+        // Read again: a search takes a while, and the title may have been written meanwhile.
+        let mut t2 = self.db.title(title_id)?.unwrap_or_else(|| tc.title.clone());
         t2.last_search_at = crate::db::now();
         self.db.save_title(&mut t2)?;
 
@@ -1157,6 +1214,7 @@ mod tests {
             "[ZetaRebel] Mobile Suit Gundam - 0080 War in the Pocket - 01 - How Many Miles to the Battlefield (BD x264 1080p 8-bit FLAC)",
             "[Group] Mobile Suit Gundam 0080 War in the Pocket 01-06 (BD 1080p)",
             "[Reaktor]Mobile Suit Gundam - 0080 War in the Pocket - E03 [1080p][x265][10-bit]",
+            "[MTBB] Mobile Suit Gundam 0080 War in the Pocket - 01 [08A560DA]",
             "Mobile Suit Gundam 0080: War in the Pocket [1080p x265 10bit AAC] [1/7] - \"Episode 4.mkv\" yEnc",
         ] {
             assert!(names_an_episode(name, &gundam), "{name}");
@@ -1166,6 +1224,8 @@ mod tests {
             assert!(!names_an_episode(name, &gundam), "{name}");
         }
         assert!(!names_an_episode("Star.Wars.Episode.1.The.Phantom.Menace.1999.1080p.BluRay.x264-GRP", &film("Star Wars: Episode I - The Phantom Menace", 1999)));
+        assert!(names_an_episode("[FanSub] Another Robot Saga 0079 - 02 (BD 1080p)", &film("Another Robot Saga 0079", 1981)));
+        assert!(!names_an_episode("Toy.Story.3.2010.1080p.BluRay.x264-GRP", &film("Toy Story", 1995)));
         assert!(!names_an_episode("2001.A.Space.Odyssey.1968.1080p.BluRay.x264-GRP", &film("2001: A Space Odyssey", 1968)));
         assert!(!names_an_episode("The.Matrix.1999.1080p.BluRay.x264-GRP", &film("The Matrix", 1999)));
     }

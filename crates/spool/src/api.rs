@@ -335,6 +335,12 @@ async fn add_title(State(app): State<App>, Json(b): Json<AddTitle>) -> R<Title> 
     Ok(Json(app.add_title(b.kind, b.tmdb_id, b.tvmaze_id, b.profile_id, b.monitored, b.search).await?))
 }
 
+/// Turn a film that is posted in episodes into the series it is listed as.
+async fn title_to_series(State(app): State<App>, Path(id): Path<i64>, body: Option<Json<Value>>) -> R<Title> {
+    let tvmaze = body.and_then(|b| b.0["tvmaze_id"].as_u64()).map(|n| n as u32);
+    Ok(Json(app.film_to_series(id, tvmaze).await?))
+}
+
 async fn patch_title(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Title> {
     let mut t = app.db.title(id)?.ok_or_else(|| not_found("title"))?;
     if let Some(m) = b["monitored"].as_bool() {
@@ -1315,6 +1321,7 @@ fn api_routes() -> Router<App> {
         .route("/api/titles/{id}/search", post(search_title))
         .route("/api/titles/{id}/refresh", post(refresh_title))
         .route("/api/titles/{id}/scan", post(scan_title))
+        .route("/api/titles/{id}/to-series", post(title_to_series))
         .route("/api/titles/{id}/nzb", post(upload_nzb))
         .route("/api/titles/{id}/seasons/{season}", patch(patch_season))
         .route("/api/episodes/{id}", patch(patch_episode))

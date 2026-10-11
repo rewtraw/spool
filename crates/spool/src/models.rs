@@ -168,6 +168,23 @@ pub struct Title {
     /// episodes are not downloaded one after another to find out the same.
     #[serde(default)]
     pub in_episodes: bool,
+    /// The same work as the series source lists it, when it does: what the film would become
+    /// if it were collected as episodes.
+    #[serde(default)]
+    pub as_series: Option<SeriesTwin>,
+    /// Whether the series source has been asked about this film yet.
+    #[serde(default)]
+    pub series_checked: bool,
+}
+
+/// A film's listing as a series.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SeriesTwin {
+    pub tvmaze_id: u32,
+    pub title: String,
+    pub episodes: u32,
+    /// How long the episodes run together, in minutes; 0 when the source does not say.
+    pub minutes: u32,
 }
 
 impl Title {

@@ -1145,6 +1145,82 @@ async fn a_film_posted_in_episodes_is_learned_from_the_first_and_the_rest_are_tu
     assert!(!codes(whole).contains(&"episode".to_string()), "{:?}", codes(whole));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_film_listed_elsewhere_as_a_series_is_known_before_anything_is_downloaded() {
+    let video = video_or_skip!();
+    let source = details_source().await;
+    let mut w = World::with_sources(Mode::Active, Some((&source, &source))).await;
+    let episode = |n: u32| format!("[FanSub] Pocket Robot War - {n:02} - A Chapter (BD x264 1080p DTS)");
+
+    let mut g = w.app.settings.general();
+    g.tmdb_api_key = "key".into();
+    w.app.settings.set_general(&g).unwrap();
+    // Adding the film asks the series source about it, by the id the two share.
+    let film = w.app.add_title(Kind::Movie, Some(80), None, w.profile("movie"), true, false).await.unwrap();
+    let twin = film.as_series.clone().expect("the series listing");
+    assert_eq!((twin.tvmaze_id, twin.episodes, twin.minutes, film.in_episodes), (88, 6, 180, true));
+    for n in 1..=2 {
+        w.release(&episode(n), &[("v.mkv", &video)]);
+        w.indexer.lock().untagged.insert(episode(n));
+    }
+    let outcome = w.app.search(film.id, Scope::Movie, false, true).await.unwrap();
+    assert!(outcome.grabbed.is_empty(), "{}", outcome.message);
+    assert!(outcome.decisions.iter().filter(|d| d.release.title.starts_with("[FanSub]")).all(|d| d.rejections.iter().any(|r| r.code == "episode")), "{:?}", outcome.decisions.iter().map(|d| &d.rejections).collect::<Vec<_>>());
+
+    // A film nobody lists as a series: a run of numbered releases in the results says it.
+    let saga = w.movie("Another Robot Saga 0079", 1981, "tt0000079");
+    for n in 1..=3 {
+        let name = format!("[FanSub] Another Robot Saga 0079 - {n:02} (BD 1080p)");
+        w.release(&name, &[("v.mkv", &video)]);
+        w.indexer.lock().untagged.insert(name);
+    }
+    let outcome = w.app.search(saga.id, Scope::Movie, false, true).await.unwrap();
+    assert!(outcome.grabbed.is_empty(), "{}", outcome.message);
+    assert!(w.app.db.title(saga.id).unwrap().unwrap().in_episodes, "{:?}", outcome.decisions.iter().map(|d| (&d.release.title, d.accepted, &d.rejections)).collect::<Vec<_>>());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_film_becomes_the_series_it_is_listed_as_and_its_download_is_filed_as_an_episode() {
+    let video = video_or_skip!();
+    let source = details_source().await;
+    let mut w = World::with_sources(Mode::Active, Some((&source, &source))).await;
+    // In the library since before Spool asked the series source, so nothing is known yet.
+    let mut film = w.movie("Pocket Robot War", 1989, "tt0000080");
+    film.runtime = 180;
+    w.app.db.save_title(&mut film).unwrap();
+    let name = "[FanSub] Pocket Robot War - 05 - A Chapter (BD x264 1080p DTS)";
+    w.release(name, &[("05.mkv", &video)]);
+    w.indexer.lock().untagged.insert(name.to_string());
+    w.app.search(film.id, Scope::Movie, false, true).await.unwrap();
+    w.wait_state(film.id, AcqState::ImportBlocked).await;
+
+    let series = w.app.film_to_series(film.id, None).await.unwrap();
+    assert_eq!((series.kind, series.title.as_str(), series.monitored), (Kind::Series, "Pocket Robot War", true));
+    assert!(w.app.db.title(film.id).unwrap().is_none(), "the film's entry goes");
+    assert!(!w.root.join("Movies/Pocket Robot War (1989)").exists(), "and its empty folder");
+
+    // The episode that was downloaded as the film is filed where it belongs.
+    let mut filed = None;
+    for _ in 0..100 {
+        filed = w.app.db.episodes(series.id).unwrap().into_iter().find(|e| e.file_id.is_some());
+        if filed.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let filed = filed.expect("an episode with a file");
+    assert_eq!((filed.season, filed.episode), (1, 5));
+    assert!(tree(&w.root.join("TV Shows")).iter().any(|f| f.contains("S01E05")), "{:?}", tree(&w.root.join("TV Shows")));
+    assert!(w.app.db.attention(false).unwrap().is_empty(), "the notice is closed");
+
+    // A film with a file is not turned into anything.
+    let kept = w.movie("Kept Film", 2001, "tt0000081");
+    w.release("Kept.Film.2001.1080p.BluRay.x264-GRP", &[("k.mkv", &video)]);
+    w.app.search(kept.id, Scope::Movie, false, true).await.unwrap();
+    w.wait_state(kept.id, AcqState::Imported).await;
+    assert!(w.app.film_to_series(kept.id, Some(88)).await.is_err());
+}
+
 async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
     use tower::ServiceExt;
     let req = axum::http::Request::builder().method(method).uri(uri).header("content-type", "application/json");
@@ -1689,10 +1765,14 @@ async fn details_source() -> String {
             json!({"id": 593, "title": "Solaris", "release_date": "1972-03-20", "status": "Released"}),
             json!({"id": 2103, "title": "Solaris", "release_date": "2002-11-27", "status": "Released"}),
             json!({"id": 111, "title": "Alpha", "release_date": "2001-01-01", "status": "Released"}),
+            json!({"id": 80, "title": "Pocket Robot War", "release_date": "1989-03-25", "status": "Released", "runtime": 180, "imdb_id": "tt0000080"}),
         ]
     }
     fn show() -> Value {
         json!({"id": 77, "name": "Example World", "premiered": "2016-10-02", "status": "Ended", "externals": {"thetvdb": 296762}})
+    }
+    fn ova() -> Value {
+        json!({"id": 88, "name": "Pocket Robot War", "premiered": "1989-03-25", "status": "Ended", "externals": {"thetvdb": 8088, "imdb": "tt0000080"}})
     }
     let router = axum::Router::new()
         .route(
@@ -1710,6 +1790,20 @@ async fn details_source() -> String {
                 axum::Json(if hit { json!([{"show": show()}]) } else { json!([]) })
             }),
         )
+        // The same work as the series source lists it: six half-hour episodes.
+        .route(
+            "/lookup/shows",
+            get(|Query(q): Query<HashMap<String, String>>| async move {
+                if q.get("imdb").is_some_and(|i| i == "tt0000080") {
+                    Ok(axum::Json(ova()))
+                } else {
+                    Err(axum::http::StatusCode::NOT_FOUND)
+                }
+            }),
+        )
+        .route("/shows/88", get(|| async { axum::Json(ova()) }))
+        .route("/shows/88/akas", get(|| async { axum::Json(json!([])) }))
+        .route("/shows/88/episodes", get(|| async { axum::Json(Value::Array((1..=6).map(|n| json!({"type": "regular", "season": 1, "number": n, "name": format!("Chapter {n}"), "airdate": "1989-03-25", "runtime": 30})).collect())) }))
         .route("/shows/77", get(|| async { axum::Json(show()) }))
         .route("/shows/77/akas", get(|| async { axum::Json(json!([])) }))
         .route(

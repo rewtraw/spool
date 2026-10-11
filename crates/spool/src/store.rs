@@ -396,6 +396,14 @@ impl Db {
         Ok(id)
     }
 
+    /// Hand a download to another title, as when a film becomes a series.
+    pub fn move_acquisition(&self, a: &mut Acquisition, title_id: i64) -> Result<()> {
+        a.title_id = title_id;
+        self.with(|c| c.execute("UPDATE acquisitions SET title_id = ?2 WHERE id = ?1", params![a.id, title_id]))?;
+        self.save_acquisition(a)?;
+        Ok(())
+    }
+
     pub fn acquisition(&self, id: i64) -> Result<Option<Acquisition>> {
         self.with(|c| c.query_row("SELECT id, data FROM acquisitions WHERE id = ?1", [id], acq_row).optional())
     }

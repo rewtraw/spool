@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api';
-  import { app, act, go } from '../lib/state.svelte';
+  import { app, act, go, loadTitles } from '../lib/state.svelte';
   import { ago, bytes, day, qualityName } from '../lib/format';
   import Poster from '../components/Poster.svelte';
   import JobLine from '../components/JobLine.svelte';
@@ -37,7 +37,11 @@
     const acq = item.item.acquisition_id;
     if (action === 'dismiss' || !acq) await act(() => api.post(`/attention/${item.item.id}/dismiss`));
     else if (action === 'retry') await act(() => api.post(`/activity/${acq}/retry_import`), 'Trying the import again');
-    else if (action === 'discard') await act(() => api.post(`/activity/${acq}/cancel_blocklist`), 'Discarded. Looking for another release.');
+    else if (action === 'series') {
+      let made: any;
+      const ok = await act(async () => { made = await api.post(`/titles/${item.item.title_id}/to-series`); }, 'Now a series. Looking for its episodes.');
+      if (ok && made) await loadTitles();
+    } else if (action === 'discard') await act(() => api.post(`/activity/${acq}/cancel_blocklist`), 'Discarded. Looking for another release.');
     load();
   }
 
@@ -89,6 +93,7 @@
             {#if a.item.data?.reason}<p class="faint break">{a.item.data.reason}</p>{/if}
             <div class="row wrap actions">
               {#if a.item.kind === 'import_blocked' && a.item.acquisition_id}
+                {#if titleOf(a.item.title_id)?.as_series}<button class="btn small primary" onclick={() => resolve(a, 'series')}>Switch to series</button>{/if}
                 <button class="btn small" onclick={() => resolve(a, 'retry')}>Import anyway</button>
                 <button class="btn small" onclick={() => resolve(a, 'discard')}>Discard and find another</button>
               {/if}

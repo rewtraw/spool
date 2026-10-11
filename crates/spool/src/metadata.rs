@@ -1,6 +1,6 @@
 //! Title metadata: TMDB for movies, TVmaze for television.
 
-use crate::models::{Collection, Episode, Kind, Person, SeasonInfo, Title};
+use crate::models::{Collection, Episode, Kind, Person, SeasonInfo, SeriesTwin, Title};
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
@@ -107,6 +107,8 @@ impl Metadata {
             details_at: 0,
             local: Default::default(),
             in_episodes: false,
+            as_series: None,
+            series_checked: false,
         };
         let original = s(m, "original_title");
         if !original.is_empty() && original != t.title {
@@ -240,6 +242,8 @@ impl Metadata {
             details_at: 0,
             local: Default::default(),
             in_episodes: false,
+            as_series: None,
+            series_checked: false,
         }
     }
 
@@ -301,6 +305,41 @@ impl Metadata {
         seasons.dedup();
         title.seasons = seasons.into_iter().map(|n| SeasonInfo { number: n, monitored: n > 0 }).collect();
         Ok((title, episodes))
+    }
+
+    /// A film as the series source lists it, if it does: found by the film's IMDb id, or
+    /// failing that by a show of exactly the same name that began in the same year and runs
+    /// about as long in all. Only a listing of two or more episodes counts. `Ok(None)` means the source has no such show.
+    pub async fn series_twin(&self, imdb_id: Option<&str>, title: &str, year: u32, runtime: u32) -> Result<Option<SeriesTwin>> {
+        let plain = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+        let (mut show, mut by_name) = (None, false);
+        if let Some(imdb) = imdb_id.filter(|i| !i.is_empty()) {
+            match self.get(&format!("{}/lookup/shows?imdb={imdb}", self.tvmaze_base)).await {
+                Ok(v) if v.get("id").is_some() => show = Some(v),
+                Ok(_) => {}
+                Err(e) if e.to_string() == "not found" => {}
+                Err(e) => return Err(e),
+            }
+        }
+        if show.is_none() && year > 0 {
+            let found = self.get(&format!("{}/search/shows?q={}", self.tvmaze_base, urlencoding::encode(title.trim()))).await?;
+            show = found.as_array().into_iter().flatten().filter_map(|r| r.get("show")).find(|s| plain(&self::s(s, "name")) == plain(title) && self::s(s, "premiered").starts_with(&year.to_string())).cloned();
+            by_name = true;
+        }
+        let Some(show) = show else { return Ok(None) };
+        let Some(id) = show.get("id").and_then(|x| x.as_u64()) else { return Ok(None) };
+        let eps = self.get(&format!("{}/shows/{id}/episodes", self.tvmaze_base)).await?;
+        let eps: Vec<&Value> = eps.as_array().into_iter().flatten().collect();
+        if eps.len() < 2 {
+            return Ok(None);
+        }
+        let minutes: u32 = eps.iter().map(|e| e.get("runtime").and_then(|x| x.as_u64()).unwrap_or(0) as u32).sum();
+        // A name and a year can be shared by two different works. Without the id to tie them,
+        // the episodes together have to run about as long as the film does.
+        if by_name && (runtime == 0 || minutes == 0 || minutes * 10 < runtime * 6 || minutes * 10 > runtime * 14) {
+            return Ok(None);
+        }
+        Ok(Some(SeriesTwin { tvmaze_id: id as u32, title: self::s(&show, "name"), episodes: eps.len() as u32, minutes }))
     }
 
     pub async fn series_by_tvdb(&self, tvdb_id: u32) -> Result<(Title, Vec<Episode>)> {

@@ -57,6 +57,8 @@ Plex, Jellyfin and Kodi attach artwork and notes to a film by name: `Film (1999)
 
 **A file that disappears while its title is monitored.** The library scan notices files added and removed outside Spool. A monitored title whose file has gone from a disk that is there counts as missing, and Spool looks for it again. Stop monitoring a title before deleting its file by hand, or delete it through Spool, which does that for you.
 
+**A film that is posted in episodes.** Some works, short animated series above all, are listed as one film by the film source and posted as their episodes. Each episode's name carries the film's whole title, so a single episode can pass for the film. Spool guards against it three ways: when a film is added it asks the series source whether the same work is listed there as episodes; when a search brings back a run of numbered releases it takes that as the answer; and failing both, the first download is stopped because it is far too short, and the rest are turned down by name. The title's page then offers **Switch to series**, which replaces the film with the series, keeps its monitoring, and files an episode that was already downloaded where it belongs.
+
 **Two programs managing one folder.** Stop Radarr and Sonarr before making Spool active. Plex and Jellyfin only read, and can stay.
 
 **An extra taken for the film.** Spool tells extras from the film by the folder and file names media servers use. A featurette with an unmarked name, loose in a film's folder, looks like a second version of the film. It is kept and never replaced, and it is listed on the title's page as a version, where you can see it.

@@ -22,6 +22,16 @@ Spool is one process. It holds the catalog, talks to indexers, downloads from Us
 7. **Import.** The plan (what moves where, what it replaces) is written to a journal before any file moves. Unfinished entries are completed at startup. Replaced files go to a recycle folder for a set number of days.
 8. **Afterwards.** Plex is told to rescan the folder. The NZB is kept in the archive so the release can be fetched again later without an indexer.
 
+## When the sources disagree about a work's shape
+
+TMDB lists some works as one film that TVmaze lists as a series, and such works are posted as their episodes. An episode's release name carries the film's whole title, so judged one at a time it looks like the film. Spool settles it with the cheapest evidence it has, in this order:
+
+1. **The other source.** When a film is added, and once at a later refresh for films still without a file, TVmaze is asked for a show with the film's IMDb id. Failing an id, a show of exactly the same name that began in the same year and runs about as long in all counts.
+2. **The results as a set.** If a search for the film brings back releases naming three or more different episodes of it, and more of those than of releases that could be the whole film, it is posted in episodes. No single release shows this; the run does.
+3. **One download.** A file far shorter than the film, from a release named as an episode, marks the title when it is stopped at import.
+
+A film so marked turns down releases named as its episodes (`episode` in the verdicts) and still accepts the film whole. `film_to_series` replaces it with the series the other source lists, hands over any download that was stopped, and files it as the episode its name says it is.
+
 ## Storage
 
 One SQLite database in WAL mode holds everything, in a "columns plus JSON document" shape: the columns that are queried are real columns and the rest of each record is JSON. Saved NZBs are gzip files beside it. The database contains indexer keys and Usenet passwords and is created readable only by its owner.
