@@ -15,6 +15,22 @@ pub enum Mode {
     Active,
 }
 
+/// A further place the library lives, beside the main one. See [`crate::locations`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Location {
+    /// Given when the location is added and never reused. The main location is zero.
+    pub id: u32,
+    pub name: String,
+    pub movie_root: String,
+    pub series_root: String,
+    /// The volume that must be mounted for the location to count as there. Empty means the
+    /// folders only have to be readable.
+    pub volume: String,
+    /// Spool may add, replace and delete files here. When false it only reads.
+    pub manage: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct General {
@@ -76,6 +92,11 @@ pub struct General {
     /// Profiles preselected when adding a title. Zero means the first one.
     pub default_movie_profile: i64,
     pub default_series_profile: i64,
+    /// Further places the library lives, beside the folders above.
+    pub locations: Vec<Location>,
+    /// The location new titles are put in; zero is the main one, which is also used whenever
+    /// the chosen one cannot take them.
+    pub new_titles_location: u32,
 }
 
 impl Default for General {
@@ -118,6 +139,8 @@ impl Default for General {
             archive_runner_ups: 2,
             default_movie_profile: 0,
             default_series_profile: 0,
+            locations: vec![],
+            new_titles_location: 0,
         }
     }
 }

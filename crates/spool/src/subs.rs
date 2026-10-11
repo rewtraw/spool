@@ -616,6 +616,9 @@ impl App {
         if !file.subtitles.iter().any(|s| s.rel_path == rel_path) {
             bail!("no such subtitle file");
         }
+        if let Some(why) = self.title_locked(&title) {
+            bail!(why);
+        }
         let _ = std::fs::remove_file(Path::new(&title.path).join(rel_path));
         file.subtitles.retain(|s| s.rel_path != rel_path);
         self.save_file_data(&file)
@@ -701,7 +704,8 @@ impl App {
             bail!("the subtitle file has no readable lines");
         }
         let mut report = self.judge_timing(r, &cues).await;
-        if correct && report.verdict == Verdict::Shifted {
+        // On a location Spool only reads, a subtitle is judged and left as it is.
+        if correct && report.verdict == Verdict::Shifted && self.title_locked(&title).is_none() {
             let fixed = retime(&cues, report.rate, report.offset);
             // Only keep the correction if the corrected file then checks out.
             if self.judge_timing(r, &fixed).await.verdict == Verdict::InSync {
@@ -835,6 +839,9 @@ impl App {
             bail!("what OpenSubtitles sent is not a readable subtitle file");
         }
         let (mut file, title) = self.file_and_title(file_id)?;
+        if let Some(why) = self.title_locked(&title) {
+            bail!(why);
+        }
         let video = Path::new(&title.path).join(&file.rel_path);
         let tag = if c.hearing_impaired { format!("{}.sdh", c.language) } else { c.language.clone() };
         let path = video.with_file_name(format!("{}.{tag}.srt", stem(&video)));
@@ -886,7 +893,9 @@ impl App {
             return Ok(vec![]);
         }
         let mut out = vec![];
-        for t in self.db.titles(None)? {
+        let places = self.placement();
+        // Only where a subtitle file could be put beside the video.
+        for t in self.db.titles(None)?.into_iter().filter(|t| places.locked(t).is_none()) {
             for f in self.db.files(t.id)? {
                 let have: Vec<String> = embedded_languages(&f).into_iter().chain(f.subtitles.iter().map(|s| s.language.clone())).collect();
                 let missing: Vec<String> = wanted.iter().filter(|w| !have.contains(w)).cloned().collect();
@@ -908,9 +917,6 @@ impl App {
         }
         if wanted_languages(&g.subtitle_languages).is_empty() {
             return Ok("skipped: no subtitle languages are chosen".into());
-        }
-        if !self.volume_ok() {
-            return Ok("skipped: the media volume is not mounted".into());
         }
         let mut missing = self.missing_subtitles()?;
         let total = missing.len();

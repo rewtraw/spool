@@ -102,11 +102,12 @@ fn container(f: &MediaFile) -> String {
 
 impl Library {
     /// The library as it stands. Reading it takes a moment and a player asks many things at
-    /// once, so one reading serves every request until the library or what has been watched changes.
+    /// once, so one reading serves every request until the library or what has been watched changes,
+    /// or a location comes or goes.
     pub fn shared(app: &App) -> Result<std::sync::Arc<Library>> {
         // Read the count before the library: a change that lands meanwhile then shows as a
         // newer count next time, and the library is read again.
-        let revision = app.db.revision()?;
+        let revision = (app.db.revision()?, app.location_changes.load(std::sync::atomic::Ordering::Relaxed));
         if let Some((at, lib)) = app.player_library.lock().as_ref() {
             if *at == revision {
                 return Ok(lib.clone());
@@ -133,10 +134,13 @@ impl Library {
                 episodes.entry(e.title_id).or_default().push(e);
             }
         }
+        // Only what can be played now: titles on a location that is away are left out until it is back.
+        let places = app.placement();
         let titles: Vec<Title> = app
             .db
             .titles(None)?
             .into_iter()
+            .filter(|t| places.online(t))
             .filter(|t| match t.kind {
                 Kind::Movie => files.contains_key(&t.id),
                 Kind::Series => episodes.contains_key(&t.id),

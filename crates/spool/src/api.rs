@@ -172,6 +172,7 @@ async fn status(State(app): State<App>) -> R<Value> {
             }
         }
     }
+    warnings.extend(app.location_problems());
     if app.settings.servers().iter().all(|s| !s.enabled || s.host.is_empty()) {
         warnings.push("No usenet server is configured.".into());
     }
@@ -201,7 +202,7 @@ async fn status(State(app): State<App>) -> R<Value> {
 
 // ---------------------------------------------------------------- titles
 
-fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashMap<i64, (u32, u32)>, profiles: &[QualityProfile], active: &[Acquisition]) -> Value {
+fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashMap<i64, (u32, u32)>, profiles: &[QualityProfile], active: &[Acquisition], places: &crate::locations::Placement) -> Value {
     let mut v = serde_json::to_value(t).unwrap_or(Value::Null);
     v["sort_title"] = json!(crate::store::sort_title(&t.title));
     v["poster"] = json!(crate::art::local_url(t, crate::art::Art::Poster));
@@ -216,6 +217,12 @@ fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashMap<i64, (u3
     v["profile"] = json!(profiles.iter().find(|p| p.id == t.profile_id).map(|p| p.name.clone()));
     v["active"] = json!(active.iter().find(|a| a.title_id == t.id).map(|a| a.state.as_str()));
     v["available"] = json!(t.kind == Kind::Series || t.movie_available(chrono::Local::now().date_naive()));
+    // Where it is kept matters only once there is more than one place.
+    if places.0.len() > 1 {
+        v["location"] = json!(places.of(&t.path).map(|p| p.0.name.clone()));
+    }
+    v["offline"] = json!(!t.path.is_empty() && !places.online(t));
+    v["read_only"] = json!(places.read_only(t));
     v
 }
 
@@ -223,6 +230,7 @@ fn summarize(t: &Title, files: &HashMap<i64, (u32, u64)>, eps: &HashMap<i64, (u3
 /// `only` narrows the list to those ids.
 fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<Vec<Value>> {
     let (files, eps, profiles, active) = (app.db.file_counts()?, app.db.episode_counts()?, app.db.profiles()?, app.db.active_acquisitions()?);
+    let places = app.placement();
     let titles = match only {
         // A few are quicker fetched one by one than read with everything else.
         Some(ids) if ids.len() <= 20 => {
@@ -239,7 +247,7 @@ fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<Vec<Value>> 
         .iter()
         .filter(|t| only.is_none_or(|ids| ids.contains(&t.id)))
         .map(|t| {
-            let mut v = summarize(t, &files, &eps, &profiles, &active);
+            let mut v = summarize(t, &files, &eps, &profiles, &active, &places);
             if let Some(o) = v.as_object_mut() {
                 for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at", "people", "tagline", "collection", "details_at"] {
                     o.remove(k);
@@ -289,7 +297,7 @@ async fn changes(State(app): State<App>, Query(q): Query<HashMap<String, String>
 async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
     let t = app.db.title(id)?.ok_or_else(|| not_found("title"))?;
     let (files, eps, profiles, active) = (app.db.file_counts()?, app.db.episode_counts()?, app.db.profiles()?, app.db.active_acquisitions()?);
-    let mut v = summarize(&t, &files, &eps, &profiles, &active);
+    let mut v = summarize(&t, &files, &eps, &profiles, &active, &app.placement());
     v["episodes"] = json!(app.db.episodes(id)?);
     v["files"] = json!(app.db.files(id)?);
     v["decisions"] = json!(app.rejudge(&app.title_context(t.clone())?, app.db.decisions(id)?));
@@ -824,7 +832,22 @@ async fn put_general(State(app): State<App>, headers: HeaderMap, Json(mut g): Js
         }
         tracing::warn!("Spool is now active: it will download and write to the library");
     }
+    let moved = g.locations != old.locations || g.movie_root != old.movie_root || g.series_root != old.series_root || g.required_volume != old.required_volume;
+    if g.locations != old.locations {
+        g.locations = app.tidy_locations(std::mem::take(&mut g.locations)).map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;
+    }
+    if g.new_titles_location != 0 && !g.locations.iter().any(|l| l.id == g.new_titles_location && l.manage) {
+        g.new_titles_location = 0;
+    }
     app.settings.set_general(&g)?;
+    if moved {
+        // Look at what was just described, off to one side: a share that is slow to answer
+        // must not hold up the reply.
+        let again = app.clone();
+        let _ = tokio::task::spawn_blocking(move || again.watch_locations()).await;
+        app.location_changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        app.emit(Event::Locations);
+    }
     app.apply_engine_config();
     Ok(match cookie {
         Some(c) => ([(header::SET_COOKIE, c)], Json(json!({"ok": true}))).into_response(),
@@ -1128,6 +1151,7 @@ async fn space(State(app): State<App>) -> R<Value> {
         "free": crate::app::free_space(&app.engine.config().incomplete_dir),
         "kept_free": g.min_free_gb as u64 * (1 << 30),
         "library": files.values().map(|f| f.1).sum::<u64>(),
+        "locations": app.location_report(),
         "recycled": {"files": recycled_files, "bytes": recycled_bytes, "days": g.recycle_days},
         "waiting": {"count": waiting.len(), "bytes": waiting.iter().map(|j| j.total_bytes).sum::<u64>()},
         "titles": rows.into_iter().take(150).map(|r| r.1).collect::<Vec<_>>(),
@@ -1180,6 +1204,61 @@ async fn art(State(app): State<App>, Path((id, kind)): Path<(i64, String)>) -> R
         Ok(bytes) => ([(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "public, max-age=31536000, immutable")], bytes).into_response(),
         Err(_) => ([(header::CACHE_CONTROL, "public, max-age=600")], StatusCode::NOT_FOUND).into_response(),
     }
+}
+
+/// Every place the library lives, with whether it can be reached and how much is on it.
+async fn locations(State(app): State<App>) -> Json<Value> {
+    Json(json!(app.location_report()))
+}
+
+/// Start looking through a location for films and shows to bring in. Nothing is changed.
+async fn location_look(State(app): State<App>, Path(id): Path<u32>) -> R<Value> {
+    if !app.placement().0.iter().any(|p| p.0.id == id && p.1) {
+        return Err(ApiError(StatusCode::CONFLICT, "that location cannot be reached right now".into()));
+    }
+    if app.adoption.lock().as_ref().is_some_and(|a| a.running) {
+        return Err(ApiError(StatusCode::CONFLICT, "a location is already being looked through".into()));
+    }
+    // Marked as under way before the reply, so whoever asks next sees this look and not the last.
+    *app.adoption.lock() = Some(crate::adopt::Adoption { location: id, running: true, step: "looking".into(), ..Default::default() });
+    tokio::spawn(async move {
+        if let Err(e) = app.adopt_look(id).await {
+            tracing::warn!(error = %e, "could not look through the location");
+            app.adoption_failed(&format!("{e:#}"));
+        }
+    });
+    Ok(Json(json!({"started": true})))
+}
+
+/// What the last look found, or how far it has got.
+async fn location_found(State(app): State<App>, Path(id): Path<u32>) -> Json<Value> {
+    Json(json!(app.adoption.lock().clone().filter(|a| a.location == id)))
+}
+
+#[derive(Deserialize)]
+struct LocationAdd {
+    #[serde(default)]
+    picks: Vec<crate::adopt::Pick>,
+    #[serde(default)]
+    monitor: bool,
+}
+
+/// Add what the last look was sure of, and whichever unclear ones the caller has settled.
+async fn location_add(State(app): State<App>, Path(id): Path<u32>, Json(b): Json<LocationAdd>) -> R<Value> {
+    if !app.adoption.lock().as_ref().is_some_and(|a| a.location == id && !a.running) {
+        return Err(ApiError(StatusCode::CONFLICT, "look through the location first".into()));
+    }
+    if let Some(a) = app.adoption.lock().as_mut() {
+        (a.running, a.done, a.total) = (true, 0, 0);
+        a.step = "adding".into();
+    }
+    tokio::spawn(async move {
+        if let Err(e) = app.adopt_add(id, b.picks, b.monitor).await {
+            tracing::warn!(error = %e, "could not add titles from the location");
+            app.adoption_failed(&format!("{e:#}"));
+        }
+    });
+    Ok(Json(json!({"started": true})))
 }
 
 /// How the players' door stands, and what players have been asking for lately.
@@ -1282,6 +1361,10 @@ fn api_routes() -> Router<App> {
         .route("/api/art/{id}/{kind}", get(art))
         .route("/api/players", get(players))
         .route("/api/changes", get(changes))
+        .route("/api/locations", get(locations))
+        .route("/api/locations/{id}/look", post(location_look))
+        .route("/api/locations/{id}/found", get(location_found))
+        .route("/api/locations/{id}/add", post(location_add))
         .route("/api/events", get(events))
 }
 

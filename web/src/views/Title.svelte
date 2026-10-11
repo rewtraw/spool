@@ -172,6 +172,9 @@
         {[t.year || '', t.kind === 'movie' ? (t.runtime ? `${t.runtime} min` : '') : t.network, t.kind === 'series' ? (t.status === 'ended' ? 'Ended' : t.status === 'continuing' ? 'Continuing' : '') : t.studio, t.genres.slice(0, 3).join(', '), t.original_language && t.original_language !== 'english' ? `In ${t.original_language[0].toUpperCase()}${t.original_language.slice(1)}` : ''].filter(Boolean).join(' · ')}
       </div>
       {#if t.overview}<p class="overview">{t.overview}</p>{/if}
+      {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
+      {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
+      {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
       {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url}
         <div class="links">
           {#if t.plex?.url}<a href={t.plex.url} target="_blank" rel="noopener noreferrer">Open in Plex <span aria-hidden="true">↗</span></a>{/if}
@@ -451,6 +454,14 @@
   }
   .meta {
     font-size: 14px;
+  }
+  .where {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--faint);
+  }
+  .where.warn {
+    color: var(--warn);
   }
   .overview {
     max-width: 72ch;

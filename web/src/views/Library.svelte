@@ -22,6 +22,7 @@
   }
 
   function statusOf(t: Title): { label: string; tone: string } {
+    if (t.offline) return { label: 'Offline', tone: '' };
     if (t.active === 'import_blocked') return { label: 'Needs attention', tone: 'warn' };
     if (t.active) return { label: 'Downloading', tone: 'accent' };
     if (t.kind === 'series') {
@@ -178,7 +179,7 @@
   <div class="grid">
     {#each shown as t (t.id)}
       {@const s = statusOf(t)}
-      <a class="tile" href="#/title/{t.id}" class:dim={!t.monitored && !(t.file_count || t.episodes_have)} class:picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
+      <a class="tile" href="#/title/{t.id}" class:dim={t.offline || (!t.monitored && !(t.file_count || t.episodes_have))} class:picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
         <div class="art">
           <Poster src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} />
           {#if selecting}<span class="check" class:on={picked[t.id]} aria-hidden="true">{picked[t.id] ? '✓' : ''}</span>{/if}

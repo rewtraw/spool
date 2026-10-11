@@ -149,7 +149,8 @@ impl App {
     pub async fn scan_title(&self, id: i64, report: &mut ScanReport) -> Result<()> {
         let title = self.db.title(id)?.ok_or_else(|| anyhow!("no such title"))?;
         report.titles += 1;
-        if title.path.is_empty() || !self.volume_ok() {
+        // Files that cannot be seen are not files that have gone.
+        if title.path.is_empty() || !self.title_online(&title) {
             return Ok(());
         }
         let root = Path::new(&title.path);
@@ -225,7 +226,7 @@ impl App {
 
     pub async fn scan_all(&self) -> Result<ScanReport> {
         let mut report = ScanReport::default();
-        if !self.volume_ok() {
+        if self.placement().0.iter().all(|(_, online)| !online) {
             bail!("the media volume is not mounted");
         }
         for t in self.db.titles(None)? {
@@ -260,7 +261,7 @@ impl App {
     }
 }
 
-fn collect(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+pub(crate) fn collect(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();

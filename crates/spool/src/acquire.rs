@@ -82,6 +82,8 @@ pub struct TitleContext {
     pub oversize: HashSet<i64>,
     /// Where each indexer stands against its daily allowance.
     pub budgets: HashMap<i64, IndexerBudget>,
+    /// Why nothing may be downloaded for this title now: its location is only read, or away.
+    pub locked: Option<String>,
 }
 
 impl App {
@@ -98,6 +100,7 @@ impl App {
             files: self.db.files(title.id)?,
             active: self.db.title_acquisitions(title.id)?.into_iter().filter(|a| a.state.is_active()).collect(),
             blocklist: self.db.blocklisted(title.id)?,
+            locked: self.title_locked(&title),
             profile,
             title,
             compact: false,
@@ -231,6 +234,10 @@ impl App {
 
         if let Some(r) = pre {
             record.rejections.push(r);
+            return Judged { record, candidate };
+        }
+        if let Some(why) = &tc.locked {
+            record.rejections.push(rej("location", why.clone()));
             return Judged { record, candidate };
         }
 
@@ -491,6 +498,10 @@ impl App {
         };
         tc.oversize = oversize.clone();
         let t = &tc.title;
+        // Nothing found could be put with the rest of the title, so the indexers are not asked.
+        if let Some(why) = &tc.locked {
+            return Ok(SearchOutcome { decisions: self.db.decisions(title_id)?, grabbed: vec![], errors: vec![], message: format!("Not searched: {why}") });
+        }
         if tc.compact && oversize.is_empty() {
             let message = match tc.profile.target_size_gb {
                 _ if tc.files.is_empty() => "Nothing to compact: there is no file on disk yet".to_string(),
@@ -802,6 +813,9 @@ impl App {
         if !self.volume_ok() {
             bail!("the media volume is not mounted");
         }
+        if let Some(why) = self.title_locked(title) {
+            bail!(why);
+        }
         // Asking twice for the same release gets the download already under way, not a second one.
         let already = |app: &App| -> Result<Option<Acquisition>> {
             Ok(app.db.title_acquisitions(title.id)?.into_iter().find(|a| a.state.is_active() && ((!a.release.guid.is_empty() && a.release.guid == d.release.guid) || a.release.title == d.release.title)))
@@ -974,6 +988,9 @@ impl App {
         }
         if !self.volume_ok() {
             bail!("the media volume is not mounted");
+        }
+        if let Some(why) = self.title_locked(title) {
+            bail!(why);
         }
         let quality = spool_core::quality::parse_quality(name, title.kind.flavor());
         let job_id = self.engine.add(nzb, name, None)?;

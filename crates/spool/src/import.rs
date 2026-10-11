@@ -134,10 +134,8 @@ impl App {
         if g.recycle_days == 0 {
             return PathBuf::new();
         }
-        let root = match title.kind {
-            Kind::Movie => g.movie_root,
-            Kind::Series => g.series_root,
-        };
+        // Beside the library folder the title is in, so recycling never crosses to another disk.
+        let root = self.placement().of(&title.path).map(|(l, _)| l.root(title.kind).to_string()).filter(|r| !r.is_empty() && Path::new(&title.path).starts_with(r)).unwrap_or_default();
         let root = if root.is_empty() { Path::new(&title.path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default() } else { root };
         let day = chrono::Local::now().format("%Y%m%d").to_string();
         let name = file_abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -151,10 +149,12 @@ impl App {
         }
         let g = self.settings.general();
         let naming_cfg = self.settings.naming();
-        let (root, folder) = match title.kind {
-            Kind::Movie => (g.movie_root, naming::movie_folder_name(&naming_cfg, &title.title, title.year, title.imdb_id.as_deref(), title.tmdb_id)),
-            Kind::Series => (g.series_root, naming::series_folder_name(&naming_cfg, &title.title, title.year)),
+        let folder = match title.kind {
+            Kind::Movie => naming::movie_folder_name(&naming_cfg, &title.title, title.year, title.imdb_id.as_deref(), title.tmdb_id),
+            Kind::Series => naming::series_folder_name(&naming_cfg, &title.title, title.year),
         };
+        // The location chosen for new titles, or the main one when that cannot take this.
+        let root = self.placement().for_new(title.kind, g.new_titles_location).map(|l| l.root(title.kind).to_string()).unwrap_or_default();
         if root.is_empty() {
             bail!("no library folder is configured for {}", if title.kind == Kind::Movie { "movies" } else { "television" });
         }
@@ -456,8 +456,8 @@ impl App {
         let Some(output) = acq.output_path.clone() else { bail!("the download has no output folder") };
         let root = PathBuf::from(&output);
 
-        if !self.volume_ok() {
-            acq.error = Some("the media volume is not mounted; the import will be retried".into());
+        if let Some(why) = self.title_locked(&title) {
+            acq.error = Some(format!("{why}; the import will be retried"));
             self.db.save_acquisition(&mut acq)?;
             return Ok(());
         }
@@ -569,8 +569,8 @@ impl App {
     pub fn delete_file(&self, file_id: i64) -> Result<()> {
         let file = self.db.file(file_id)?.ok_or_else(|| anyhow!("no such file"))?;
         let title = self.db.title(file.title_id)?.ok_or_else(|| anyhow!("no such title"))?;
-        if !self.volume_ok() {
-            bail!("the media volume is not mounted");
+        if let Some(why) = self.title_locked(&title) {
+            bail!(why);
         }
         let abs = Path::new(&title.path).join(&file.rel_path);
         for s in &file.subtitles {
@@ -598,15 +598,13 @@ impl App {
     }
 
     fn recycle_roots(&self) -> Vec<PathBuf> {
-        let g = self.settings.general();
-        [g.movie_root, g.series_root].into_iter().filter(|r| !r.is_empty()).map(|r| Path::new(&r).join(".spool-recycle")).collect()
+        // Only where Spool may delete, and only what can be reached.
+        let places = self.placement();
+        places.0.iter().filter(|(l, online)| l.manage && *online).flat_map(|(l, _)| [l.movie_root.clone(), l.series_root.clone()]).filter(|r| !r.is_empty()).map(|r| Path::new(&r).join(".spool-recycle")).collect()
     }
 
     /// Number of files and total bytes waiting in the recycle folders.
     pub fn recycle_usage(&self) -> (usize, u64) {
-        if !self.volume_ok() {
-            return (0, 0);
-        }
         let mut files = vec![];
         for root in self.recycle_roots() {
             walk(&root, &mut files);
@@ -619,12 +617,13 @@ impl App {
     /// configured number of days. Returns bytes freed.
     pub fn clean_recycle(&self, all: bool) -> Result<u64> {
         let g = self.settings.general();
-        if !self.volume_ok() {
+        let roots = self.recycle_roots();
+        if roots.is_empty() {
             bail!("the media volume is not mounted");
         }
         let cutoff = (chrono::Local::now() - chrono::Duration::days(g.recycle_days as i64)).format("%Y%m%d").to_string();
         let mut freed = 0;
-        for root in self.recycle_roots() {
+        for root in roots {
             let Ok(rd) = std::fs::read_dir(&root) else { continue };
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();

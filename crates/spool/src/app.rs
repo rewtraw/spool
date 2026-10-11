@@ -21,6 +21,8 @@ pub enum Event {
     Decisions { title_id: i64 },
     Attention,
     Task { name: String, running: bool, message: String },
+    /// A location came back or went away, which changes how its titles are listed.
+    Locations,
 }
 
 pub struct Inner {
@@ -42,6 +44,14 @@ pub struct Inner {
     /// answer, 2 allowed, 3 refused. Reading a removable disk needs the user's consent, and the
     /// first read blocks until they give it.
     pub volume_access: std::sync::atomic::AtomicU8,
+    /// Whether each further location could be reached when last looked at.
+    pub location_state: Mutex<HashMap<u32, bool>>,
+    /// Locations being looked at right now, so a share that does not answer is asked once.
+    pub location_checking: Mutex<HashSet<u32>>,
+    /// Counts locations coming and going, for anything that keeps a picture of the library.
+    pub location_changes: std::sync::atomic::AtomicU64,
+    /// The last look through a location for titles to bring in, and what came of it.
+    pub adoption: Mutex<Option<crate::adopt::Adoption>>,
     pub sessions: Mutex<HashSet<String>>,
     /// Wrong passwords lately: (how many, when the last one was).
     pub login_failures: Mutex<(u32, i64)>,
@@ -55,8 +65,9 @@ pub struct Inner {
     pub player_failures: Mutex<(u32, i64)>,
     /// The last few hundred requests players made, for working out what one of them wants.
     pub player_requests: Mutex<std::collections::VecDeque<String>>,
-    /// The library as last read for players, and the database's change count at the time.
-    pub player_library: Mutex<Option<(i64, Arc<crate::jellyfin::items::Library>)>>,
+    /// The library as last read for players, with the database's change count and the count of
+    /// locations coming and going at the time.
+    pub player_library: Mutex<Option<((i64, u64), Arc<crate::jellyfin::items::Library>)>>,
     /// Where players are being served, or why they are not.
     pub player_status: Mutex<String>,
     /// Releases being sent to the downloader right now, keyed by title and release name.
@@ -95,6 +106,12 @@ pub fn http_client() -> reqwest::Client {
 
 impl App {
     pub async fn start(data_dir: &Path, db: Db) -> anyhow::Result<App> {
+        Self::start_with(data_dir, db, None).await
+    }
+
+    /// As [`start`], asking for film and series details at the given addresses (TMDB's, then
+    /// TVmaze's) in place of the real ones.
+    pub async fn start_with(data_dir: &Path, db: Db, sources: Option<(&str, &str)>) -> anyhow::Result<App> {
         let sessions: HashSet<String> = db.get_setting::<Vec<String>>("sessions").into_iter().collect();
         let player_tokens: Vec<String> = db.get_setting("player_tokens");
         let settings = Settings::new(db.clone());
@@ -111,12 +128,16 @@ impl App {
         }
         let engine = Engine::start(engine_config(&settings, data_dir)).await?;
         let http = http_client();
+        let mut meta = Metadata::new(http.clone());
+        if let Some((tmdb, tvmaze)) = sources {
+            (meta.tmdb_base, meta.tvmaze_base) = (tmdb.to_string(), tvmaze.to_string());
+        }
         let (events, _) = broadcast::channel(1024);
         Ok(App(Arc::new(Inner {
             db,
             settings,
             engine,
-            meta: Metadata::new(http.clone()),
+            meta,
             http,
             events,
             data_dir: data_dir.to_path_buf(),
@@ -125,6 +146,10 @@ impl App {
             indexer_backoff: Mutex::new(HashMap::new()),
             tasks: Mutex::new(HashMap::new()),
             volume_access: std::sync::atomic::AtomicU8::new(0),
+            location_state: Mutex::new(HashMap::new()),
+            location_checking: Mutex::new(HashSet::new()),
+            location_changes: std::sync::atomic::AtomicU64::new(0),
+            adoption: Mutex::new(None),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),

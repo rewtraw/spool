@@ -81,16 +81,9 @@ async fn send_file(path: &Path, headers: &HeaderMap, head: bool) -> Response {
     response.body(Body::from_stream(pieces)).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-fn unavailable(app: &App) -> Option<Response> {
-    app.volume_problem().map(|why| (StatusCode::SERVICE_UNAVAILABLE, why).into_response())
-}
-
 /// The video itself: a film, an episode, or one named version of a film.
 pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool) -> Response {
     let Some(id) = Id::parse(id) else { return StatusCode::NOT_FOUND.into_response() };
-    if let Some(r) = unavailable(app) {
-        return r;
-    }
     let path: Option<PathBuf> = Library::shared(app).ok().and_then(|lib| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| Path::new(&t.path).join(&f.rel_path)));
     match path {
         Some(p) => send_file(&p, headers, head).await,
@@ -138,9 +131,6 @@ fn to_vtt(srt: &str) -> String {
 pub async fn subtitle(app: &App, id: &str, source: Option<&str>, index: &str, file: &str) -> Response {
     let missing = || StatusCode::NOT_FOUND.into_response();
     let (Some(id), Ok(index)) = (Id::parse(id), index.parse::<usize>()) else { return missing() };
-    if let Some(r) = unavailable(app) {
-        return r;
-    }
     let path = Library::shared(app).ok().and_then(|lib| {
         let (t, f) = lib.file_for(id, source.and_then(Id::parse))?;
         let inside = super::items::media_streams(&f.media_info.clone().unwrap_or_default()).len();
@@ -262,10 +252,8 @@ pub async fn with_streams(app: &App, lib: std::sync::Arc<Library>, id: Id) -> Re
         _ => vec![],
     };
     let mut learned = false;
-    if app.volume_ok() {
-        for (t, f) in &files {
-            learned |= learn_streams(app, t, f).await;
-        }
+    for (t, f) in &files {
+        learned |= learn_streams(app, t, f).await;
     }
     if !learned {
         return Ok(lib);
@@ -289,7 +277,7 @@ pub async fn fill_in(app: App) {
     let mut probed = 0;
     for t in &titles {
         for f in app.db.files(t.id).unwrap_or_default() {
-            if !app.volume_ok() {
+            if !app.title_online(t) {
                 break;
             }
             if learn_streams(&app, t, &f).await {

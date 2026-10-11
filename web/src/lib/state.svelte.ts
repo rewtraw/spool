@@ -159,6 +159,12 @@ export function connect() {
         app.tick++;
         loadStatus();
         break;
+      case 'locations':
+        // Titles go offline or come back without anything about them changing.
+        app.tick++;
+        loadTitles(true);
+        loadStatus();
+        break;
       case 'resync':
         app.tick++;
         loadTitles(true);

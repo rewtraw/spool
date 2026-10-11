@@ -26,6 +26,17 @@ Spool is one process. It holds the catalog, talks to indexers, downloads from Us
 
 One SQLite database in WAL mode holds everything, in a "columns plus JSON document" shape: the columns that are queried are real columns and the rest of each record is JSON. Saved NZBs are gzip files beside it. The database contains indexer keys and Usenet passwords and is created readable only by its owner.
 
+## Locations
+
+The library always has a main location: the two folders in the general settings, on the volume named there. Further locations sit beside it, each with folders of its own and each either managed or only read. A title belongs to the location whose folder holds its own, so nothing about a title says where it is except its path.
+
+Two rules follow from that, and every part of Spool that touches files asks the same question of them (`title_locked`):
+
+- **Away means left alone.** A location that cannot be reached takes its titles offline. They are not scanned, searched for or offered to players, and a file that cannot be seen is never recorded as gone. Whether a location is there is looked at on a thread of its own with a short wait, because a network share that has gone can keep a caller waiting indefinitely.
+- **Only read means nothing is written.** On a location Spool does not manage, releases are rejected with the reason, imports and subtitle files are refused, and nothing is deleted or recycled.
+
+Bringing in what is already on a location (`adopt.rs`) is two steps: looking reads each folder's name, asks the metadata sources and reports what it is sure of, what is already in the library, what is unclear and what it could not place; adding records the sure ones, and any the user settles, where they lie.
+
 ## Knowing what changed
 
 The database keeps a count of changes to the library. Triggers move it on by one for every write to a title, episode or file that alters it, and note in a `changes` table where that row now stands: one entry per row, holding its latest position, with removals kept for three months. Because the database does this itself, no part of Spool can change the library without it being recorded. Saving a row as it already was does not count, and neither does a title whose only news is when it was last searched or refreshed.

@@ -100,6 +100,11 @@ impl App {
         // A refusal may have been reversed in System Settings since the last look.
         let _ = self.volume_access.compare_exchange(3, 0, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed);
         let ok = self.volume_ok();
+        if *was_ok != ok {
+            // Its titles come and go with it, for anything that keeps a picture of the library.
+            self.location_changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.emit(crate::app::Event::Locations);
+        }
         if *was_ok && !ok {
             tracing::warn!(reason = %self.volume_problem().unwrap_or_default(), "the media volume cannot be used; pausing downloads");
             self.engine.pause_all();

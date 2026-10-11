@@ -45,8 +45,10 @@ impl App {
         let today = chrono::Local::now().date_naive();
         let nowt = chrono::Utc::now();
         let mut wanted = vec![];
+        let places = self.placement();
         for t in self.db.titles(None)? {
-            if !t.monitored {
+            // A title on a location that is away or only read is not looked for.
+            if !t.monitored || places.locked(&t).is_some() {
                 continue;
             }
             let missing = match t.kind {
@@ -210,6 +212,7 @@ impl App {
             let mut volume_was_ok = true;
             loop {
                 app.watch_volume(&mut volume_was_ok);
+                app.watch_locations();
                 if app.volume_ok() {
                     app.watch_space();
                 }

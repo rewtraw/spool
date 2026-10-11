@@ -111,6 +111,12 @@ export interface Title {
   status: string;
   runtime: number;
   poster?: string | null;
+  /** The location the title is kept on, when there is more than one. */
+  location?: string | null;
+  /** Its location cannot be reached right now. */
+  offline?: boolean;
+  /** Its location is one Spool only reads. */
+  read_only?: boolean;
   /** The poster at the size grids and lists show it. */
   poster_small?: string | null;
   fanart?: string | null;

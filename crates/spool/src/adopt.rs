@@ -1,0 +1,411 @@
+//! Bringing in a library that already exists on a location.
+//!
+//! It happens in two steps, so nothing is added on a guess. Looking walks the location's
+//! folders, reads what each is from its name, asks the metadata sources, and reports: what it
+//! is sure of, what is already in the library, what could be one of several things, and what
+//! it could not place. Adding then takes the sure ones, and any the user has settled, and
+//! records each title where it lies. No file is moved, renamed or changed by either step.
+
+use crate::app::{App, Event};
+use crate::db::now;
+use crate::models::*;
+use anyhow::{anyhow, bail, Result};
+use serde::{Deserialize, Serialize};
+use spool_core::parser::is_video_file;
+use std::path::{Path, PathBuf};
+
+/// One thing a folder could be.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Match {
+    pub tmdb_id: Option<u32>,
+    pub tvmaze_id: Option<u32>,
+    pub tvdb_id: Option<u32>,
+    pub title: String,
+    pub year: u32,
+    pub poster: Option<String>,
+}
+
+/// A folder on the location and what was made of it.
+#[derive(Clone, Debug, Serialize)]
+pub struct Found {
+    pub folder: String,
+    pub kind: Kind,
+    /// The name and year as read from the folder.
+    pub name: String,
+    pub year: u32,
+    pub files: usize,
+    pub bytes: u64,
+    /// new: sure what it is, and not in the library. have: already in the library. unclear:
+    /// could be any of `matches`. unknown: nothing found. added, failed: after adding.
+    pub state: String,
+    pub note: String,
+    /// What it could be; for a new one, the first is what it is.
+    pub matches: Vec<Match>,
+}
+
+/// How far looking through a location, or adding from it, has got.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Adoption {
+    pub location: u32,
+    pub running: bool,
+    /// looking, adding, or done.
+    pub step: String,
+    pub done: usize,
+    pub total: usize,
+    pub message: String,
+    pub found: Vec<Found>,
+}
+
+/// A folder the user has settled: which of the things it could be it is.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Pick {
+    pub folder: String,
+    pub tmdb_id: Option<u32>,
+    pub tvmaze_id: Option<u32>,
+    pub tvdb_id: Option<u32>,
+}
+
+/// What a folder's name says it holds.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Named {
+    pub name: String,
+    pub year: u32,
+    pub tmdb_id: Option<u32>,
+    pub tvdb_id: Option<u32>,
+    pub imdb_id: Option<String>,
+}
+
+fn is_year(s: &str) -> Option<u32> {
+    (s.len() == 4).then(|| s.parse::<u32>().ok()).flatten().filter(|y| (1880..=2100).contains(y))
+}
+
+/// Read a folder name: "Heat (1995)", "Heat (1995) {imdb-tt0113277}", "Heat [tmdbid-949]",
+/// "Heat 1995", or a release name such as "Heat.1995.1080p.BluRay.x264-GRP".
+pub fn read_name(folder: &str) -> Named {
+    let mut out = Named::default();
+    // Ids are kept in braces or square brackets, by more than one convention.
+    let mut plain = String::new();
+    let mut rest = folder;
+    while let Some(open) = rest.find(['{', '[']) {
+        let close = if rest[open..].starts_with('{') { '}' } else { ']' };
+        let Some(len) = rest[open..].find(close) else { break };
+        let tag = rest[open + 1..open + len].to_ascii_lowercase();
+        if let Some((kind, id)) = tag.split_once(['-', '=', ':']) {
+            match kind.trim().trim_end_matches("id") {
+                "tmdb" => out.tmdb_id = id.trim().parse().ok(),
+                "tvdb" => out.tvdb_id = id.trim().parse().ok(),
+                "imdb" => out.imdb_id = Some(id.trim().to_string()).filter(|i| i.starts_with("tt")),
+                _ => {}
+            }
+        }
+        plain.push_str(&rest[..open]);
+        rest = &rest[open + len + 1..];
+    }
+    plain.push_str(rest);
+    let mut plain = plain.trim().to_string();
+
+    // A release name: words joined by dots or underscores, the title ending where the year,
+    // the season or the resolution begins.
+    if !plain.contains(' ') && plain.contains(['.', '_']) {
+        let mut words = vec![];
+        for w in plain.split(['.', '_']) {
+            let lower = w.to_ascii_lowercase();
+            let season = lower.len() >= 3 && lower.starts_with('s') && lower[1..].chars().take(2).all(|c| c.is_ascii_digit());
+            let resolution = lower.ends_with('p') && lower.len() >= 4 && lower[..lower.len() - 1].chars().all(|c| c.is_ascii_digit());
+            if let Some(y) = is_year(w).filter(|_| !words.is_empty()) {
+                out.year = y;
+                break;
+            }
+            if season || resolution {
+                break;
+            }
+            words.push(w);
+        }
+        out.name = words.join(" ");
+        return out;
+    }
+    // "Title (1995)": the last bracketed year, with whatever follows it dropped.
+    if let Some((at, y)) = plain.match_indices('(').filter_map(|(i, _)| plain[i + 1..].find(')').and_then(|len| is_year(&plain[i + 1..i + 1 + len])).map(|y| (i, y))).next_back() {
+        if !plain[..at].trim().is_empty() {
+            out.year = y;
+            plain.truncate(at);
+        }
+    } else if let Some((head, tail)) = plain.rsplit_once(' ') {
+        if let Some(y) = is_year(tail).filter(|_| !head.trim().is_empty()) {
+            out.year = y;
+            plain = head.to_string();
+        }
+    }
+    out.name = plain.trim().trim_end_matches(['-', ',']).trim().to_string();
+    out
+}
+
+/// A title reduced to what two spellings of it share.
+fn plain(s: &str) -> String {
+    s.to_lowercase().replace('&', " and ").chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// The one candidate a folder's name points to, if it points to one.
+fn sure<'a>(named: &Named, candidates: &'a [Title]) -> Option<&'a Title> {
+    let same: Vec<&Title> = candidates.iter().filter(|t| plain(&t.title) == plain(&named.name) || t.alt_titles.iter().any(|a| plain(a) == plain(&named.name))).collect();
+    if named.year == 0 {
+        // Without a year, a name shared by several things settles nothing.
+        return (same.len() == 1).then(|| same[0]);
+    }
+    same.iter().find(|t| t.year == named.year).or_else(|| same.iter().find(|t| t.year.abs_diff(named.year) <= 1)).copied()
+}
+
+fn as_match(t: &Title) -> Match {
+    Match { tmdb_id: t.tmdb_id, tvmaze_id: t.tvmaze_id, tvdb_id: t.tvdb_id, title: t.title.clone(), year: t.year, poster: t.poster.clone() }
+}
+
+/// The folders directly inside a library folder that hold video, with how much.
+fn folders(root: &str) -> Vec<(PathBuf, usize, u64)> {
+    let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
+    let mut out = vec![];
+    for e in rd.flatten() {
+        let path = e.path();
+        if !path.is_dir() || e.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let mut files = vec![];
+        crate::catalog::collect(&path, &mut files);
+        let videos: Vec<&PathBuf> = files.iter().filter(|f| is_video_file(&f.to_string_lossy()) && !f.to_string_lossy().contains("/.spool-recycle/")).collect();
+        if !videos.is_empty() {
+            out.push((path.clone(), videos.len(), videos.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum()));
+        }
+    }
+    out.sort();
+    out
+}
+
+impl App {
+    /// Note that work on a location has stopped short, so nothing is left looking busy.
+    pub fn adoption_failed(&self, why: &str) {
+        self.adoption_set(|a| {
+            a.running = false;
+            a.step = "done".into();
+            a.message = why.to_string();
+        });
+        if self.tasks.lock().get("adopt").is_some_and(|t| t.running) {
+            self.task_end("adopt", why);
+        }
+    }
+
+    fn adoption_set(&self, f: impl FnOnce(&mut Adoption)) {
+        if let Some(a) = self.adoption.lock().as_mut() {
+            f(a);
+        }
+    }
+
+    /// Work out what one folder is.
+    async fn recognise(&self, kind: Kind, folder: &Path, files: usize, bytes: u64, here: &[Title]) -> Found {
+        let folder_name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let named = read_name(&folder_name);
+        let mut found = Found { folder: folder.to_string_lossy().to_string(), kind, name: named.name.clone(), year: named.year, files, bytes, state: "unknown".into(), note: String::new(), matches: vec![] };
+        if let Some(t) = here.iter().find(|t| Path::new(&t.path) == folder) {
+            found.state = "have".into();
+            found.note = "already in the library".into();
+            found.matches = vec![as_match(t)];
+            return found;
+        }
+        let key = self.settings.general().tmdb_api_key;
+        // An id in the folder's name settles it; otherwise the name is searched for.
+        let by_id = named.tmdb_id.is_some() || named.tvdb_id.is_some() || named.imdb_id.is_some();
+        let looked: Result<Vec<Title>> = match kind {
+            Kind::Movie => match (&named.tmdb_id, &named.imdb_id) {
+                (Some(id), _) => self.meta.search_movies(&key, &format!("tmdb:{id}")).await,
+                (_, Some(id)) => self.meta.search_movies(&key, id).await,
+                _ if named.year > 0 => self.meta.search_movies(&key, &format!("{} ({})", named.name, named.year)).await,
+                _ => self.meta.search_movies(&key, &named.name).await,
+            },
+            Kind::Series => match named.tvdb_id {
+                Some(id) => self.meta.search_series(&format!("tvdb:{id}")).await,
+                None => self.meta.search_series(&named.name).await,
+            },
+        };
+        let candidates = match looked {
+            Ok(c) => c,
+            Err(e) => {
+                found.note = format!("{e:#}");
+                return found;
+            }
+        };
+        let chosen = if by_id { candidates.first() } else { sure(&named, &candidates) };
+        match chosen {
+            Some(t) => {
+                found.matches = vec![as_match(t)];
+                match self.db.find_title(kind, t.tmdb_id, t.tvdb_id).ok().flatten() {
+                    Some(mine) => {
+                        found.state = "have".into();
+                        found.note = if mine.path.is_empty() { "already in the library, with no files yet".into() } else { format!("already in the library, at {}", mine.path) };
+                    }
+                    None => found.state = "new".into(),
+                }
+            }
+            None if candidates.is_empty() => found.note = "nothing by that name was found".into(),
+            None => {
+                found.state = "unclear".into();
+                found.note = "more than one thing it could be".into();
+                found.matches = candidates.iter().take(5).map(as_match).collect();
+            }
+        }
+        found
+    }
+
+    /// Walk a location's folders and say what each is, changing nothing. Runs to completion;
+    /// progress is in `adoption`.
+    pub async fn adopt_look(&self, location_id: u32) -> Result<()> {
+        let places = self.placement();
+        let (loc, online) = places.0.iter().find(|p| p.0.id == location_id).cloned().ok_or_else(|| anyhow!("no such location"))?;
+        if !online {
+            bail!("{} cannot be reached right now", loc.name);
+        }
+        if !self.task_start("adopt", &format!("Looking through {}", loc.name)) {
+            bail!("a location is already being looked through");
+        }
+        *self.adoption.lock() = Some(Adoption { location: location_id, running: true, step: "looking".into(), ..Default::default() });
+        let roots = [(Kind::Movie, loc.movie_root.clone()), (Kind::Series, loc.series_root.clone())];
+        let listed = tokio::task::spawn_blocking(move || roots.into_iter().filter(|(_, r)| !r.is_empty()).flat_map(|(k, r)| folders(&r).into_iter().map(move |f| (k, f))).collect::<Vec<_>>()).await.unwrap_or_default();
+        self.adoption_set(|a| a.total = listed.len());
+        let here = self.db.titles(None).unwrap_or_default();
+        for (kind, (folder, files, bytes)) in listed {
+            let found = self.recognise(kind, &folder, files, bytes, &here).await;
+            self.adoption_set(|a| {
+                a.done += 1;
+                a.found.push(found);
+            });
+            // Unhurried: the metadata sources are shared with everyone else.
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+        let count = |state: &str| self.adoption.lock().as_ref().map(|a| a.found.iter().filter(|f| f.state == state).count()).unwrap_or(0);
+        let message = format!("{} to add, {} already in the library, {} unclear, {} not recognised", count("new"), count("have"), count("unclear"), count("unknown"));
+        self.adoption_set(|a| {
+            a.running = false;
+            a.step = "done".into();
+            a.message = message.clone();
+        });
+        self.task_end("adopt", &message);
+        Ok(())
+    }
+
+    /// Record one folder as a title where it lies.
+    async fn adopt_one(&self, kind: Kind, folder: &str, m: &Match, monitor: bool) -> Result<Title> {
+        let g = self.settings.general();
+        let (mut title, episodes) = match kind {
+            Kind::Movie => (self.meta.movie(&g.tmdb_api_key, m.tmdb_id.ok_or_else(|| anyhow!("no TMDB id"))?).await?, vec![]),
+            Kind::Series => match (m.tvmaze_id, m.tvdb_id) {
+                (Some(id), _) => self.meta.series(id).await?,
+                (_, Some(id)) => self.meta.series_by_tvdb(id).await?,
+                _ => bail!("no TVmaze or TVDB id"),
+            },
+        };
+        if let Some(mine) = self.db.find_title(kind, title.tmdb_id, title.tvdb_id)? {
+            bail!("{} is already in the library{}", title.title, if mine.path.is_empty() { String::new() } else { format!(", at {}", mine.path) });
+        }
+        title.path = folder.to_string();
+        title.monitored = monitor;
+        title.profile_id = if kind == Kind::Movie { g.default_movie_profile } else { g.default_series_profile };
+        title.added_at = now();
+        title.last_refresh_at = now();
+        self.db.save_title(&mut title)?;
+        for mut e in episodes {
+            e.title_id = title.id;
+            e.monitored = monitor;
+            self.db.upsert_episode(&e)?;
+        }
+        let mut report = crate::catalog::ScanReport::default();
+        self.scan_title(title.id, &mut report).await?;
+        self.db.add_history(Some(title.id), "adopted", serde_json::json!({"path": folder, "files": report.files_added}))?;
+        Ok(title)
+    }
+
+    /// Add what the last look was sure of, and whatever `picks` settles. Runs to completion.
+    pub async fn adopt_add(&self, location_id: u32, picks: Vec<Pick>, monitor: bool) -> Result<()> {
+        let looked = self.adoption.lock().clone().filter(|a| a.location == location_id).ok_or_else(|| anyhow!("look through the location first"))?;
+        if !self.placement().0.iter().any(|p| p.0.id == location_id && p.1) {
+            bail!("the location cannot be reached right now");
+        }
+        let mut work: Vec<(usize, Match)> = vec![];
+        for (i, f) in looked.found.iter().enumerate() {
+            match picks.iter().find(|p| p.folder == f.folder) {
+                Some(p) if f.state != "have" && f.state != "added" => work.push((i, Match { tmdb_id: p.tmdb_id, tvmaze_id: p.tvmaze_id, tvdb_id: p.tvdb_id, ..Default::default() })),
+                None if f.state == "new" => work.extend(f.matches.first().cloned().map(|m| (i, m))),
+                _ => {}
+            }
+        }
+        if !self.task_start("adopt", &format!("Adding {} titles", work.len())) {
+            bail!("a location is already being looked through");
+        }
+        self.adoption_set(|a| {
+            (a.running, a.done, a.total) = (true, 0, work.len());
+            a.step = "adding".into();
+        });
+        let mut added = 0;
+        for (i, m) in work {
+            let (kind, folder) = (looked.found[i].kind, looked.found[i].folder.clone());
+            let result = self.adopt_one(kind, &folder, &m, monitor).await;
+            self.adoption_set(|a| {
+                a.done += 1;
+                match &result {
+                    Ok(t) => {
+                        a.found[i].state = "added".into();
+                        a.found[i].note = String::new();
+                        a.found[i].matches = vec![as_match(t)];
+                    }
+                    Err(e) => {
+                        a.found[i].state = "failed".into();
+                        a.found[i].note = format!("{e:#}");
+                    }
+                }
+            });
+            if let Ok(t) = result {
+                added += 1;
+                self.emit(Event::Title { id: t.id });
+            }
+        }
+        let message = format!("Added {added} titles");
+        self.adoption_set(|a| {
+            a.running = false;
+            a.step = "done".into();
+            a.message = message.clone();
+        });
+        self.task_end("adopt", &message);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_names_are_read_in_the_ways_people_write_them() {
+        let n = |s: &str| read_name(s);
+        assert_eq!((n("Heat (1995)").name.as_str(), n("Heat (1995)").year), ("Heat", 1995));
+        assert_eq!(n("Heat (1995) {imdb-tt0113277}"), Named { name: "Heat".into(), year: 1995, imdb_id: Some("tt0113277".into()), ..Default::default() });
+        assert_eq!(n("Heat (1995) [tmdbid-949]").tmdb_id, Some(949));
+        assert_eq!(n("The Wire {tvdb-79126}"), Named { name: "The Wire".into(), tvdb_id: Some(79126), ..Default::default() });
+        assert_eq!((n("Blade Runner 2049 (2017)").name.as_str(), n("Blade Runner 2049 (2017)").year), ("Blade Runner 2049", 2017));
+        assert_eq!((n("Heat 1995").name.as_str(), n("Heat 1995").year), ("Heat", 1995));
+        assert_eq!((n("Dangerous Liaisons (1988) Remux").name.as_str(), n("Dangerous Liaisons (1988) Remux").year), ("Dangerous Liaisons", 1988));
+        assert_eq!((n("Heat.1995.1080p.BluRay.x264-GRP").name.as_str(), n("Heat.1995.1080p.BluRay.x264-GRP").year), ("Heat", 1995));
+        assert_eq!(n("The.Wire.S01.1080p.BluRay.x264-GRP").name, "The Wire");
+        assert_eq!((n("2001 A Space Odyssey (1968)").name.as_str(), n("2001 A Space Odyssey (1968)").year), ("2001 A Space Odyssey", 1968));
+        assert_eq!(n("1917 (2019)").name, "1917");
+        assert_eq!(n("Solaris").year, 0);
+    }
+
+    #[test]
+    fn a_name_points_to_one_thing_or_to_none() {
+        let t = |title: &str, year: u32| serde_json::from_value::<Title>(serde_json::json!({"kind": "movie", "title": title, "year": year})).unwrap();
+        let list = vec![t("Solaris", 2002), t("Solaris", 1972), t("Solaris Rising", 2010)];
+        assert_eq!(sure(&Named { name: "Solaris".into(), year: 1972, ..Default::default() }, &list).map(|t| t.year), Some(1972));
+        assert!(sure(&Named { name: "Solaris".into(), ..Default::default() }, &list).is_none(), "two films share the name");
+        assert!(sure(&Named { name: "Solaris".into(), year: 1999, ..Default::default() }, &list).is_none());
+        let amp = vec![t("Fast & Furious", 2009)];
+        assert_eq!(sure(&Named { name: "Fast and Furious".into(), year: 2010, ..Default::default() }, &amp).map(|t| t.year), Some(2009));
+    }
+}

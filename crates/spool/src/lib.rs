@@ -1,6 +1,7 @@
 //! Spool server: one service that finds, downloads and organizes movies and television.
 
 pub mod acquire;
+pub mod adopt;
 pub mod api;
 pub mod app;
 pub mod archive;
@@ -9,6 +10,7 @@ pub mod catalog;
 pub mod db;
 pub mod import;
 pub mod jellyfin;
+pub mod locations;
 pub mod mcp;
 pub mod metadata;
 pub mod migrate;
