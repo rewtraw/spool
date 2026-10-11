@@ -150,7 +150,17 @@ impl Library {
             .collect();
         // The same collections the web app shows, among what can be played.
         let groups = app.collections_among(&titles)?;
-        let set_members = groups.iter().map(|g| (g.id, g.members.iter().map(|m| m.title_id).collect())).collect();
+        // In order of release, or in the user's own order where they have set one.
+        let set_members = groups
+            .iter()
+            .map(|g| {
+                let mut members: Vec<&crate::anime::Member> = g.members.iter().collect();
+                if g.ordered {
+                    members.sort_by_key(|m| m.story);
+                }
+                (g.id, members.into_iter().map(|m| m.title_id).collect())
+            })
+            .collect();
         let sets = groups.into_iter().map(|g| Collection { id: g.id, name: g.name, poster: g.poster, fanart: g.fanart }).collect();
         let index = titles.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         Ok(Library { server_id: super::server_id(app), titles, index, files, episodes, episode_title, watched: app.db.watched_all()?, sets, set_members })
@@ -717,7 +727,7 @@ impl Library {
                     self.title(i).map(|t| self.season_episodes(t, Some(s))).unwrap_or_default()
                 }
                 Some(Id::Collection(c)) => {
-                    // In the order they came out, films and series together.
+                    // In order of release or the user's own order, films and series together.
                     natural = true;
                     self.set_members.get(&c).into_iter().flatten().filter_map(|id| self.title(*id)).map(|t| if t.kind == Kind::Movie { Node::Movie(t) } else { Node::Series(t) }).collect()
                 }

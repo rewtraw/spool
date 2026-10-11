@@ -112,6 +112,8 @@ export interface Collection {
   missing: { anilist_id: number; tmdb_id?: number | null; title: string; year: number; format: string; episodes: number; role: string; poster?: string | null; story: number; can_add: boolean }[];
   /** The member to watch next, once one has been watched. */
   next?: number | null;
+  /** Its titles have been put in an order of your own, which `story` then follows. */
+  ordered?: boolean;
 }
 
 export interface Title {

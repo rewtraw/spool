@@ -18,7 +18,8 @@
   );
   const missing = $derived([...(c?.missing ?? [])].sort((a, b) => (order === 'story' ? a.story - b.story || a.year - b.year : a.year - b.year)));
   // Whether following the story differs from following the releases at all.
-  const twoOrders = $derived(c?.kind === 'anime' && (c?.members ?? []).some((m, i, all) => all.some((o, j) => j > i && o.story < m.story)));
+  const twoOrders = $derived((c?.kind === 'anime' || !!c?.ordered) && (c?.members ?? []).some((m, i, all) => all.some((o, j) => j > i && o.story < m.story)));
+  const otherOrder = $derived(c?.ordered ? 'Your order' : 'Story order');
   const next = $derived(c?.next ? app.titles.find((t) => t.id === c.next) : undefined);
   const seen = $derived((c?.members ?? []).filter((m) => m.watched).length);
   const FORMAT: Record<string, string> = { TV: 'Series', TV_SHORT: 'Short series', MOVIE: 'Film', OVA: 'OVA', ONA: 'Web series', SPECIAL: 'Special' };
@@ -48,6 +49,26 @@
     await act(() => api.put(`/titles/${titleId}/collection`, { collection: 0 }), 'Taken out of the collection');
     refresh();
   }
+  /** Move a title one place earlier or later. The order shown becomes your own. */
+  async function move(i: number, by: number) {
+    const ids = members.map((m) => m.title_id);
+    const j = i + by;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await act(() => api.put(`/collections/${id}/order`, { titles: ids }));
+    refresh();
+  }
+  async function resetOrder() {
+    await act(() => api.put(`/collections/${id}/order`, { titles: [] }), 'Back to the order its sources give');
+    refresh();
+  }
+  function toggleEdit() {
+    editing = !editing;
+    name = c?.name ?? '';
+    // Reordering works on the order that can be changed.
+    if (editing) order = 'story';
+  }
+
   async function undo() {
     if (!confirm(`Remove the collection “${c?.name}”? Its titles stay in the library.`)) return;
     await act(() => api.del(`/collections/${id}`), 'Collection removed');
@@ -73,31 +94,32 @@
       {#if twoOrders}
         <div class="seg" aria-label="Order">
           <button class:on={order === 'release'} aria-pressed={order === 'release'} onclick={() => (order = 'release')}>Release order</button>
-          <button class:on={order === 'story'} aria-pressed={order === 'story'} onclick={() => (order = 'story')}>Story order</button>
+          <button class:on={order === 'story'} aria-pressed={order === 'story'} onclick={() => (order = 'story')}>{otherOrder}</button>
         </div>
       {/if}
-      <button class="btn small" class:primary={editing} onclick={() => { editing = !editing; name = c?.name ?? ''; }}>{editing ? 'Done' : 'Edit'}</button>
+      <button class="btn small" class:primary={editing} onclick={toggleEdit}>{editing ? 'Done' : 'Edit'}</button>
     </div>
   </header>
 
   {#if editing}
     <div class="card edit">
       <label class="field">Name<div class="row"><input class="input grow" bind:value={name} /><button class="btn" onclick={rename}>Save</button></div>
-        <span class="hint">{c.kind === 'own' ? 'Your own collection.' : 'Leave empty and save to give back the name its source has.'} Below, say what each title is to the story, or take it out. Your changes stand over what TMDB and AniList say.</span>
+        <span class="hint">{c.kind === 'own' ? 'Your own collection.' : 'Leave empty and save to give back the name its source has.'} Below, move a title earlier or later with the arrows, say what it is to the story, or take it out. Your changes stand over what TMDB and AniList say.</span>
       </label>
+      {#if c.ordered}<div><button class="btn small ghost" onclick={resetOrder}>Give back the order its sources have</button></div>{/if}
       {#if c.kind === 'own'}<div><button class="btn small ghost danger" onclick={undo}>Remove this collection</button></div>{/if}
     </div>
   {/if}
 
   {#if next}
     <a class="card upnext" href="#/title/{next.id}">
-      <span class="faint small">Up next{order === 'story' || !twoOrders ? '' : ', in story order'}</span>
+      <span class="faint small">Up next{order === 'story' || !twoOrders ? '' : c.ordered ? ', in your order' : ', in story order'}</span>
       <b>{next.title}</b> <span class="muted">{next.year || ''}</span>
     </a>
   {/if}
 
   <div class="grid">
-    {#each members as m (m.title_id)}
+    {#each members as m, i (m.title_id)}
       {@const t = m.t!}
       <div class="tile">
         <a href="#/title/{t.id}" class:dim={t.offline}>
@@ -110,6 +132,11 @@
           <div class="faint small">{t.year || ''} · {t.kind === 'series' ? 'Series' : 'Film'}</div>
         </a>
         {#if editing}
+          <div class="row moves">
+            <button class="btn small" disabled={i === 0} onclick={() => move(i, -1)} aria-label="Move {t.title} earlier">←</button>
+            <span class="faint small grow">{i + 1}</span>
+            <button class="btn small" disabled={i === members.length - 1} onclick={() => move(i, 1)} aria-label="Move {t.title} later">→</button>
+          </div>
           <select class="input small" value={m.role} onchange={(e) => setRole(t.id, e.currentTarget.value)} aria-label="What {t.title} is to the story">
             {#each ROLES as r}<option value={r}>{r || 'Part of the story'}</option>{/each}
           </select>
@@ -189,6 +216,11 @@
   .seg button.on {
     background: var(--surface);
     color: var(--text);
+  }
+  .moves {
+    gap: 6px;
+    align-items: center;
+    text-align: center;
   }
   .edit {
     margin-top: 16px;

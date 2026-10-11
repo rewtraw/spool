@@ -1284,12 +1284,26 @@ async fn collection_rename(State(app): State<App>, Path(id): Path<u32>, Json(b):
     Ok(Json(json!({"ok": true})))
 }
 
+/// Put a collection's titles in the user's own order. An empty list gives back the story's.
+async fn collection_order(State(app): State<App>, Path(id): Path<u32>, Json(b): Json<Value>) -> R<Value> {
+    let titles: Vec<i64> = b["titles"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default();
+    app.edit_collections(|e| {
+        if titles.is_empty() {
+            e.order.remove(&id);
+        } else {
+            e.order.insert(id, titles);
+        }
+    })?;
+    Ok(Json(json!({"ok": true})))
+}
+
 /// Undo a collection of the user's own. Its titles go back to where the sources put them.
 async fn collection_remove(State(app): State<App>, Path(id): Path<u32>) -> R<Value> {
     app.edit_collections(|e| {
         e.own.retain(|o| o.0 != id);
         e.placed.retain(|_, g| *g != id);
         e.names.remove(&id);
+        e.order.remove(&id);
     })?;
     Ok(Json(json!({"ok": true})))
 }
@@ -1496,6 +1510,7 @@ fn api_routes() -> Router<App> {
         .route("/api/collections", get(collections).post(collection_new))
         .route("/api/collections/add", post(collection_add))
         .route("/api/collections/{id}", put(collection_rename).delete(collection_remove))
+        .route("/api/collections/{id}/order", put(collection_order))
         .route("/api/collections/{id}/art", get(collection_art))
         .route("/api/film-part/{id}/art", get(film_part_art))
         .route("/api/titles/{id}/collection", put(title_collection))

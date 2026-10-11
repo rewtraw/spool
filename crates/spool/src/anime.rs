@@ -236,6 +236,8 @@ pub struct Group {
     /// The member to watch next, once one of them has been watched: the first in story
     /// order that has not been.
     pub next: Option<i64>,
+    /// The user has put its titles in an order of their own, which `story` then follows.
+    pub ordered: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -296,6 +298,8 @@ pub struct Edits {
     pub placed: HashMap<i64, u32>,
     /// Collections the user made, by id and name.
     pub own: Vec<(u32, String)>,
+    /// The order the user put a collection's titles in, by the collection's id.
+    pub order: HashMap<u32, Vec<i64>>,
 }
 
 /// Ids of collections the user made carry this bit.
@@ -493,6 +497,7 @@ pub fn groups(titles: &[Title], from: &Sources) -> Vec<Group> {
             members: members.iter().map(|t| member(t, role.get(&t.anilist[0]).copied().unwrap_or_default(), order.get(&t.anilist[0]).copied().unwrap_or(u32::MAX))).collect(),
             missing,
             next: None,
+            ordered: false,
         });
     }
 
@@ -515,7 +520,7 @@ pub fn groups(titles: &[Title], from: &Sources) -> Vec<Group> {
             .filter(|(_, p)| !titles.iter().any(|t| t.kind == Kind::Movie && t.tmdb_id == Some(p.tmdb_id)))
             .map(|(i, p)| Missing { anilist_id: 0, tmdb_id: Some(p.tmdb_id), title: p.title.clone(), year: p.year, format: "MOVIE".into(), episodes: 1, role: String::new(), poster: p.poster.clone(), story: i as u32, can_add: true })
             .collect();
-        out.push(Group { id, name: c.name, poster: c.poster, fanart: c.fanart, kind: "films".into(), members: members.iter().enumerate().map(|(i, t)| member(t, "", place(t.tmdb_id, i))).collect(), missing, next: None });
+        out.push(Group { id, name: c.name, poster: c.poster, fanart: c.fanart, kind: "films".into(), members: members.iter().enumerate().map(|(i, t)| member(t, "", place(t.tmdb_id, i))).collect(), missing, next: None, ordered: false });
     }
 
     // Where the user has put a title: into one of these, into a collection of their own, or out.
@@ -534,6 +539,14 @@ pub fn groups(titles: &[Title], from: &Sources) -> Vec<Group> {
         }
         if g.poster.is_none() {
             g.poster = g.members.iter().find_map(|m| titles.iter().find(|t| t.id == m.title_id).and_then(|t| t.poster.clone()));
+        }
+        // The user's own order stands in for the story's. A title they have not placed,
+        // one added since, keeps its place after those they have.
+        if let Some(order) = edits.order.get(&g.id).filter(|o| !o.is_empty()) {
+            for m in &mut g.members {
+                m.story = order.iter().position(|id| *id == m.title_id).map(|i| i as u32).unwrap_or(order.len() as u32 + m.story);
+            }
+            g.ordered = true;
         }
         // Once something of it has been watched, what comes next in the story.
         if g.members.iter().any(|m| m.watched) {
@@ -937,6 +950,14 @@ mod tests {
         let named: Vec<(&str, &str, Vec<i64>)> = found.iter().map(|g| (g.name.as_str(), g.kind.as_str(), g.members.iter().map(|m| m.title_id).collect())).collect();
         assert_eq!(named, [("My Heroes", "anime", vec![10, 12]), ("Rainy days", "own", vec![13])]);
         assert_eq!(found[0].members[1].role, "Side story");
+
+        // And puts the titles in an order of their own, which is then the one followed.
+        let mut edits = Edits::default();
+        edits.order.insert(g.id, vec![12, 10]);
+        let found = groups(&titles, &Sources { works: &works, edits, watched: HashSet::from([12]), ..Default::default() });
+        assert!(found[0].ordered);
+        assert_eq!(story(&found[0]), [12, 10, 11], "theirs first, then what they did not place");
+        assert_eq!(found[0].next, Some(10));
     }
 
     #[test]

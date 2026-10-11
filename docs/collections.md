@@ -27,7 +27,7 @@ Titles are shown in order of release. Where following the story would put them d
 
 ### Your own word
 
-The sources are not always right, and not every set you want is one they know. **Edit** on a collection's page lets you rename it, say what each title is to the story, or take a title out. On a title's page you can move it into another collection, into a new one of your own, or out of any. What you say stands over what TMDB and AniList say, and "Where its sources put it" hands a title back to them.
+The sources are not always right, and not every set you want is one they know. **Edit** on a collection's page lets you rename it, say what each title is to the story, or take a title out. While editing, the arrows under each title move it earlier or later; the order you make replaces the story's order for that collection, on the page, for "Up next" and on players, and one button gives the sources' order back. On a title's page you can move it into another collection, into a new one of your own, or out of any. What you say stands over what TMDB and AniList say, and "Where its sources put it" hands a title back to them.
 
 ## On a television
 
