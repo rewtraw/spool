@@ -628,6 +628,166 @@ impl App {
 
     /// Search the indexers for one title and record a verdict for every result.
     /// With `grab`, the best acceptable results are sent to the downloader.
+    /// Ask the indexers again by name, where asking by id left something wanted without an
+    /// acceptable release. What comes back joins `releases` and `judged`.
+    #[allow(clippy::too_many_arguments)]
+    async fn ask_by_name(&self, tc: &TitleContext, scope: Scope, oversize: &HashSet<i64>, user: bool, source: &str, scope_filter: Option<Scope>, releases: &mut Vec<Release>, judged: &mut Vec<Judged>, errors: &mut Vec<String>) {
+        let t = &tc.title;
+        let now = chrono::Utc::now();
+        // A film the indexer has not linked to its id is invisible to a search by id, and anime
+        // films sit outside the movie categories altogether. When the first search turns up
+        // nothing acceptable, ask by name: with the year, then without.
+        if t.kind == Kind::Movie && !tc.compact && !judged.iter().any(|j| j.record.accepted) {
+            let plain: String = t.title.chars().map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut texts = vec![];
+            if t.year > 0 {
+                texts.push(format!("{plain} {}", t.year));
+            }
+            texts.push(plain);
+            for text in texts {
+                let (more, errs) = self.query_all(t.kind, &[Query::MovieText { text }], false, user).await;
+                errors.extend(errs);
+                for r in more {
+                    if !releases.iter().any(|x| x.title == r.title && x.indexer_id == r.indexer_id) {
+                        judged.push(self.judge(tc, &r, source, scope_filter, user));
+                        releases.push(r);
+                    }
+                }
+                if judged.iter().any(|j| j.record.accepted) {
+                    break;
+                }
+            }
+        }
+        // Indexers find a series by its id only where they tagged the release with it, and many
+        // posts are not tagged.
+        if t.kind == Kind::Series {
+            let wanted: Vec<&Episode> = match scope {
+                Scope::Episode(id) => tc.episodes.iter().filter(|e| e.id == id).collect(),
+                Scope::Season(n) => tc.episodes.iter().filter(|e| e.season == n && e.file_id.is_none() && e.has_aired(now)).collect(),
+                Scope::Compact => tc.episodes.iter().filter(|e| e.file_id.is_some_and(|f| oversize.contains(&f))).collect(),
+                _ => tc.episodes.iter().filter(|e| e.season > 0 && e.monitored && t.season_monitored(e.season) && e.file_id.is_none() && e.has_aired(now)).collect(),
+            };
+            let uncovered = |judged: &[Judged]| -> Vec<&Episode> {
+                let have: HashSet<i64> = judged.iter().filter(|j| j.record.accepted).flat_map(|j| j.record.episode_ids.iter().copied()).collect();
+                wanted.iter().filter(|e| !have.contains(&e.id)).copied().collect()
+            };
+            let mut texts: Vec<String> = vec![];
+            let left = uncovered(&judged);
+            if !left.is_empty() {
+                texts.push(match (scope, left.as_slice()) {
+                    (Scope::Episode(_), [e]) => format!("{} S{:02}E{:02}", t.title, e.season, e.episode),
+                    _ => t.title.clone(),
+                });
+                // Anime is as often posted under its romanised name as its English one.
+                let other = t.anilist.first().and_then(|a| self.db.anime(*a).ok().flatten()).and_then(|m| m.names.into_iter().find(|n| plain(n) != plain(&t.title)));
+                if let (Some(name), false) = (other, matches!(scope, Scope::Episode(_))) {
+                    texts.push(name);
+                }
+            }
+            for round in 0..2 {
+                if texts.is_empty() {
+                    break;
+                }
+                let queries: Vec<Query> = texts.drain(..).map(|text| Query::TvText { text }).collect();
+                let (more, errs) = self.query_all(t.kind, &queries, false, user).await;
+                errors.extend(errs);
+                for r in more {
+                    if !releases.iter().any(|x| x.title == r.title && x.indexer_id == r.indexer_id) {
+                        judged.push(self.judge(tc, &r, source, scope_filter, user));
+                        releases.push(r);
+                    }
+                }
+                // A long series returns more than one page of names; narrow to the seasons still short.
+                if round == 0 && !matches!(scope, Scope::Episode(_)) {
+                    let mut seasons: Vec<u32> = uncovered(&judged).iter().map(|e| e.season).collect();
+                    seasons.sort_unstable();
+                    seasons.dedup();
+                    texts = seasons.into_iter().take(3).map(|n| format!("{} S{n:02}", t.title)).collect();
+                }
+            }
+        }
+    }
+
+    /// Send the best of what was judged to download. Gives what was started, what could not
+    /// be, in words, and the size of each release that was refused with the reason.
+    async fn grab_best(&self, tc: &TitleContext, judged: &[Judged], may_queue: bool) -> (Vec<Acquisition>, Vec<String>, Vec<(u64, String)>) {
+        let (t, title_id) = (&tc.title, tc.title.id);
+        let mut grabbed: Vec<Acquisition> = vec![];
+        let mut grab_errors: Vec<String> = vec![];
+        let mut blocked: Vec<(u64, String)> = vec![];
+        let policy = self.settings.general().proper_policy;
+        // A chosen release that turns out to be gone from Usenet is set aside and the choice
+        // made again from what is left, a few times at most.
+        let mut dead: HashSet<String> = HashSet::new();
+        let mut no_room = false;
+        for _ in 0..4 {
+            let claimed: HashSet<i64> = grabbed.iter().flat_map(|a| a.episode_ids.iter().copied()).collect();
+            let live: Vec<&Judged> = judged
+                .iter()
+                .filter(|j| !dead.contains(&j.record.release.title))
+                .filter(|j| if j.record.episode_ids.is_empty() { grabbed.is_empty() } else { !j.record.episode_ids.iter().any(|id| claimed.contains(id)) })
+                .collect();
+            let mut any_gone = false;
+            for j in pick(&live, &tc.profile, policy) {
+                match self.grab(&j.record, &tc.title, if tc.compact { COMPACT_REASON } else { "best acceptable release from search" }, may_queue).await {
+                    Ok(Some(a)) => grabbed.push(a),
+                    Ok(None) => {}
+                    Err(e) if e.downcast_ref::<NoSpace>().is_some() => {
+                        // Not a fault, and the next release in line may be small enough.
+                        tracing::debug!(release = %j.record.release.title, "{e}");
+                        grab_errors.push(format!("Could not start {}: {e}", j.record.release.title));
+                        blocked.push((j.record.release.size, e.to_string()));
+                        dead.insert(j.record.release.title.clone());
+                        no_room = true;
+                    }
+                    Err(e) if e.downcast_ref::<Gone>().is_some() => {
+                        tracing::info!(release = %j.record.release.title, "{e}; choosing again");
+                        dead.insert(j.record.release.title.clone());
+                        any_gone = true;
+                    }
+                    Err(e) => {
+                        tracing::warn!(release = %j.record.release.title, error = %e, "grab failed");
+                        grab_errors.push(format!("Could not start {}: {e}", j.record.release.title));
+                        blocked.push((j.record.release.size, e.to_string()));
+                        dead.insert(j.record.release.title.clone());
+                    }
+                }
+            }
+            if !any_gone {
+                break;
+            }
+        }
+        // A film posted in parts, each part a release of its own: the others come with it.
+        // They share a name but for the number.
+        if t.kind == Kind::Movie && grabbed.len() == 1 {
+            let own_title = t.title.to_lowercase().contains("part");
+            if let Some((n, _, key)) = crate::local::part_of_release(&grabbed[0].release.title).filter(|p| !(p.1 && own_title)) {
+                let mut seen: HashSet<u32> = HashSet::from([n]);
+                let rest: Vec<&Judged> = judged.iter().filter(|j| j.record.accepted && crate::local::part_of_release(&j.record.release.title).is_some_and(|p| p.2 == key && seen.insert(p.0))).collect();
+                for j in rest {
+                    match self.grab(&j.record, &tc.title, "another part of the same film", may_queue).await {
+                        Ok(Some(a)) => grabbed.push(a),
+                        Ok(None) => {}
+                        Err(e) => grab_errors.push(format!("Could not start {}: {e}", j.record.release.title)),
+                    }
+                }
+            }
+        }
+        // Remember a title turned away only for space, so the backlog leaves it alone until
+        // the disk has more to give.
+        if no_room && grabbed.is_empty() {
+            if let Some(headroom) = self.space_headroom() {
+                if self.space_blocked.lock().insert(title_id, headroom).is_none() {
+                    tracing::info!(title = %tc.title.title, "nothing for this title fits on the disk right now; leaving it until space frees up");
+                }
+            }
+        } else {
+            self.space_blocked.lock().remove(&title_id);
+        }
+    
+        (grabbed, grab_errors, blocked)
+    }
+
     /// Which of a series' episodes a release holds, going by its name.
     pub(crate) fn episodes_of(&self, tc: &TitleContext, release: &Release) -> Vec<i64> {
         self.judge(tc, release, "manual", None, true).record.episode_ids
@@ -717,80 +877,8 @@ impl App {
         let source = if user { "manual" } else { "search" };
         let mut judged: Vec<Judged> = releases.iter().map(|r| self.judge(&tc, r, source, scope_filter, user)).collect();
 
-        // Indexers find a series by its id only where they tagged the release with it, and many
-        // posts are not tagged. If the id search leaves wanted episodes without an acceptable
-        // release, ask again by name.
         let mut errors = errors;
-        // A film the indexer has not linked to its id is invisible to a search by id, and anime
-        // films sit outside the movie categories altogether. When the first search turns up
-        // nothing acceptable, ask by name: with the year, then without.
-        if t.kind == Kind::Movie && !tc.compact && !judged.iter().any(|j| j.record.accepted) {
-            let plain: String = t.title.chars().map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
-            let mut texts = vec![];
-            if t.year > 0 {
-                texts.push(format!("{plain} {}", t.year));
-            }
-            texts.push(plain);
-            for text in texts {
-                let (more, errs) = self.query_all(t.kind, &[Query::MovieText { text }], false, user).await;
-                errors.extend(errs);
-                for r in more {
-                    if !releases.iter().any(|x| x.title == r.title && x.indexer_id == r.indexer_id) {
-                        judged.push(self.judge(&tc, &r, source, scope_filter, user));
-                        releases.push(r);
-                    }
-                }
-                if judged.iter().any(|j| j.record.accepted) {
-                    break;
-                }
-            }
-        }
-        if t.kind == Kind::Series {
-            let wanted: Vec<&Episode> = match scope {
-                Scope::Episode(id) => tc.episodes.iter().filter(|e| e.id == id).collect(),
-                Scope::Season(n) => tc.episodes.iter().filter(|e| e.season == n && e.file_id.is_none() && e.has_aired(now)).collect(),
-                Scope::Compact => tc.episodes.iter().filter(|e| e.file_id.is_some_and(|f| oversize.contains(&f))).collect(),
-                _ => tc.episodes.iter().filter(|e| e.season > 0 && e.monitored && t.season_monitored(e.season) && e.file_id.is_none() && e.has_aired(now)).collect(),
-            };
-            let uncovered = |judged: &[Judged]| -> Vec<&Episode> {
-                let have: HashSet<i64> = judged.iter().filter(|j| j.record.accepted).flat_map(|j| j.record.episode_ids.iter().copied()).collect();
-                wanted.iter().filter(|e| !have.contains(&e.id)).copied().collect()
-            };
-            let mut texts: Vec<String> = vec![];
-            let left = uncovered(&judged);
-            if !left.is_empty() {
-                texts.push(match (scope, left.as_slice()) {
-                    (Scope::Episode(_), [e]) => format!("{} S{:02}E{:02}", t.title, e.season, e.episode),
-                    _ => t.title.clone(),
-                });
-                // Anime is as often posted under its romanised name as its English one.
-                let other = t.anilist.first().and_then(|a| self.db.anime(*a).ok().flatten()).and_then(|m| m.names.into_iter().find(|n| plain(n) != plain(&t.title)));
-                if let (Some(name), false) = (other, matches!(scope, Scope::Episode(_))) {
-                    texts.push(name);
-                }
-            }
-            for round in 0..2 {
-                if texts.is_empty() {
-                    break;
-                }
-                let queries: Vec<Query> = texts.drain(..).map(|text| Query::TvText { text }).collect();
-                let (more, errs) = self.query_all(t.kind, &queries, false, user).await;
-                errors.extend(errs);
-                for r in more {
-                    if !releases.iter().any(|x| x.title == r.title && x.indexer_id == r.indexer_id) {
-                        judged.push(self.judge(&tc, &r, source, scope_filter, user));
-                        releases.push(r);
-                    }
-                }
-                // A long series returns more than one page of names; narrow to the seasons still short.
-                if round == 0 && !matches!(scope, Scope::Episode(_)) {
-                    let mut seasons: Vec<u32> = uncovered(&judged).iter().map(|e| e.season).collect();
-                    seasons.sort_unstable();
-                    seasons.dedup();
-                    texts = seasons.into_iter().take(3).map(|n| format!("{} S{n:02}", t.title)).collect();
-                }
-            }
-        }
+        self.ask_by_name(&tc, scope, &oversize, user, source, scope_filter, &mut releases, &mut judged, &mut errors).await;
         // The results themselves can show that a film is posted in episodes. Remember it and
         // judge them again, so that one is not downloaded to find out.
         if t.kind == Kind::Movie && !t.in_episodes && posted_in_episodes(t, &judged) {
@@ -813,80 +901,7 @@ impl App {
         self.db.record_decisions(&judged.iter().map(|j| j.record.clone()).collect::<Vec<_>>())?;
         self.emit(Event::Decisions { title_id });
 
-        let mut grabbed: Vec<Acquisition> = vec![];
-        let mut grab_errors: Vec<String> = vec![];
-        let mut blocked: Vec<(u64, String)> = vec![];
-        if grab {
-            let policy = self.settings.general().proper_policy;
-            // A chosen release that turns out to be gone from Usenet is set aside and the choice
-            // made again from what is left, a few times at most.
-            let mut dead: HashSet<String> = HashSet::new();
-            let mut no_room = false;
-            for _ in 0..4 {
-                let claimed: HashSet<i64> = grabbed.iter().flat_map(|a| a.episode_ids.iter().copied()).collect();
-                let live: Vec<&Judged> = judged
-                    .iter()
-                    .filter(|j| !dead.contains(&j.record.release.title))
-                    .filter(|j| if j.record.episode_ids.is_empty() { grabbed.is_empty() } else { !j.record.episode_ids.iter().any(|id| claimed.contains(id)) })
-                    .collect();
-                let mut any_gone = false;
-                for j in pick(&live, &tc.profile, policy) {
-                    match self.grab(&j.record, &tc.title, if tc.compact { COMPACT_REASON } else { "best acceptable release from search" }, may_queue).await {
-                        Ok(Some(a)) => grabbed.push(a),
-                        Ok(None) => {}
-                        Err(e) if e.downcast_ref::<NoSpace>().is_some() => {
-                            // Not a fault, and the next release in line may be small enough.
-                            tracing::debug!(release = %j.record.release.title, "{e}");
-                            grab_errors.push(format!("Could not start {}: {e}", j.record.release.title));
-                            blocked.push((j.record.release.size, e.to_string()));
-                            dead.insert(j.record.release.title.clone());
-                            no_room = true;
-                        }
-                        Err(e) if e.downcast_ref::<Gone>().is_some() => {
-                            tracing::info!(release = %j.record.release.title, "{e}; choosing again");
-                            dead.insert(j.record.release.title.clone());
-                            any_gone = true;
-                        }
-                        Err(e) => {
-                            tracing::warn!(release = %j.record.release.title, error = %e, "grab failed");
-                            grab_errors.push(format!("Could not start {}: {e}", j.record.release.title));
-                            blocked.push((j.record.release.size, e.to_string()));
-                            dead.insert(j.record.release.title.clone());
-                        }
-                    }
-                }
-                if !any_gone {
-                    break;
-                }
-            }
-            // A film posted in parts, each part a release of its own: the others come with it.
-            // They share a name but for the number.
-            if t.kind == Kind::Movie && grabbed.len() == 1 {
-                let own_title = t.title.to_lowercase().contains("part");
-                if let Some((n, _, key)) = crate::local::part_of_release(&grabbed[0].release.title).filter(|p| !(p.1 && own_title)) {
-                    let mut seen: HashSet<u32> = HashSet::from([n]);
-                    let rest: Vec<&Judged> = judged.iter().filter(|j| j.record.accepted && crate::local::part_of_release(&j.record.release.title).is_some_and(|p| p.2 == key && seen.insert(p.0))).collect();
-                    for j in rest {
-                        match self.grab(&j.record, &tc.title, "another part of the same film", may_queue).await {
-                            Ok(Some(a)) => grabbed.push(a),
-                            Ok(None) => {}
-                            Err(e) => grab_errors.push(format!("Could not start {}: {e}", j.record.release.title)),
-                        }
-                    }
-                }
-            }
-            // Remember a title turned away only for space, so the backlog leaves it alone until
-            // the disk has more to give.
-            if no_room && grabbed.is_empty() {
-                if let Some(headroom) = self.space_headroom() {
-                    if self.space_blocked.lock().insert(title_id, headroom).is_none() {
-                        tracing::info!(title = %tc.title.title, "nothing for this title fits on the disk right now; leaving it until space frees up");
-                    }
-                }
-            } else {
-                self.space_blocked.lock().remove(&title_id);
-            }
-        }
+        let (grabbed, grab_errors, blocked) = if grab { self.grab_best(&tc, &judged, may_queue).await } else { (vec![], vec![], vec![]) };
         if !grabbed.is_empty() {
             self.archive_runner_ups(&tc.title, runner_ups(&judged, &grabbed, &tc.profile, self.settings.general().proper_policy, self.settings.general().archive_runner_ups as usize));
         }
