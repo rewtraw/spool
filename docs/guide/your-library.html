@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your library and what Spool does to it · Spool</title>
+<meta name="description" content="This page is for anyone pointing Spool at films and shows they already have. It says how to bring a library in, exactly what Spool changes on disk, what it never touches, and how to get something back.">
+<link rel="icon" href="../assets/mark.svg">
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
+    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
+      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(../assets/mark.svg) center / contain no-repeat; mask: url(../assets/mark.svg) center / contain no-repeat; }
+  .brand small { font: 500 15px/1 var(--sans); color: var(--muted); margin-left: 4px; }
+  header nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
+  header nav a:hover { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 40px; }
+  .side { font-size: 14.5px; }
+  .side .inner { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; display: grid; gap: 2px; padding-bottom: 24px; }
+  .side summary { display: none; }
+  .side p { margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+  .side a:hover { color: var(--text); }
+  .side a.on { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+  .side a.sub { padding: 3px 10px 3px 22px; font-size: 13.5px; }
+
+  article { max-width: 740px; min-width: 0; }
+  h1 { font: 600 clamp(32px, 4.6vw, 44px)/1.1 var(--serif); letter-spacing: -0.012em; margin: 0 0 20px; text-wrap: balance; }
+  h2 { font: 600 26px/1.2 var(--serif); margin: 52px 0 12px; padding-top: 4px; }
+  h3 { font: 600 19px/1.3 var(--serif); margin: 34px 0 8px; }
+  h2 a:hover::after, h3 a:hover::after { content: ' #'; color: var(--faint); }
+  h1 + p { font-size: 18.5px; color: var(--muted); }
+  p, ul, ol { margin: 0 0 16px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 5px 0; }
+  li > p { margin-bottom: 8px; }
+  li > ul, li > ol, li > .scroll { margin-top: 8px; }
+  strong { font-weight: 600; }
+  article p a, article li a, article td a { color: var(--accent); }
+  article p a:hover, article li a:hover, article td a:hover { text-decoration: underline; }
+  code { font: 0.88em var(--mono); background: var(--raised); padding: 2px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  pre { margin: 0 0 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14px/1.7 var(--mono); overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .scroll { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--surface); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { min-width: 150px; }
+
+  .around { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 56px; }
+  .around a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: 600 17px/1.3 var(--serif); }
+  .around a:hover { border-color: var(--muted); }
+  .around a span { display: block; font: 600 12px/1.6 var(--sans); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); }
+  .around .next { text-align: right; }
+
+  footer { margin-top: 72px; padding: 26px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: flex; gap: 8px 26px; flex-wrap: wrap; }
+  footer a { color: var(--accent); }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 22px; padding-top: 20px; }
+    .brand small { display: none; }
+    .side { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .side summary { display: block; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+    .side .inner { position: static; max-height: none; padding: 0 8px 12px; }
+    .side a.sub { display: none; }
+    h2 { margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<!-- Made from docs/your-library.md by web/scripts/build-docs.mjs. Change that file, not this one. -->
+<div class="wrap">
+  <header>
+    <a class="brand" href="../"><span class="mark"></span>Spool<small>Guides</small></a>
+    <nav>
+      <a href="./">All guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <details open>
+        <summary>Guides</summary>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a class="on" aria-current="page" href="your-library.html">Your library</a><a class="sub" href="#the-short-answer">The short answer</a><a class="sub" href="#bringing-in-a-library-you-already-have">Bringing in a library you already have</a><a class="sub" href="#what-spool-changes-and-when">What Spool changes, and when</a><a class="sub" href="#what-spool-never-does">What Spool never does</a><a class="sub" href="#what-can-go-wrong">What can go wrong</a><a class="sub" href="#getting-something-back">Getting something back</a><a class="sub" href="#a-careful-way-in">A careful way in</a><p>Using it</p><a href="locations.html">More than one place</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+      </details>
+    </aside>
+    <article>
+<h1>Your library and what Spool does to it</h1>
+<p>This page is for anyone pointing Spool at films and shows they already have. It says how to bring a library in, exactly what Spool changes on disk, what it never touches, and how to get something back.</p>
+<h2 id="the-short-answer"><a href="#the-short-answer">The short answer</a></h2>
+<ul>
+<li>In shadow mode, and on a location marked as only read, Spool changes nothing on disk.</li>
+<li>On a location it manages, in active mode, Spool adds files, replaces a film or episode with a better copy when the title&#39;s profile allows it, and deletes what you tell it to. Replaced and deleted files wait in a recycle folder for seven days.</li>
+<li>It never moves or renames the files already in your library, and never touches trailers, extras, artwork or a media server&#39;s notes, with one small exception described <a href="#one-exception-files-named-after-the-film">below</a>.</li>
+</ul>
+<p>The real risks are an unwanted upgrade and a folder matched to the wrong film. Both are avoided by bringing titles in unmonitored and looking before you switch things on.</p>
+<h2 id="bringing-in-a-library-you-already-have"><a href="#bringing-in-a-library-you-already-have">Bringing in a library you already have</a></h2>
+<p>There are three ways in. None of them moves, renames or deletes anything.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>You have</th>
+<th>Use</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Radarr and Sonarr</td>
+<td><code>spool migrate</code></td>
+<td>Copies their catalog, profiles, indexers and Usenet servers. Titles keep the monitoring they had. See <a href="getting-started.html#coming-from-radarr-sonarr-and-sabnzbd">Getting started</a>.</td>
+</tr>
+<tr>
+<td>Plex</td>
+<td>Settings, Plex, <strong>Track in Spool</strong></td>
+<td>Adds a title Plex has, unmonitored, pointing at the folder Plex plays it from. See <a href="plex.html">Beside Plex</a>.</td>
+</tr>
+<tr>
+<td>Folders and nothing else</td>
+<td>Settings, General, More locations, <strong>Look for films and shows</strong></td>
+<td>Reads each folder&#39;s name and any notes inside it, and offers what it recognised for you to add. See <a href="locations.html">A library in more than one place</a>.</td>
+</tr>
+</tbody></table></div>
+<p>The third way works on further locations, not on the main folders. If your only library is a set of plain folders, give Spool an empty main folder for new titles and add the existing library as a location.</p>
+<h2 id="what-spool-changes-and-when"><a href="#what-spool-changes-and-when">What Spool changes, and when</a></h2>
+<p>Everything in this table needs active mode and a location Spool manages.</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>What</th>
+<th>When</th>
+<th>Where the old file goes</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Creates a title&#39;s folder and files a download into it</td>
+<td>A monitored title is missing and an acceptable release is found</td>
+<td>Nothing is replaced</td>
+</tr>
+<tr>
+<td>Renames the downloaded file to your naming format</td>
+<td>On import, if Naming has &quot;Rename files when importing&quot; on</td>
+<td>Nothing is replaced</td>
+</tr>
+<tr>
+<td>Replaces a film or an episode with a better copy</td>
+<td>The title is monitored, its profile allows upgrades, and the file is below the profile&#39;s cutoff</td>
+<td>Recycle folder</td>
+</tr>
+<tr>
+<td>Replaces a file with a smaller copy</td>
+<td>You ask for it, with Find smaller copies</td>
+<td>Recycle folder</td>
+</tr>
+<tr>
+<td>Writes subtitle files beside a film</td>
+<td>The release brought them, or you set languages under Subtitles</td>
+<td>Nothing is replaced</td>
+</tr>
+<tr>
+<td>Deletes a file</td>
+<td>You ask for it: Delete files, or removing a title and choosing to delete its files</td>
+<td>Recycle folder</td>
+</tr>
+</tbody></table></div>
+<p>A title that is not monitored is never searched for, downloaded or upgraded. Removing a title from Spool leaves its files where they are unless you ask otherwise.</p>
+<h2 id="what-spool-never-does"><a href="#what-spool-never-does">What Spool never does</a></h2>
+<ul>
+<li><strong>Move or rename files already in the library.</strong> <code>spool check-paths</code>, and the same check under Settings, Maintenance, only report where files differ from the naming format.</li>
+<li><strong>Touch what else is in the folder.</strong> Trailers, featurettes, samples, posters, backdrops, theme music, <code>.nfo</code> files and <code>.plexmatch</code> are recognised and left alone. An upgrade replaces the film&#39;s main file and nothing else. Second versions of a film are left alone too. <a href="local-files.html">Files Spool recognises</a> lists every name.</li>
+<li><strong>Write to a location marked as only read.</strong> No downloads, upgrades, renames, subtitles or deletions happen there.</li>
+<li><strong>Write when the disk is missing.</strong> If the disk named in the settings is not mounted, Spool pauses. It does not create stand-in folders somewhere else.</li>
+<li><strong>Take a library that has gone away for one that needs downloading again.</strong> Titles on a location that cannot be reached are shown as offline and left alone.</li>
+</ul>
+<h3 id="one-exception-files-named-after-the-film"><a href="#one-exception-files-named-after-the-film">One exception: files named after the film</a></h3>
+<p>Plex, Jellyfin and Kodi attach artwork and notes to a film by name: <code>Film (1999)-fanart.jpg</code> and <code>Film (1999).nfo</code> belong to <code>Film (1999).mkv</code>. When an upgrade gives the film&#39;s file a new name, Spool renames those companions to match, so the media server still finds them. It never overwrites a file to do so, and does it only on locations it manages.</p>
+<h2 id="what-can-go-wrong"><a href="#what-can-go-wrong">What can go wrong</a></h2>
+<p><strong>An upgrade you did not want.</strong> If a title is monitored and its profile allows upgrades, Spool replaces a file it judges worse than the cutoff. A library you are happy with should come in unmonitored, or on a location that is only read. Monitor titles one at a time, or change the profile so that upgrades are off, before monitoring many.</p>
+<p><strong>A folder matched to the wrong film.</strong> Two films share a name, or a folder is named carelessly. When looking through a location, Spool adds only what it is sure of, lists the rest as unclear for you to choose, and notes when a file runs much longer or shorter than the film it was matched to. A wrong match changes nothing on disk: the title shows the wrong details until you remove it and add the right one. It matters more if the title is monitored, because Spool would then look for the wrong film.</p>
+<p><strong>A file that disappears while its title is monitored.</strong> The library scan notices files added and removed outside Spool. A monitored title whose file has gone from a disk that is there counts as missing, and Spool looks for it again. Stop monitoring a title before deleting its file by hand, or delete it through Spool, which does that for you.</p>
+<p><strong>Two programs managing one folder.</strong> Stop Radarr and Sonarr before making Spool active. Plex and Jellyfin only read, and can stay.</p>
+<p><strong>An extra taken for the film.</strong> Spool tells extras from the film by the folder and file names media servers use. A featurette with an unmarked name, loose in a film&#39;s folder, looks like a second version of the film. It is kept and never replaced, and it is listed on the title&#39;s page as a version, where you can see it.</p>
+<h2 id="getting-something-back"><a href="#getting-something-back">Getting something back</a></h2>
+<ul>
+<li><strong>The recycle folder.</strong> Replaced and deleted files are moved to a <code>.spool-recycle</code> folder in the library they came from, and removed after the number of days set under Settings, General, Folders (seven unless you change it). Setting it to 0 deletes at once, with no way back.</li>
+<li><strong>The import journal.</strong> What an import will move and replace is written down before any file moves. An import interrupted by a restart or a power cut is finished at the next start.</li>
+<li><strong>The archive.</strong> Spool keeps the NZB of everything it downloads, so a file deleted to make room can be downloaded again while the post is still on Usenet.</li>
+<li><strong>Backups.</strong> The database is backed up each night into Spool&#39;s data folder, and to a second folder if you name one.</li>
+<li><strong>History.</strong> Every import, replacement and deletion is listed under Activity and on the title&#39;s page, with the reason.</li>
+</ul>
+<h2 id="a-careful-way-in"><a href="#a-careful-way-in">A careful way in</a></h2>
+<ol>
+<li>Install Spool and leave it in shadow mode.</li>
+<li>Bring the library in by one of the three ways above, unmonitored, or as a location that is only read.</li>
+<li>Open a few titles. Check the details are right and that the page lists the files you expect, with any extras under &quot;Also in the folder&quot;.</li>
+<li>Run the check under Settings, Maintenance, File locations to see how your naming compares with Spool&#39;s.</li>
+<li>Add a title you do not have, monitored, and read the verdicts Spool gives its releases.</li>
+<li>Switch to active. Monitor more as you come to trust it.</li>
+</ol>
+<nav class="around" aria-label="Other guides"><a class="prev" href="getting-started.html"><span>Before</span>Getting started</a><a class="next" href="locations.html"><span>Next</span>A library in more than one place</a></nav>
+    </article>
+  </div>
+  <footer>
+    <a href="https://github.com/rewtraw/spool/blob/main/docs/your-library.md">Change this page on GitHub</a>
+    <a href="../">Spool's front page</a>
+    <span>Spool is free software under the GNU GPL v3.</span>
+  </footer>
+</div>
+<script>if (matchMedia('(max-width: 860px)').matches) document.querySelector('.side details').open = false;</script>
+</body>
+</html>

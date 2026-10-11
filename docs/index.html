@@ -75,6 +75,9 @@
   .grid div { background: var(--bg); padding: 26px 24px; }
   .grid h3 { font: 600 19px/1.25 var(--serif); margin: 0 0 8px; }
   .grid p { margin: 0; color: var(--muted); font-size: 15.5px; }
+  .grid > a { background: var(--bg); padding: 26px 24px; }
+  .grid > a:hover { background: var(--surface); }
+  .grid > a h3::after { content: ' →'; color: var(--accent); }
 
   .show { display: grid; grid-template-columns: 5fr 7fr; gap: 48px; align-items: center; }
   .show.flip { grid-template-columns: 7fr 5fr; }
@@ -87,8 +90,9 @@
   pre { margin: 28px 0 0; padding: 22px 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14.5px/1.75 var(--mono); overflow-x: auto; }
   pre .c { color: var(--faint); }
   .note { color: var(--muted); font-size: 15.5px; max-width: 700px; margin: 18px 0 0; }
-  .note a, footer a { color: var(--accent); }
-  .note a:hover, footer a:hover { text-decoration: underline; }
+  .note a, footer a, a.more { color: var(--accent); }
+  .note a:hover, footer a:hover, a.more:hover { text-decoration: underline; }
+  a.more { display: block; margin-top: 10px; font-size: 14.5px; }
 
   footer { margin-top: 96px; padding: 30px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: grid; gap: 8px; }
 
@@ -111,6 +115,7 @@
     <nav>
       <a class="hide" href="#how">How it works</a>
       <a class="hide" href="#start">Get started</a>
+      <a href="guide/">Guides</a>
       <a href="https://github.com/rewtraw/spool">GitHub</a>
     </nav>
   </header>
@@ -120,6 +125,7 @@
     <p class="lede">Spool finds, downloads, verifies and files movies and television. <b>One process, one queue and one web app</b> where there used to be three.</p>
     <div class="cta">
       <a class="btn primary" href="#start">Get started</a>
+      <a class="btn" href="guide/">Read the guides</a>
       <a class="btn" href="https://github.com/rewtraw/spool">View the source</a>
     </div>
   </div>
@@ -223,12 +229,24 @@
   <section>
     <p class="eyebrow">On the television</p>
     <h2>Plays what it files.</h2>
-    <p class="sub">Spool can answer as a Jellyfin server, so a player such as Infuse on Apple TV opens the library directly. There is no second server to run and no folders to share.</p>
+    <p class="sub">Spool can answer as a Jellyfin server, so a player such as Infuse on Apple TV opens the library directly. There is no second server to run and no folders to share. <a class="more" href="guide/players.html">Playing on a television</a></p>
     <div class="grid">
       <div><h3>Found by itself</h3><p>Players on the same network see Spool without being given an address. It has its own port and its own sign-in, which opens nothing but playback.</p></div>
       <div><h3>The library as Spool knows it</h3><p>Posters, cast, scores, collections, seasons and episodes, with search, recently added, continue watching and next up.</p></div>
       <div><h3>Every file as it is</h3><p>Nothing is transcoded. Each version of a film is offered, with its subtitles, and where you stopped is remembered for next time.</p></div>
     </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">The library you already have</p>
+    <h2>Takes your folders as it finds them.</h2>
+    <p class="sub">Spool can look through a disk or a share from a NAS and bring in the films and shows already there, where they lie. Nothing is moved or renamed to suit it.</p>
+    <div class="grid">
+      <div><h3>In more than one place</h3><p>Add further disks and shares beside the main library. Each is managed like the main one or only read, in which case Spool lists and plays what is there and writes nothing. <a class="more" href="guide/locations.html">More than one place</a></p></div>
+      <div><h3>Away means left alone</h3><p>When a NAS is switched off its titles are shown as offline. Nothing is searched for or downloaded again because files cannot be seen. <a class="more" href="guide/locations.html#when-a-location-cannot-be-reached">When a location is away</a></p></div>
+      <div><h3>Knows what else is in a folder</h3><p>Trailers, extras, your own posters and a media server's notes are recognised under the names Plex, Jellyfin, Emby and Kodi use. An upgrade replaces the film and nothing else. <a class="more" href="guide/local-files.html">Every name it knows</a></p></div>
+    </div>
+    <p class="note">Before pointing Spool at files you care about, read <a href="guide/your-library.html">what it changes and what it never touches</a>.</p>
   </section>
 
   <section class="show">
@@ -241,6 +259,7 @@
         <li><b>Add, search, download, manage</b> the queue, the archive and Plex.</li>
         <li><b>Always behind a key</b>, with a read-only key if you want one. Deleting files needs explicit confirmation.</li>
       </ul>
+      <a class="more" href="guide/assistants.html">AI assistants</a>
     </div>
     <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/title.png" alt="A title page showing its file, the releases considered and the actions available" width="1440" height="960"></div>
   </section>
@@ -257,7 +276,21 @@ docker compose up -d --build            <span class="c"># http://localhost:7979<
 <span class="c"># or from source: Rust, Bun, and par2, 7zz and ffmpeg on the PATH</span>
 (cd web && bun install && bun run build)
 cargo run --release -p spool -- serve</pre>
-    <p class="note">Add your folders, a Usenet provider and a Newznab indexer in Settings. Spool starts in shadow mode, recording what it would do and changing nothing, until you switch it to active. Coming from Radarr, Sonarr and SABnzbd? <code>spool migrate</code> brings over your catalog, profiles, indexers and servers. The <a href="https://github.com/rewtraw/spool#readme">README</a> has the details.</p>
+    <p class="note">Add your folders, a Usenet provider and a Newznab indexer in Settings. Spool starts in shadow mode, recording what it would do and changing nothing, until you switch it to active. Coming from Radarr, Sonarr and SABnzbd? <code>spool migrate</code> brings over your catalog, profiles, indexers and servers. <a href="guide/getting-started.html">Getting started</a> has every step.</p>
+  </section>
+
+  <section id="guides">
+    <p class="eyebrow">Guides</p>
+    <h2>How to set it up, and what it does with your files.</h2>
+    <div class="grid">
+      <a href="guide/getting-started.html"><h3>Getting started</h3><p>Installing, the first settings, shadow mode, coming from Radarr and Sonarr, and running it as a service.</p></a>
+      <a href="guide/your-library.html"><h3>Your library</h3><p>Bringing in what you have, what Spool changes on disk, what it never touches, and how to get something back.</p></a>
+      <a href="guide/locations.html"><h3>More than one place</h3><p>Another disk or a share from a NAS, managed or only read, and what happens while it is switched off.</p></a>
+      <a href="guide/players.html"><h3>On a television</h3><p>Serving the library to Infuse and other players that speak to Jellyfin, at home and away.</p></a>
+      <a href="guide/plex.html"><h3>Beside Plex</h3><p>What Spool reads from a Plex server you already run, and what it asks of it.</p></a>
+      <a href="guide/local-files.html"><h3>Files it recognises</h3><p>Every name it knows for trailers, extras, artwork, notes and theme music in a title's folder.</p></a>
+    </div>
+    <p class="note">Also: <a href="guide/assistants.html">AI assistants</a>, <a href="guide/api.html">the HTTP API</a>, <a href="guide/architecture.html">how Spool is put together</a> and <a href="guide/">the full list</a>.</p>
   </section>
 
   <footer>

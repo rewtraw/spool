@@ -26,6 +26,21 @@
 <img src="docs/assets/archive.png" width="49%" alt="The archive">
 </p>
 
+## Guides
+
+The guides are at **[rewtraw.github.io/spool/guide](https://rewtraw.github.io/spool/guide/)**, and in [docs/](docs/README.md) as Markdown.
+
+| | |
+| --- | --- |
+| [Getting started](docs/getting-started.md) | Installing, the first settings, shadow mode, migrating, running as a service |
+| [Your library and what Spool does to it](docs/your-library.md) | What it changes, what it never touches, how to undo things |
+| [A library in more than one place](docs/locations.md) | Further disks and NAS shares, managed or only read |
+| [Playing on a television](docs/players.md) | Infuse and other players that speak to Jellyfin |
+| [Beside Plex](docs/plex.md) | What Spool reads from Plex and asks of it |
+| [Files Spool recognises](docs/local-files.md) | Trailers, extras, artwork, notes and theme music |
+| [AI assistants](docs/assistants.md) · [The HTTP API](docs/api.md) | For programs |
+| [How Spool is put together](docs/architecture.md) · [Ideas](docs/ideas.md) | For contributors |
+
 ## Status
 
 Spool runs one household's library day to day. It is young, and it is built for a single trusted user on a private network. It runs on macOS and Linux, natively or in a container; the test suite runs on both. It supports Usenet only (no torrents), Newznab indexers, TMDB for movies and TVmaze for series.
@@ -112,6 +127,7 @@ If the library is on a removable disk, set `SPOOL_SIGN_IDENTITY` to a stable cod
 ```sh
 cargo test --workspace     # needs ffmpeg, par2 and 7zz for the full suite
 (cd web && bun run check)
+(cd web && bun run docs)   # after changing a guide in docs/: rebuilds the pages in docs/guide
 ```
 
 | Path | What it is |

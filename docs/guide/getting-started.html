@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting started · Spool</title>
+<meta name="description" content="Spool runs on macOS and Linux, natively or in a container. It needs a Usenet provider, a Newznab indexer and somewhere to keep the library. It does not use torrents.">
+<link rel="icon" href="../assets/mark.svg">
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
+    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
+      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(../assets/mark.svg) center / contain no-repeat; mask: url(../assets/mark.svg) center / contain no-repeat; }
+  .brand small { font: 500 15px/1 var(--sans); color: var(--muted); margin-left: 4px; }
+  header nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
+  header nav a:hover { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 40px; }
+  .side { font-size: 14.5px; }
+  .side .inner { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; display: grid; gap: 2px; padding-bottom: 24px; }
+  .side summary { display: none; }
+  .side p { margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+  .side a:hover { color: var(--text); }
+  .side a.on { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+  .side a.sub { padding: 3px 10px 3px 22px; font-size: 13.5px; }
+
+  article { max-width: 740px; min-width: 0; }
+  h1 { font: 600 clamp(32px, 4.6vw, 44px)/1.1 var(--serif); letter-spacing: -0.012em; margin: 0 0 20px; text-wrap: balance; }
+  h2 { font: 600 26px/1.2 var(--serif); margin: 52px 0 12px; padding-top: 4px; }
+  h3 { font: 600 19px/1.3 var(--serif); margin: 34px 0 8px; }
+  h2 a:hover::after, h3 a:hover::after { content: ' #'; color: var(--faint); }
+  h1 + p { font-size: 18.5px; color: var(--muted); }
+  p, ul, ol { margin: 0 0 16px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 5px 0; }
+  li > p { margin-bottom: 8px; }
+  li > ul, li > ol, li > .scroll { margin-top: 8px; }
+  strong { font-weight: 600; }
+  article p a, article li a, article td a { color: var(--accent); }
+  article p a:hover, article li a:hover, article td a:hover { text-decoration: underline; }
+  code { font: 0.88em var(--mono); background: var(--raised); padding: 2px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  pre { margin: 0 0 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14px/1.7 var(--mono); overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .scroll { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--surface); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { min-width: 150px; }
+
+  .around { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 56px; }
+  .around a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: 600 17px/1.3 var(--serif); }
+  .around a:hover { border-color: var(--muted); }
+  .around a span { display: block; font: 600 12px/1.6 var(--sans); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); }
+  .around .next { text-align: right; }
+
+  footer { margin-top: 72px; padding: 26px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: flex; gap: 8px 26px; flex-wrap: wrap; }
+  footer a { color: var(--accent); }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 22px; padding-top: 20px; }
+    .brand small { display: none; }
+    .side { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .side summary { display: block; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+    .side .inner { position: static; max-height: none; padding: 0 8px 12px; }
+    .side a.sub { display: none; }
+    h2 { margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<!-- Made from docs/getting-started.md by web/scripts/build-docs.mjs. Change that file, not this one. -->
+<div class="wrap">
+  <header>
+    <a class="brand" href="../"><span class="mark"></span>Spool<small>Guides</small></a>
+    <nav>
+      <a href="./">All guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <details open>
+        <summary>Guides</summary>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a class="on" aria-current="page" href="getting-started.html">Getting started</a><a class="sub" href="#install-it">Install it</a><a class="sub" href="#the-first-settings">The first settings</a><a class="sub" href="#shadow-mode-then-active">Shadow mode, then active</a><a class="sub" href="#coming-from-radarr-sonarr-and-sabnzbd">Coming from Radarr, Sonarr and SABnzbd</a><a class="sub" href="#running-it-as-a-service">Running it as a service</a><a class="sub" href="#the-command-line">The command line</a><a class="sub" href="#where-spool-keeps-its-data">Where Spool keeps its data</a><a class="sub" href="#next">Next</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+      </details>
+    </aside>
+    <article>
+<h1>Getting started</h1>
+<p>Spool runs on macOS and Linux, natively or in a container. It needs a Usenet provider, a Newznab indexer and somewhere to keep the library. It does not use torrents.</p>
+<h2 id="install-it"><a href="#install-it">Install it</a></h2>
+<h3 id="with-docker"><a href="#with-docker">With Docker</a></h3>
+<pre><code class="language-sh">git clone https://github.com/rewtraw/spool &amp;&amp; cd spool
+mkdir -p data                      # owned by the user in compose.yaml
+$EDITOR compose.yaml               # set the user and the path to your media
+docker compose up -d --build       # http://localhost:7979
+</code></pre>
+<p>The image carries the helper tools Spool calls. Everything Spool keeps lives in <code>/data</code>.</p>
+<p>Mount the library and the downloads folder under one path. A finished download is then moved into the library, which takes no time, instead of being copied.</p>
+<p>On <strong>TrueNAS SCALE</strong>, add it as a custom app with the same settings as <a href="https://github.com/rewtraw/spool/blob/main/compose.yaml">compose.yaml</a>: port 7979, a dataset for <code>/data</code>, your media dataset at <code>/media</code>, and the apps user (568) as the user.</p>
+<h3 id="from-source"><a href="#from-source">From source</a></h3>
+<p>You need Rust, <a href="https://bun.sh">Bun</a>, and four helper tools: <code>par2</code> for repair, <code>7zz</code> for extraction, and <code>ffprobe</code> and <code>ffmpeg</code> for reading media files and checking subtitles.</p>
+<pre><code class="language-sh">brew install par2 sevenzip ffmpeg                # macOS
+sudo apt install par2 7zip ffmpeg                # Debian, Ubuntu
+
+git clone https://github.com/rewtraw/spool &amp;&amp; cd spool
+(cd web &amp;&amp; bun install &amp;&amp; bun run build)         # the server embeds web/dist
+cargo run --release -p spool -- serve            # http://localhost:7979
+</code></pre>
+<p>Debian&#39;s and Ubuntu&#39;s <code>7zip</code> cannot open RAR archives. Spool unpacks the common uncompressed kind itself, so most posts are unaffected. For the rest, install 7-Zip from <a href="https://github.com/ip7z/7zip/releases">its own releases</a>, as the container image does.</p>
+<h2 id="the-first-settings"><a href="#the-first-settings">The first settings</a></h2>
+<p>Open the web app and go to Settings. Three tabs need filling in before Spool can do anything.</p>
+<ol>
+<li><strong>General.</strong><ul>
+<li><em>Folders</em>: where movies and series live and where to download to. Name the disk that must be mounted, if the library is on one that can be unplugged.</li>
+<li><em>Connections</em>: a free <a href="https://www.themoviedb.org/settings/api">TMDB API key</a>, which Spool needs to look up movies. Set a password for the app if anyone else can reach the address.</li>
+</ul>
+</li>
+<li><strong>Usenet.</strong> One or more providers. Priority 0 is asked first; higher numbers only fill in missing articles. The Test button signs in and reports what it found.</li>
+<li><strong>Indexers.</strong> One or more Newznab indexers, each with its address and API key.</li>
+</ol>
+<p>The other tabs can wait:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Tab</th>
+<th>What it holds</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Profiles</td>
+<td>Which qualities a title may be downloaded in, where upgrades stop, and a size to aim for.</td>
+</tr>
+<tr>
+<td>Naming</td>
+<td>How imported files and folders are named. The formats use Radarr&#39;s and Sonarr&#39;s tokens.</td>
+</tr>
+<tr>
+<td>Plex</td>
+<td>What Plex has that Spool does not, and the other way round. See <a href="plex.html">Beside Plex</a>.</td>
+</tr>
+<tr>
+<td>Disk space</td>
+<td>What is using the disk and what could go.</td>
+</tr>
+<tr>
+<td>Maintenance</td>
+<td>The scheduled tasks, each with a Run now button, and the recycle folder.</td>
+</tr>
+</tbody></table></div>
+<h2 id="shadow-mode-then-active"><a href="#shadow-mode-then-active">Shadow mode, then active</a></h2>
+<p>Spool starts in <strong>shadow mode</strong>. It reads the indexer feeds and records what it would download and why, and changes nothing: no downloads, no moved files, no deletions. This is the time to add a few titles, open one, and read the verdicts it gives each release.</p>
+<p>When the choices look right, switch to <strong>active</strong> under Settings, General, Mode, or from the command line:</p>
+<pre><code class="language-sh">spool mode active
+</code></pre>
+<p>Stop Radarr and Sonarr from managing the same folders first. Two programs filing into one library will fight over the same files.</p>
+<p>If you already have a library, read <a href="your-library.html">Your library and what Spool does to it</a> before going active.</p>
+<h2 id="coming-from-radarr-sonarr-and-sabnzbd"><a href="#coming-from-radarr-sonarr-and-sabnzbd">Coming from Radarr, Sonarr and SABnzbd</a></h2>
+<p><code>spool migrate</code> reads their settings and brings over the catalog, profiles, indexers and Usenet servers. It can be run again safely.</p>
+<pre><code class="language-sh">spool migrate \
+  --radarr-url http://localhost:7878 --radarr-key &lt;key&gt; \
+  --sonarr-url http://localhost:8989 --sonarr-key &lt;key&gt; \
+  --radarr-db radarr.db --sonarr-db sonarr.db \
+  --sab-ini sabnzbd.ini
+</code></pre>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Option</th>
+<th>What it is for</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>--radarr-url</code>, <code>--radarr-key</code>, <code>--sonarr-url</code>, <code>--sonarr-key</code></td>
+<td>Where the two apps answer, and their API keys.</td>
+</tr>
+<tr>
+<td><code>--radarr-db</code>, <code>--sonarr-db</code></td>
+<td>A copy of each app&#39;s database. Their APIs hide indexer keys and the Plex token; the databases have them.</td>
+</tr>
+<tr>
+<td><code>--sab-ini</code></td>
+<td>A copy of <code>sabnzbd.ini</code>, for the Usenet servers.</td>
+</tr>
+<tr>
+<td><code>--map FROM=TO</code></td>
+<td>Turns a path as a container saw it into the path on this machine. Repeat it for each mapping.</td>
+</tr>
+</tbody></table></div>
+<p>Nothing on disk is moved. Two commands then check the result:</p>
+<pre><code class="language-sh">spool check-paths      # is every file where Spool&#39;s naming would put it?
+spool shadow-report    # does Spool read past releases as Radarr and Sonarr did?
+</code></pre>
+<h2 id="running-it-as-a-service"><a href="#running-it-as-a-service">Running it as a service</a></h2>
+<p><strong>Linux.</strong> <a href="https://github.com/rewtraw/spool/blob/main/deploy/spool.service">deploy/spool.service</a> is a systemd user unit. The steps to install it are at the top of the file.</p>
+<p><strong>macOS.</strong> <code>deploy/deploy.sh</code> builds Spool, installs it as a LaunchAgent on a Mac over SSH and restarts it. It reads its settings from the environment or from <code>deploy/local.env</code>:</p>
+<pre><code class="language-sh">SPOOL_HOST=my-mac deploy/deploy.sh
+</code></pre>
+<p>If the library is on a removable disk, set <code>SPOOL_SIGN_IDENTITY</code> to a stable code-signing identity. macOS ties the permission to read a removable disk to the program&#39;s signature, and the first read under launchd shows a consent prompt on that Mac&#39;s screen. Spool reports that it is waiting for the prompt instead of hanging.</p>
+<h2 id="the-command-line"><a href="#the-command-line">The command line</a></h2>
+<pre><code class="language-sh">spool serve [--bind 0.0.0.0:7979]   # run the service
+spool mode active|shadow            # start or stop making changes
+spool migrate ...                   # import from Radarr, Sonarr and SABnzbd
+spool check-paths                   # are existing files where Spool would put them?
+spool shadow-report ...             # compare with Radarr&#39;s and Sonarr&#39;s history
+spool check-subtitles VIDEO SUBS    # is this subtitle file in time? --fix corrects it
+spool download x.nzb --out DIR      # run one NZB through the engine, outside the library
+spool backup DEST                   # write a consistent copy of the database
+</code></pre>
+<h2 id="where-spool-keeps-its-data"><a href="#where-spool-keeps-its-data">Where Spool keeps its data</a></h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>System</th>
+<th>Folder</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>macOS</td>
+<td><code>~/Library/Application Support/Spool</code></td>
+</tr>
+<tr>
+<td>Linux</td>
+<td><code>~/.local/share/spool</code></td>
+</tr>
+<tr>
+<td>Container</td>
+<td><code>/data</code></td>
+</tr>
+</tbody></table></div>
+<p><code>--data-dir</code> or <code>SPOOL_DATA_DIR</code> puts it elsewhere. The folder holds the database, the saved NZBs, cached artwork, the log and a nightly backup. The database contains indexer keys and Usenet passwords and is created readable only by its owner. Settings, General, Connections can name a second folder on another disk for a copy of the backup.</p>
+<h2 id="next"><a href="#next">Next</a></h2>
+<ul>
+<li><a href="your-library.html">Your library and what Spool does to it</a></li>
+<li><a href="locations.html">A library in more than one place</a></li>
+<li><a href="players.html">Playing on a television</a></li>
+</ul>
+<nav class="around" aria-label="Other guides"><span></span><a class="next" href="your-library.html"><span>Next</span>Your library and what Spool does to it</a></nav>
+    </article>
+  </div>
+  <footer>
+    <a href="https://github.com/rewtraw/spool/blob/main/docs/getting-started.md">Change this page on GitHub</a>
+    <a href="../">Spool's front page</a>
+    <span>Spool is free software under the GNU GPL v3.</span>
+  </footer>
+</div>
+<script>if (matchMedia('(max-width: 860px)').matches) document.querySelector('.side details').open = false;</script>
+</body>
+</html>

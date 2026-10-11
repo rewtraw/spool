@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playing on a television · Spool</title>
+<meta name="description" content="Spool can serve its library to a player on a television, a phone or a tablet. It answers the way a Jellyfin server does, so a player that knows how to talk to Jellyfin opens the library directly: there is no second server to run and no folders to share.">
+<link rel="icon" href="../assets/mark.svg">
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
+    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
+      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(../assets/mark.svg) center / contain no-repeat; mask: url(../assets/mark.svg) center / contain no-repeat; }
+  .brand small { font: 500 15px/1 var(--sans); color: var(--muted); margin-left: 4px; }
+  header nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
+  header nav a:hover { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 40px; }
+  .side { font-size: 14.5px; }
+  .side .inner { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; display: grid; gap: 2px; padding-bottom: 24px; }
+  .side summary { display: none; }
+  .side p { margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+  .side a:hover { color: var(--text); }
+  .side a.on { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+  .side a.sub { padding: 3px 10px 3px 22px; font-size: 13.5px; }
+
+  article { max-width: 740px; min-width: 0; }
+  h1 { font: 600 clamp(32px, 4.6vw, 44px)/1.1 var(--serif); letter-spacing: -0.012em; margin: 0 0 20px; text-wrap: balance; }
+  h2 { font: 600 26px/1.2 var(--serif); margin: 52px 0 12px; padding-top: 4px; }
+  h3 { font: 600 19px/1.3 var(--serif); margin: 34px 0 8px; }
+  h2 a:hover::after, h3 a:hover::after { content: ' #'; color: var(--faint); }
+  h1 + p { font-size: 18.5px; color: var(--muted); }
+  p, ul, ol { margin: 0 0 16px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 5px 0; }
+  li > p { margin-bottom: 8px; }
+  li > ul, li > ol, li > .scroll { margin-top: 8px; }
+  strong { font-weight: 600; }
+  article p a, article li a, article td a { color: var(--accent); }
+  article p a:hover, article li a:hover, article td a:hover { text-decoration: underline; }
+  code { font: 0.88em var(--mono); background: var(--raised); padding: 2px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  pre { margin: 0 0 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14px/1.7 var(--mono); overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .scroll { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--surface); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { min-width: 150px; }
+
+  .around { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 56px; }
+  .around a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: 600 17px/1.3 var(--serif); }
+  .around a:hover { border-color: var(--muted); }
+  .around a span { display: block; font: 600 12px/1.6 var(--sans); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); }
+  .around .next { text-align: right; }
+
+  footer { margin-top: 72px; padding: 26px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: flex; gap: 8px 26px; flex-wrap: wrap; }
+  footer a { color: var(--accent); }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 22px; padding-top: 20px; }
+    .brand small { display: none; }
+    .side { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .side summary { display: block; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+    .side .inner { position: static; max-height: none; padding: 0 8px 12px; }
+    .side a.sub { display: none; }
+    h2 { margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<!-- Made from docs/players.md by web/scripts/build-docs.mjs. Change that file, not this one. -->
+<div class="wrap">
+  <header>
+    <a class="brand" href="../"><span class="mark"></span>Spool<small>Guides</small></a>
+    <nav>
+      <a href="./">All guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <details open>
+        <summary>Guides</summary>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="players.html">On a television</a><a class="sub" href="#turning-it-on">Turning it on</a><a class="sub" href="#adding-it-in-infuse">Adding it in Infuse</a><a class="sub" href="#what-the-player-gets">What the player gets</a><a class="sub" href="#nothing-is-converted">Nothing is converted</a><a class="sub" href="#away-from-home">Away from home</a><a class="sub" href="#seeing-what-players-are-doing">Seeing what players are doing</a><a class="sub" href="#what-is-not-there">What is not there</a><a href="plex.html">Beside Plex</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+      </details>
+    </aside>
+    <article>
+<h1>Playing on a television</h1>
+<p>Spool can serve its library to a player on a television, a phone or a tablet. It answers the way a Jellyfin server does, so a player that knows how to talk to Jellyfin opens the library directly: there is no second server to run and no folders to share.</p>
+<p>It is tested with <a href="https://firecore.com/infuse">Infuse</a> on Apple TV and iPhone. Other players that speak to Jellyfin may work.</p>
+<h2 id="turning-it-on"><a href="#turning-it-on">Turning it on</a></h2>
+<p>Under Settings, General, Players:</p>
+<ol>
+<li>Tick <strong>Serve the library to players</strong>.</li>
+<li>Choose a <strong>name</strong> and a <strong>password</strong> for players to sign in with. These are separate from the web app&#39;s password, and open nothing but playback.</li>
+<li>Leave the <strong>port</strong> at 8096 unless something else uses it. It is the one players expect.</li>
+<li>Save.</li>
+</ol>
+<p>In a container, publish the port as well (<code>8096:8096</code>) and give the player the machine&#39;s address. Being found without an address relies on a broadcast on the local network, which reaches a container only when it shares the host&#39;s network.</p>
+<h2 id="adding-it-in-infuse"><a href="#adding-it-in-infuse">Adding it in Infuse</a></h2>
+<ol>
+<li>In Infuse, add a share and choose <strong>Jellyfin</strong>.</li>
+<li>On the same network, Spool appears in the list by itself as <strong>Spool</strong>. If it does not, enter the address of the machine Spool runs on and port 8096.</li>
+<li>Sign in with the name and password from the settings.</li>
+</ol>
+<p>If an Apple TV says an error occurred on a server it received through iCloud from another device, remove the server on the Apple TV and add it again there.</p>
+<h2 id="what-the-player-gets"><a href="#what-the-player-gets">What the player gets</a></h2>
+<ul>
+<li><strong>The library as Spool knows it.</strong> Posters, backdrops, cast, scores, collections, seasons and episodes, with search, recently added, continue watching and next up.</li>
+<li><strong>Every file as it is.</strong> Each version of a film is offered, with its subtitle files.</li>
+<li><strong>Your own artwork.</strong> A poster or backdrop you keep in a title&#39;s folder is shown in place of the fetched one, and so are season posters and episode frames. See <a href="local-files.html#artwork">Files Spool recognises</a>.</li>
+<li><strong>Trailers and extras.</strong> Trailers and other extras in a title&#39;s folder are offered to the player. Whether and where they are shown is up to the player.</li>
+<li><strong>What you have watched.</strong> The player reports what was played and where you stopped, and Spool remembers it for next time and for other players.</li>
+</ul>
+<p>Titles on a <a href="locations.html#when-a-location-cannot-be-reached">location that cannot be reached</a> are left out until it comes back.</p>
+<h2 id="nothing-is-converted"><a href="#nothing-is-converted">Nothing is converted</a></h2>
+<p>Spool sends each file exactly as it is on disk. It does not transcode, so the player has to be able to play the file itself. Infuse plays nearly everything. For other players, a profile&#39;s &quot;Prefer what an Apple TV plays without conversion&quot; option steers downloads toward files that need no conversion.</p>
+<p>Because nothing is converted, a file&#39;s full bitrate has to fit through the network between Spool and the player. On a home network that is rarely a concern. Away from home it is the upload speed of the connection Spool sits behind that sets the limit.</p>
+<h2 id="away-from-home"><a href="#away-from-home">Away from home</a></h2>
+<p>Spool&#39;s door for players is plain HTTP with a simple sign-in. It is made for a private network. <strong>Do not forward the port from your router to the internet.</strong></p>
+<p>To play away from home, put the player and the machine Spool runs on in the same private network:</p>
+<ul>
+<li><strong><a href="https://tailscale.com">Tailscale</a></strong> or another WireGuard network. Install it on both, and give the player the machine&#39;s name on that network and port 8096. This is the simplest way and works on Apple TV.</li>
+<li><strong>A VPN into your home network</strong>, if your router offers one.</li>
+</ul>
+<p>Finding Spool by itself works only on the local network. Over a private network, enter the address by hand.</p>
+<h2 id="seeing-what-players-are-doing"><a href="#seeing-what-players-are-doing">Seeing what players are doing</a></h2>
+<p>Settings, General, Players shows whether Spool is listening and how many players are signed in. Changing the name or the password signs every player out.</p>
+<h2 id="what-is-not-there"><a href="#what-is-not-there">What is not there</a></h2>
+<ul>
+<li><strong>Transcoding</strong>, as above.</li>
+<li><strong>Several users.</strong> There is one sign-in, and one record of what has been watched.</li>
+<li><strong>Live television, music and photos.</strong></li>
+<li><strong>A fast sync for Infuse&#39;s Library Mode.</strong> Infuse&#39;s default, Direct Mode, is what Spool is tested with. See <a href="ideas.html">Ideas</a>.</li>
+</ul>
+<nav class="around" aria-label="Other guides"><a class="prev" href="locations.html"><span>Before</span>A library in more than one place</a><a class="next" href="plex.html"><span>Next</span>Beside Plex</a></nav>
+    </article>
+  </div>
+  <footer>
+    <a href="https://github.com/rewtraw/spool/blob/main/docs/players.md">Change this page on GitHub</a>
+    <a href="../">Spool's front page</a>
+    <span>Spool is free software under the GNU GPL v3.</span>
+  </footer>
+</div>
+<script>if (matchMedia('(max-width: 860px)').matches) document.querySelector('.side details').open = false;</script>
+</body>
+</html>

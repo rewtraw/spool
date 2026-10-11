@@ -29,6 +29,7 @@ jobs:
           bun install --frozen-lockfile
           bun run check
           bun run build
+          bun run docs --check
       - name: Tests
         run: cargo test --workspace
 

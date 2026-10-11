@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Files Spool recognises in a title's folder · Spool</title>
+<meta name="description" content="Beside the film or the episodes, a title&amp;#39;s folder often holds extras, artwork, theme music and a media server&amp;#39;s notes. Spool reads these under the names Plex, Jellyfin, Emby and Kodi use. It never writes or deletes them; the one thing it does is rename artwork and notes that were named after a film&amp;#39;s file when an upgrade gives that file a new name.">
+<link rel="icon" href="../assets/mark.svg">
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
+    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
+      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(../assets/mark.svg) center / contain no-repeat; mask: url(../assets/mark.svg) center / contain no-repeat; }
+  .brand small { font: 500 15px/1 var(--sans); color: var(--muted); margin-left: 4px; }
+  header nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
+  header nav a:hover { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 40px; }
+  .side { font-size: 14.5px; }
+  .side .inner { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; display: grid; gap: 2px; padding-bottom: 24px; }
+  .side summary { display: none; }
+  .side p { margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+  .side a:hover { color: var(--text); }
+  .side a.on { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+  .side a.sub { padding: 3px 10px 3px 22px; font-size: 13.5px; }
+
+  article { max-width: 740px; min-width: 0; }
+  h1 { font: 600 clamp(32px, 4.6vw, 44px)/1.1 var(--serif); letter-spacing: -0.012em; margin: 0 0 20px; text-wrap: balance; }
+  h2 { font: 600 26px/1.2 var(--serif); margin: 52px 0 12px; padding-top: 4px; }
+  h3 { font: 600 19px/1.3 var(--serif); margin: 34px 0 8px; }
+  h2 a:hover::after, h3 a:hover::after { content: ' #'; color: var(--faint); }
+  h1 + p { font-size: 18.5px; color: var(--muted); }
+  p, ul, ol { margin: 0 0 16px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 5px 0; }
+  li > p { margin-bottom: 8px; }
+  li > ul, li > ol, li > .scroll { margin-top: 8px; }
+  strong { font-weight: 600; }
+  article p a, article li a, article td a { color: var(--accent); }
+  article p a:hover, article li a:hover, article td a:hover { text-decoration: underline; }
+  code { font: 0.88em var(--mono); background: var(--raised); padding: 2px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  pre { margin: 0 0 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14px/1.7 var(--mono); overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .scroll { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--surface); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { min-width: 150px; }
+
+  .around { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 56px; }
+  .around a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: 600 17px/1.3 var(--serif); }
+  .around a:hover { border-color: var(--muted); }
+  .around a span { display: block; font: 600 12px/1.6 var(--sans); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); }
+  .around .next { text-align: right; }
+
+  footer { margin-top: 72px; padding: 26px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: flex; gap: 8px 26px; flex-wrap: wrap; }
+  footer a { color: var(--accent); }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 22px; padding-top: 20px; }
+    .brand small { display: none; }
+    .side { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .side summary { display: block; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+    .side .inner { position: static; max-height: none; padding: 0 8px 12px; }
+    .side a.sub { display: none; }
+    h2 { margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<!-- Made from docs/local-files.md by web/scripts/build-docs.mjs. Change that file, not this one. -->
+<div class="wrap">
+  <header>
+    <a class="brand" href="../"><span class="mark"></span>Spool<small>Guides</small></a>
+    <nav>
+      <a href="./">All guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <details open>
+        <summary>Guides</summary>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a class="on" aria-current="page" href="local-files.html">Files it recognises</a><a class="sub" href="#extras">Extras</a><a class="sub" href="#the-film-itself">The film itself</a><a class="sub" href="#artwork">Artwork</a><a class="sub" href="#notes">Notes</a><a class="sub" href="#theme-music">Theme music</a><a class="sub" href="#where-these-come-from">Where these come from</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+      </details>
+    </aside>
+    <article>
+<h1>Files Spool recognises in a title&#39;s folder</h1>
+<p>Beside the film or the episodes, a title&#39;s folder often holds extras, artwork, theme music and a media server&#39;s notes. Spool reads these under the names Plex, Jellyfin, Emby and Kodi use. It never writes or deletes them; the one thing it does is rename artwork and notes that were named after a film&#39;s file when an upgrade gives that file a new name.</p>
+<p>Names are matched without regard to capitals.</p>
+<h2 id="extras"><a href="#extras">Extras</a></h2>
+<p>A video is an extra, not the film or an episode, when it is in a folder with one of these names, anywhere under the title&#39;s folder:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Folder</th>
+<th>Kind</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Trailers</code></td>
+<td>Trailer</td>
+</tr>
+<tr>
+<td><code>Behind The Scenes</code></td>
+<td>Behind the scenes</td>
+</tr>
+<tr>
+<td><code>Deleted Scenes</code></td>
+<td>Deleted scene</td>
+</tr>
+<tr>
+<td><code>Featurettes</code></td>
+<td>Featurette</td>
+</tr>
+<tr>
+<td><code>Interviews</code></td>
+<td>Interview</td>
+</tr>
+<tr>
+<td><code>Scenes</code></td>
+<td>Scene</td>
+</tr>
+<tr>
+<td><code>Shorts</code></td>
+<td>Short</td>
+</tr>
+<tr>
+<td><code>Clips</code></td>
+<td>Clip</td>
+</tr>
+<tr>
+<td><code>Other</code>, <code>Extras</code></td>
+<td>Other</td>
+</tr>
+<tr>
+<td><code>Samples</code></td>
+<td>Sample</td>
+</tr>
+<tr>
+<td><code>Backdrops</code></td>
+<td>Theme video</td>
+</tr>
+</tbody></table></div>
+<p>or when its name ends with one of these markers:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Ending</th>
+<th>Kind</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>-trailer</code>, <code>.trailer</code>, <code>_trailer</code>, <code> trailer</code>, or the whole name <code>trailer</code></td>
+<td>Trailer</td>
+</tr>
+<tr>
+<td><code>-sample</code>, <code>.sample</code>, <code>_sample</code>, <code> sample</code>, or the whole name <code>sample</code></td>
+<td>Sample</td>
+</tr>
+<tr>
+<td><code>-behindthescenes</code></td>
+<td>Behind the scenes</td>
+</tr>
+<tr>
+<td><code>-deleted</code>, <code>-deletedscene</code></td>
+<td>Deleted scene</td>
+</tr>
+<tr>
+<td><code>-featurette</code></td>
+<td>Featurette</td>
+</tr>
+<tr>
+<td><code>-interview</code></td>
+<td>Interview</td>
+</tr>
+<tr>
+<td><code>-scene</code></td>
+<td>Scene</td>
+</tr>
+<tr>
+<td><code>-short</code></td>
+<td>Short</td>
+</tr>
+<tr>
+<td><code>-clip</code></td>
+<td>Clip</td>
+</tr>
+<tr>
+<td><code>-other</code>, <code>-extra</code></td>
+<td>Other</td>
+</tr>
+</tbody></table></div>
+<p>A release name ends with the group that made it, and groups have all sorts of names. So a file whose name carries a quality (<code>1080p</code>, <code>BluRay</code>, <code>WEB-DL</code>) is not taken for an extra because it ends in <code>-SCENE</code> or <code>-OTHER</code>; only <code>trailer</code> and <code>sample</code> still mark such a name.</p>
+<h2 id="the-film-itself"><a href="#the-film-itself">The film itself</a></h2>
+<ul>
+<li><strong>Versions.</strong> Several films&#39; worth of video in one film folder are one film and versions of it kept beside it: <code>Film (1999) - 2160p.mkv</code>, <code>Film (1999) - Directors Cut.mkv</code>. The largest is the main file, which an upgrade replaces; the others are left alone.</li>
+<li><strong>Parts.</strong> Files that end in <code>cd1</code>, <code>disc 2</code>, <code>part-1</code>, <code>pt2</code>, <code>dvd1</code>, <code>disk1</code>, or the same with a letter from <code>a</code> to <code>d</code>, are the parts of one film and are replaced together.</li>
+<li><strong>Ids in a folder&#39;s name.</strong> <code>{tmdb-603}</code>, <code>{imdb-tt0133093}</code>, <code>{tvdb-79126}</code> as Plex writes them, and <code>[tmdbid-603]</code>, <code>[imdbid-tt0133093]</code>, <code>[tvdbid-79126]</code> as Jellyfin and Emby do.</li>
+</ul>
+<h2 id="artwork"><a href="#artwork">Artwork</a></h2>
+<p>Pictures may be <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>, <code>.webp</code> or <code>.tbn</code>. A name may stand alone (<code>poster.jpg</code>) or follow the film&#39;s file name and a hyphen (<code>Film (1999)-poster.jpg</code>), and may end in a number where there are several (<code>fanart-2.jpg</code>, <code>backdrop3.jpg</code>).</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Names</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>poster</code>, <code>folder</code>, <code>cover</code>, <code>default</code>, <code>movie</code>, <code>show</code>, <code>keyart</code>, or a picture with exactly the film&#39;s file name</td>
+<td>Poster</td>
+</tr>
+<tr>
+<td><code>fanart</code>, <code>backdrop</code>, <code>background</code>, <code>art</code>, anything in an <code>extrafanart</code> folder</td>
+<td>Backdrop</td>
+</tr>
+<tr>
+<td><code>banner</code></td>
+<td>Banner</td>
+</tr>
+<tr>
+<td><code>logo</code>, <code>clearlogo</code></td>
+<td>Logo</td>
+</tr>
+<tr>
+<td><code>landscape</code>, <code>thumb</code></td>
+<td>Thumbnail</td>
+</tr>
+<tr>
+<td><code>clearart</code></td>
+<td>Clear art</td>
+</tr>
+<tr>
+<td><code>disc</code>, <code>discart</code>, <code>cdart</code></td>
+<td>Disc art</td>
+</tr>
+<tr>
+<td><code>square</code>, <code>squareArt</code>, <code>backgroundSquare</code></td>
+<td>Square art</td>
+</tr>
+</tbody></table></div>
+<p>For series:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Names</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Season01.jpg</code>, <code>Season01b.jpg</code>, <code>season01-poster.jpg</code>, or <code>poster.jpg</code> inside the season&#39;s folder</td>
+<td>That season&#39;s poster</td>
+</tr>
+<tr>
+<td><code>season01-banner.jpg</code>, <code>season01-fanart.jpg</code></td>
+<td>That season&#39;s banner or backdrop</td>
+</tr>
+<tr>
+<td><code>season-specials-poster.jpg</code>, or <code>poster.jpg</code> inside <code>Specials</code></td>
+<td>The specials&#39; poster</td>
+</tr>
+<tr>
+<td>A picture with an episode&#39;s file name, or that name and <code>-thumb</code></td>
+<td>That episode&#39;s frame</td>
+</tr>
+</tbody></table></div>
+<p>A folder&#39;s own poster and backdrop are shown in place of the ones from TMDB or TVmaze, in the app and to players. So are a season&#39;s poster and an episode&#39;s frame. The other kinds are recorded and listed, and not yet shown anywhere.</p>
+<h2 id="notes"><a href="#notes">Notes</a></h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Written by</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>movie.nfo</code>, or an <code>.nfo</code> with the film&#39;s file name</td>
+<td>Kodi, Jellyfin, Emby</td>
+</tr>
+<tr>
+<td><code>tvshow.nfo</code></td>
+<td>Kodi, Jellyfin, Emby</td>
+</tr>
+<tr>
+<td><code>.plexmatch</code> at the top of the folder</td>
+<td>Plex</td>
+</tr>
+</tbody></table></div>
+<p>Spool reads the ids from them (<code>&lt;uniqueid type=&quot;tmdb&quot;&gt;</code>, <code>&lt;tmdbid&gt;</code>, <code>&lt;imdbid&gt;</code>, <code>&lt;tvdbid&gt;</code>, an IMDb id in <code>&lt;id&gt;</code>, or a link to the title&#39;s page on IMDb or TMDB; <code>tmdbid:</code>, <code>tvdbid:</code>, <code>imdbid:</code> lines in <code>.plexmatch</code>), with the title and the year. They are how a folder with an unhelpful name is recognised when a location is brought in. A release&#39;s own <code>.nfo</code>, named after nothing in the folder, is ignored.</p>
+<h2 id="theme-music"><a href="#theme-music">Theme music</a></h2>
+<p><code>theme.mp3</code> (or <code>.flac</code>, <code>.m4a</code>, <code>.ogg</code>, <code>.wav</code>, <code>.aac</code>, <code>.opus</code>), and anything in a <code>theme-music</code> folder.</p>
+<h2 id="where-these-come-from"><a href="#where-these-come-from">Where these come from</a></h2>
+<ul>
+<li>Jellyfin: <a href="https://jellyfin.org/docs/general/server/media/movies/">Movies</a> and <a href="https://jellyfin.org/docs/general/server/media/shows/">Shows</a></li>
+<li>Plex: <a href="https://support.plex.tv/articles/local-files-for-trailers-and-extras/">Local files for trailers and extras</a>, <a href="https://support.plex.tv/articles/200220677-local-media-assets-movies/">Local media assets for movies</a> and <a href="https://support.plex.tv/articles/200220717-local-media-assets-tv-shows/">for TV shows</a></li>
+<li>Kodi: the NFO and artwork pages of its wiki</li>
+</ul>
+<nav class="around" aria-label="Other guides"><a class="prev" href="plex.html"><span>Before</span>Beside Plex</a><a class="next" href="assistants.html"><span>Next</span>AI assistants</a></nav>
+    </article>
+  </div>
+  <footer>
+    <a href="https://github.com/rewtraw/spool/blob/main/docs/local-files.md">Change this page on GitHub</a>
+    <a href="../">Spool's front page</a>
+    <span>Spool is free software under the GNU GPL v3.</span>
+  </footer>
+</div>
+<script>if (matchMedia('(max-width: 860px)').matches) document.querySelector('.side details').open = false;</script>
+</body>
+</html>
