@@ -2460,10 +2460,22 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
     let (now, waiting) = (&busy["moves"]["now"], &busy["moves"]["waiting"]);
     assert_eq!((now["title"].as_str(), now["from"].as_str(), now["to"].as_str(), now["done"].as_u64(), now["total"].as_u64()), (Some("Heat"), Some("Shelf"), Some("Main"), Some(300), Some(1200)), "{now}");
     assert_eq!((waiting.as_array().map(Vec::len), waiting[0]["title"].as_str(), waiting[0]["to"].as_str()), (Some(1), Some("Heat"), Some("Vault")), "{waiting}");
+    // A waiting title can be taken out of the line; the move under way is not touched.
+    let (_, row) = call(&api, "GET", &format!("/api/titles/{}", heat.id), Value::Null).await;
+    assert_eq!(row["move_waiting"].as_bool(), Some(true));
+    w.app.moves.lock().queue.push_back((77, 2));
+    let (status, said) = call(&api, "POST", "/api/titles/move/cancel", json!({"ids": [heat.id]})).await;
+    assert_eq!((status, said["cancelled"].as_u64()), (200, Some(1)), "{said}");
+    {
+        let moves = w.app.moves.lock();
+        assert_eq!((moves.queue.iter().map(|m| m.0).collect::<Vec<_>>(), moves.now.as_ref().map(|m| m.title_id)), (vec![77], Some(heat.id)));
+    }
+    let (_, said) = call(&api, "POST", "/api/titles/move/cancel", Value::Null).await;
+    assert_eq!(said["cancelled"].as_u64(), Some(1), "with no titles named, all that wait are taken out");
     {
         let mut moves = w.app.moves.lock();
+        assert!(moves.queue.is_empty() && moves.now.is_some());
         moves.now = None;
-        moves.queue.clear();
     }
 
     // Off a location Spool only reads: copied, and the original kept as a further copy.

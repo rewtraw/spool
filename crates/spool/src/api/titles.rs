@@ -113,7 +113,9 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
     // Being moved to another location, or waiting its turn, with how far the move has got.
     if app.moving(id) {
         v["moving"] = json!(true);
-        v["move"] = json!(app.moves.lock().now.clone().filter(|m| m.title_id == id));
+        let moves = app.moves.lock();
+        v["move"] = json!(moves.now.clone().filter(|m| m.title_id == id));
+        v["move_waiting"] = json!(moves.queue.iter().any(|m| m.0 == id));
     }
     v["episodes"] = json!(app.db.episodes(id)?);
     // Each file with the place it is on, when it is a copy kept elsewhere than the title's own folder.
@@ -173,6 +175,12 @@ pub(super) async fn move_titles(State(app): State<App>, Json(b): Json<Value>) ->
         app.emit(Event::Title { id: *id });
     }
     Ok(Json(json!({"queued": queued, "asked": ids.len()})))
+}
+
+/// Take waiting titles out of the line to be moved: those named, or all of them.
+pub(super) async fn cancel_moves(State(app): State<App>, body: Option<Json<Value>>) -> R<Value> {
+    let ids: Vec<i64> = body.and_then(|b| b.0["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect())).unwrap_or_default();
+    Ok(Json(json!({"cancelled": app.cancel_moves(&ids)})))
 }
 
 /// Turn a film that is posted in episodes into the series it is listed as.

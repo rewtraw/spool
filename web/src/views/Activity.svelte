@@ -32,6 +32,11 @@
     const timer = setInterval(load, 3000);
     return () => clearInterval(timer);
   });
+  /** Take one waiting title, or all of them, out of the line. The move under way finishes. */
+  async function cancelMoves(id?: number) {
+    await act(() => api.post('/titles/move/cancel', id ? { ids: [id] } : {}), id ? 'Taken out of the line. It stays where it is.' : 'The waiting moves are cancelled. Those titles stay where they are.');
+    load();
+  }
   // How fast the copy is going, from what was counted the last time it was asked.
   let seen: { id: number; done: number; at: number } | null = null;
   let moveSpeed = $state(0);
@@ -194,9 +199,16 @@
       {/if}
       {#if moves.waiting.length}
         <div class="card waiting">
-          <div class="muted">{moves.waiting.length} waiting {moves.waiting.length === 1 ? 'its' : 'their'} turn</div>
+          <div class="row">
+            <span class="muted grow">{moves.waiting.length} waiting {moves.waiting.length === 1 ? 'its' : 'their'} turn</span>
+            {#if moves.waiting.length > 1}<button class="btn small ghost" onclick={() => cancelMoves()}>Cancel all waiting</button>{/if}
+          </div>
           {#each moves.waiting as m (m.title_id)}
-            <div class="row"><a class="grow truncate" href="#/title/{m.title_id}">{m.title ?? 'Unknown title'}</a><span class="faint">{m.from && m.to ? `${m.from} to ${m.to}` : m.to ? `To ${m.to}` : ''}</span></div>
+            <div class="row">
+              <a class="grow truncate" href="#/title/{m.title_id}">{m.title ?? 'Unknown title'}</a>
+              <span class="faint dest">{m.from && m.to ? `${m.from} to ${m.to}` : m.to ? `To ${m.to}` : ''}</span>
+              <button class="btn small ghost" aria-label="Cancel the move of {m.title ?? 'this title'}" onclick={() => cancelMoves(m.title_id)}>Cancel</button>
+            </div>
           {/each}
         </div>
       {/if}
@@ -332,6 +344,10 @@
   }
   .waiting .row {
     gap: 12px;
+    align-items: center;
+  }
+  .waiting .dest {
+    white-space: nowrap;
   }
   .pickall {
     gap: 8px;

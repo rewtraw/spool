@@ -197,6 +197,21 @@ impl App {
         moves.now.as_ref().is_some_and(|m| m.title_id == id) || moves.queue.iter().any(|m| m.0 == id)
     }
 
+    /// Take titles out of the line of those waiting to be moved, or all of them when none are
+    /// named. A move already under way is left to finish. Says how many were taken out.
+    pub fn cancel_moves(&self, ids: &[i64]) -> usize {
+        let taken: Vec<i64> = {
+            let mut moves = self.moves.lock();
+            let taken = moves.queue.iter().map(|m| m.0).filter(|id| ids.is_empty() || ids.contains(id)).collect::<Vec<_>>();
+            moves.queue.retain(|m| !taken.contains(&m.0));
+            taken
+        };
+        for id in &taken {
+            self.emit(Event::Title { id: *id });
+        }
+        taken.len()
+    }
+
     /// The move under way and the titles waiting their turn, as Activity shows them.
     pub fn moves_shown(&self) -> serde_json::Value {
         let (now, waiting) = {

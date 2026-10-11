@@ -84,7 +84,7 @@ Spool plays a copy and never changes it, whatever kind of location it is on: it 
 3. The copy is given the folder's name and the title is pointed at it.
 4. Only then is the original taken away.
 
-Activity shows the title being moved, how much of it has been copied and how fast, and the titles waiting their turn.
+Activity shows the title being moved, how much of it has been copied and how fast, and the titles waiting their turn. A waiting title can be taken out of the line there or on its own page; the move under way is left to finish.
 
 If anything fails before the last step, the title is left where it was and a notice says why. On one disk the folder is simply renamed into place.
 

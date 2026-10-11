@@ -139,6 +139,7 @@ export interface Title {
   moving?: boolean;
   /** How far the move has got, on the title's own page. */
   move?: { to: string; done: number; total: number } | null;
+  move_waiting?: boolean;
   /** A film that is posted as its episodes, so single episodes are turned down. */
   in_episodes?: boolean;
   /** The same work as the series source lists it. */

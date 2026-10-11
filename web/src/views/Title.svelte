@@ -138,6 +138,10 @@
   let places = $state<any[]>([]);
   api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
   const elsewhere = $derived(places.filter((p) => p.manage && p.online && p.name !== t?.location && (t?.kind === 'movie' ? p.movie_root : p.series_root)));
+  async function cancelMove() {
+    await act(() => api.post('/titles/move/cancel', { ids: [id] }), 'Taken out of the line. It stays where it is.');
+    load();
+  }
   async function moveTo(where: string) {
     const place = places.find((p) => String(p.id) === where);
     if (!place || !t) return;
@@ -261,7 +265,8 @@
       {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
       {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
       {#if t.moving}
-        <p class="where warn">{#if t.move?.total}Being moved to {t.move.to}: {bytes(t.move.done)} of {bytes(t.move.total)}.{:else}Waiting to be moved.{/if} It stays playable where it is until the move is done.</p>
+        <p class="where warn">{#if t.move?.total}Being moved to {t.move.to}: {bytes(t.move.done)} of {bytes(t.move.total)}.{:else}Waiting to be moved.{/if} It stays playable where it is until the move is done.
+          {#if t.move_waiting}<button class="btn small" onclick={cancelMove}>Cancel the move</button>{/if}</p>
       {:else if elsewhere.length && t.path && !t.offline}
         <p class="where">
           <select class="pick" aria-label="Move to another location" value={''} onchange={(e) => { moveTo(e.currentTarget.value); e.currentTarget.value = ''; }}>
