@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a><a class="sub" href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a></nav>
       </details>
     </aside>
     <article>
@@ -200,6 +200,79 @@
 </ul>
 <p><strong>Why it is waiting.</strong> On a gigabit network, relaying a film through Spool&#39;s machine costs next to nothing: a film plays at a small fraction of the line&#39;s speed.</p>
 <p><strong>When to build it.</strong> Spool&#39;s machine becomes the limit on playing, for instance with several films at once of the largest kind; or the NAS is given a faster line than Spool&#39;s machine has; or playing what is on the NAS should carry on while Spool&#39;s machine is busy.</p>
+<h2 id="from-one-spool-and-its-helpers-to-a-cluster"><a href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a></h2>
+<p><strong>What it is.</strong> Spool with <a href="helper.html">helpers</a> is already the simplest kind of cluster: one machine that decides and others that do the work where the disks are. This is what it has of one, what it lacks, and the steps between, in the order they would be worth taking.</p>
+<p><strong>What is there now.</strong></p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Part of a cluster</th>
+<th>How Spool has it</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>One machine decides, others work</td>
+<td>Spool holds the catalogue and makes every choice; a helper does what it is told.</td>
+</tr>
+<tr>
+<td>More than one worker</td>
+<td>The settings take any number of helpers, each serving the folders it is given.</td>
+</tr>
+<tr>
+<td>Work goes to where the data is</td>
+<td>A download runs on the machine that holds the disks it will be filed on.</td>
+</tr>
+<tr>
+<td>A worker may fail</td>
+<td>With a helper away, Spool does its work itself, and waits for what the helper had under way.</td>
+</tr>
+<tr>
+<td>The parts agree on how to talk</td>
+<td>Spool and a helper check that they are the same version before working together.</td>
+</tr>
+</tbody></table></div>
+<p><strong>What is missing.</strong></p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Part of a cluster</th>
+<th>Today</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A second machine that can decide</td>
+<td>There is one Spool. While it is down nothing is searched for, chosen or played, though a NAS may hold most of the files.</td>
+</tr>
+<tr>
+<td>A choice between workers</td>
+<td>Each folder belongs to one helper. Nothing shares work out, or picks the machine with least to do.</td>
+</tr>
+<tr>
+<td>A catalogue in more than one place</td>
+<td>It is one database file on Spool&#39;s machine. Helpers hold none of it.</td>
+</tr>
+<tr>
+<td>Workers that report in</td>
+<td>Spool asks each helper how it stands, once a second. A helper never says of its own accord that it is there or what it has.</td>
+</tr>
+</tbody></table></div>
+<p><strong>The steps, nearest first.</strong></p>
+<ol>
+<li><strong>The helper reads its own folders.</strong> Looking through a location and the nightly scan are done on the NAS, and only the findings cross. Written up under <a href="#more-for-the-helper-to-do">More for the helper to do</a>.</li>
+<li><strong>The helper plays its own files.</strong> A player takes a film from the NAS, on a ticket from Spool. Written up under <a href="#playing-straight-from-the-helper">Playing straight from the helper</a>. After this, playing what is on a NAS needs Spool only to sign in and browse.</li>
+<li><strong>Helpers report in.</strong> A helper is given Spool&#39;s address and tells it when it starts, what it has finished and when it is going down. Spool stops asking every second, and a second helper becomes a matter of starting it.</li>
+<li><strong>Work that can go anywhere, goes to whoever is free.</strong> Checking subtitles against the sound and repairing a damaged download need a processor more than a particular disk. With more than one helper, Spool could send such a job to the one with least to do.</li>
+<li><strong>A second Spool that follows the first.</strong> It keeps a copy of the catalogue up to date and takes over when the first stops answering: searching, choosing, serving the web app and players. This is the step that makes a cluster in the strict sense.</li>
+</ol>
+<p><strong>What the last step would cost.</strong> It is of a different size from the others.</p>
+<ul>
+<li>The catalogue is SQLite, which one program writes to. Following it from another machine means shipping its changes across as they happen, or moving to a database made for more than one writer; both are large changes to how Spool keeps everything.</li>
+<li>Two machines must never both believe they are in charge, or each will download and file the same things. Deciding which one is, and being sure the other knows, is the hard part of every such system.</li>
+<li>Players and browsers would need one address that follows whichever is in charge.</li>
+<li>Everything Spool keeps in memory and not in the database (the line of titles waiting to be moved was one such, until it was written down) would have to be found and written down, or be lost when the other takes over.</li>
+</ul>
+<p><strong>Why it is waiting.</strong> For one household&#39;s library, Spool being down for the length of a restart costs a few seconds of nothing being searched for. The first two steps bring most of what a cluster would, at a fraction of the work: with them, a NAS goes on playing what it holds whatever Spool&#39;s machine is doing.</p>
+<p><strong>When to build it.</strong> Steps 1 and 2 when their own entries say. Step 3 when there is a second helper. Step 4 when a second helper sits idle while the first is busy. Step 5 if Spool&#39;s machine proves unreliable enough that its being away is noticed, and not before.</p>
 <nav class="around" aria-label="Other guides"><a class="prev" href="architecture.html"><span>Before</span>How Spool is put together</a><span></span></nav>
     </article>
   </div>

@@ -72,3 +72,45 @@ It would also remove the need for the helper's downloads folder to be shared wit
 **Why it is waiting.** On a gigabit network, relaying a film through Spool's machine costs next to nothing: a film plays at a small fraction of the line's speed.
 
 **When to build it.** Spool's machine becomes the limit on playing, for instance with several films at once of the largest kind; or the NAS is given a faster line than Spool's machine has; or playing what is on the NAS should carry on while Spool's machine is busy.
+
+## From one Spool and its helpers to a cluster
+
+**What it is.** Spool with [helpers](helper.md) is already the simplest kind of cluster: one machine that decides and others that do the work where the disks are. This is what it has of one, what it lacks, and the steps between, in the order they would be worth taking.
+
+**What is there now.**
+
+| Part of a cluster | How Spool has it |
+| --- | --- |
+| One machine decides, others work | Spool holds the catalogue and makes every choice; a helper does what it is told. |
+| More than one worker | The settings take any number of helpers, each serving the folders it is given. |
+| Work goes to where the data is | A download runs on the machine that holds the disks it will be filed on. |
+| A worker may fail | With a helper away, Spool does its work itself, and waits for what the helper had under way. |
+| The parts agree on how to talk | Spool and a helper check that they are the same version before working together. |
+
+**What is missing.**
+
+| Part of a cluster | Today |
+| --- | --- |
+| A second machine that can decide | There is one Spool. While it is down nothing is searched for, chosen or played, though a NAS may hold most of the files. |
+| A choice between workers | Each folder belongs to one helper. Nothing shares work out, or picks the machine with least to do. |
+| A catalogue in more than one place | It is one database file on Spool's machine. Helpers hold none of it. |
+| Workers that report in | Spool asks each helper how it stands, once a second. A helper never says of its own accord that it is there or what it has. |
+
+**The steps, nearest first.**
+
+1. **The helper reads its own folders.** Looking through a location and the nightly scan are done on the NAS, and only the findings cross. Written up under [More for the helper to do](#more-for-the-helper-to-do).
+2. **The helper plays its own files.** A player takes a film from the NAS, on a ticket from Spool. Written up under [Playing straight from the helper](#playing-straight-from-the-helper). After this, playing what is on a NAS needs Spool only to sign in and browse.
+3. **Helpers report in.** A helper is given Spool's address and tells it when it starts, what it has finished and when it is going down. Spool stops asking every second, and a second helper becomes a matter of starting it.
+4. **Work that can go anywhere, goes to whoever is free.** Checking subtitles against the sound and repairing a damaged download need a processor more than a particular disk. With more than one helper, Spool could send such a job to the one with least to do.
+5. **A second Spool that follows the first.** It keeps a copy of the catalogue up to date and takes over when the first stops answering: searching, choosing, serving the web app and players. This is the step that makes a cluster in the strict sense.
+
+**What the last step would cost.** It is of a different size from the others.
+
+- The catalogue is SQLite, which one program writes to. Following it from another machine means shipping its changes across as they happen, or moving to a database made for more than one writer; both are large changes to how Spool keeps everything.
+- Two machines must never both believe they are in charge, or each will download and file the same things. Deciding which one is, and being sure the other knows, is the hard part of every such system.
+- Players and browsers would need one address that follows whichever is in charge.
+- Everything Spool keeps in memory and not in the database (the line of titles waiting to be moved was one such, until it was written down) would have to be found and written down, or be lost when the other takes over.
+
+**Why it is waiting.** For one household's library, Spool being down for the length of a restart costs a few seconds of nothing being searched for. The first two steps bring most of what a cluster would, at a fraction of the work: with them, a NAS goes on playing what it holds whatever Spool's machine is doing.
+
+**When to build it.** Steps 1 and 2 when their own entries say. Step 3 when there is a second helper. Step 4 when a second helper sits idle while the first is busy. Step 5 if Spool's machine proves unreliable enough that its being away is noticed, and not before.
