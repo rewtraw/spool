@@ -177,10 +177,12 @@ pub(super) async fn move_titles(State(app): State<App>, Json(b): Json<Value>) ->
     Ok(Json(json!({"queued": queued, "asked": ids.len()})))
 }
 
-/// Take waiting titles out of the line to be moved: those named, or all of them.
+/// Call moves off: the waiting titles named, or all that wait; and the move under way, when
+/// its title is named.
 pub(super) async fn cancel_moves(State(app): State<App>, body: Option<Json<Value>>) -> R<Value> {
     let ids: Vec<i64> = body.and_then(|b| b.0["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect())).unwrap_or_default();
-    Ok(Json(json!({"cancelled": app.cancel_moves(&ids)})))
+    let (cancelled, stopping) = app.cancel_moves(&ids);
+    Ok(Json(json!({"cancelled": cancelled, "stopping": stopping})))
 }
 
 /// Turn a film that is posted in episodes into the series it is listed as.

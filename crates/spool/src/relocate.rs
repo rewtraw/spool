@@ -15,7 +15,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 /// The titles waiting to be moved, and the one being moved now.
@@ -34,7 +34,13 @@ pub struct Moving {
     #[serde(serialize_with = "count")]
     pub done: Arc<AtomicU64>,
     pub total: u64,
+    /// Set when the person calls the move off; the copy stops at the next block.
+    #[serde(skip)]
+    pub stop: Arc<AtomicBool>,
 }
+
+/// What a move that was called off ends with, so it is not reported as a failure.
+const CALLED_OFF: &str = "the move was cancelled";
 
 fn count<S: serde::Serializer>(n: &Arc<AtomicU64>, s: S) -> std::result::Result<S::Ok, S::Error> {
     s.serialize_u64(n.load(Ordering::Relaxed))
@@ -50,7 +56,7 @@ fn listing(root: &Path) -> Vec<(PathBuf, u64)> {
 
 /// Copy a folder's files to another, counting bytes as they go, and check each against its
 /// original by size.
-fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64) -> Result<()> {
+fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64, stop: &AtomicBool) -> Result<()> {
     use std::io::{Read, Write};
     let mut buffer = vec![0u8; 4 << 20];
     for (rel, size) in files {
@@ -61,6 +67,9 @@ fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &AtomicU64) 
         let mut input = std::fs::File::open(&src).with_context(|| format!("reading {}", src.display()))?;
         let mut output = std::fs::File::create(&dst).with_context(|| format!("writing {}", dst.display()))?;
         loop {
+            if stop.load(Ordering::Relaxed) {
+                bail!(CALLED_OFF);
+            }
             let n = input.read(&mut buffer).with_context(|| format!("reading {}", src.display()))?;
             if n == 0 {
                 break;
@@ -162,7 +171,7 @@ impl App {
                         let mut moves = app.moves.lock();
                         match moves.queue.pop_front() {
                             Some(next) => {
-                                moves.now = Some(Moving { title_id: next.0, to: String::new(), done: Arc::new(AtomicU64::new(0)), total: 0 });
+                                moves.now = Some(Moving { title_id: next.0, to: String::new(), done: Arc::new(AtomicU64::new(0)), total: 0, stop: Default::default() });
                                 next
                             }
                             None => {
@@ -176,6 +185,10 @@ impl App {
                         Ok(said) => {
                             tracing::info!(title = %name, "{said}");
                             app.emit(Event::Task { name: "move".into(), running: false, message: said });
+                        }
+                        Err(e) if e.to_string() == CALLED_OFF => {
+                            tracing::info!(title = %name, "a move was cancelled; the title is where it was");
+                            app.emit(Event::Task { name: "move".into(), running: false, message: format!("The move of {name} was cancelled. It is still where it was.") });
                         }
                         Err(e) => {
                             tracing::warn!(title = %name, error = %format!("{e:#}"), "could not move a title");
@@ -197,19 +210,26 @@ impl App {
         moves.now.as_ref().is_some_and(|m| m.title_id == id) || moves.queue.iter().any(|m| m.0 == id)
     }
 
-    /// Take titles out of the line of those waiting to be moved, or all of them when none are
-    /// named. A move already under way is left to finish. Says how many were taken out.
-    pub fn cancel_moves(&self, ids: &[i64]) -> usize {
-        let taken: Vec<i64> = {
+    /// Call moves off. Titles waiting their turn are taken out of the line: those named, or
+    /// all of them when none are named. The move under way is stopped only when its title is
+    /// named: its copy is abandoned and what was copied is removed, and the title stays where
+    /// it was. Once the copy is complete the move is past stopping and finishes. Says how
+    /// many were taken out of the line, and whether the move under way was told to stop.
+    pub fn cancel_moves(&self, ids: &[i64]) -> (usize, bool) {
+        let (taken, stopping): (Vec<i64>, bool) = {
             let mut moves = self.moves.lock();
             let taken = moves.queue.iter().map(|m| m.0).filter(|id| ids.is_empty() || ids.contains(id)).collect::<Vec<_>>();
             moves.queue.retain(|m| !taken.contains(&m.0));
-            taken
+            let stopping = moves.now.as_ref().is_some_and(|m| ids.contains(&m.title_id));
+            if let Some(m) = moves.now.as_ref().filter(|_| stopping) {
+                m.stop.store(true, Ordering::Relaxed);
+            }
+            (taken, stopping)
         };
         for id in &taken {
             self.emit(Event::Title { id: *id });
         }
-        taken.len()
+        (taken.len(), stopping)
     }
 
     /// The move under way and the titles waiting their turn, as Activity shows them.
@@ -238,6 +258,7 @@ impl App {
             v["to"] = m.to.clone().into();
             v["done"] = m.done.load(Ordering::Relaxed).min(m.total).into();
             v["total"] = m.total.into();
+            v["stopping"] = m.stop.load(Ordering::Relaxed).into();
             v
         });
         let waiting: Vec<serde_json::Value> = waiting
@@ -271,19 +292,29 @@ impl App {
             }
         }
         let done = Arc::new(AtomicU64::new(0));
-        self.moves.lock().now = Some(Moving { title_id: id, to: to_name.clone(), done: done.clone(), total });
+        // The flag made when the title was taken from the line is kept, so a move called off
+        // while its folder was being read is still called off.
+        let stop = {
+            let mut moves = self.moves.lock();
+            let stop = moves.now.as_ref().map(|m| m.stop.clone()).unwrap_or_default();
+            moves.now = Some(Moving { title_id: id, to: to_name.clone(), done: done.clone(), total, stop: stop.clone() });
+            stop
+        };
+        if stop.load(Ordering::Relaxed) {
+            bail!(CALLED_OFF);
+        }
         self.emit(Event::Title { id });
 
         // Under a working name first, so a half-made folder is never taken for the title's.
         let working = target.with_file_name(format!(".spool-moving-{id}"));
-        let (w, t, f, fl, d) = (working.clone(), target.clone(), from.clone(), files.clone(), done.clone());
+        let (w, t, f, fl, d, st) = (working.clone(), target.clone(), from.clone(), files.clone(), done.clone(), stop.clone());
         tokio::task::spawn_blocking(move || -> Result<()> {
             let _ = std::fs::remove_dir_all(&w);
             // On the same disk a folder is moved by renaming it, which takes no time.
             if !keep_original && std::fs::rename(&f, &t).is_ok() {
                 return Ok(());
             }
-            let copied = copy_all(&f, &w, &fl, &d).and_then(|_| std::fs::rename(&w, &t).with_context(|| format!("naming {}", t.display())));
+            let copied = copy_all(&f, &w, &fl, &d, &st).and_then(|_| std::fs::rename(&w, &t).with_context(|| format!("naming {}", t.display())));
             if copied.is_err() {
                 let _ = std::fs::remove_dir_all(&w);
             }
@@ -337,11 +368,16 @@ mod tests {
         let files = listing(&from);
         assert_eq!(files.len(), 4);
         let done = AtomicU64::new(0);
-        copy_all(&from, &to, &files, &done).unwrap();
+        copy_all(&from, &to, &files, &done, &AtomicBool::new(false)).unwrap();
         assert_eq!(done.load(Ordering::Relaxed), files.iter().map(|f| f.1).sum::<u64>());
         assert_eq!(std::fs::read(to.join("Trailers/teaser.mkv")).unwrap(), b"teaser");
         assert_eq!(std::fs::metadata(to.join("Film (1999).mkv")).unwrap().len(), 5 << 20);
         assert!(from.join("Film (1999).mkv").exists(), "the original is there until it is taken away");
+        // Called off, a copy stops before it reads another block and takes nothing from the original.
+        let (again, counted) = (dir.path().join("there/.spool-moving-2"), AtomicU64::new(0));
+        let stopped = copy_all(&from, &again, &files, &counted, &AtomicBool::new(true)).unwrap_err();
+        assert_eq!((stopped.to_string().as_str(), counted.load(Ordering::Relaxed)), (CALLED_OFF, 0));
+        assert!(from.join("Film (1999).mkv").exists());
         remove_all(&from, &files);
         assert!(!from.join("Film (1999).mkv").exists() && !from.join("Trailers").exists());
         assert!(from.join(".AppleDouble").exists(), "what was not copied is not removed");

@@ -37,6 +37,12 @@
     await act(() => api.post('/titles/move/cancel', id ? { ids: [id] } : {}), id ? 'Taken out of the line. It stays where it is.' : 'The waiting moves are cancelled. Those titles stay where they are.');
     load();
   }
+  /** Call off the move under way. What was copied is removed and the title stays where it was. */
+  async function stopMove(m: any) {
+    if (!confirm(`Cancel the move of ${m.title ?? 'this title'}? What has been copied so far is removed, and it stays where it is.`)) return;
+    await act(() => api.post('/titles/move/cancel', { ids: [m.title_id] }), 'Stopping the move');
+    load();
+  }
   // How fast the copy is going, from what was counted the last time it was asked.
   let seen: { id: number; done: number; at: number } | null = null;
   let moveSpeed = $state(0);
@@ -182,19 +188,23 @@
           <div class="grow">
             <div class="row wrap top">
               <a class="t" href="#/title/{m.title_id}">{m.title ?? 'Unknown title'}</a>
-              <span class="chip accent">{m.total ? 'Copying' : 'Getting ready'}</span>
+              <span class="chip {m.stopping ? 'warn' : 'accent'}">{m.stopping ? 'Stopping' : !m.total ? 'Getting ready' : m.done >= m.total ? 'Finishing' : 'Copying'}</span>
               {#if m.to}<span class="chip">{m.from ? `${m.from} to ${m.to}` : `To ${m.to}`}</span>{/if}
             </div>
             {#if m.total}
               <div class="progress" role="progressbar" aria-label="Move progress" aria-valuenow={Math.round(pct(m.done, m.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(m.done, m.total)}%"></i></div>
               <div class="faint why">
-                {#if m.done >= m.total}Copied. Checking it and taking the original away.
+                {#if m.stopping}Cancelled. Removing what was copied; it stays where it was.
+                {:else if m.done >= m.total}Copied. Checking it and taking the original away.
                 {:else}{bytes(m.done)} of {bytes(m.total)}{moveSpeed > 0 ? ` · ${bytes(moveSpeed)}/s · about ${duration((m.total - m.done) / moveSpeed)} left` : ''}{/if}
               </div>
             {:else}
               <div class="faint why">Reading what is in its folder.</div>
             {/if}
           </div>
+          {#if !m.stopping && !(m.total && m.done >= m.total)}
+            <div class="buttons"><button class="btn small ghost danger" onclick={() => stopMove(m)}>Cancel</button></div>
+          {/if}
         </div>
       {/if}
       {#if moves.waiting.length}

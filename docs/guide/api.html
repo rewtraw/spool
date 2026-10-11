@@ -227,6 +227,10 @@
 <td>Move titles to another location: <code>{&quot;ids&quot;: [...], &quot;location&quot;: id}</code>.</td>
 </tr>
 <tr>
+<td><code>POST /api/titles/move/cancel</code></td>
+<td>Call moves off: <code>{&quot;ids&quot;: [...]}</code> takes those titles out of the line and stops the move under way if its title is among them; with no ids, every waiting title is taken out. <code>GET /api/activity</code> lists the move under way and those waiting, under <code>moves</code>.</td>
+</tr>
+<tr>
 <td><code>POST /api/titles/{id}/to-series</code></td>
 <td>Replace a film that is posted in episodes with the series it is listed as.</td>
 </tr>

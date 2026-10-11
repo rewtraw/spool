@@ -2453,7 +2453,7 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
     {
         use std::sync::{atomic::AtomicU64, Arc};
         let mut moves = w.app.moves.lock();
-        moves.now = Some(spool::relocate::Moving { title_id: heat.id, to: "Main".into(), done: Arc::new(AtomicU64::new(300)), total: 1200 });
+        moves.now = Some(spool::relocate::Moving { title_id: heat.id, to: "Main".into(), done: Arc::new(AtomicU64::new(300)), total: 1200, stop: Default::default() });
         moves.queue.push_back((heat.id, 2));
     }
     let (_, busy) = call(&api, "GET", "/api/activity", Value::Null).await;
@@ -2464,14 +2464,20 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
     let (_, row) = call(&api, "GET", &format!("/api/titles/{}", heat.id), Value::Null).await;
     assert_eq!(row["move_waiting"].as_bool(), Some(true));
     w.app.moves.lock().queue.push_back((77, 2));
-    let (status, said) = call(&api, "POST", "/api/titles/move/cancel", json!({"ids": [heat.id]})).await;
-    assert_eq!((status, said["cancelled"].as_u64()), (200, Some(1)), "{said}");
+    let (status, said) = call(&api, "POST", "/api/titles/move/cancel", json!({"ids": [77]})).await;
+    assert_eq!((status, said["cancelled"].as_u64(), said["stopping"].as_bool()), (200, Some(1), Some(false)), "{said}");
     {
         let moves = w.app.moves.lock();
-        assert_eq!((moves.queue.iter().map(|m| m.0).collect::<Vec<_>>(), moves.now.as_ref().map(|m| m.title_id)), (vec![77], Some(heat.id)));
+        assert_eq!((moves.queue.iter().map(|m| m.0).collect::<Vec<_>>(), moves.now.as_ref().map(|m| m.title_id)), (vec![heat.id], Some(heat.id)));
     }
     let (_, said) = call(&api, "POST", "/api/titles/move/cancel", Value::Null).await;
-    assert_eq!(said["cancelled"].as_u64(), Some(1), "with no titles named, all that wait are taken out");
+    assert_eq!((said["cancelled"].as_u64(), said["stopping"].as_bool()), (Some(1), Some(false)), "with no titles named, all that wait are taken out");
+    assert!(!w.app.moves.lock().now.as_ref().unwrap().stop.load(std::sync::atomic::Ordering::Relaxed), "and the move under way is left alone");
+    // Named, the move under way is told to stop, and Activity says so.
+    let (_, said) = call(&api, "POST", "/api/titles/move/cancel", json!({"ids": [heat.id]})).await;
+    assert_eq!((said["cancelled"].as_u64(), said["stopping"].as_bool()), (Some(0), Some(true)), "{said}");
+    let (_, busy) = call(&api, "GET", "/api/activity", Value::Null).await;
+    assert_eq!(busy["moves"]["now"]["stopping"].as_bool(), Some(true));
     {
         let mut moves = w.app.moves.lock();
         assert!(moves.queue.is_empty() && moves.now.is_some());
