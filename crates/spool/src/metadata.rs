@@ -108,12 +108,7 @@ impl Metadata {
                 fanart: opt(c, "backdrop_path").map(|p| format!("{TMDB_IMG}/w1280{p}")),
             }),
             details_at: 0,
-            local: Default::default(),
-            in_episodes: false,
-            anilist: vec![],
-            anime_checked_at: 0,
-            as_series: None,
-            series_checked: false,
+            ..Default::default()
         };
         let original = s(m, "original_title");
         if !original.is_empty() && original != t.title {
@@ -283,12 +278,7 @@ impl Metadata {
             people: series_people(show),
             collection: None,
             details_at: 0,
-            local: Default::default(),
-            in_episodes: false,
-            anilist: vec![],
-            anime_checked_at: 0,
-            as_series: None,
-            series_checked: false,
+            ..Default::default()
         }
     }
 

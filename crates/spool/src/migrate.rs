@@ -419,20 +419,9 @@ impl App {
                     season_folder: true,
                     original_language: None,
                     first_aired: None,
-                    last_search_at: existing.as_ref().map(|e| e.last_search_at).unwrap_or(0),
                     last_refresh_at: now(),
-                    tagline: existing.as_ref().map(|e| e.tagline.clone()).unwrap_or_default(),
-                    rating: existing.as_ref().and_then(|e| e.rating),
-                    certification: existing.as_ref().and_then(|e| e.certification.clone()),
-                    people: existing.as_ref().map(|e| e.people.clone()).unwrap_or_default(),
-                    collection: existing.as_ref().and_then(|e| e.collection.clone()),
-                    details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
-                    local: existing.as_ref().map(|e| e.local.clone()).unwrap_or_default(),
-                    in_episodes: existing.as_ref().is_some_and(|e| e.in_episodes),
-                    anilist: existing.as_ref().map(|e| e.anilist.clone()).unwrap_or_default(),
-                    anime_checked_at: existing.as_ref().map(|e| e.anime_checked_at).unwrap_or(0),
-                    as_series: existing.as_ref().and_then(|e| e.as_series.clone()),
-                    series_checked: existing.as_ref().is_some_and(|e| e.series_checked),
+                    // Whatever Spool has learned of the title since it was last brought over is kept.
+                    ..existing.clone().unwrap_or_default()
                 };
                 self.db.save_title(&mut t)?;
                 report.movies += 1;
@@ -547,20 +536,9 @@ impl App {
                     season_folder: sr["seasonFolder"].as_bool().unwrap_or(true),
                     original_language: None,
                     first_aired: date(sr, "firstAired"),
-                    last_search_at: existing.as_ref().map(|e| e.last_search_at).unwrap_or(0),
                     last_refresh_at: now(),
-                    tagline: existing.as_ref().map(|e| e.tagline.clone()).unwrap_or_default(),
-                    rating: existing.as_ref().and_then(|e| e.rating),
-                    certification: existing.as_ref().and_then(|e| e.certification.clone()),
-                    people: existing.as_ref().map(|e| e.people.clone()).unwrap_or_default(),
-                    collection: existing.as_ref().and_then(|e| e.collection.clone()),
-                    details_at: existing.as_ref().map(|e| e.details_at).unwrap_or(0),
-                    local: existing.as_ref().map(|e| e.local.clone()).unwrap_or_default(),
-                    in_episodes: existing.as_ref().is_some_and(|e| e.in_episodes),
-                    anilist: existing.as_ref().map(|e| e.anilist.clone()).unwrap_or_default(),
-                    anime_checked_at: existing.as_ref().map(|e| e.anime_checked_at).unwrap_or(0),
-                    as_series: existing.as_ref().and_then(|e| e.as_series.clone()),
-                    series_checked: existing.as_ref().is_some_and(|e| e.series_checked),
+                    // Whatever Spool has learned of the title since it was last brought over is kept.
+                    ..existing.clone().unwrap_or_default()
                 };
                 self.db.save_title(&mut t)?;
                 report.series += 1;

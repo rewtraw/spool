@@ -184,6 +184,14 @@ pub struct Title {
     pub anime_checked_at: i64,
 }
 
+impl Default for Title {
+    /// A title with nothing known of it: every field as it is read when it is absent. Titles
+    /// are built from this, so a new field is named only where it is given a value.
+    fn default() -> Title {
+        serde_json::from_value(serde_json::json!({"kind": "movie", "title": ""})).expect("an empty title reads")
+    }
+}
+
 /// A film's listing as a series.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SeriesTwin {
