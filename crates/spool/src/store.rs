@@ -104,6 +104,29 @@ impl Db {
         Ok(data.and_then(|d| serde_json::from_str(&d).ok()))
     }
 
+    pub fn film_set_put(&self, set: &crate::anime::FilmSet) -> Result<()> {
+        self.with(|c| c.execute("INSERT OR REPLACE INTO film_sets(id, fetched_at, data) VALUES (?1,?2,?3)", params![set.id, now(), serde_json::to_string(set).unwrap_or_default()]))?;
+        Ok(())
+    }
+
+    pub fn film_sets(&self) -> Result<Vec<crate::anime::FilmSet>> {
+        let rows: Vec<String> = self.with(|c| {
+            let mut s = c.prepare("SELECT data FROM film_sets ORDER BY id")?;
+            let rows = s.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })?;
+        Ok(rows.iter().filter_map(|d| serde_json::from_str(d).ok()).collect())
+    }
+
+    /// The film collections read since then.
+    pub fn film_sets_since(&self, since: i64) -> Result<Vec<u32>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT id FROM film_sets WHERE fetched_at >= ?1")?;
+            let rows = s.query_map([since], |r| r.get::<_, u32>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
     pub fn anime_all(&self) -> Result<Vec<crate::anime::Media>> {
         let rows: Vec<String> = self.with(|c| {
             let mut s = c.prepare("SELECT data FROM anime ORDER BY id")?;

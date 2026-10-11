@@ -356,6 +356,19 @@ impl App {
                 if targets.is_empty() {
                     return Err(Blocked::Needs("could not tell which episodes the downloaded files are".into()));
                 }
+                // The release was taken for particular episodes, and the files' own names say
+                // otherwise: a later season numbered from one, most often. With a file for
+                // each of those episodes, the release is believed, in order.
+                let read: std::collections::HashSet<i64> = targets.iter().flat_map(|t| t.2.iter().map(|e| e.id)).collect();
+                let meant: std::collections::HashSet<i64> = wanted.iter().copied().collect();
+                if forced_episodes.is_none() && !meant.is_empty() && read != meant && targets.len() == vids.len() && targets.len() == meant.len() && targets.iter().all(|t| t.2.len() == 1) {
+                    let mut taken_for: Vec<Episode> = episodes.iter().filter(|e| meant.contains(&e.id)).cloned().collect();
+                    taken_for.sort_by_key(|e| (e.season, e.episode));
+                    targets.sort_by_key(|t| (t.2[0].season, t.2[0].episode));
+                    for (target, episode) in targets.iter_mut().zip(taken_for) {
+                        target.2 = vec![episode];
+                    }
+                }
             }
         }
 

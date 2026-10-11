@@ -100,16 +100,18 @@ export interface Quality {
   revision?: { version: number; real: number; is_repack: boolean };
 }
 
-/** Titles that belong together: a series of films, or an anime's series, films and specials. */
+/** Titles that belong together: a series of films, an anime's series, films and specials, or a set of your own. */
 export interface Collection {
   id: number;
   name: string;
   poster?: string | null;
-  kind: 'anime' | 'films';
-  /** In the order they came out. `role` says what a member is when not simply part of the story. */
-  members: { title_id: number; year: number; role: string }[];
-  /** Works of the same story that are not in the library. */
-  missing: { anilist_id: number; title: string; year: number; format: string; episodes: number; role: string; poster?: string | null; can_add: boolean }[];
+  kind: 'anime' | 'films' | 'own';
+  /** In order of release. `role` says what a member is when not simply part of the story; `story` is its place in the story's own order. */
+  members: { title_id: number; year: number; role: string; story: number; watched: boolean }[];
+  /** Works of the same story, or films of the same collection, that are not in the library. */
+  missing: { anilist_id: number; tmdb_id?: number | null; title: string; year: number; format: string; episodes: number; role: string; poster?: string | null; story: number; can_add: boolean }[];
+  /** The member to watch next, once one has been watched. */
+  next?: number | null;
 }
 
 export interface Title {

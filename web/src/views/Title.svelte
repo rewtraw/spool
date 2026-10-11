@@ -124,6 +124,21 @@
   const inCollection = $derived(app.collections.find((c) => c.members.some((m) => m.title_id === id)));
   const myRole = $derived(inCollection?.members.find((m) => m.title_id === id)?.role ?? '');
 
+  /** Put this title in a collection, a new one, none, or back where its sources have it. */
+  async function place(where: string) {
+    if (!where) return;
+    let collection: number | null = where === 'auto' ? null : Number(where);
+    if (where === 'new') {
+      const name = prompt('Name the collection')?.trim();
+      if (!name) return;
+      const made = await act(() => api.post<{ id: number }>('/collections', { name }));
+      if (!made) return;
+      collection = made.id;
+    }
+    await act(() => api.put(`/titles/${id}/collection`, { collection }), 'Collection changed');
+    loadTitles(true);
+  }
+
   /** A film that is posted in episodes becomes the series it is listed as. */
   async function toSeries() {
     let made: any;
@@ -216,9 +231,16 @@
       {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
       {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
       {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
-      {#if inCollection}
-        <p class="where">Part of <a class="link" href="#/collection/{inCollection.id}">{inCollection.name}</a>{#if myRole}, as {myRole === 'Alternative telling' ? 'an alternative telling' : `a ${myRole.toLowerCase()}`}{/if}.</p>
-      {/if}
+      <p class="where">
+        {#if inCollection}Part of <a class="link" href="#/collection/{inCollection.id}">{inCollection.name}</a>{#if myRole}, as {myRole === 'Alternative telling' ? 'an alternative telling' : `a ${myRole.toLowerCase()}`}{/if}.{/if}
+        <select class="pick" aria-label="Collection" value={''} onchange={(e) => { place(e.currentTarget.value); e.currentTarget.value = ''; }}>
+          <option value="">{inCollection ? 'Move…' : 'Put in a collection…'}</option>
+          {#each app.collections.filter((c) => c.id !== inCollection?.id) as c}<option value={c.id}>{c.name}</option>{/each}
+          <option value="new">A new collection…</option>
+          {#if inCollection}<option value="0">None</option>{/if}
+          <option value="auto">Where its sources put it</option>
+        </select>
+      </p>
       {#if t.kind === 'movie' && t.in_episodes && !t.files.length}
         <div class="notice warn episodes">
           {#if t.as_series}
@@ -566,6 +588,17 @@
     margin: 0;
     font-size: 13.5px;
     color: var(--faint);
+  }
+  .pick {
+    font: inherit;
+    font-size: 13px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 2px 6px;
+    margin-left: 6px;
+    max-width: 210px;
   }
   .episodes {
     display: flex;

@@ -189,6 +189,35 @@ impl Metadata {
         Ok(found)
     }
 
+    /// A series as a search would list it, found by its TVDB id.
+    pub async fn series_listing_by_tvdb(&self, tvdb_id: u32) -> Result<Title> {
+        let show = self.get(&format!("{}/lookup/shows?thetvdb={tvdb_id}", self.tvmaze_base)).await?;
+        if show.get("id").is_none() {
+            bail!("not found");
+        }
+        Ok(self.series_from(&show))
+    }
+
+    /// A film collection, whole: every film TMDB puts in it.
+    pub async fn film_set(&self, key: &str, id: u32) -> Result<crate::anime::FilmSet> {
+        let v = self.get(&format!("{}/collection/{id}?api_key={key}", self.tmdb_base)).await?;
+        let parts = v
+            .get("parts")
+            .and_then(|p| p.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|p| {
+                Some(crate::anime::FilmPart {
+                    tmdb_id: p.get("id")?.as_u64()? as u32,
+                    title: s(p, "title"),
+                    year: s(p, "release_date").get(..4).and_then(|y| y.parse().ok()).unwrap_or(0),
+                    poster: opt(p, "poster_path").map(|path| format!("{TMDB_IMG}/w500{path}")),
+                })
+            })
+            .collect();
+        Ok(crate::anime::FilmSet { id, name: s(&v, "name"), parts })
+    }
+
     /// The film source's id for a film known by its IMDb id.
     pub async fn movie_by_imdb(&self, key: &str, imdb_id: &str) -> Result<Option<u32>> {
         if key.is_empty() {

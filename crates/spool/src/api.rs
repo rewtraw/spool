@@ -606,6 +606,15 @@ async fn upload_nzb(State(app): State<App>, Path(id): Path<i64>, Query(q): Query
     Ok(Json(app.add_manual_nzb(&t, episodes, &name, &body)?))
 }
 
+/// Films and series by name, together.
+async fn lookup_all(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
+    let query = q.get("q").cloned().unwrap_or_default();
+    if query.trim().is_empty() {
+        return Ok(Json(json!({"movies": [], "series": []})));
+    }
+    Ok(Json(app.discover(&query).await?))
+}
+
 async fn lookup(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Vec<Value>> {
     let query = q.get("q").cloned().unwrap_or_default();
     if query.trim().is_empty() {
@@ -1226,7 +1235,10 @@ async fn collections(State(app): State<App>) -> R<Value> {
         g.poster = g.poster.as_ref().map(|src| format!("/api/collections/{}/art?v={}", g.id, &crate::art::tag(src)[..10]));
         g.fanart = None;
         for m in &mut g.missing {
-            m.poster = m.poster.as_ref().map(|src| format!("/api/anime/{}/art?v={}", m.anilist_id, &crate::art::tag(src)[..10]));
+            m.poster = m.poster.as_ref().map(|src| match m.tmdb_id {
+                Some(tmdb) => format!("/api/film-part/{tmdb}/art?v={}", &crate::art::tag(src)[..10]),
+                None => format!("/api/anime/{}/art?v={}", m.anilist_id, &crate::art::tag(src)[..10]),
+            });
         }
     }
     Ok(Json(json!(groups)))
@@ -1234,8 +1246,77 @@ async fn collections(State(app): State<App>) -> R<Value> {
 
 /// Add a work a collection lacks.
 async fn collection_add(State(app): State<App>, Json(b): Json<Value>) -> R<Title> {
+    if let Some(tmdb) = b["tmdb_id"].as_u64() {
+        return Ok(Json(app.add_missing_film(tmdb as u32).await?));
+    }
     let id = b["anilist_id"].as_u64().ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "which work?".into()))? as u32;
     Ok(Json(app.add_missing(id).await?))
+}
+
+/// A collection of the user's own making, empty until titles are put in it.
+async fn collection_new(State(app): State<App>, Json(b): Json<Value>) -> R<Value> {
+    let name = b["name"].as_str().unwrap_or_default().trim().to_string();
+    if name.is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "give the collection a name".into()));
+    }
+    let mut id = 0;
+    app.edit_collections(|e| {
+        id = crate::anime::OWN_GROUP | (e.own.iter().map(|o| o.0 & !crate::anime::OWN_GROUP).max().unwrap_or(0) + 1);
+        e.own.push((id, name.clone()));
+    })?;
+    Ok(Json(json!({"id": id, "name": name})))
+}
+
+/// Give a collection another name. An empty name gives back the one its source has.
+async fn collection_rename(State(app): State<App>, Path(id): Path<u32>, Json(b): Json<Value>) -> R<Value> {
+    let name = b["name"].as_str().unwrap_or_default().trim().to_string();
+    app.edit_collections(|e| {
+        if let Some(own) = e.own.iter_mut().find(|o| o.0 == id) {
+            if !name.is_empty() {
+                own.1 = name.clone();
+            }
+        } else if name.is_empty() {
+            e.names.remove(&id);
+        } else {
+            e.names.insert(id, name.clone());
+        }
+    })?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Undo a collection of the user's own. Its titles go back to where the sources put them.
+async fn collection_remove(State(app): State<App>, Path(id): Path<u32>) -> R<Value> {
+    app.edit_collections(|e| {
+        e.own.retain(|o| o.0 != id);
+        e.placed.retain(|_, g| *g != id);
+        e.names.remove(&id);
+    })?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Say which collection a title is in, or what it is to its collection. `collection` is a
+/// collection's id, 0 for none, or null to leave it to the sources; `role` likewise.
+async fn title_collection(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
+    app.edit_collections(|e| {
+        if let Some(c) = b.get("collection") {
+            match c.as_u64() {
+                Some(g) => e.placed.insert(id, g as u32),
+                None => e.placed.remove(&id),
+            };
+        }
+        if let Some(r) = b.get("role") {
+            match r.as_str() {
+                Some(role) => e.roles.insert(id, role.trim().to_string()),
+                None => e.roles.remove(&id),
+            };
+        }
+    })?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn film_part_art(State(app): State<App>, Path(id): Path<u32>) -> Response {
+    let Some(src) = app.db.film_sets().ok().and_then(|sets| sets.into_iter().flat_map(|s| s.parts).find(|p| p.tmdb_id == id)).and_then(|p| p.poster) else { return StatusCode::NOT_FOUND.into_response() };
+    picture(app.art_any(&format!("part-{id}"), &src, 400).await)
 }
 
 fn picture(image: anyhow::Result<Vec<u8>>) -> Response {
@@ -1372,6 +1453,7 @@ fn api_routes() -> Router<App> {
         .route("/api/files/{id}/subtitles/auto", post(auto_file_subtitle))
         .route("/api/files/{id}/subtitles/check", post(check_file_subtitle))
         .route("/api/lookup", get(lookup))
+        .route("/api/lookup/all", get(lookup_all))
         .route("/api/activity", get(activity))
         .route("/api/activity/{id}/{action}", post(activity_action))
         .route("/api/queue/{action}", post(queue_action))
@@ -1411,9 +1493,12 @@ fn api_routes() -> Router<App> {
         .route("/api/art/{id}/{kind}", get(art))
         .route("/api/players", get(players))
         .route("/api/changes", get(changes))
-        .route("/api/collections", get(collections))
+        .route("/api/collections", get(collections).post(collection_new))
         .route("/api/collections/add", post(collection_add))
+        .route("/api/collections/{id}", put(collection_rename).delete(collection_remove))
         .route("/api/collections/{id}/art", get(collection_art))
+        .route("/api/film-part/{id}/art", get(film_part_art))
+        .route("/api/titles/{id}/collection", put(title_collection))
         .route("/api/anime/{id}/art", get(anime_art))
         .route("/api/locations", get(locations))
         .route("/api/locations/{id}/look", post(location_look))

@@ -149,8 +149,7 @@ impl Library {
             })
             .collect();
         // The same collections the web app shows, among what can be played.
-        let works = if titles.iter().any(|t| !t.anilist.is_empty()) { app.db.anime_all()? } else { vec![] };
-        let groups = crate::anime::groups(&titles, &works, app.anime_ids().as_deref());
+        let groups = app.collections_among(&titles)?;
         let set_members = groups.iter().map(|g| (g.id, g.members.iter().map(|m| m.title_id).collect())).collect();
         let sets = groups.into_iter().map(|g| Collection { id: g.id, name: g.name, poster: g.poster, fanart: g.fanart }).collect();
         let index = titles.iter().enumerate().map(|(i, t)| (t.id, i)).collect();

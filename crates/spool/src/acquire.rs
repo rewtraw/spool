@@ -157,9 +157,74 @@ pub struct TitleContext {
     pub budgets: HashMap<i64, IndexerBudget>,
     /// Why nothing may be downloaded for this title now: its location is only read, or away.
     pub locked: Option<String>,
+    /// For anime: the names its later seasons go by, each a work of its own to the people
+    /// who post it, and where in the series each begins.
+    pub seasons: Vec<SeasonName>,
+}
+
+/// A season of a series under the name releases give it.
+#[derive(Clone, Debug)]
+pub struct SeasonName {
+    pub season: u32,
+    /// Its first episode is the season's episode `offset + 1`.
+    pub offset: u32,
+    /// Lower-case letters and digits only.
+    pub names: Vec<String>,
+}
+
+fn plain(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// A season said at the end of a series' name in a release: "Show Season 2", "Show S2",
+/// "Show 2nd Season". Gives the name without it, and the season.
+fn season_marker(title: &str) -> Option<(String, u32)> {
+    let words: Vec<String> = title.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
+    let number = |w: &str| w.parse::<u32>().ok().filter(|n| (1..=30).contains(n));
+    let ordinal = |w: &str| ["st", "nd", "rd", "th"].iter().find_map(|s| w.strip_suffix(s)).and_then(number);
+    let (rest, season) = match words.as_slice() {
+        [rest @ .., a, b] if a == "season" => (rest, number(b)?),
+        [rest @ .., a, b] if b == "season" => (rest, ordinal(a)?),
+        [rest @ .., a] if a.len() <= 3 && a.starts_with('s') => (rest, number(&a[1..])?),
+        _ => return None,
+    };
+    (!rest.is_empty()).then(|| (rest.concat(), season))
+}
+
+/// Which season a release means when it names one in the series' title and numbers its
+/// episodes from one: by the name AniList has for that season, or by a season said outright
+/// after the series' own name. A release under the series' plain name is left as it is, since
+/// its numbers may run on across seasons.
+fn season_named(series_title: &str, t: &Title, seasons: &[SeasonName]) -> Option<(u32, u32)> {
+    let said = plain(series_title);
+    let own: Vec<String> = std::iter::once(&t.title).chain(&t.alt_titles).map(|n| plain(n)).collect();
+    if own.contains(&said) {
+        return None;
+    }
+    if let Some(s) = seasons.iter().find(|s| s.names.contains(&said)) {
+        return Some((s.season, s.offset));
+    }
+    let (rest, season) = season_marker(series_title)?;
+    (season >= 2 && own.contains(&rest)).then_some((season, 0))
 }
 
 impl App {
+    /// The names a series' seasons go by on AniList, with the season each is.
+    fn season_names(&self, t: &Title) -> Vec<SeasonName> {
+        if t.kind != Kind::Series || t.anilist.is_empty() {
+            return vec![];
+        }
+        let Some(ids) = self.anime_ids() else { return vec![] };
+        t.anilist
+            .iter()
+            .filter_map(|a| {
+                let known = ids.back.get(a)?;
+                let names = self.db.anime(*a).ok().flatten()?.names.iter().map(|n| plain(n)).filter(|n| !n.is_empty()).collect();
+                Some(SeasonName { season: known.season, offset: known.offset, names })
+            })
+            .collect()
+    }
+
     pub fn title_context(&self, title: Title) -> Result<TitleContext> {
         let profiles = self.db.profiles()?;
         let profile = profiles
@@ -174,6 +239,7 @@ impl App {
             active: self.db.title_acquisitions(title.id)?.into_iter().filter(|a| a.state.is_active()).collect(),
             blocklist: self.db.blocklisted(title.id)?,
             locked: self.title_locked(&title),
+            seasons: self.season_names(&title),
             profile,
             title,
             compact: false,
@@ -225,13 +291,23 @@ impl App {
                 None => return blank(rej("unparseable", "the release name could not be understood"), unknown),
             },
             Kind::Series => {
-                let Some(p) = parse_episode_title(&release.title) else {
+                let Some(mut p) = parse_episode_title(&release.title) else {
                     return blank(rej("unparseable", "the release name could not be understood"), unknown);
                 };
                 let q = p.quality.unwrap_or(unknown);
                 let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id;
                 let mut pre = None;
-                if !by_id && matching::match_series(&p, &[t.key()]).is_none() {
+                // A later season posted under its own name and numbered from one.
+                let named = season_named(&p.series_title, t, &tc.seasons);
+                if let Some((season, offset)) = named {
+                    let within = tc.episodes.iter().filter(|e| e.season == season).count() as u32;
+                    if p.is_absolute() && p.absolute_episode_numbers.iter().all(|n| n + offset <= within) {
+                        p.episode_numbers = p.absolute_episode_numbers.iter().map(|n| n + offset).collect();
+                        p.absolute_episode_numbers.clear();
+                        p.season_numbers = vec![season];
+                    }
+                }
+                if !by_id && named.is_none() && matching::match_series(&p, &[t.key()]).is_none() {
                     pre = Some(rej("wrong_title", format!("looks like \"{}\", not {}", p.series_title, t.title)));
                 }
                 let season = p.season_number();
@@ -692,6 +768,11 @@ impl App {
                     (Scope::Episode(_), [e]) => format!("{} S{:02}E{:02}", t.title, e.season, e.episode),
                     _ => t.title.clone(),
                 });
+                // Anime is as often posted under its romanised name as its English one.
+                let other = t.anilist.first().and_then(|a| self.db.anime(*a).ok().flatten()).and_then(|m| m.names.into_iter().find(|n| plain(n) != plain(&t.title)));
+                if let (Some(name), false) = (other, matches!(scope, Scope::Episode(_))) {
+                    texts.push(name);
+                }
             }
             for round in 0..2 {
                 if texts.is_empty() {
@@ -1218,8 +1299,28 @@ pub struct SearchOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::names_an_episode;
+    use super::{names_an_episode, season_marker, season_named, SeasonName};
     use crate::models::Title;
+
+    #[test]
+    fn a_later_season_is_known_by_the_name_a_release_gives_it() {
+        let show: Title = serde_json::from_value(serde_json::json!({"kind": "series", "title": "Attack on Example", "year": 2013, "alt_titles": ["Shingeki no Rei"]})).unwrap();
+        let seasons = [
+            SeasonName { season: 1, offset: 0, names: vec!["attackonexample".into(), "shingekinorei".into()] },
+            SeasonName { season: 3, offset: 12, names: vec!["attackonexampleseason3part2".into(), "shingekinorei3part2".into()] },
+        ];
+        // Under the name AniList has for that season, with where in the season it begins.
+        assert_eq!(season_named("Shingeki no Rei 3 Part 2", &show, &seasons), Some((3, 12)));
+        // A season said outright after the series' own name, in any of the usual ways.
+        for name in ["Attack on Example Season 2", "Attack on Example S2", "Shingeki no Rei 2nd Season"] {
+            assert_eq!(season_named(name, &show, &seasons), Some((2, 0)), "{name}");
+        }
+        // The series' plain name is left alone: its numbers may run on across seasons.
+        assert_eq!(season_named("Attack on Example", &show, &seasons), None);
+        assert_eq!(season_named("Shingeki no Rei", &show, &seasons), None);
+        assert_eq!(season_named("Another Show Season 2", &show, &seasons), None);
+        assert_eq!(season_marker("Space Station"), None);
+    }
 
     #[test]
     fn an_episode_is_told_from_a_film_by_its_name() {

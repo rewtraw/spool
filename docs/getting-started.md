@@ -66,6 +66,8 @@ spool mode active
 
 Stop Radarr and Sonarr from managing the same folders first. Two programs filing into one library will fight over the same files.
 
+Titles are added under **Discover**. One search looks for films and series together: the kind you chose is listed first and the other below it, so a film and the series of the same name are both in front of you.
+
 If you already have a library, read [Your library and what Spool does to it](your-library.md) before going active.
 
 ## Coming from Radarr, Sonarr and SABnzbd

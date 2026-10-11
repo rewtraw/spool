@@ -1377,7 +1377,7 @@ async fn anime_is_known_by_its_own_source_and_its_series_and_films_make_a_collec
     let said = w.app.anime_sweep().await.unwrap();
     // Its first run reads every title, the film included.
     assert!(said.starts_with("2 anime titles"), "{said}");
-    assert_eq!(w.app.db.title(show.id).unwrap().unwrap().anilist, [80]);
+    assert_eq!(w.app.db.title(show.id).unwrap().unwrap().anilist, [80, 81], "a season each");
     let found = w.app.collections().unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
     let c = &found[0];
@@ -1392,10 +1392,70 @@ async fn anime_is_known_by_its_own_source_and_its_series_and_films_make_a_collec
     let border = w.app.add_title(Kind::Movie, Some(91), None, w.profile("movie"), true, false).await.unwrap();
     assert_eq!((border.anilist.as_slice(), border.in_episodes), (&[91u32][..], false));
 
+    // A series of films is read whole, so the film between the two that are here shows as missing.
+    for tmdb in [301, 303] {
+        w.app.add_title(Kind::Movie, Some(tmdb), None, w.profile("movie"), true, false).await.unwrap();
+    }
+    w.app.anime_sweep().await.unwrap();
+    let found = w.app.collections().unwrap();
+    let saga = found.iter().find(|c| c.name == "Saga Collection").expect("the film collection");
+    assert_eq!((saga.kind.as_str(), saga.members.len()), ("films", 2));
+    assert_eq!(saga.missing.iter().map(|m| (m.tmdb_id, m.title.as_str())).collect::<Vec<_>>(), [(Some(302), "Saga Two")]);
+
+    // Searching for something to add asks all three sources. The OVA comes back as the film
+    // TMDB has, marked as posted in episodes, and as the series to add in its place.
+    let both = w.app.discover("Pocket Robot War").await.unwrap();
+    assert_eq!((both["movies"][0]["title"].as_str(), both["movies"][0]["anime"]["as_series"].as_bool(), both["movies"][0]["library_id"].as_i64()), (Some("Pocket Robot War"), Some(true), Some(film.id)));
+    assert_eq!((both["series"][0]["title"].as_str(), both["series"][0]["anime"]["format"].as_str(), both["series"][0]["anime"]["episodes"].as_u64()), (Some("Pocket Robot War"), Some("OVA"), Some(6)), "{both}");
+
     // The web app and players are given the same collection.
     let router = spool::api::router(w.app.clone());
     let (status, listed) = call(&router, "GET", "/api/collections", serde_json::Value::Null).await;
     assert_eq!((status, listed[0]["name"].as_str(), listed[0]["members"].as_array().map(|m| m.len())), (200, Some("Robot War"), Some(2)));
+
+    // The user's word stands over the sources: a new name, a role, and a title taken out.
+    let robot = listed[0]["id"].as_u64().unwrap();
+    assert_eq!(call(&router, "PUT", &format!("/api/collections/{robot}"), serde_json::json!({"name": "Robots"})).await.0, 200);
+    assert_eq!(call(&router, "PUT", &format!("/api/titles/{}/collection", film.id), serde_json::json!({"role": "Spin-off"})).await.0, 200);
+    let (_, listed) = call(&router, "GET", "/api/collections", serde_json::Value::Null).await;
+    let robots = listed.as_array().unwrap().iter().find(|c| c["id"].as_u64() == Some(robot)).unwrap();
+    let role = robots["members"].as_array().unwrap().iter().find(|m| m["title_id"].as_i64() == Some(film.id)).and_then(|m| m["role"].as_str());
+    assert_eq!((robots["name"].as_str(), role), (Some("Robots"), Some("Spin-off")));
+    let (_, made) = call(&router, "POST", "/api/collections", serde_json::json!({"name": "Rainy days"})).await;
+    assert_eq!(call(&router, "PUT", &format!("/api/titles/{}/collection", film.id), serde_json::json!({"collection": made["id"]})).await.0, 200);
+    let (_, listed) = call(&router, "GET", "/api/collections", serde_json::Value::Null).await;
+    let names: Vec<&str> = listed.as_array().unwrap().iter().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(names, ["Rainy days", "Saga Collection"], "the anime collection is down to one title, and so is gone");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_later_season_posted_under_its_own_name_and_numbered_from_one_lands_in_that_season() {
+    let video = video_or_skip!();
+    let source = details_source().await;
+    let mut w = World::with_sources(Mode::Active, Some((&source, &source))).await;
+    let (mut show, eps) = w.series("Example World", 296762, &[(1, 1, "The Original"), (2, 1, "Journey"), (2, 2, "Reunion")]);
+    show.seasons.push(SeasonInfo { number: 2, monitored: true });
+    w.app.db.save_title(&mut show).unwrap();
+    w.app.anime_sweep().await.unwrap();
+
+    // The second season is "Robot War II" to the people who post it, and starts again at 01.
+    for n in 1..=2 {
+        w.release(&format!("[FanSub] Robot War II - {n:02} (BD 1080p)"), &[(&format!("[FanSub] Robot War II - {n:02}.mkv"), &video)]);
+        w.indexer.lock().untagged.insert(format!("[FanSub] Robot War II - {n:02} (BD 1080p)"));
+    }
+    let outcome = w.app.search(show.id, Scope::Season(2), true, true).await.unwrap();
+    let covers: HashMap<&str, &str> = outcome.decisions.iter().map(|d| (d.release.title.as_str(), d.covers.as_str())).collect();
+    assert_eq!((covers["[FanSub] Robot War II - 01 (BD 1080p)"], covers["[FanSub] Robot War II - 02 (BD 1080p)"]), ("S02E01", "S02E02"), "{:?}", outcome.decisions.iter().map(|d| (&d.release.title, &d.rejections)).collect::<Vec<_>>());
+    assert_eq!(outcome.grabbed.len(), 2, "{}", outcome.message);
+    for _ in 0..150 {
+        if w.app.db.episodes(show.id).unwrap().iter().filter(|e| e.file_id.is_some()).count() == 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let have: Vec<(u32, u32, bool)> = w.app.db.episodes(show.id).unwrap().iter().map(|e| (e.season, e.episode, e.file_id.is_some())).collect();
+    assert_eq!(have, [(1, 1, false), (2, 1, true), (2, 2, true)], "the files' own names say episodes 1 and 2 of the whole run; the release is believed");
+    assert_eq!(eps.len(), 3);
 }
 
 async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
@@ -1944,6 +2004,8 @@ async fn details_source() -> String {
             json!({"id": 111, "title": "Alpha", "release_date": "2001-01-01", "status": "Released"}),
             json!({"id": 80, "title": "Pocket Robot War", "release_date": "1989-03-25", "status": "Released", "runtime": 180, "imdb_id": "tt0000080"}),
             json!({"id": 91, "title": "Border Two Example", "release_date": "2013-11-30", "status": "Released", "runtime": 57, "imdb_id": "tt0000091"}),
+            json!({"id": 301, "title": "Saga One", "release_date": "2001-05-01", "status": "Released", "belongs_to_collection": {"id": 500, "name": "Saga Collection"}}),
+            json!({"id": 303, "title": "Saga Three", "release_date": "2005-05-01", "status": "Released", "belongs_to_collection": {"id": 500, "name": "Saga Collection"}}),
         ]
     }
     fn show() -> Value {
@@ -1961,6 +2023,12 @@ async fn details_source() -> String {
             }),
         )
         .route("/movie/{id}", get(|AxPath(id): AxPath<u64>| async move { axum::Json(films().into_iter().find(|f| f["id"] == id).unwrap_or(Value::Null)) }))
+        // A film collection whole, and a film by its IMDb id.
+        .route(
+            "/collection/500",
+            get(|| async { axum::Json(json!({"id": 500, "name": "Saga Collection", "parts": [{"id": 301, "title": "Saga One", "release_date": "2001-05-01"}, {"id": 302, "title": "Saga Two", "release_date": "2003-05-01"}, {"id": 303, "title": "Saga Three", "release_date": "2005-05-01"}]})) }),
+        )
+        .route("/find/{imdb}", get(|AxPath(imdb): AxPath<String>| async move { axum::Json(json!({"movie_results": films().into_iter().filter(|f| f["imdb_id"] == imdb.as_str()).collect::<Vec<_>>()})) }))
         .route(
             "/search/shows",
             get(|Query(q): Query<HashMap<String, String>>| async move {
@@ -1972,7 +2040,7 @@ async fn details_source() -> String {
         .route(
             "/lookup/shows",
             get(|Query(q): Query<HashMap<String, String>>| async move {
-                if q.get("imdb").is_some_and(|i| i == "tt0000080") {
+                if q.get("imdb").is_some_and(|i| i == "tt0000080") || q.get("thetvdb").is_some_and(|i| i == "8088") {
                     Ok(axum::Json(ova()))
                 } else {
                     Err(axum::http::StatusCode::NOT_FOUND)
@@ -1990,6 +2058,8 @@ async fn details_source() -> String {
                     {"type": "OVA", "anilist_id": 82, "imdb_id": ["tt0000080"], "tvdb_id": 8088, "season": {"tvdb": 1}},
                     {"type": "TV", "anilist_id": 80, "tvdb_id": 296762, "season": {"tvdb": 1}},
                     {"type": "TV", "anilist_id": 85, "tvdb_id": 9085, "season": {"tvdb": 1}},
+                    // The second season of the first series, a work of its own to AniList.
+                    {"type": "TV", "anilist_id": 81, "tvdb_id": 296762, "season": {"tvdb": 2}},
                     // A set of specials that the list gives two films' ids to.
                     {"type": "SPECIAL", "anilist_id": 90, "imdb_id": ["tt0000091", "tt0000092"], "tvdb_id": 9090, "season": {"tvdb": 0}},
                 ]))
@@ -2015,7 +2085,13 @@ async fn details_source() -> String {
                 let asked: Vec<u64> = q["variables"]["ids"].as_array().into_iter().flatten().filter_map(|x| x.as_u64()).collect();
                 let mut shorts = with(brief(90, "SPECIAL", 2013, "Border Shorts"), json!([{"relationType": "PARENT", "node": with(brief(91, "MOVIE", 2013, "Border: Two Example"), json!([]))}]));
                 shorts["episodes"] = json!(4);
-                let media: Vec<Value> = asked.iter().filter_map(|id| match id { 80 => Some(whole.clone()), 82 => Some(ova()), 90 => Some(shorts.clone()), _ => None }).collect();
+                // A search by name finds the OVA under any of its names.
+                if let Some(name) = q["variables"]["q"].as_str() {
+                    let hit = name.to_lowercase().contains("pocket robot");
+                    return axum::Json(json!({"data": {"Page": {"media": if hit { vec![ova()] } else { vec![] }}}}));
+                }
+                let second = with(brief(81, "TV", 1981, "Robot War II"), json!([{"relationType": "PREQUEL", "node": with(brief(80, "TV", 1979, "Robot War"), json!([]))}]));
+                let media: Vec<Value> = asked.iter().filter_map(|id| match id { 80 => Some(whole.clone()), 81 => Some(second.clone()), 82 => Some(ova()), 90 => Some(shorts.clone()), _ => None }).collect();
                 axum::Json(json!({"data": {"Page": {"media": media}}}))
             }),
         )

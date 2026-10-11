@@ -120,12 +120,17 @@
 <p>A title is in one collection at most. An anime&#39;s collection takes it before a film collection does, because it holds the series as well as the films.</p>
 <p>Collections that mix live-action films and series, such as a franchise with both, are not built: neither source ties those together.</p>
 <h2 id="in-the-library"><a href="#in-the-library">In the library</a></h2>
-<p><strong>Collections</strong> in the library&#39;s toolbar shows each collection as one tile in place of its titles. The tile opens the collection&#39;s page:</p>
+<p><strong>Collections</strong> in the library&#39;s toolbar shows each collection as one tile in place of its titles, marked with how much of it you have (&quot;3 of 7&quot;). The tile opens the collection&#39;s page:</p>
 <ul>
-<li>its titles in the order they came out, each marked with what it is when it is not simply part of the story: <strong>Recap</strong>, <strong>Side story</strong>, <strong>Alternative telling</strong> or <strong>Spin-off</strong>;</li>
-<li>for anime, the works of the same story that are <strong>not in the library</strong>, each with an Add button where Spool knows the ids to add it by.</li>
+<li>its titles, each marked with what it is when it is not simply part of the story: <strong>Recap</strong> (which can be skipped), <strong>Side story</strong>, <strong>Alternative telling</strong> or <strong>Spin-off</strong>, and with a tick once watched;</li>
+<li>what is <strong>not in the library</strong>: for anime, the works of the same story; for a series of films, the other films TMDB puts in the collection. Each has an Add button where Spool knows the ids to add it by;</li>
+<li><strong>Up next</strong>, once you have watched something of it on a player: the first title in the story&#39;s order that you have not.</li>
 </ul>
 <p>A title&#39;s own page says which collection it is part of.</p>
+<h3 id="release-order-and-story-order"><a href="#release-order-and-story-order">Release order and story order</a></h3>
+<p>Titles are shown in order of release. Where following the story would put them differently, a prequel film made years after its series for instance, the page offers <strong>Story order</strong> as well: from the earliest point in the telling, each work, then its recaps and side stories, then what follows it, with other tellings of the same story last. The order comes from AniList&#39;s relations, so it is as good as they are.</p>
+<h3 id="your-own-word"><a href="#your-own-word">Your own word</a></h3>
+<p>The sources are not always right, and not every set you want is one they know. <strong>Edit</strong> on a collection&#39;s page lets you rename it, say what each title is to the story, or take a title out. On a title&#39;s page you can move it into another collection, into a new one of your own, or out of any. What you say stands over what TMDB and AniList say, and &quot;Where its sources put it&quot; hands a title back to them.</p>
 <h2 id="on-a-television"><a href="#on-a-television">On a television</a></h2>
 <div class="scroll"><table>
 <thead>
@@ -151,10 +156,13 @@
 <p>Anime is filed awkwardly by the film and series sources, and the people who post it follow anime databases. Knowing a title&#39;s AniList entry lets Spool:</p>
 <ul>
 <li><strong>Know a &quot;film&quot; that is really episodes.</strong> An OVA of six episodes is one film to TMDB and is posted as six files. AniList says so outright, so Spool turns single episodes down for the film and offers <a href="your-library.html#what-can-go-wrong">Switch to series</a> before anything is downloaded.</li>
-<li><strong>Recognise the name a release carries.</strong> Fan releases often use the romanised Japanese name. Spool adds the first entry&#39;s English and romanised names to the names it accepts for the title.</li>
+<li><strong>Recognise the name a release carries.</strong> Fan releases often use the romanised Japanese name. Spool adds the first entry&#39;s English and romanised names to the names it accepts for the title, and searches indexers under the other name when the first finds too little.</li>
+<li><strong>Put a later season&#39;s episodes in the right season.</strong> Each season of an anime is a work of its own to the people who post it, often under its own name and numbered from one again: <code>Show Season 2 - 01</code>. Spool takes that as season 2, episode 1, by the name AniList has for the season or by a season said after the series&#39; own name. A release under the series&#39; plain name is left as it is, since its numbers may run on across seasons.</li>
+<li><strong>Find it when you search.</strong> Discover asks AniList as well as the film and series sources, so anime is found under its romanised name too, and an OVA that TMDB lists as a film is offered as the series it is posted as.</li>
 </ul>
 <h2 id="how-a-title-is-recognised-as-anime"><a href="#how-a-title-is-recognised-as-anime">How a title is recognised as anime</a></h2>
 <p>Never by guessing at names. A community-maintained list, <a href="https://github.com/Fribb/anime-lists">Fribb/anime-lists</a>, ties AniList&#39;s ids to IMDb&#39;s and TVDB&#39;s. A film is found by its IMDb id and a series by its TVDB id, each of its seasons being an AniList entry of its own. A title the list does not know is not treated as anime.</p>
+<p>The list is not always exact for films: it sometimes ties a film&#39;s id to a set of specials from the same story. So the match is checked. If the entry does not carry the film&#39;s name and a work beside it does, that work is the film; and if nothing settles it, or the year or the length disagree, Spool takes only that the film belongs to the story, and nothing else from the entry.</p>
 <h2 id="what-spool-asks-for-and-how-often"><a href="#what-spool-asks-for-and-how-often">What Spool asks for, and how often</a></h2>
 <ul>
 <li><strong>The id list</strong> is fetched once a week and kept beside Spool&#39;s database.</li>
@@ -165,7 +173,7 @@
 <ul>
 <li>Titles are tied together only through works AniList relates to them directly, or to a work beside them. Two seasons of a very long story with several missing seasons between them may not be joined until one of the missing ones is added.</li>
 <li>Relations are AniList&#39;s. A cross-over or a shared character does not join two stories; a spin-off does.</li>
-<li>Missing works are listed for anime only. For a series of films, Spool shows what you have.</li>
+<li>Collections that you make yourself, and titles you move, are shown in Spool and to players. In Plex they are written as tags like any other collection, if that is turned on.</li>
 </ul>
 <nav class="around" aria-label="Other guides"><a class="prev" href="plex.html"><span>Before</span>Beside Plex</a><a class="next" href="local-files.html"><span>Next</span>Files Spool recognises in a title's folder</a></nav>
     </article>

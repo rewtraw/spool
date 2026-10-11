@@ -209,7 +209,7 @@
         <a class="tile" href="#/collection/{e.c.id}">
           <div class="art stack">
             <Poster src={e.c.poster ?? e.inside[0].poster_small ?? e.inside[0].poster} title={e.c.name} kind="movie" />
-            <span class="chip pin">{e.inside.length} titles</span>
+            <span class="chip pin">{e.c.missing.length ? `${e.c.members.length} of ${e.c.members.length + e.c.missing.length}` : `${e.inside.length} titles`}</span>
           </div>
           <div class="name truncate">{e.c.name}</div>
           <div class="faint small">Collection</div>

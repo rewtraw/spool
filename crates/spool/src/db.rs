@@ -311,6 +311,14 @@ const MIGRATIONS: &[&str] = &[
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
     "#,
+    // 7: film collections as TMDB lists them, whole.
+    r#"
+    CREATE TABLE film_sets (
+        id INTEGER PRIMARY KEY,
+        fetched_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+    "#,
 ];
 
 impl Db {
