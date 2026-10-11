@@ -166,6 +166,16 @@ impl Library {
         Ok(Library { server_id: super::server_id(app), titles, index, files, episodes, episode_title, watched: app.db.watched_all()?, sets, set_members })
     }
 
+    /// The titles whose posters stand for a whole view, Movies or Shows: the five most lately
+    /// added that have one. With them, a tag that changes when the choice does.
+    pub fn view_posters(&self, kind: Kind) -> (Vec<i64>, String) {
+        let mut with: Vec<&Title> = self.titles.iter().filter(|t| t.kind == kind && t.poster_source().is_some()).collect();
+        with.sort_by_key(|t| std::cmp::Reverse((t.added_at, t.id)));
+        with.truncate(5);
+        let said: String = with.iter().map(|t| format!("{}:{}|", t.id, t.poster_source().unwrap_or_default())).collect();
+        (with.iter().map(|t| t.id).collect(), crate::art::tag(&said)[..10].to_string())
+    }
+
     fn title(&self, id: i64) -> Option<&Title> {
         self.index.get(&id).map(|i| &self.titles[*i])
     }
@@ -441,7 +451,10 @@ impl Library {
                 put!("ChildCount", json!(self.titles.iter().filter(|t| t.kind == *kind).count()));
                 put!("DisplayPreferencesId", json!(id.to_string()));
                 put!("PlayAccess", json!("Full"));
-                put!("ImageTags", json!({}));
+                // A picture made of the posters most lately added to it. See `view_posters`.
+                let picture = self.view_posters(*kind);
+                put!("ImageTags", if picture.0.is_empty() { json!({}) } else { json!({"Primary": picture.1}) });
+                put!("PrimaryImageAspectRatio", json!(1.7778));
                 put!("BackdropImageTags", json!([]));
                 put!("MediaType", json!("Unknown"));
                 put!("CanDownload", json!(false));

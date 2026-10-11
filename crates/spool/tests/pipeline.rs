@@ -2334,6 +2334,15 @@ async fn what_lies_beside_a_film_is_recognised_shown_and_left_alone_by_an_upgrad
     let item = serde_json::from_slice::<Value>(&body).unwrap()["Items"][0].clone();
     assert_eq!((item["LocalTrailerCount"].as_u64(), item["SpecialFeatureCount"].as_u64()), (Some(1), Some(1)));
     let id = item["Id"].as_str().unwrap().to_string();
+    // The Movies view itself is given a picture, made of the posters of what is in it.
+    let (_, body) = get(jf.clone(), token.clone(), "/UserViews".into()).await;
+    let views = serde_json::from_slice::<Value>(&body).unwrap();
+    let movies = views["Items"].as_array().unwrap().iter().find(|v| v["CollectionType"] == "movies").expect("the Movies view").clone();
+    assert!(movies["ImageTags"]["Primary"].is_string(), "{movies}");
+    let (status, picture) = get(jf.clone(), token.clone(), format!("/Items/{}/Images/Primary", movies["Id"].as_str().unwrap())).await;
+    let seen = image::load_from_memory(&picture).expect("a picture");
+    assert_eq!((status, seen.width(), seen.height()), (200, 1280, 720));
+
     let (_, body) = get(jf.clone(), token.clone(), format!("/Items/{id}/LocalTrailers")).await;
     let trailers = serde_json::from_slice::<Value>(&body).unwrap();
     assert_eq!((trailers.as_array().map(Vec::len), trailers[0]["Type"].as_str(), trailers[0]["ExtraType"].as_str()), (Some(1), Some("Trailer"), Some("Trailer")));

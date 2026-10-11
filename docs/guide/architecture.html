@@ -137,6 +137,43 @@
 <td>A Svelte app built to static files and embedded in the server binary.</td>
 </tr>
 </tbody></table></div>
+<p>Inside the server crate, the parts that are easiest to lose track of:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>What it holds</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>api/</code></td>
+<td>The HTTP routes, a file for each thing they are about; <code>mod.rs</code> holds signing in, errors and the list of routes.</td>
+</tr>
+<tr>
+<td><code>acquire.rs</code></td>
+<td>Judging releases, searching and grabbing.</td>
+</tr>
+<tr>
+<td><code>import.rs</code>, <code>shape.rs</code></td>
+<td>Filing a finished download, and the checks that its videos run as long as their names say.</td>
+</tr>
+<tr>
+<td><code>names.rs</code></td>
+<td>Comparing names, and a memory of what each release name said, since reading one is slow.</td>
+</tr>
+<tr>
+<td><code>anime.rs</code></td>
+<td>AniList, the id list, and collections.</td>
+</tr>
+<tr>
+<td><code>local.rs</code>, <code>locations.rs</code>, <code>adopt.rs</code></td>
+<td>What else is in a folder, where the library lives, and bringing in what is already there.</td>
+</tr>
+<tr>
+<td><code>jellyfin/</code></td>
+<td>The server players speak to.</td>
+</tr>
+</tbody></table></div>
 <h2 id="the-path-of-a-download"><a href="#the-path-of-a-download">The path of a download</a></h2>
 <ol>
 <li><strong>Search.</strong> A scheduled feed read, a backlog search or a person asks the indexers for releases. Series are searched by id first, then by name if wanted episodes are still uncovered.</li>

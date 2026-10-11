@@ -11,6 +11,18 @@ Spool is one process. It holds the catalog, talks to indexers, downloads from Us
 | `spool` | The server: SQLite store, metadata, indexer client, search and grab, the import journal, scheduler, HTTP API, MCP endpoint and CLI. |
 | `web` | A Svelte app built to static files and embedded in the server binary. |
 
+Inside the server crate, the parts that are easiest to lose track of:
+
+| File | What it holds |
+| --- | --- |
+| `api/` | The HTTP routes, a file for each thing they are about; `mod.rs` holds signing in, errors and the list of routes. |
+| `acquire.rs` | Judging releases, searching and grabbing. |
+| `import.rs`, `shape.rs` | Filing a finished download, and the checks that its videos run as long as their names say. |
+| `names.rs` | Comparing names, and a memory of what each release name said, since reading one is slow. |
+| `anime.rs` | AniList, the id list, and collections. |
+| `local.rs`, `locations.rs`, `adopt.rs` | What else is in a folder, where the library lives, and bringing in what is already there. |
+| `jellyfin/` | The server players speak to. |
+
 ## The path of a download
 
 1. **Search.** A scheduled feed read, a backlog search or a person asks the indexers for releases. Series are searched by id first, then by name if wanted episodes are still uncovered.

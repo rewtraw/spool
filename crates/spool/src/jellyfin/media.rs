@@ -93,9 +93,25 @@ pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderM
 
 /// A poster, a backdrop, an episode's frame or someone's photograph.
 pub async fn image(app: &App, id: &str, kind: &str, versioned: bool, head: bool) -> Response {
-    let found = Id::parse(id).and_then(|id| Library::shared(app).ok().and_then(|lib| lib.image(id, kind)));
-    let Some((src, name, width)) = found else { return StatusCode::NOT_FOUND.into_response() };
-    match app.art_any(&name, &src, width).await {
+    let id = Id::parse(id);
+    // Movies and Shows have no picture of their own; one is made from what is in them.
+    let view = match id {
+        Some(Id::Movies) => Some(Kind::Movie),
+        Some(Id::Shows) => Some(Kind::Series),
+        _ => None,
+    };
+    let made = match view.filter(|_| kind.eq_ignore_ascii_case("primary")) {
+        Some(of) => {
+            let Some((titles, tag)) = Library::shared(app).ok().map(|lib| lib.view_posters(of)).filter(|p| !p.0.is_empty()) else { return StatusCode::NOT_FOUND.into_response() };
+            app.art_view(of.as_str(), &titles, &tag).await
+        }
+        None => {
+            let found = id.and_then(|id| Library::shared(app).ok().and_then(|lib| lib.image(id, kind)));
+            let Some((src, name, width)) = found else { return StatusCode::NOT_FOUND.into_response() };
+            app.art_any(&name, &src, width).await
+        }
+    };
+    match made {
         Ok(bytes) => {
             // An address that names a version never shows a different picture.
             let cache = if versioned { "public, max-age=31536000, immutable" } else { "public, max-age=3600" };

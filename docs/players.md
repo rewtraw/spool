@@ -26,6 +26,7 @@ If an Apple TV says an error occurred on a server it received through iCloud fro
 ## What the player gets
 
 - **The library as Spool knows it.** Posters, backdrops, cast, scores, collections, seasons and episodes, with search, recently added, continue watching and next up.
+- **Pictures for Movies and Shows.** The two views a player lists first are each given a picture made of the posters most lately added to them.
 - **Collections.** A series of films, or an anime's series and films together, as [Spool groups them](collections.md).
 - **Every file as it is.** Each version of a film is offered, with its subtitle files.
 - **Your own artwork.** A poster or backdrop you keep in a title's folder is shown in place of the fetched one, and so are season posters and episode frames. See [Files Spool recognises](local-files.md#artwork).

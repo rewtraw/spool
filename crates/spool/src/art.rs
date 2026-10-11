@@ -165,6 +165,42 @@ impl App {
         self.art_fetch(&path, &url, presized, width, &format!("{name}-")).await
     }
 
+    /// One picture for a whole view of the library, as players show Movies and Shows: these
+    /// titles' posters side by side, each cut to a tall strip. Kept under the tag, which
+    /// changes when the titles chosen do.
+    pub async fn art_view(&self, name: &str, titles: &[i64], tag: &str) -> Result<Vec<u8>> {
+        let path = self.data_dir.join("art").join(format!("view-{name}-{tag}.jpg"));
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            return Ok(bytes);
+        }
+        let mut posters = vec![];
+        for id in titles {
+            if let Ok(bytes) = self.art(*id, Art::Poster).await {
+                posters.push(bytes);
+            }
+        }
+        if posters.is_empty() {
+            bail!("no posters to make a picture of");
+        }
+        let out = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            let (w, h, gap) = (1280u32, 720u32, 4u32);
+            let n = posters.len() as u32;
+            let mut canvas = image::RgbImage::from_pixel(w, h, image::Rgb([13, 13, 15]));
+            let strip = (w - gap * (n - 1)) / n;
+            for (i, bytes) in posters.iter().enumerate() {
+                let Ok(img) = image::load_from_memory(bytes) else { continue };
+                let cut = img.resize_to_fill(strip, h, image::imageops::FilterType::Triangle).to_rgb8();
+                image::imageops::replace(&mut canvas, &cut, (i as u32 * (strip + gap)) as i64, 0);
+            }
+            let mut buf = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 84).encode_image(&canvas)?;
+            Ok(buf)
+        })
+        .await??;
+        self.art_keep(&path, &out, &format!("view-{name}-")).await?;
+        Ok(out)
+    }
+
     /// That poster at list size, made from the full one, which is kept.
     pub async fn archive_art_small(&self, nzb_id: i64) -> Result<Vec<u8>> {
         let n = self.archive_get(nzb_id)?.ok_or_else(|| anyhow!("no such saved release"))?;
