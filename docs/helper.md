@@ -130,7 +130,7 @@ The ticket names that one file, runs out after twelve hours, and is signed with 
 
 **Other players.** Under **How it is reached, and other players to send** there is a list of further addresses: ranges such as `10.0.5.0/24`, or one player's address. A player at one of them is sent wherever it is. Use it for a second network at home, or to try one player before turning the switch on. Do not put in the whole Tailscale range unless the machine is on Tailscale too: a phone away from home would be sent to a machine it cannot reach.
 
-**Players that follow.** Being sent elsewhere for a film is something a player has to follow, and a player that does not will fail to play. Infuse 8.5 on a Mac follows and seeks; Infuse on an Apple TV has not been tried yet.
+**Players that follow.** Being sent elsewhere for a film is something a player has to follow, and a player that does not will fail to play. Infuse 8.5 follows and seeks: on a Mac at home, and on a phone away from home, where the film came from the NAS over Tailscale. Infuse on an Apple TV has not been tried yet.
 
 **What is playing, and from where,** is at the top of Activity while it plays: the title, and the machine it comes from or "Through this Spool".
 

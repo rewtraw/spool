@@ -90,7 +90,7 @@ A location stops meaning folders on this machine and comes to mean folders on so
 
 **What is not known.**
 
-- Whether players other than Infuse follow being sent to another address for a film. Infuse 8.5 on a Mac does, and seeks there: it was tried on 12 October 2026. It asked Spool once and then kept to the address it was sent to. Infuse on an Apple TV and on a phone are expected to be the same and have not been tried.
+- Whether players other than Infuse follow being sent to another address for a film. Infuse 8.5 on a Mac does, and seeks there: it was tried on 12 October 2026. It asked Spool once and then kept to the address it was sent to. Infuse on a phone does too, away from home over Tailscale. Infuse on an Apple TV is expected to be the same and has not been tried.
 - Whether a player copes with one server at two addresses. Infuse did not, when a second address was added to a share by hand.
 
 **What stands in the way.**
