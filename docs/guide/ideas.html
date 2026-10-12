@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#playing-straight-from-the-helper">Playing straight from the helper</a><a class="sub" href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a><a class="sub" href="#helpers-that-are-found-and-linked-by-themselves">Helpers that are found and linked by themselves</a><a class="sub" href="#converting-while-it-plays">Converting while it plays</a><a class="sub" href="#sharing-a-library-between-households">Sharing a library between households</a><a class="sub" href="#titles-worth-having-found-without-being-asked-for">Titles worth having, found without being asked for</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a class="on" aria-current="page" href="ideas.html">Ideas</a><a class="sub" href="#a-faster-sync-for-infuses-library-mode">A faster sync for Infuse's Library Mode</a><a class="sub" href="#more-for-the-helper-to-do">More for the helper to do</a><a class="sub" href="#linked-spools">Linked Spools</a><a class="sub" href="#converting-while-it-plays">Converting while it plays</a><a class="sub" href="#titles-worth-having-found-without-being-asked-for">Titles worth having, found without being asked for</a></nav>
       </details>
     </aside>
     <article>
@@ -171,205 +171,130 @@
 <tr>
 <td>Playing</td>
 <td>NAS to Spool&#39;s machine to the player</td>
-<td>From the NAS to the player directly; see <a href="#playing-straight-from-the-helper">below</a></td>
+<td>From the NAS to the player directly; see <a href="#linked-spools">Linked Spools</a></td>
 </tr>
 </tbody></table></div>
 <p>It would also remove the need for the helper&#39;s downloads folder to be shared with Spool&#39;s machine, since Spool would no longer read a download before filing it.</p>
 <p><strong>What it would cost.</strong> Each is a part of Spool that reads files directly today and would have to ask the helper instead: the import plan, the library scan and the subtitle check. Playing from the NAS means the helper serving files to players, which gives it a door to the outside that it does not have now.</p>
 <p><strong>Why it is waiting.</strong> The jobs that move whole films across the network are the ones that were slow, and those are done. These read a little of each file.</p>
 <p><strong>When to build it.</strong> A nightly scan of a large share proves slow in practice, or sharing the downloads folder is in the way.</p>
-<h2 id="playing-straight-from-the-helper"><a href="#playing-straight-from-the-helper">Playing straight from the helper</a></h2>
-<p><strong>What it is.</strong> A film kept on a NAS is played today by way of Spool&#39;s machine: the NAS sends it to Spool across the share, and Spool sends it on to the player. With <a href="helper.html">a helper</a> on the NAS, the player could fetch the film from the NAS itself, while still knowing only one server.</p>
-<p><strong>How it would work.</strong></p>
-<ol>
-<li>The player signs in to Spool and browses the library there, as now. Spool is the only server it is ever told of.</li>
-<li>Asked to play a file that lies on a helper&#39;s disks, Spool answers with a redirect to the helper, carrying a ticket for that one file.</li>
-<li>The player follows the redirect and takes the film from the NAS. What was watched, and where it stopped, are still reported to Spool.</li>
-</ol>
-<p><strong>Why the player still sees one server.</strong> The helper would not answer the question players ask of a network to find servers, and would have no sign-in, no library and nothing to browse. It would serve a file to whoever holds a ticket from Spool, and nothing else. No name in DNS is needed for it: the redirect carries its address.</p>
-<p><strong>The ticket.</strong> It names one file, runs out after a few hours, and is signed with the key Spool and the helper already share, so the helper cannot be used as an open door to the files.</p>
+<h2 id="linked-spools"><a href="#linked-spools">Linked Spools</a></h2>
+<p><strong>What it is.</strong> One idea in place of three. A <a href="helper.html">helper</a> on a NAS, a NAS that plays its own films, and a library shared with another household were written up here as separate things. They are the same thing at different levels of trust: one Spool linked to another, with what the link allows as the only difference. This is being built, in the stages below. The first two are done: see <a href="helper.html#playing-from-the-helper">Playing from the helper</a>.</p>
+<p><strong>What a link allows.</strong> Two Spools are linked with a code. Each then grants the other some of three things:</p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Grant</th>
+<th>What the other Spool may do</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>See</td>
+<td>List what is in the folders that are shared with it.</td>
+</tr>
+<tr>
+<td>Play</td>
+<td>Fetch one file, on a ticket.</td>
+</tr>
+<tr>
+<td>Work</td>
+<td>Download, file, move and convert on this machine&#39;s disks, as it directs.</td>
+</tr>
+</tbody></table></div>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>What it is called today</th>
+<th>The grants</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A helper on a NAS</td>
+<td>See, Play and Work, given to the Spool that drives it.</td>
+</tr>
+<tr>
+<td>A friend&#39;s Spool</td>
+<td>See and Play, given both ways or one way.</td>
+</tr>
+<tr>
+<td>A relative&#39;s machine that you look after</td>
+<td>All three.</td>
+</tr>
+</tbody></table></div>
+<p>A location stops meaning folders on this machine and comes to mean folders on some linked Spool. A disk plugged in here, a NAS and another household are then one idea.</p>
+<p><strong>The one rule.</strong> Every folder has exactly one Spool that decides for it. Others may see what is in it, play from it, or work in it when told. None of them chooses what is downloaded, upgraded or deleted there. A helper needs that rule so that two machines never file the same thing, and sharing needs it so that nobody changes someone else&#39;s library.</p>
+<p><strong>Who enforces a grant.</strong> The side that gives it, as a helper holds itself to the folders it was started with today. A linked Spool cannot widen what it was given.</p>
+<p><strong>The ticket.</strong> Playing from another machine rests on a ticket: it names one file, runs out after a few hours, and is signed with a key the two Spools share. The machine that holds the file serves it to whoever holds the ticket and to nobody else. It has no sign-in and nothing to browse, so a player still knows one server.</p>
+<p><strong>The stages.</strong></p>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>What is built</th>
+<th>What it gives</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Links. &quot;Helpers&quot; in the settings becomes &quot;Linked Spools&quot;, each link with its grants, speaking a protocol with a version, so that two Spools on different releases still understand each other.</td>
+<td>What a helper does today, on the footing the rest stands on.</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Play. The machine that holds a file serves it on a ticket. Spool sends a player on the same network there, and goes on relaying for a player elsewhere.</td>
+<td>At home, a film on the NAS comes from the NAS.</td>
+</tr>
+<tr>
+<td>3</td>
+<td>See, done where the disks are. The linked machine reads its own folders and reports what it finds.</td>
+<td>Looking through a location and the nightly scan stop reading across the share.</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Finding and linking. A Spool announces itself on the network, is listed as found, and is linked with a short code; the two agree a key between themselves. A linked machine reports in, and is no longer asked how it stands every second.</td>
+<td>No keys to copy.</td>
+</tr>
+<tr>
+<td>5</td>
+<td>An account for each person who plays.</td>
+<td>Each has what they have watched, and limits can be set; someone without a Spool of their own can be given an account.</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Links between households: See and Play, with limits set on the link.</td>
+<td>Each household sees the others&#39; libraries in its own.</td>
+</tr>
+</tbody></table></div>
+<p><strong>Limits on a link to another household.</strong> Which locations are shared; whether the films as they are or only their <a href="compact.html">compact versions</a>; how many may play at once; how much may be sent at once; and an end to the link at any time. A film is sent at the rate it was made at, so from a home whose line is slow upstream, compact versions are what to share.</p>
+<p><strong>Whose accounts.</strong> People sign in to their own household&#39;s Spool. A link is between two Spools, so one never holds accounts for the other&#39;s people, and learns of their watching only that a file was asked for.</p>
 <p><strong>What is not known.</strong></p>
 <ul>
-<li>Whether Infuse follows a redirect on the address it streams from, and keeps following it when seeking. Most players do. If it does not, the protocol has a second way to say that a file is at another address (a media source marked as remote, with its own address), to try next.</li>
-<li>How the player is told from the helper&#39;s side that a file has subtitles beside it. Spool hands those out itself today, and could go on doing so.</li>
-</ul>
-<p><strong>What it would cost.</strong></p>
-<ul>
-<li>The helper takes requests from players, where today it takes them only from Spool. It would stay on the home network and answer only to a ticket, but it is a door it does not have now.</li>
-<li>A player away from home cannot reach a NAS that is only on the home network. Spool would redirect a player on the same network as the helper and go on relaying for any other, which means knowing which is which from the address the request came from.</li>
-</ul>
-<p><strong>Why it is waiting.</strong> On a gigabit network, relaying a film through Spool&#39;s machine costs next to nothing: a film plays at a small fraction of the line&#39;s speed.</p>
-<p><strong>When to build it.</strong> Spool&#39;s machine becomes the limit on playing, for instance with several films at once of the largest kind; or the NAS is given a faster line than Spool&#39;s machine has; or playing what is on the NAS should carry on while Spool&#39;s machine is busy.</p>
-<h2 id="from-one-spool-and-its-helpers-to-a-cluster"><a href="#from-one-spool-and-its-helpers-to-a-cluster">From one Spool and its helpers to a cluster</a></h2>
-<p><strong>What it is.</strong> Spool with <a href="helper.html">helpers</a> is already the simplest kind of cluster: one machine that decides and others that do the work where the disks are. This is what it has of one, what it lacks, and the steps between, in the order they would be worth taking.</p>
-<p><strong>What is there now.</strong></p>
-<div class="scroll"><table>
-<thead>
-<tr>
-<th>Part of a cluster</th>
-<th>How Spool has it</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>One machine decides, others work</td>
-<td>Spool holds the catalogue and makes every choice; a helper does what it is told.</td>
-</tr>
-<tr>
-<td>More than one worker</td>
-<td>The settings take any number of helpers, each serving the folders it is given.</td>
-</tr>
-<tr>
-<td>Work goes to where the data is</td>
-<td>A download runs on the machine that holds the disks it will be filed on.</td>
-</tr>
-<tr>
-<td>A worker may fail</td>
-<td>With a helper away, Spool does its work itself, and waits for what the helper had under way.</td>
-</tr>
-<tr>
-<td>The parts agree on how to talk</td>
-<td>Spool and a helper check that they are the same version before working together.</td>
-</tr>
-</tbody></table></div>
-<p><strong>What is missing.</strong></p>
-<div class="scroll"><table>
-<thead>
-<tr>
-<th>Part of a cluster</th>
-<th>Today</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>A second machine that can decide</td>
-<td>There is one Spool. While it is down nothing is searched for, chosen or played, though a NAS may hold most of the files.</td>
-</tr>
-<tr>
-<td>A choice between workers</td>
-<td>Each folder belongs to one helper. Nothing shares work out, or picks the machine with least to do.</td>
-</tr>
-<tr>
-<td>A catalogue in more than one place</td>
-<td>It is one database file on Spool&#39;s machine. Helpers hold none of it.</td>
-</tr>
-<tr>
-<td>Workers that report in</td>
-<td>Spool asks each helper how it stands, once a second. A helper never says of its own accord that it is there or what it has.</td>
-</tr>
-</tbody></table></div>
-<p><strong>The steps, nearest first.</strong></p>
-<ol>
-<li><strong>The helper reads its own folders.</strong> Looking through a location and the nightly scan are done on the NAS, and only the findings cross. Written up under <a href="#more-for-the-helper-to-do">More for the helper to do</a>.</li>
-<li><strong>The helper plays its own files.</strong> A player takes a film from the NAS, on a ticket from Spool. Written up under <a href="#playing-straight-from-the-helper">Playing straight from the helper</a>. After this, playing what is on a NAS needs Spool only to sign in and browse.</li>
-<li><strong>Helpers report in.</strong> A helper is given Spool&#39;s address and tells it when it starts, what it has finished and when it is going down. Spool stops asking every second, and a second helper becomes a matter of starting it. <a href="#helpers-that-are-found-and-linked-by-themselves">Being found and linked by itself</a> belongs with this.</li>
-<li><strong>Work that can go anywhere, goes to whoever is free.</strong> Checking subtitles against the sound and repairing a damaged download need a processor more than a particular disk. With more than one helper, Spool could send such a job to the one with least to do.</li>
-<li><strong>A second Spool that follows the first.</strong> It keeps a copy of the catalogue up to date and takes over when the first stops answering: searching, choosing, serving the web app and players. This is the step that makes a cluster in the strict sense.</li>
-</ol>
-<p><strong>What the last step would cost.</strong> It is of a different size from the others.</p>
-<ul>
-<li>The catalogue is SQLite, which one program writes to. Following it from another machine means shipping its changes across as they happen, or moving to a database made for more than one writer; both are large changes to how Spool keeps everything.</li>
-<li>Two machines must never both believe they are in charge, or each will download and file the same things. Deciding which one is, and being sure the other knows, is the hard part of every such system.</li>
-<li>Players and browsers would need one address that follows whichever is in charge.</li>
-<li>Everything Spool keeps in memory and not in the database (the line of titles waiting to be moved was one such, until it was written down) would have to be found and written down, or be lost when the other takes over.</li>
-</ul>
-<p><strong>Why it is waiting.</strong> For one household&#39;s library, Spool being down for the length of a restart costs a few seconds of nothing being searched for. The first two steps bring most of what a cluster would, at a fraction of the work: with them, a NAS goes on playing what it holds whatever Spool&#39;s machine is doing.</p>
-<p><strong>When to build it.</strong> Steps 1 and 2 when their own entries say. Step 3 when there is a second helper. Step 4 when a second helper sits idle while the first is busy. Step 5 if Spool&#39;s machine proves unreliable enough that its being away is noticed, and not before.</p>
-<h2 id="helpers-that-are-found-and-linked-by-themselves"><a href="#helpers-that-are-found-and-linked-by-themselves">Helpers that are found and linked by themselves</a></h2>
-<p><strong>What it is.</strong> Setting up <a href="helper.html">a helper</a> today means making a key, giving it to the helper and to Spool, typing the helper&#39;s address, and naming one folder as each machine sees it. A helper could instead announce itself on the network, be listed in Spool&#39;s settings as found, and be linked with a button and a short code.</p>
-<p><strong>How it would go.</strong></p>
-<ol>
-<li>A helper is started on a machine, with the folders it may use.</li>
-<li>Under Settings, General, Helpers, a line appears: found on your network, with the machine&#39;s name and a <strong>Link</strong> button.</li>
-<li>Linking asks for a short code the helper printed when it started. The two agree a key between themselves; nobody copies one.</li>
-<li>Spool works out which of its locations lie on the helper&#39;s disks, and shows the match to be confirmed.</li>
-</ol>
-<p><strong>The three parts.</strong></p>
-<div class="scroll"><table>
-<thead>
-<tr>
-<th>Part</th>
-<th>Today</th>
-<th>As it would be</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Finding</td>
-<td>The helper&#39;s address is typed in.</td>
-<td>The helper announces itself on the network and Spool listens, as players already find Spool.</td>
-</tr>
-<tr>
-<td>Trusting</td>
-<td>A key is made by hand and given to both.</td>
-<td>A helper that is not yet linked accepts one thing only: a request to link, with the right code.</td>
-</tr>
-<tr>
-<td>Matching folders</td>
-<td>One folder is named twice, as each machine sees it.</td>
-<td>Spool compares what is in its own location folders with what the helper sees in its folders and lines them up, which is the comparison &quot;Check this location&quot; already makes.</td>
-</tr>
-</tbody></table></div>
-<p><strong>What it would not change.</strong></p>
-<ul>
-<li>The folders a helper may touch are still set where the helper runs. That is what keeps it inside them, and it should not be something a button in a web page can widen.</li>
-<li>The helper&#39;s downloads folder still has to be shared with Spool&#39;s machine, until <a href="#more-for-the-helper-to-do">the helper reads its downloads itself</a>.</li>
-<li>Typing an address stays possible, for a helper that cannot be found.</li>
+<li>Whether Infuse follows being sent to another address for a film, and keeps following when seeking. It asks Spool again on every seek, which is in its favour. Players are sent only from the addresses named in the settings, so it can be tried with one player. If Infuse does not follow, the protocol has a second way to say that a file is at another address, to try next.</li>
+<li>Whether a player copes with one server at two addresses. Infuse did not, when a second address was added to a share by hand.</li>
 </ul>
 <p><strong>What stands in the way.</strong></p>
 <ul>
-<li>A container on its container system&#39;s own network neither hears nor is heard by the home network&#39;s announcements. The helper would have to share the host&#39;s network, as Spool must to be found by players from a container.</li>
-<li>On a Mac, a program may not speak to the local network until it is allowed to under Privacy &amp; Security, and a Spool run as a service is refused without a word. Finding helpers would fail the same quiet way as reaching one does.</li>
-<li>Anything on the network can announce itself as a helper. The code is what keeps a stranger&#39;s machine from being linked, so linking can never be made a single click.</li>
-<li>Folders are matched by what is in them. Two empty folders look alike, and so do two copies of one library; those have to be chosen by hand.</li>
+<li>A player away from home cannot reach a NAS that is only on the home network. Spool sends a player there only when the two are on the same network.</li>
+<li>A container on its container system&#39;s own network neither hears nor is heard by announcements on the home network. To be found, it has to share the host&#39;s network.</li>
+<li>On a Mac, a program run as a service may not speak to the local network until it is allowed to under Privacy &amp; Security, and is refused without a word.</li>
+<li>Anything on a network can announce itself. The code is what keeps a stranger&#39;s machine from being linked, so linking is never a single click.</li>
+<li>Two homes cannot reach each other without help: a private network between them, or an open port with a certificate.</li>
+<li>Other households update when they like. What two Spools say to each other has to go on being understood by older and newer releases.</li>
 </ul>
-<p><strong>What it would cost.</strong> About a day: the announcement and the listening are small, and most of the work is the linking and the matching, with their tests.</p>
-<p><strong>Why it is waiting.</strong> A helper is set up once. The four things typed today take a few minutes, and the settings page says at once whether they were right.</p>
-<p><strong>When to build it.</strong> With <a href="#from-one-spool-and-its-helpers-to-a-cluster">helpers that report in</a>, since both are a helper making itself known; or when a second helper is added and setting one up is no longer something done once.</p>
+<p><strong>The line not to cross.</strong> Links between households are by invitation, between people who know each other, as a library is shared with family. There is no list of Spools to browse and no way to find a stranger&#39;s.</p>
+<p><strong>What was considered and left out.</strong></p>
+<ul>
+<li><strong>A second Spool that takes over by itself when the first stops.</strong> Two machines must never both believe they are in charge, or each downloads, files and deletes the same things. For one household that risk buys back a few seconds.</li>
+<li><strong>A second Spool that keeps a copy of the catalogue, to be switched to by hand.</strong> Not needed: when a linked machine is away its titles go offline and the rest carries on, and the nightly backup restores a catalogue onto another machine.</li>
+<li><strong>Work sent to whichever machine is free.</strong> Worth having only with a second machine that does Work.</li>
+</ul>
+<p><strong>What may follow.</strong> A NAS that runs a whole Spool of its own, deciding for its own folders, with the household&#39;s settings, accounts and what has been watched kept the same on each. Either machine would then go on serving players while the other is down. Settings are small and seldom change, so the latest edit can win; the catalogue is not copied, because each title belongs to the Spool whose folder holds it. It would mean splitting a Usenet provider&#39;s connections between the two, and each reading the indexers for itself. It waits until links have been in use.</p>
 <h2 id="converting-while-it-plays"><a href="#converting-while-it-plays">Converting while it plays</a></h2>
 <p><strong>What it is.</strong> <a href="compact.html">Compact versions</a> are made ahead of time. A player that asks for a smaller stream of a file with no compact version gets the original. Spool could instead convert the file as it is played, as Jellyfin and Plex do, and Infuse can ask for exactly that since its version 8.5.</p>
 <p><strong>What it would take.</strong> Starting ffmpeg for each player that asks, cutting what it makes into short pieces, serving those in the form players expect (HLS), following the player when it skips about, and clearing up when it stops. The part of the players&#39; protocol that asks for a converted stream would have to be answered, where today Spool says every file is to be played as it is.</p>
 <p><strong>What is known.</strong> A Mac mini with an M4 turns a 4K film on disc into 1080p at about ten times the speed it plays, on its video hardware, and two at once each get half of that. So one such machine could serve eight or so players at once, each with a film converted as it goes.</p>
 <p><strong>Why it is waiting.</strong> A compact version made once serves every player from then on and survives a restart; converting as it plays serves one player once. For a library whose titles are known ahead of time, making them ahead of time is less to build and less to go wrong.</p>
-<p><strong>When to build it.</strong> Titles are often played away from home before anyone thought to make a compact version of them; or the library is shared with people on connections of every kind, as in <a href="#sharing-a-library-between-households">sharing between households</a>.</p>
-<h2 id="sharing-a-library-between-households"><a href="#sharing-a-library-between-households">Sharing a library between households</a></h2>
-<p><strong>What it is.</strong> Several people each run their own Spool, and each sees the others&#39; libraries in their own, as one. A title only one of them has is played from that one&#39;s machine, through the player&#39;s own Spool, so a player still knows one server.</p>
-<p><strong>How it fits what is there.</strong> Another household&#39;s Spool looks like <a href="locations.html#managed-or-only-read">a location that is only read</a>, reached over the internet and not through a mount.</p>
-<div class="scroll"><table>
-<thead>
-<tr>
-<th>Wanted</th>
-<th>Already there</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>Titles hidden while their owner&#39;s machine is off</td>
-<td>A location that cannot be reached takes its titles offline.</td>
-</tr>
-<tr>
-<td>One entry for a film two people have</td>
-<td>A title in more than one place, each offered to players as a version.</td>
-</tr>
-<tr>
-<td>Nothing of someone else&#39;s ever changed</td>
-<td>Locations that are only read.</td>
-</tr>
-<tr>
-<td>A player sees one server</td>
-<td>The door players use; the other Spool is only where the film comes from.</td>
-</tr>
-<tr>
-<td>The same film known as the same</td>
-<td>Every Spool keeps the same ids for a title.</td>
-</tr>
-</tbody></table></div>
-<p><strong>What is new.</strong> Two Spools linked by invitation, with a code, each choosing what it shares; one asking the other what it has; and one fetching a file from the other to hand to a player.</p>
-<p><strong>What stands in the way.</strong></p>
-<ul>
-<li>A film is sent at the rate it was made at. From a home whose line is slow upstream, a film on disc will not play. <a href="compact.html">Compact versions</a> are the answer that exists: share those.</li>
-<li>Two homes cannot reach each other without help. A private network between them (Tailscale&#39;s sharing of one machine is the least to set up) or an open port with a certificate.</li>
-<li>What each owner must be able to set: which locations are shared, how much may be sent at once, how many players at once, and an end to the arrangement.</li>
-<li>What one household learns of another&#39;s watching. No more than that a film was sent.</li>
-</ul>
-<p><strong>The line not to cross.</strong> By invitation, between people who know each other, as a library is shared with family. No list of Spools to browse and no way to find a stranger&#39;s: that would be something else.</p>
-<p><strong>When to build it.</strong> Someone to share with runs Spool too.</p>
+<p><strong>When to build it.</strong> Titles are often played away from home before anyone thought to make a compact version of them; or the library is shared with people on connections of every kind, as in <a href="#linked-spools">links between households</a>.</p>
 <h2 id="titles-worth-having-found-without-being-asked-for"><a href="#titles-worth-having-found-without-being-asked-for">Titles worth having, found without being asked for</a></h2>
 <p><strong>What it is.</strong> Spool looks for what it has been told to look for. With an indexer that sets no limit on how much it may be asked, it could also keep an eye out for films worth having that nobody has added: new ones that are being talked about, and old ones that are well thought of, each at a quality the profile would accept.</p>
 <p><strong>How it would go.</strong></p>

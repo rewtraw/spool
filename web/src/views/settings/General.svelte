@@ -53,20 +53,25 @@
     checks[id] = 'running';
     checks[id] = await api.post(`/locations/${id}/check`).catch((e) => ({ ok: false, checks: [{ what: 'check', ok: false, detail: e.message }] }));
   }
-  // ---- helpers: a small Spool on the machine that holds some of the disks
-  let helpers = $state<any[]>([]);
-  let helperTimer: ReturnType<typeof setInterval> | undefined;
-  async function loadHelpers() {
-    helpers = await api.get<any[]>('/helpers').catch(() => helpers);
+  // ---- linked Spools: today a helper, a small Spool on the machine that holds some of the disks
+  let links = $state<any[]>([]);
+  let linkTimer: ReturnType<typeof setInterval> | undefined;
+  async function loadLinks() {
+    links = await api.get<any[]>('/links').catch(() => links);
   }
-  const helperOf = (id: number) => helpers.find((h) => h.id === id);
-  function addHelper() {
-    (general.helpers ??= []).push({ id: 0, name: '', url: '', key: '', here: '', there: '' });
+  const linkOf = (id: number) => links.find((h) => h.id === id);
+  function addLink() {
+    (general.links ??= []).push({ id: 0, name: '', url: '', key: '', here: '', there: '', play_url: '', play_from: [] });
   }
+  // What a linked Spool allows this one, in words.
+  const allows = (seen: any) => {
+    const words = ['see', 'play', 'work'].filter((g) => seen.grants?.[g]);
+    return words.length ? `allows ${words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]}` : '';
+  };
   $effect(() => {
-    loadHelpers();
-    helperTimer = setInterval(loadHelpers, 5000);
-    return () => clearInterval(helperTimer);
+    loadLinks();
+    linkTimer = setInterval(loadLinks, 5000);
+    return () => clearInterval(linkTimer);
   });
   function addPlace() {
     general.locations.push({ id: 0, name: '', movie_root: '', series_root: '', volume: '', manage: false });
@@ -116,7 +121,7 @@
     load();
     // The players' door follows the settings within a few seconds.
     setTimeout(loadPlayers, 4000);
-    setTimeout(loadHelpers, 1500);
+    setTimeout(loadLinks, 1500);
   }
 </script>
 
@@ -269,10 +274,10 @@
     </fieldset>
 
     <fieldset class="card">
-      <legend>Helpers</legend>
-      <p class="muted">A helper is a small Spool that runs on the machine that holds some of the disks, such as a NAS. It downloads, unpacks and files onto its own disks, and moves titles between them, so that nothing crosses the network to this machine and back. Spool here still decides everything and serves the library. <a class="link" href="https://rewtraw.github.io/spool/guide/helper.html" target="_blank" rel="noreferrer">Setting one up</a></p>
-      {#each general.helpers ?? [] as h, i (i)}
-        {@const now = helperOf(h.id)}
+      <legend>Linked Spools</legend>
+      <p class="muted">A Spool on another machine that this one is linked to. Today that is a helper: a small Spool on the machine that holds some of the disks, such as a NAS. It downloads, unpacks and files onto its own disks, and moves titles between them, so that nothing crosses the network to this machine and back. It can also hand a film to a player itself. Spool here still decides everything and is the one server players know. <a class="link" href="https://rewtraw.github.io/spool/guide/helper.html" target="_blank" rel="noreferrer">Setting one up</a></p>
+      {#each general.links ?? [] as h, i (i)}
+        {@const now = linkOf(h.id)}
         <div class="place">
           <div class="cols">
             <label class="field">Name<input class="input" bind:value={h.name} placeholder="The NAS's name" /></label>
@@ -284,10 +289,18 @@
             <label class="field">The same folder, as the helper sees it<input class="input mono" bind:value={h.there} placeholder="/nas" /></label>
           </div>
           <span class="hint">Every location whose folders lie under the first is served by this helper. A path is turned from one machine's to the other's by swapping these two at its start, so they must name the same folder.</span>
+          <div class="cols">
+            <label class="field">Players sent straight to it
+              <input class="input mono" value={(h.play_from ?? []).join(', ')} onchange={(e) => (h.play_from = e.currentTarget.value.split(/[\s,]+/).filter(Boolean))} placeholder="192.168.1.0/24" />
+            </label>
+            <label class="field">Address players use<input class="input mono" bind:value={h.play_url} placeholder={h.url || 'http://nas:7978'} /></label>
+          </div>
+          <span class="hint">A player at one of these addresses is sent to this machine for a film it holds, with a ticket for that one film, and the film no longer passes through here. Give ranges of addresses, such as your home network's, or one player's address to try it with. Left empty, every film is sent through this Spool, as it is for any player not named. The second address is only needed if players reach the machine at a different one from Spool.</span>
           <div class="row wrap">
             {#if now}
               <span class="small" class:warn={!now.seen.usable || !now.seen.downloads_seen}>
-                {[!now.seen.asked ? 'Not asked yet' : !now.seen.reachable ? 'Cannot be reached' : !now.seen.usable ? 'Cannot be used' : 'Answering',
+                {[!now.seen.asked ? 'Not asked yet' : !now.seen.reachable ? 'Cannot be reached' : !now.seen.usable && !now.seen.play ? 'Cannot be used' : 'Answering',
+                  now.seen.reachable ? allows(now.seen) : '',
                   now.serves.length ? `serves ${now.serves.join(' and ')}` : 'serves no location yet',
                   now.seen.usable && now.downloads ? `${now.downloads} ${now.downloads === 1 ? 'download' : 'downloads'} running` : '',
                   now.seen.free != null ? `${bytes(now.seen.free)} free for downloads` : ''].filter(Boolean).join(' · ')}
@@ -296,13 +309,14 @@
               <span class="faint small">Save to start using it.</span>
             {/if}
             <span class="grow"></span>
-            <button class="btn small ghost danger" type="button" onclick={() => general.helpers.splice(i, 1)}>Remove</button>
+            <button class="btn small ghost danger" type="button" onclick={() => general.links.splice(i, 1)}>Remove</button>
           </div>
           {#if now?.seen.problem}<p class="small warn">{now.seen.problem}</p>{/if}
+          {#if now?.seen.legacy && (h.play_from ?? []).length}<p class="small warn">This helper is from before it could hand films to players. Update it, and until then every film is sent through this Spool.</p>{/if}
         </div>
       {/each}
-      <div><button class="btn" type="button" onclick={addHelper}>Add a helper</button></div>
-      <p class="hint">Without a helper, or while one cannot be reached, a location on another machine works as before: downloads run here and are filed across the share. "Check this location" says what a location's helper sees.</p>
+      <div><button class="btn" type="button" onclick={addLink}>Add a helper</button></div>
+      <p class="hint">Without a helper, or while one cannot be reached, a location on another machine works as before: downloads run here and are filed across the share, and films are sent to players from here. "Check this location" says what a location's helper sees.</p>
     </fieldset>
 
     <fieldset class="card">

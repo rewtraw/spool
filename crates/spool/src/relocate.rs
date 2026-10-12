@@ -163,10 +163,14 @@ pub(crate) fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &
     Ok(())
 }
 
-/// Take away the files that were copied, and the folders left empty by that.
+/// Take away the files that were copied, and the folders left empty by that. A file that is
+/// no longer the size it was when it was copied is another file by now, and is left.
 pub(crate) fn remove_all(root: &Path, files: &[(PathBuf, u64)]) {
-    for (rel, _) in files {
-        let _ = std::fs::remove_file(root.join(rel));
+    for (rel, size) in files {
+        let path = root.join(rel);
+        if std::fs::symlink_metadata(&path).is_ok_and(|m| m.len() == *size) {
+            let _ = std::fs::remove_file(path);
+        }
     }
     sweep(root);
     let mut folders: Vec<PathBuf> = files.iter().filter_map(|(rel, _)| rel.parent().map(|p| root.join(p))).collect();
@@ -485,20 +489,32 @@ impl App {
         // Under a working name first, so a half-made folder is never taken for the title's.
         let working = target.with_file_name(format!(".spool-moving-{id}"));
         let mut handed: Option<(Arc<crate::remote::Remote>, String)> = None;
+        // The helper restarted after the title had arrived and before it could say so, and
+        // the original may still be where it was.
+        let mut left_behind = false;
         if let Some(r) = helper {
             let there = |p: &Path| r.there(p).ok_or_else(|| anyhow!("{} is not on {}'s disks", p.display(), r.conf.name));
             let op = r.move_start(&there(&from)?, &there(&target)?, &there(&working)?, keep_original).await?;
-            let (mut told, mut silent) = (false, 0u32);
+            let (mut told, mut silent, mut moved_by_helper) = (false, 0u32, true);
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 if stop.load(Ordering::Relaxed) && !told {
                     told = r.move_cancel(&op).await.is_ok();
                 }
                 let said = match r.move_state(&op).await {
-                    Ok(said) => said,
+                    Ok(Some(said)) => said,
                     // A helper that has restarted has forgotten the move, and cleared away
-                    // what it had copied; the title is where it was.
-                    Err(e) if e.to_string().contains("no such move") => bail!("{}'s helper was restarted in the middle of the move", r.conf.name),
+                    // what it had half copied. A folder under the title's own name is only
+                    // ever a whole one, so if that is there the title did arrive.
+                    Ok(None) => {
+                        let (t, f) = (target.clone(), from.clone());
+                        let (arrived, original) = tokio::task::spawn_blocking(move || (t.is_dir(), f.is_dir())).await?;
+                        if !arrived {
+                            bail!("{}'s helper was restarted in the middle of the move", r.conf.name);
+                        }
+                        (left_behind, moved_by_helper) = (original, false);
+                        break;
+                    }
                     // One that has gone quiet is waited for: it may well be copying still.
                     Err(e) => {
                         silent += 1;
@@ -525,7 +541,7 @@ impl App {
                     }
                 }
             }
-            handed = Some((r, op));
+            handed = moved_by_helper.then_some((r, op));
         } else {
             let (w, t, f, fl, d, st) = (working.clone(), target.clone(), from.clone(), files.clone(), done.clone(), stop.clone());
             tokio::task::spawn_blocking(move || -> Result<()> {
@@ -546,7 +562,8 @@ impl App {
         // The title now lives at the new place. Its files keep their names within the folder.
         let mut moved = self.db.title(id)?.ok_or_else(|| anyhow!("the title was removed"))?;
         moved.path = target.to_string_lossy().to_string();
-        if keep_original && !moved.also.iter().any(|a| Path::new(a) == from) {
+        // An original that is still there is recorded as a copy, never lost track of.
+        if (keep_original || left_behind) && !moved.also.iter().any(|a| Path::new(a) == from) {
             moved.also.push(from.to_string_lossy().to_string());
         }
         self.db.save_title(&mut moved)?;
@@ -563,6 +580,15 @@ impl App {
                 tokio::task::spawn_blocking(move || remove_all(&f, &fl)).await?;
             }
             None => {}
+        }
+        // Whatever could not be taken away, or was changed while the title was being moved
+        // and so was left, is still a folder of this title's, and is recorded as one.
+        if !keep_original && !left_behind {
+            let f = from.clone();
+            if tokio::task::spawn_blocking(move || f.is_dir()).await? && !moved.also.iter().any(|a| Path::new(a) == from) {
+                moved.also.push(from.to_string_lossy().to_string());
+                self.db.save_title(&mut moved)?;
+            }
         }
         let mut report = crate::catalog::ScanReport::default();
         self.scan_title(id, &mut report).await?;

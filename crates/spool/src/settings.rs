@@ -36,20 +36,27 @@ pub struct Location {
 }
 
 /// A helper on the machine that holds some of the disks. See [`crate::remote`].
+/// Another Spool this one is linked to: a helper on the machine that holds some of the
+/// disks. See [`crate::link`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct HelperConf {
-    /// Given when the helper is added and never reused.
+pub struct LinkConf {
+    /// Given when the link is added and never reused.
     pub id: u32,
     pub name: String,
-    /// Where the helper answers, such as `http://nas:7978`.
+    /// Where it answers this Spool, such as `http://nas:7978`.
     pub url: String,
     pub key: String,
     /// The folder this machine sees the other machine's disks under, and the folder the
-    /// helper sees the same thing under. A path is turned from one to the other by swapping
-    /// these at its start.
+    /// other machine sees the same thing under. A path is turned from one to the other by
+    /// swapping these at its start.
     pub here: String,
     pub there: String,
+    /// Where it answers players, when that is not where it answers this Spool.
+    pub play_url: String,
+    /// The players that are sent to it for a file it holds: ranges of addresses, such as
+    /// `192.168.1.0/24`. With none, every player is served through this Spool.
+    pub play_from: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -120,8 +127,12 @@ pub struct General {
     /// The location new titles are put in; zero is the main one, which is also used whenever
     /// the chosen one cannot take them.
     pub new_titles_location: u32,
-    /// Helpers on other machines that do file work on their own disks.
-    pub helpers: Vec<HelperConf>,
+    /// The Spools this one is linked to. They were called helpers, and settings saved under
+    /// that name are read as they are.
+    #[serde(alias = "helpers")]
+    pub links: Vec<LinkConf>,
+    /// The highest number a link has been given, so that none is ever given again.
+    pub link_seq: u32,
     /// How compact versions are made.
     pub compact: crate::compact::Compact,
 }
@@ -169,7 +180,8 @@ impl Default for General {
             default_series_profile: 0,
             locations: vec![],
             new_titles_location: 0,
-            helpers: vec![],
+            links: vec![],
+            link_seq: 0,
             compact: Default::default(),
         }
     }

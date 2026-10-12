@@ -28,6 +28,8 @@ services:
       # Where it downloads to: a folder of its own. On the same dataset as the library, a
       # finished download is filed by renaming it; on another, by a copy within the NAS.
       SPOOL_HELPER_DOWNLOADS: "/nas/downloads/spool"
+      # What it does for whoever holds the key: see, play, work. All three unless said.
+      # SPOOL_HELPER_GRANTS: "see,play,work"
     volumes:
       # Its own small state: the Usenet servers Spool gives it.
       - spool-helper-data:/data

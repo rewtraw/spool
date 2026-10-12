@@ -9,20 +9,27 @@
 //! folder this machine sees the NAS under and the folder the helper sees the same thing
 //! under; whatever lies in the first is its to work on.
 //!
+//! A helper is one end of a link (see [`crate::link`]), and before anything is asked of it
+//! the two settle what they both speak and what it allows. One that hands files to players
+//! is sent the players named in its settings, each with a ticket for the one file.
+//!
 //! A helper that cannot be reached takes nothing with it. Downloads for its part of the
 //! library run here and are filed across the share, as they would be without it, and what
 //! it was already doing is waited for and not written off.
 
 use crate::app::{App, Event};
 use crate::helper::Pushed;
+use crate::link::ticket::Signer;
+use crate::link::{agreed, Grants, Hello, Net, Share};
 use crate::models::*;
-use crate::settings::HelperConf;
+use crate::settings::LinkConf;
 use anyhow::{anyhow, bail, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::{json, Value};
 use spool_nntp::{JobState, JobStatus};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,8 +43,16 @@ pub struct Seen {
     /// Why it cannot be used, or cannot be used for downloads, in words for a person.
     pub problem: String,
     pub version: String,
-    /// It answers and speaks as this Spool does.
+    /// It answers, does work for this Spool, and the two speak of work alike.
     pub usable: bool,
+    /// It hands files to players who come with a ticket.
+    pub play: bool,
+    /// What it allows this Spool.
+    pub grants: Grants,
+    /// It is from before links, and has the work and nothing else.
+    pub legacy: bool,
+    /// The folders it shares.
+    pub shares: Vec<Share>,
     /// Its folder of finished downloads can be read from this machine, which filing needs.
     pub downloads_seen: bool,
     pub paused: bool,
@@ -46,16 +61,45 @@ pub struct Seen {
     pub busy: Vec<String>,
     #[serde(skip)]
     boot: String,
-    /// How many times it has answered since it was last looked at closely.
-    #[serde(skip)]
-    answers: u32,
     #[serde(skip)]
     pushed: Option<Pushed>,
+    /// Its last report of its downloads could not be read, so what is kept of them is old.
+    #[serde(skip)]
+    stale: bool,
+    /// When to ask again what it is: something was wrong, and may have been put right.
+    #[serde(skip)]
+    again: Option<Instant>,
 }
 
+/// Why a linked Spool did not do what it was asked.
+#[derive(Debug)]
+pub enum Fail {
+    /// No answer came. `sent` is false only when it is certain that nothing reached it.
+    Away { why: String, sent: bool },
+    /// It answered, and said no.
+    Refused { status: u16, why: String },
+    /// It answered in a way that cannot be read.
+    Garbled(String),
+}
+
+impl std::fmt::Display for Fail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Fail::Away { why, .. } | Fail::Refused { why, .. } | Fail::Garbled(why) => f.write_str(why),
+        }
+    }
+}
+
+impl std::error::Error for Fail {}
+
+type Asked<T> = std::result::Result<T, Fail>;
+
 pub struct Remote {
-    pub conf: HelperConf,
+    pub conf: LinkConf,
     http: reqwest::Client,
+    signer: Signer,
+    /// The players that are sent to it for a file.
+    nets: Vec<Net>,
     /// Its downloads as last reported, named and placed as this machine knows them.
     jobs: Mutex<Vec<JobStatus>>,
     /// Downloads handed over a moment ago, which a report already on its way back may not
@@ -80,9 +124,27 @@ fn wait<F: std::future::Future>(f: F) -> F::Output {
 }
 
 impl Remote {
-    fn new(conf: HelperConf) -> Remote {
+    fn new(conf: LinkConf) -> Remote {
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).build().expect("http client");
-        Remote { conf, http, jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
+        let (signer, nets) = (Signer::new(&conf.key), conf.play_from.iter().filter_map(|n| Net::parse(n).ok()).collect());
+        Remote { conf, http, signer, nets, jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
+    }
+
+    /// Where a player at this address can take a file from the linked machine itself: an
+    /// address with a ticket for that one file. None when the player is not one of those
+    /// sent there, or the machine is not handing files out just now.
+    pub fn direct(&self, here: &Path, player: IpAddr) -> Option<String> {
+        if !self.nets.iter().any(|n| n.holds(player)) {
+            return None;
+        }
+        let there = self.there(here)?;
+        let seen = self.seen.lock();
+        if !(seen.reachable && seen.play) {
+            return None;
+        }
+        let (share, rel) = crate::link::place(&seen.shares, &there)?;
+        let base = if self.conf.play_url.is_empty() { &self.conf.url } else { &self.conf.play_url };
+        Some(format!("{}/link/play/v1/file?ticket={}", base.trim_end_matches('/'), self.signer.issue(&share.id, &rel, crate::db::now().max(0) as u64)))
     }
 
     pub fn seen(&self) -> Seen {
@@ -112,27 +174,30 @@ impl Remote {
         there.strip_prefix(&self.conf.there).ok().map(|rest| Path::new(&self.conf.here).join(rest))
     }
 
-    async fn send(&self, req: reqwest::RequestBuilder, patience: Duration) -> Result<Value> {
+    async fn send(&self, req: reqwest::RequestBuilder, patience: Duration) -> Asked<Value> {
         let name = &self.conf.name;
-        let resp = req.bearer_auth(&self.conf.key).timeout(patience).send().await.map_err(|e| anyhow!("{name}'s helper did not answer: {}", e.without_url()))?;
+        let away = |e: reqwest::Error| Fail::Away { sent: !e.is_connect(), why: format!("{name}'s helper did not answer: {}", e.without_url()) };
+        let resp = req.bearer_auth(&self.conf.key).timeout(patience).send().await.map_err(away)?;
         let status = resp.status();
-        let body: Value = resp.json().await.unwrap_or(Value::Null);
+        let body: Option<Value> = serde_json::from_slice(&resp.bytes().await.map_err(away)?).ok();
         if !status.is_success() {
-            bail!("{name}'s helper refused: {}", body["error"].as_str().unwrap_or(status.as_str()));
+            let why = body.as_ref().and_then(|b| b["error"].as_str()).unwrap_or(status.as_str());
+            return Err(Fail::Refused { status: status.as_u16(), why: format!("{name}'s helper refused: {why}") });
         }
-        Ok(body)
+        // An answer that cannot be read is never taken for one that says there is nothing.
+        body.ok_or_else(|| Fail::Garbled(format!("{name}'s helper answered in a way this Spool cannot read")))
     }
 
-    async fn get(&self, path: &str) -> Result<Value> {
+    async fn get(&self, path: &str) -> Asked<Value> {
         self.send(self.http.get(format!("{}{path}", self.conf.url.trim_end_matches('/'))), Duration::from_secs(8)).await
     }
 
-    async fn post(&self, path: &str, body: Value, patience: Duration) -> Result<Value> {
+    async fn post(&self, path: &str, body: Value, patience: Duration) -> Asked<Value> {
         self.send(self.http.post(format!("{}{path}", self.conf.url.trim_end_matches('/'))).json(&body), patience).await
     }
 
-    async fn post_bytes(&self, path: &str, bytes: &[u8]) -> Result<Value> {
-        self.send(self.http.post(format!("{}{path}", self.conf.url.trim_end_matches('/'))).body(bytes.to_vec()), Duration::from_secs(60)).await
+    async fn post_bytes(&self, path: &str, bytes: &[u8]) -> Asked<Value> {
+        self.send(self.http.post(format!("{}{path}", self.conf.url.trim_end_matches('/'))).body(bytes.to_vec()), Duration::from_secs(30)).await
     }
 
     /// A download as the helper reports it, renamed and placed as this machine knows it.
@@ -149,13 +214,36 @@ impl Remote {
         all
     }
 
-    async fn add(&self, nzb: &[u8], name: &str) -> Result<String> {
-        let said = self.post_bytes(&format!("/helper/jobs?name={}", urlencoding::encode(name)), nzb).await?;
-        let id = format!("{}{}", self.prefix(), said["id"].as_str().ok_or_else(|| anyhow!("{}'s helper gave no name for the download", self.conf.name))?);
+    async fn add(&self, nzb: &[u8], name: &str) -> Asked<String> {
+        // The request is given a name of its own. If its answer is lost it is asked again
+        // under that name, and the helper starts the download once however often it hears.
+        let path = format!("/helper/jobs?name={}&rid={}", urlencoding::encode(name), &crate::settings::new_key()[..16]);
+        // Once one try may have got through, the helper may be downloading, whatever a
+        // later try says: only its own word, under the same name, settles it.
+        let mut in_doubt: Option<String> = None;
+        let mut own = None;
+        for _ in 0..3 {
+            match self.post_bytes(&path, nzb).await {
+                Ok(said) => match said["id"].as_str() {
+                    Some(id) => {
+                        own = Some(id.to_string());
+                        break;
+                    }
+                    None => in_doubt = Some(format!("{}'s helper gave no name for the download", self.conf.name)),
+                },
+                Err(Fail::Away { sent: true, why } | Fail::Garbled(why)) => in_doubt = Some(why),
+                Err(e) if in_doubt.is_none() => return Err(e),
+                Err(_) => {}
+            }
+        }
+        let garbled = || Fail::Garbled(format!("{}'s helper gave no name for the download", self.conf.name));
+        let Some(own) = own else { return Err(Fail::Away { sent: true, why: in_doubt.unwrap_or_default() }) };
+        let id = format!("{}{own}", self.prefix());
         let placeholder: JobStatus = serde_json::from_value(json!({
             "id": id, "name": name, "state": "queued", "total_bytes": spool_nntp::nzb::parse(nzb).map(|n| n.bytes()).unwrap_or(0), "done_bytes": 0, "speed": 0, "eta_secs": null,
             "missing_articles": 0, "damaged_articles": 0, "message": "", "error": null, "output_path": null, "added_at": crate::db::now(),
-        }))?;
+        }))
+        .map_err(|_| garbled())?;
         let mut fresh = self.fresh.lock();
         fresh.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(15));
         fresh.insert(id.clone(), (Instant::now(), placeholder));
@@ -164,7 +252,7 @@ impl Remote {
 
     /// One action on one download, named as the helper names it.
     async fn act(&self, own: &str, action: &str, body: Value) -> Result<()> {
-        self.post(&format!("/helper/jobs/{own}/{action}"), body, Duration::from_secs(15)).await.map(|_| ())
+        Ok(self.post(&format!("/helper/jobs/{own}/{action}"), body, Duration::from_secs(15)).await.map(|_| ())?)
     }
 
     async fn remove(&self, own: &str, files: bool) -> Result<()> {
@@ -177,16 +265,16 @@ impl Remote {
     /// File one thing into the library on the helper's own disks. A film copied between two
     /// of its disks takes a while, so it is given a long time to answer.
     pub async fn file_move(&self, from: &Path, to: &Path) -> Result<()> {
-        self.post("/helper/fs/move", json!({"from": from, "to": to}), Duration::from_secs(4 * 3600)).await.map(|_| ())
+        Ok(self.post("/helper/fs/move", json!({"from": from, "to": to}), Duration::from_secs(4 * 3600)).await.map(|_| ())?)
     }
 
     /// Clear away the folder a finished download left.
     pub async fn remove_output(&self, there: &Path) -> Result<()> {
-        self.post("/helper/fs/remove", json!({"path": there}), Duration::from_secs(120)).await.map(|_| ())
+        Ok(self.post("/helper/fs/remove", json!({"path": there}), Duration::from_secs(120)).await.map(|_| ())?)
     }
 
     pub async fn stat(&self, there: &Path) -> Result<Value> {
-        self.post("/helper/fs/stat", json!({"path": there}), Duration::from_secs(10)).await
+        Ok(self.post("/helper/fs/stat", json!({"path": there}), Duration::from_secs(10)).await?)
     }
 
     pub async fn move_start(&self, from: &Path, to: &Path, working: &Path, keep_original: bool) -> Result<String> {
@@ -194,73 +282,152 @@ impl Remote {
         said["id"].as_str().map(str::to_string).ok_or_else(|| anyhow!("{}'s helper gave no name for the move", self.conf.name))
     }
 
-    pub async fn move_state(&self, id: &str) -> Result<Value> {
-        self.get(&format!("/helper/moves/{id}")).await
+    /// How a move stands. `Ok(None)` is the helper saying it knows of no such move, which
+    /// is what one that has restarted says.
+    pub async fn move_state(&self, id: &str) -> Result<Option<Value>> {
+        match self.get(&format!("/helper/moves/{id}")).await {
+            Ok(said) => Ok(Some(said)),
+            Err(Fail::Refused { status: 404, .. }) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn move_cancel(&self, id: &str) -> Result<()> {
-        self.post(&format!("/helper/moves/{id}/cancel"), json!({}), Duration::from_secs(15)).await.map(|_| ())
+        Ok(self.post(&format!("/helper/moves/{id}/cancel"), json!({}), Duration::from_secs(15)).await.map(|_| ())?)
     }
 
     pub async fn move_finish(&self, id: &str, remove_original: bool) -> Result<()> {
-        self.post(&format!("/helper/moves/{id}/finish"), json!({"remove_original": remove_original}), Duration::from_secs(600)).await.map(|_| ())
+        Ok(self.post(&format!("/helper/moves/{id}/finish"), json!({"remove_original": remove_original}), Duration::from_secs(600)).await.map(|_| ())?)
+    }
+
+    /// What is known of the helper when it does not answer.
+    fn away(&self, why: String) {
+        let mut seen = self.seen.lock();
+        (seen.asked, seen.reachable, seen.usable, seen.play, seen.problem, seen.again) = (true, false, false, false, why, None);
+    }
+
+    /// Find out what the helper is: what it speaks, what it allows, and what it shares.
+    /// Nothing is asked of it until this has been settled.
+    async fn meet(&self) {
+        let name = &self.conf.name;
+        let mut next = Seen { asked: true, reachable: true, ..Default::default() };
+        match self.get("/link").await {
+            Ok(said) => match serde_json::from_value::<Hello>(said) {
+                Ok(hello) => {
+                    let work = hello.grants.work && agreed(crate::link::WORK, &hello.protocols.work).is_some();
+                    next.play = hello.grants.play && agreed(crate::link::PLAY, &hello.protocols.play).is_some();
+                    (next.boot, next.version, next.grants, next.shares) = (hello.boot, hello.version, hello.grants, hello.shares);
+                    if work {
+                        self.meet_work(&mut next).await;
+                    } else if hello.grants.work {
+                        next.problem = format!("{name}'s helper is version {} and does not speak of work as this Spool does; update the two", next.version);
+                    } else if !next.play {
+                        next.problem = format!("{name}'s helper allows this Spool nothing it can use");
+                    }
+                }
+                Err(_) => next.problem = format!("{name}'s helper answered in a way this Spool cannot read"),
+            },
+            // One from before links says it knows no such address. It has the work, as it
+            // always did, and nothing else.
+            Err(Fail::Refused { status: 404, .. }) => {
+                (next.legacy, next.grants) = (true, Grants { work: true, ..Default::default() });
+                self.meet_work(&mut next).await;
+            }
+            Err(Fail::Away { why, .. }) => return self.away(why),
+            Err(Fail::Refused { why, .. } | Fail::Garbled(why)) => next.problem = why,
+        }
+        // Whatever is wrong may be put right without anything here being restarted: the
+        // share mounted, the helper updated, its key corrected. One that only plays is not
+        // asked for downloads, so this is also how it is known to be there still.
+        let secs = if !next.problem.is_empty() || (next.usable && !next.downloads_seen) { Some(20) } else if !next.usable { Some(5) } else { None };
+        next.again = secs.map(|secs| Instant::now() + Duration::from_secs(secs));
+        *self.seen.lock() = next;
+    }
+
+    /// The part of meeting a helper that is about work: that it speaks as this Spool does,
+    /// and that what it downloads can be read from here, which filing needs.
+    async fn meet_work(&self, next: &mut Seen) {
+        let name = &self.conf.name;
+        let info = match self.get("/helper/info").await {
+            Ok(info) => info,
+            Err(e) => return next.problem = e.to_string(),
+        };
+        if next.legacy {
+            (next.boot, next.version) = (info["boot"].as_str().unwrap_or_default().to_string(), info["version"].as_str().unwrap_or_default().to_string());
+            if info["api"].as_u64() != Some(crate::helper::API as u64) {
+                return next.problem = format!("{name}'s helper is version {} and does not speak as this Spool does; update the two together", next.version);
+            }
+        }
+        next.usable = true;
+        let complete = PathBuf::from(info["complete"].as_str().unwrap_or_default());
+        match self.here(&complete) {
+            Some(here) => {
+                let looked = here.clone();
+                if tokio::task::spawn_blocking(move || crate::locations::listable(&looked)).await.unwrap_or(false) {
+                    next.downloads_seen = true;
+                } else {
+                    next.problem = format!("{name}'s helper downloads into {}, which this machine should see at {} and cannot; share that folder and mount it, and until then downloads run here", complete.display(), here.display());
+                }
+            }
+            None => next.problem = format!("{name}'s helper downloads into {}, which is outside {}; until its downloads folder is inside, downloads run here", complete.display(), self.conf.there),
+        }
     }
 
     /// Ask the helper how things stand. Returns the downloads that changed since last time.
     async fn ask(&self, wanted: &Pushed) -> Vec<JobStatus> {
+        let due = {
+            let seen = self.seen.lock();
+            !seen.asked || !seen.reachable || seen.again.is_some_and(|at| Instant::now() >= at)
+        };
+        if due {
+            self.meet().await;
+        }
+        if !self.seen.lock().usable {
+            return vec![];
+        }
         let said = match self.get("/helper/jobs").await {
             Ok(said) => said,
-            Err(e) => {
+            Err(Fail::Away { why, .. }) => {
+                self.away(why);
+                return vec![];
+            }
+            Err(Fail::Garbled(why)) => return self.unread(why),
+            // It no longer does what it did when it was met. Nothing more is asked of it,
+            // and nobody is sent to it, until it has been met again.
+            Err(Fail::Refused { why, .. }) => {
                 let mut seen = self.seen.lock();
-                (seen.asked, seen.reachable, seen.usable, seen.problem) = (true, false, false, format!("{e:#}"));
+                (seen.usable, seen.play, seen.stale, seen.problem, seen.again) = (false, false, true, why, Some(Instant::now()));
                 return vec![];
             }
         };
-        let boot = said["boot"].as_str().unwrap_or_default().to_string();
-        // Met for the first time, or it has restarted: find out what it is and what it sees.
-        // And looked at again now and then while its downloads cannot be seen from here, so
-        // that mounting the share is noticed without restarting anything.
-        let look = {
-            let mut seen = self.seen.lock();
-            seen.answers += 1;
-            seen.boot != boot || !seen.reachable || (seen.usable && !seen.downloads_seen && seen.answers % 30 == 0)
-        };
-        if look {
-            let mut next = Seen { asked: true, reachable: true, boot: boot.clone(), ..Default::default() };
-            match self.get("/helper/info").await {
-                Ok(info) => {
-                    next.version = info["version"].as_str().unwrap_or_default().to_string();
-                    if info["api"].as_u64() != Some(crate::helper::API as u64) {
-                        next.problem = format!("{}'s helper is version {} and does not speak as this Spool does; update the two together", self.conf.name, next.version);
-                    } else {
-                        next.usable = true;
-                        // Filing reads what was downloaded, so this machine has to see it.
-                        let complete = PathBuf::from(info["complete"].as_str().unwrap_or_default());
-                        match self.here(&complete) {
-                            Some(here) if crate::locations::listable(&here) => next.downloads_seen = true,
-                            Some(here) => next.problem = format!("{}'s helper downloads into {}, which this machine should see at {} and cannot; share that folder and mount it, and until then downloads run here", self.conf.name, complete.display(), here.display()),
-                            None => next.problem = format!("{}'s helper downloads into {}, which is outside {}; until its downloads folder is inside, downloads run here", self.conf.name, complete.display(), self.conf.there),
-                        }
-                    }
-                }
-                Err(e) => next.problem = format!("{e:#}"),
+        // It has restarted, and may not be what it was.
+        if said["boot"].as_str() != Some(self.seen.lock().boot.as_str()) {
+            self.meet().await;
+            if !self.seen.lock().usable {
+                return vec![];
             }
-            *self.seen.lock() = next;
         }
-        if self.seen.lock().usable && self.seen.lock().pushed.as_ref() != Some(wanted) {
+        if self.seen.lock().pushed.as_ref() != Some(wanted) {
             let url = format!("{}/helper/config", self.conf.url.trim_end_matches('/'));
             match self.send(self.http.put(url).json(wanted), Duration::from_secs(15)).await {
                 Ok(_) => self.seen.lock().pushed = Some(wanted.clone()),
-                Err(e) => tracing::warn!(helper = %self.conf.name, error = %format!("{e:#}"), "could not give the helper its settings"),
+                Err(e) => tracing::warn!(helper = %self.conf.name, error = %e, "could not give the helper its settings"),
             }
         }
+        // Every download has to be understood, or none of the report is believed: a
+        // download missing from a report that could only half be read has not gone.
+        let read: Option<Vec<JobStatus>> = said["jobs"].as_array().and_then(|list| list.iter().map(|j| serde_json::from_value::<JobStatus>(j.clone()).ok()).collect());
+        let Some(now) = read else { return self.unread(format!("{}'s helper reported its downloads in a way this Spool cannot read; what was last known of them is kept", self.conf.name)) };
+        let now: Vec<JobStatus> = now.into_iter().map(|j| self.adopt(j)).collect();
         {
             let mut seen = self.seen.lock();
+            if std::mem::take(&mut seen.stale) {
+                seen.problem.clear();
+            }
             seen.paused = said["paused"].as_bool().unwrap_or(false);
             seen.free = said["free"].as_u64();
             seen.busy = said["busy"].as_array().map(|b| b.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
         }
-        let now: Vec<JobStatus> = serde_json::from_value::<Vec<JobStatus>>(said["jobs"].clone()).unwrap_or_default().into_iter().map(|j| self.adopt(j)).collect();
         let mut jobs = self.jobs.lock();
         let changed = now
             .iter()
@@ -270,21 +437,42 @@ impl Remote {
         *jobs = now;
         changed
     }
+
+    /// The helper answered, and what it said of its downloads is of no use. What was known
+    /// of them is kept, and marked as old.
+    fn unread(&self, why: String) -> Vec<JobStatus> {
+        let mut seen = self.seen.lock();
+        (seen.stale, seen.problem) = (true, why);
+        vec![]
+    }
+
+    /// Whether a download missing from the helper's last report has truly gone.
+    fn report_is_current(&self) -> bool {
+        let seen = self.seen.lock();
+        seen.reachable && seen.usable && !seen.stale
+    }
 }
 
-/// Check the helpers as the settings page sends them, and number the new ones.
-pub fn tidy_helpers(list: Vec<HelperConf>, old: &[HelperConf]) -> std::result::Result<Vec<HelperConf>, String> {
+/// Check the links as the settings page sends them, and number the new ones. A number is
+/// never given twice, so a download that ran on a link since removed is never taken for
+/// another's. Returns the links and the highest number given so far.
+pub fn tidy_links(list: Vec<LinkConf>, old: &[LinkConf], seq: u32) -> std::result::Result<(Vec<LinkConf>, u32), String> {
     let clean = |p: &str| p.trim().trim_end_matches('/').to_string();
-    let mut next = old.iter().chain(&list).map(|h| h.id).max().unwrap_or(0);
-    let mut out: Vec<HelperConf> = vec![];
+    let web = |url: &str| url.starts_with("http://") || url.starts_with("https://");
+    let mut next = old.iter().chain(&list).map(|h| h.id).max().unwrap_or(0).max(seq);
+    let mut out: Vec<LinkConf> = vec![];
     for mut h in list {
-        (h.name, h.url, h.key) = (h.name.trim().to_string(), clean(&h.url), h.key.trim().to_string());
+        (h.name, h.url, h.key, h.play_url) = (h.name.trim().to_string(), clean(&h.url), h.key.trim().to_string(), clean(&h.play_url));
         (h.here, h.there) = (clean(&h.here), clean(&h.there));
+        h.play_from = h.play_from.iter().flat_map(|n| n.split([',', ' ', '\n'])).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).collect();
         if h.name.is_empty() {
             return Err("every helper needs a name".into());
         }
-        if !h.url.starts_with("http://") && !h.url.starts_with("https://") {
+        if !web(&h.url) {
             return Err(format!("the address of {}'s helper must start with http:// or https://", h.name));
+        }
+        if !h.play_url.is_empty() && !web(&h.play_url) {
+            return Err(format!("the address players use for {} must start with http:// or https://", h.name));
         }
         if h.key.is_empty() {
             return Err(format!("{}'s helper needs its key", h.name));
@@ -292,13 +480,22 @@ pub fn tidy_helpers(list: Vec<HelperConf>, old: &[HelperConf]) -> std::result::R
         if !h.here.starts_with('/') || !h.there.starts_with('/') {
             return Err(format!("the two folders of {}'s helper must be full paths, starting with /", h.name));
         }
-        if h.id == 0 || out.iter().any(|o| o.id == h.id) {
-            next += 1;
+        for range in &h.play_from {
+            Net::parse(range)?;
+        }
+        // A folder is one helper's to work in, never two's.
+        if let Some(other) = out.iter().find(|o| Path::new(&o.here).starts_with(&h.here) || Path::new(&h.here).starts_with(&o.here)) {
+            return Err(format!("{} and {} are given the same folder on this machine; each folder is one helper's", other.name, h.name));
+        }
+        // A number is kept only by the link that already has it. Whatever else is sent, a
+        // new link gets a new number.
+        if !old.iter().any(|o| o.id == h.id) || out.iter().any(|o| o.id == h.id) {
+            next = next.checked_add(1).ok_or("no more links can be numbered")?;
             h.id = next;
         }
         out.push(h);
     }
-    Ok(out)
+    Ok((out, next))
 }
 
 impl App {
@@ -309,7 +506,7 @@ impl App {
     /// Bring the helpers Spool keeps in line with its settings. One whose settings have not
     /// changed keeps what is known of it.
     pub fn sync_remotes(&self) {
-        let wanted: Vec<HelperConf> = self.settings.general().helpers.into_iter().filter(|h| !h.url.trim().is_empty()).collect();
+        let wanted: Vec<LinkConf> = self.settings.general().links.into_iter().filter(|h| !h.url.trim().is_empty()).collect();
         let mut remotes = self.remotes.lock();
         *remotes = wanted.into_iter().map(|c| remotes.iter().find(|r| r.conf == c).cloned().unwrap_or_else(|| Arc::new(Remote::new(c)))).collect();
     }
@@ -324,9 +521,17 @@ impl App {
     pub async fn ask_remotes(&self) {
         let wanted = self.pushed();
         let mut problems = vec![];
-        for r in self.remotes() {
-            let was = r.seen();
-            let changed = r.ask(&wanted).await;
+        // Each is asked on its own, so one that is slow to answer holds up none of the others.
+        let asked = futures::future::join_all(self.remotes().into_iter().map(|r| {
+            let wanted = &wanted;
+            async move {
+                let was = r.seen();
+                let changed = r.ask(wanted).await;
+                (r, was, changed)
+            }
+        }))
+        .await;
+        for (r, was, changed) in asked {
             let now = r.seen();
             // What was waiting on the helper to be filed can be finished now.
             if now.usable && !was.usable {
@@ -409,7 +614,7 @@ impl App {
             Some((None, _)) => Found::Gone,
             Some((Some(r), _)) => match r.jobs().into_iter().find(|j| j.id == id) {
                 Some(j) => Found::Job(j),
-                None if r.seen().reachable => Found::Gone,
+                None if r.report_is_current() => Found::Gone,
                 None => Found::Unknown,
             },
         }
@@ -436,7 +641,10 @@ impl App {
         if let Some(r) = self.remote_for_title(title) {
             match wait(r.add(nzb, name)) {
                 Ok(id) => return Ok(id),
-                Err(e) => tracing::warn!(helper = %r.conf.name, error = %format!("{e:#}"), "the helper would not take the download; running it here"),
+                // It was asked and no answer came back. It may be downloading, so the same
+                // thing is not started here beside it.
+                Err(Fail::Away { sent: true, why } | Fail::Garbled(why)) => bail!("{why}. It may have taken the download, so it was not started here as well"),
+                Err(e) => tracing::warn!(helper = %r.conf.name, error = %e, "the helper would not take the download; running it here"),
             }
         }
         Ok(self.engine.add(nzb, name, None)?)
@@ -517,8 +725,15 @@ impl App {
         crate::import::move_file(src, dst)
     }
 
-    /// What the settings page and the check-up show of each helper.
-    pub fn helper_report(&self) -> Vec<Value> {
+    /// Where a player can take a file from the machine that holds it, if there is a link to
+    /// that machine that hands files out and the player is one of those sent there.
+    pub fn play_direct(&self, file: &Path, player: Option<IpAddr>) -> Option<String> {
+        let player = player?;
+        self.remotes().iter().find_map(|r| r.direct(file, player))
+    }
+
+    /// What the settings page and the check-up show of each link.
+    pub fn link_report(&self) -> Vec<Value> {
         let places = self.placement();
         self.remotes()
             .iter()

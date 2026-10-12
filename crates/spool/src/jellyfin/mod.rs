@@ -128,6 +128,8 @@ struct Call {
     q: Params,
     headers: HeaderMap,
     body: Value,
+    /// The address the request came from, when it is known.
+    peer: Option<std::net::IpAddr>,
 }
 
 impl Call {
@@ -502,8 +504,8 @@ impl Call {
             },
 
             (_, ["items", id, "playbackinfo"]) => self.playback_info(id).await,
-            (true, ["items", id, "download" | "file"] | ["videos", id, "stream" | "original"]) => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head).await,
-            (true, ["videos", id, file]) if file.starts_with("stream.") || file.starts_with("original.") => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head).await,
+            (true, ["items", id, "download" | "file"] | ["videos", id, "stream" | "original"]) => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer).await,
+            (true, ["videos", id, file]) if file.starts_with("stream.") || file.starts_with("original.") => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer).await,
             (true, ["videos", id, source, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, Some(source), index, file).await,
             (true, ["videos", id, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, None, index, file).await,
 
@@ -638,7 +640,7 @@ fn redact(query: &str) -> String {
     query
         .split('&')
         .map(|pair| match pair.split_once('=') {
-            Some((k, _)) if k.eq_ignore_ascii_case("api_key") || k.eq_ignore_ascii_case("apikey") => format!("{k}=..."),
+            Some((k, _)) if ["api_key", "apikey", "ticket"].iter().any(|secret| k.eq_ignore_ascii_case(secret)) => format!("{k}=..."),
             _ => pair.to_string(),
         })
         .collect::<Vec<_>>()
@@ -647,6 +649,8 @@ fn redact(query: &str) -> String {
 
 async fn handle(State(app): State<App>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
+    // The address the connection came from, and never one a request claims for itself.
+    let peer = parts.extensions.get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip());
     let mut path: Vec<String> = parts.uri.path().split('/').filter(|s| !s.is_empty()).map(str::to_lowercase).collect();
     // Older players put the API under a prefix.
     if matches!(path.first().map(String::as_str), Some("emby" | "jellyfin")) {
@@ -656,7 +660,7 @@ async fn handle(State(app): State<App>, req: Request) -> Response {
         Method::GET | Method::HEAD => Value::Null,
         _ => axum::body::to_bytes(body, 1 << 20).await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null),
     };
-    let call = Call { app, method: parts.method, path, q: Params::parse(parts.uri.query()), headers: parts.headers, body };
+    let call = Call { app, method: parts.method, path, q: Params::parse(parts.uri.query()), headers: parts.headers, body, peer };
     let response = call.route().await;
     let line = format!(
         "{} {} {}{} -> {}  [{}]",
@@ -708,7 +712,7 @@ pub fn spawn(app: App, host: String) {
                             tracing::info!(port, "serving the library to players");
                             let router = router(app.clone());
                             let serve = tokio::spawn(async move {
-                                if let Err(e) = axum::serve(listener, router).await {
+                                if let Err(e) = axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await {
                                     tracing::warn!(error = %e, "the players' server stopped");
                                 }
                             });

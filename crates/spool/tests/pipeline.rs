@@ -129,6 +129,9 @@ impl World {
         g.movie_root = root.join("Movies").to_string_lossy().to_string();
         g.series_root = root.join("TV Shows").to_string_lossy().to_string();
         g.downloads_dir = root.join("downloads").to_string_lossy().to_string();
+        // How much room the machine running the tests happens to have is not what is being
+        // tested; the tests about room set this for themselves.
+        g.min_free_gb = 0;
         app.settings.set_general(&g).unwrap();
         app.settings.set_servers(&[usenet.config("main", 0, 4)]).unwrap();
         app.apply_engine_config();
@@ -2776,7 +2779,7 @@ async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, Path
     }
     std::os::unix::fs::symlink(&nas, &mnt).unwrap();
     let key = "a-key-of-sufficient-length".to_string();
-    let conf = spool::helper::Conf { key: key.clone(), roots: vec![nas.join("films")], read_roots: vec![nas.join("vault")], downloads: nas.join("downloads") }.checked().unwrap();
+    let conf = spool::helper::Conf { key: key.clone(), roots: vec![nas.join("films")], read_roots: vec![nas.join("vault")], downloads: nas.join("downloads"), grants: spool::link::Grants::ALL }.checked().unwrap();
     let helper = spool::helper::Helper::start(&w.root.join("helper-data"), conf).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -2786,6 +2789,9 @@ async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, Path
     let api = spool::api::router(w.app.clone());
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["locations"] = json!([{"name": "Shelf", "movie_root": mnt.join("films"), "manage": true}, {"name": "Vault", "movie_root": mnt.join("vault"), "manage": false}]);
+    // Sent under the name links went by before, as a page left open across an update would:
+    // it is taken as it is.
+    g.as_object_mut().unwrap().remove("links");
     g["helpers"] = json!([{"name": "Nas", "url": url, "key": key, "here": mnt, "there": nas}]);
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert_eq!(status, 200, "{said}");
@@ -2806,7 +2812,8 @@ async fn a_helper_downloads_and_files_on_its_own_disks() {
     assert_eq!((helpers[0]["name"].as_str(), helpers[0]["serves"].to_string().as_str(), helpers[0]["seen"]["usable"].as_bool(), helpers[0]["seen"]["downloads_seen"].as_bool()), (Some("Nas"), r#"["Shelf","Vault"]"#, Some(true), Some(true)), "{helpers}");
     // Its key is not handed back to the browser.
     let (_, general) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    assert_eq!(general["helpers"][0]["key"], "********");
+    assert_eq!((general["links"][0]["key"].as_str(), general["links"][0]["id"].as_u64(), general["link_seq"].as_u64()), (Some("********"), Some(1), Some(1)), "{}", general["links"]);
+    assert!(general.get("helpers").is_none(), "and is kept under the name it has now");
     // And the helper was given the Usenet servers to download with.
     let saved: Value = serde_json::from_slice(&std::fs::read(w.root.join("helper-data/helper.json")).unwrap()).unwrap();
     assert_eq!(saved["servers"].as_array().map(Vec::len), Some(1));
@@ -2852,7 +2859,7 @@ async fn a_helper_downloads_and_files_on_its_own_disks() {
 
     // With the helper away, what it was doing is waited for, and new downloads run here.
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
-    g["helpers"][0]["url"] = json!("http://127.0.0.1:9");
+    g["links"][0]["url"] = json!("http://127.0.0.1:9");
     assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
     w.app.ask_remotes().await;
     let (_, helpers) = call(&api, "GET", "/api/helpers", Value::Null).await;
@@ -2922,6 +2929,8 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
     assert_eq!(ask("not-the-key", "/helper/fs/stat", json!({"path": nas.join("films/Alpha (2001)")})).await.0, 401);
     let outside = w.root.join("Movies/Elsewhere (1999)");
     lay(outside.join("Elsewhere (1999).mkv"), b"not the helper's");
+    lay(nas.join("films/Neighbour (1990)/Neighbour (1990).mkv"), b"another film");
+    lay(nas.join("films/.spool-moving-7/Odd (1980).mkv"), b"a film in an oddly named folder");
     let film = nas.join("films/Alpha (2001)/Alpha (2001).mkv");
     for (path, body, status, why) in [
         // Out of its folders, by either end.
@@ -2933,6 +2942,14 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
         ("/helper/fs/move", json!({"from": kept.join("Alpha (2001).mkv"), "to": nas.join("films/taken.mkv")}), 403, "only reads"),
         ("/helper/moves", json!({"from": kept, "to": nas.join("films/Taken (2001)"), "working": nas.join("films/.spool-moving-9"), "keep_original": false}), 403, "only reads"),
         ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("vault/Taken (2001)"), "working": nas.join("vault/.spool-moving-9"), "keep_original": true}), 403, "only reads"),
+        // The working folder is cleared before use, so it is never one that holds anything:
+        // not the title itself, and not its neighbour.
+        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/Alpha (2001)"), "keep_original": false}), 400, ".spool-moving-"),
+        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/Neighbour (1990)"), "keep_original": true}), 400, ".spool-moving-"),
+        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Alpha (2001)/Inside"), "working": nas.join("films/Alpha (2001)/.spool-moving-9"), "keep_original": true}), 400, "into itself"),
+        // However the title's own folder is named.
+        ("/helper/moves", json!({"from": nas.join("films/.spool-moving-7"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/.spool-moving-7"), "keep_original": true}), 400, "the title's own folder"),
+        ("/helper/moves", json!({"from": nas.join("films"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/.spool-moving-7"), "keep_original": true}), 403, "outside the folders"),
         // Only a finished download is ever cleared away, never a library folder or a whole root.
         ("/helper/fs/remove", json!({"path": nas.join("films/Alpha (2001)")}), 403, "not a finished download"),
         ("/helper/fs/remove", json!({"path": nas.join("downloads/complete")}), 403, "not a finished download"),
@@ -2941,7 +2958,7 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
         let (got, said) = ask(KEY, path, body.clone()).await;
         assert!(got == status && said.contains(why), "{path} {body}: {got} {said}");
     }
-    assert!(outside.join("Elsewhere (1999).mkv").exists() && film.exists() && kept.join("Alpha (2001).mkv").exists(), "and nothing was touched by any of it");
+    assert!(outside.join("Elsewhere (1999).mkv").exists() && film.exists() && kept.join("Alpha (2001).mkv").exists() && nas.join("films/Neighbour (1990)/Neighbour (1990).mkv").exists() && nas.join("films/.spool-moving-7/Odd (1980).mkv").exists(), "and nothing was touched by any of it");
     assert_eq!(ask(KEY, "/helper/fs/stat", json!({"path": film})).await.1.contains(r#""exists":true"#), true);
 
     // Off the helper's disks altogether, a move is Spool's own to carry out, as before.
@@ -2955,6 +2972,311 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
     }
     assert!(w.root.join("Movies/Alpha (2001)/Alpha (2001).mkv").exists() && !nas.join("films/Alpha (2001)").exists());
     assert_eq!(helper.work_done().1, 1, "the helper had no part in that one");
+}
+
+/// A request to a server on a real socket, which is how a player's address is known.
+async fn fetch(http: &reqwest::Client, method: &str, url: &str, headers: &[(&str, &str)]) -> (u16, reqwest::header::HeaderMap, Vec<u8>) {
+    let mut req = http.request(method.parse().unwrap(), url);
+    for (name, value) in headers {
+        req = req.header(*name, *value);
+    }
+    let resp = req.send().await.unwrap();
+    let (status, head) = (resp.status().as_u16(), resp.headers().clone());
+    (status, head, resp.bytes().await.unwrap().to_vec())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
+    use serde_json::{json, Value};
+    use spool::link::ticket::{Signer, Ticket, LIFE};
+    let w = World::new(Mode::Active).await;
+    let (_helper, url, nas, mnt) = with_helper(&w).await;
+    let api = spool::api::router(w.app.clone());
+    let film: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+    let folder = nas.join("vault/Alpha (2001)");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("Alpha (2001).mkv"), &film).unwrap();
+    let mut alpha = w.movie("Alpha", 2001, "tt0000001");
+    alpha.path = mnt.join("vault/Alpha (2001)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut alpha).unwrap();
+    w.app.scan_all().await.unwrap();
+
+    // The two have settled what the helper allows and what it shares.
+    let (_, links) = call(&api, "GET", "/api/links", Value::Null).await;
+    let seen = &links[0]["seen"];
+    assert_eq!((seen["usable"].as_bool(), seen["play"].as_bool(), seen["legacy"].as_bool(), seen["grants"].to_string().as_str()), (Some(true), Some(true), Some(false), r#"{"play":true,"see":true,"work":true}"#), "{links}");
+    let share = |name: &str| seen["shares"].as_array().unwrap().iter().find(|s| s["path"].as_str().unwrap().ends_with(name)).unwrap()["id"].as_str().unwrap().to_string();
+
+    // Players reach Spool on a socket, and are known by the address they come from.
+    let mut g = w.app.settings.general();
+    g.players_enabled = true;
+    w.app.settings.set_general(&g).unwrap();
+    let door = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let spool_url = format!("http://{}", door.local_addr().unwrap());
+    let jf = spool::jellyfin::router(w.app.clone());
+    tokio::spawn(async move { axum::serve(door, jf.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap() });
+    let http = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    const WHO: &str = r#"MediaBrowser Client="Infuse-Direct", Device="Apple TV", DeviceId="test-device", Version="8.5""#;
+    let signed_in = http.post(format!("{spool_url}/Users/AuthenticateByName")).header("x-emby-authorization", WHO).json(&json!({"Username": "spool", "Pw": ""})).send().await.unwrap().json::<Value>().await.unwrap();
+    let auth = format!(r#"{WHO}, Token="{}""#, signed_in["AccessToken"].as_str().unwrap());
+    let items = http.get(format!("{spool_url}/Items?Recursive=true&IncludeItemTypes=Movie")).header("x-emby-authorization", &auth).send().await.unwrap().json::<Value>().await.unwrap();
+    let stream = format!("{spool_url}/Videos/{}/stream?static=true", items["Items"][0]["Id"].as_str().unwrap());
+    let part = [("x-emby-authorization", auth.as_str()), ("range", "bytes=1000-1999")];
+
+    // Until the link names the players to send, every film comes through Spool.
+    let (status, head, body) = fetch(&http, "GET", &stream, &part).await;
+    assert_eq!((status, head["content-range"].to_str().unwrap(), &body[..]), (206, "bytes 1000-1999/200000", &film[1000..2000]));
+
+    // A player at an address the link names is sent to the machine that holds the film.
+    let send_from = |ranges: Value| {
+        let (api, app) = (api.clone(), w.app.clone());
+        async move {
+            let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+            g["links"][0]["play_from"] = ranges;
+            let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+            assert_eq!(status, 200, "{said}");
+            app.ask_remotes().await;
+        }
+    };
+    send_from(json!(["127.0.0.0/8"])).await;
+    assert!(w.app.remotes()[0].seen().usable, "the key was kept though the page only ever saw it masked");
+    let (status, head, _) = fetch(&http, "GET", &stream, &part).await;
+    let there = head["location"].to_str().unwrap().to_string();
+    assert_eq!((status, head["cache-control"].to_str().unwrap()), (307, "private, no-store"));
+    assert!(there.starts_with(&format!("{url}/link/play/v1/file?ticket=")), "{there}");
+    assert!(!w.app.player_requests.lock().iter().any(|line| line.contains(there.rsplit('=').next().unwrap())), "no ticket is kept in what Spool remembers of requests");
+
+    // The film comes from the helper, with no key and no sign-in, and not by way of Spool:
+    // the share is taken away from Spool's machine and the film still plays.
+    std::fs::remove_file(&mnt).unwrap();
+    let (status, head, body) = fetch(&http, "GET", &there, &[("range", "bytes=1000-1999")]).await;
+    assert_eq!((status, head["content-range"].to_str().unwrap(), head["content-type"].to_str().unwrap(), &body[..]), (206, "bytes 1000-1999/200000", "video/x-matroska", &film[1000..2000]));
+    assert_eq!(head["cache-control"], "private, no-store");
+    // Skipping about asks again with the same ticket.
+    let (status, head, body) = fetch(&http, "GET", &there, &[("range", "bytes=199990-")]).await;
+    assert_eq!((status, head["content-range"].to_str().unwrap(), &body[..]), (206, "bytes 199990-199999/200000", &film[199990..]));
+    let (status, _, body) = fetch(&http, "GET", &there, &[]).await;
+    assert_eq!((status, body.len(), body == film), (200, 200_000, true));
+    let (status, head, body) = fetch(&http, "HEAD", &there, &[("range", "bytes=0-9")]).await;
+    assert_eq!((status, head["content-length"].to_str().unwrap(), head.get("content-range").is_none(), body.len()), (200, "200000", true, 0), "asking what is there says nothing of parts");
+    let (status, _, body) = fetch(&http, "GET", &there, &[("range", "bytes=0-9, 20-29")]).await;
+    assert_eq!((status, body.len()), (200, 200_000), "several parts at once are answered with the whole");
+    let (status, head, _) = fetch(&http, "GET", &there, &[("range", "bytes=200000-")]).await;
+    assert_eq!((status, head["content-range"].to_str().unwrap()), (416, "bytes */200000"));
+
+    // Nothing but a ticket of Spool's own gets a file, and a ticket gets one file.
+    let status_of = |url: String| {
+        let http = http.clone();
+        async move { fetch(&http, "GET", &url, &[]).await.0 }
+    };
+    let base = format!("{url}/link/play/v1/file");
+    let ticket = there.rsplit('=').next().unwrap().to_string();
+    let mut changed = ticket.clone().into_bytes();
+    let last = changed.len() - 1;
+    changed[last] = if changed[last] == b'A' { b'B' } else { b'A' };
+    assert_eq!(status_of(format!("{base}?ticket={}", String::from_utf8(changed).unwrap())).await, 401);
+    assert_eq!(status_of(base.clone()).await, 400);
+    assert_eq!(status_of(format!("{base}?ticket={ticket}&ticket={ticket}")).await, 400, "one ticket, so there is no doubt which file is meant");
+    assert_eq!(status_of(format!("{base}?ticket={ticket}&path=/etc/passwd")).await, 200, "and nothing else in the address chooses the file");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let signer = Signer::new("a-key-of-sufficient-length");
+    let made = |share: String, rel: &str, at: u64| signer.sign(&Ticket { share, rel: rel.into(), made: at, until: at + LIFE });
+    assert_eq!(status_of(format!("{base}?ticket={}", made(share("vault"), "Alpha (2001)/Alpha (2001).mkv", now))).await, 200);
+    assert_eq!(status_of(format!("{base}?ticket={}", made(share("vault"), "Alpha (2001)/Alpha (2001).mkv", now - LIFE - 3600))).await, 410, "a ticket runs out");
+    assert_eq!(status_of(format!("{base}?ticket={}", Signer::new("some-other-key-entirely").sign(&Ticket { share: share("vault"), rel: "Alpha (2001)/Alpha (2001).mkv".into(), made: now, until: now + LIFE }))).await, 401);
+    assert_eq!(status_of(format!("{base}?ticket={}", made(share("vault"), "Alpha (2001)/Missing.mkv", now))).await, 404);
+    assert_eq!(status_of(format!("{base}?ticket={}", made("not-a-share".into(), "Alpha (2001)/Alpha (2001).mkv", now))).await, 404);
+    assert_eq!(status_of(format!("{base}?ticket={}", made(share("vault"), "Alpha (2001)", now))).await, 404, "a folder is not a file");
+    // A link planted in a shared folder leads nowhere, whether it points out of the share or
+    // at something else within reach.
+    std::fs::write(w.root.join("private.txt"), b"not for players").unwrap();
+    std::os::unix::fs::symlink(w.root.join("private.txt"), folder.join("Leak.mkv")).unwrap();
+    assert_eq!(status_of(format!("{base}?ticket={}", made(share("vault"), "Alpha (2001)/Leak.mkv", now))).await, 403);
+    std::os::unix::fs::symlink(nas.join("downloads"), nas.join("vault/Way out")).unwrap();
+    std::fs::write(nas.join("downloads/half.mkv"), b"half a download").unwrap();
+    assert_eq!(status_of(format!("{base}?ticket={}", made(share("vault"), "Way out/half.mkv", now))).await, 403);
+
+    // A player elsewhere is not sent to a machine it may not be able to reach.
+    std::os::unix::fs::symlink(&nas, &mnt).unwrap();
+    send_from(json!(["10.0.0.0/8", "192.168.69.76"])).await;
+    let (status, _, body) = fetch(&http, "GET", &stream, &part).await;
+    assert_eq!((status, &body[..]), (206, &film[1000..2000]));
+    // What is not a range of addresses is said so, and nothing is saved.
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["links"][0]["play_from"] = json!(["the living room"]);
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert!(status == 400 && said["error"].as_str().unwrap().contains("not a range of addresses"), "{status} {said}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still_works() {
+    use serde_json::{json, Value};
+    use spool::link::Grants;
+    let w = World::new(Mode::Active).await;
+    const KEY: &str = "a-key-of-sufficient-length";
+    let http = reqwest::Client::new();
+    let start = |name: &'static str, grants: Grants| {
+        let root = w.root.join(name);
+        async move {
+            std::fs::create_dir_all(root.join("films/Alpha (2001)")).unwrap();
+            std::fs::create_dir_all(root.join("downloads/complete")).unwrap();
+            std::fs::write(root.join("films/Alpha (2001)/Alpha (2001).mkv"), b"a film").unwrap();
+            let conf = spool::helper::Conf { key: KEY.into(), roots: vec![root.join("films")], read_roots: vec![], downloads: root.join("downloads"), grants }.checked().unwrap();
+            let helper = spool::helper::Helper::start(&root.join("data"), conf).await.unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            (helper, listener, url, root)
+        }
+    };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let ticket_for = |hello: &Value| spool::link::ticket::Signer::new(KEY).issue(hello["shares"][0]["id"].as_str().unwrap_or("none"), "Alpha (2001)/Alpha (2001).mkv", now);
+
+    // One that may be seen and played from, and does no work: it says so, and holds to it.
+    let (helper, listener, url, root) = start("friend", Grants { see: true, play: true, work: false }).await;
+    let router = helper.router();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    assert_eq!(http.get(format!("{url}/link")).send().await.unwrap().status().as_u16(), 401, "it says nothing of itself without the key");
+    let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
+    assert_eq!((hello["grants"].to_string().as_str(), hello["protocols"].to_string().as_str()), (r#"{"play":true,"see":true,"work":false}"#, r#"{"play":[1],"work":[]}"#), "{hello}");
+    for (method, path) in [("GET", "/helper/info"), ("GET", "/helper/jobs"), ("POST", "/helper/fs/remove"), ("POST", "/helper/moves"), ("PUT", "/helper/config")] {
+        let resp = http.request(method.parse().unwrap(), format!("{url}{path}")).bearer_auth(KEY).json(&json!({"path": root.join("films/Alpha (2001)")})).send().await.unwrap();
+        assert_eq!(resp.status().as_u16(), 403, "{method} {path}");
+    }
+    assert!(root.join("films/Alpha (2001)/Alpha (2001).mkv").exists());
+    assert_eq!(http.get(format!("{url}/link/play/v1/file?ticket={}", ticket_for(&hello))).send().await.unwrap().text().await.unwrap(), "a film");
+
+    // One that works and hands nothing to players.
+    let (helper, listener, url, _) = start("worker", Grants { see: false, play: false, work: true }).await;
+    let router = helper.router();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
+    assert_eq!(hello["protocols"].to_string(), r#"{"play":[],"work":[1]}"#);
+    assert_eq!(http.get(format!("{url}/helper/info")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
+    assert_eq!(http.get(format!("{url}/link/play/v1/file?ticket={}", ticket_for(&hello))).send().await.unwrap().status().as_u16(), 403);
+
+    // A helper from before links knows no such address. Spool takes it for what it is: it
+    // has the work, as it always did, and is sent no players.
+    let (helper, listener, url, root) = start("older", Grants::ALL).await;
+    let older = axum::Router::new().route("/link", axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND })).route("/link/{*rest}", axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND })).fallback_service(helper.router());
+    tokio::spawn(async move { axum::serve(listener, older).await.unwrap() });
+    let api = spool::api::router(w.app.clone());
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["locations"] = json!([{"name": "Older", "movie_root": root.join("films"), "manage": true}]);
+    g["links"] = json!([{"name": "Old", "url": url, "key": KEY, "here": root, "there": root, "play_from": ["0.0.0.0/0"]}]);
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert_eq!(status, 200, "{said}");
+    w.app.ask_remotes().await;
+    let old = w.app.remotes()[0].clone();
+    let seen = old.seen();
+    assert_eq!((seen.usable, seen.legacy, seen.play, seen.downloads_seen, seen.grants), (true, true, false, true, Grants { work: true, ..Default::default() }), "{}", seen.problem);
+    assert!(w.app.play_direct(&root.join("films/Alpha (2001)/Alpha (2001).mkv"), Some("127.0.0.1".parse().unwrap())).is_none(), "nobody is sent to a helper that cannot hand out files");
+
+    // Two links are never given the same folder, and a number once given is not given again.
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let mut second = g["links"][0].clone();
+    (second["id"], second["name"], second["key"], second["here"]) = (json!(0), json!("Twin"), json!(KEY), json!(root.join("films")));
+    g["links"].as_array_mut().unwrap().push(second);
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert!(status == 400 && said["error"].as_str().unwrap().contains("each folder is one helper's"), "{status} {said}");
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let kept = g["links"][0].clone();
+    g["links"] = json!([]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    // Sent with the number the removed link had, as a page left open since before would.
+    let mut again = kept;
+    again["key"] = json!(KEY);
+    assert_eq!(again["id"], 1);
+    g["links"] = json!([again]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    let g = w.app.settings.general();
+    assert_eq!((g.links[0].id, g.link_seq), (2, 2), "a download that ran on the link that was removed is never taken for the new one's");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_that_cannot_be_read_and_an_answer_that_is_lost_cost_nothing() {
+    use serde_json::{json, Value};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let w = World::new(Mode::Active).await;
+    let root = w.root.join("nas");
+    std::fs::create_dir_all(root.join("downloads/complete")).unwrap();
+
+    // A stand-in for a helper that reports one download and then, as one a release ahead
+    // of this Spool might, reports it in a way this Spool cannot read.
+    let garbled = Arc::new(AtomicBool::new(false));
+    let refusing = Arc::new(AtomicBool::new(false));
+    let job = json!({"id": "j1", "name": "A.Film.2020", "state": "downloading", "total_bytes": 100, "done_bytes": 10, "speed": 5, "eta_secs": 18, "missing_articles": 0, "damaged_articles": 0, "message": "", "error": null, "output_path": null, "added_at": 1});
+    let (flag, no, complete) = (garbled.clone(), refusing.clone(), root.join("downloads/complete"));
+    let stand_in = axum::Router::new()
+        .route("/helper/info", axum::routing::get(move || { let complete = complete.clone(); async move { axum::Json(json!({"api": 1, "version": "0.0.9", "boot": "b1", "complete": complete})) } }))
+        .route("/helper/config", axum::routing::put(|| async { axum::Json(json!({"ok": true})) }))
+        .route("/helper/jobs", axum::routing::get(move || {
+            let (flag, no, job) = (flag.clone(), no.clone(), job.clone());
+            async move {
+                if no.load(Ordering::Relaxed) {
+                    return (axum::http::StatusCode::FORBIDDEN, axum::Json(json!({"error": "this machine was not started to do work for another"})));
+                }
+                (axum::http::StatusCode::OK, axum::Json(if flag.load(Ordering::Relaxed) { json!({"boot": "b1", "jobs": [{"id": "j1", "state": "a state from the future"}]}) } else { json!({"boot": "b1", "jobs": [job], "paused": false}) }))
+            }
+        // It takes a download and answers without saying what it called it.
+        }).post(|| async { axum::Json(json!({"taken": true})) }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, stand_in).await.unwrap() });
+    let api = spool::api::router(w.app.clone());
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["links"] = json!([{"name": "Nas", "url": url, "key": "a-key-of-sufficient-length", "here": root, "there": root}]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    w.app.ask_remotes().await;
+    assert!(matches!(w.app.job_lookup("@1:j1"), spool::remote::Found::Job(_)));
+    assert!(matches!(w.app.job_lookup("@1:never"), spool::remote::Found::Gone), "a helper that answers plainly is believed about what it does not have");
+
+    garbled.store(true, Ordering::Relaxed);
+    w.app.ask_remotes().await;
+    assert!(matches!(w.app.job_lookup("@1:j1"), spool::remote::Found::Job(_)), "what was last known of a download is kept");
+    assert!(matches!(w.app.job_lookup("@1:never"), spool::remote::Found::Unknown), "and a report that could not be read is not taken to say a download has gone");
+    assert!(w.app.remotes()[0].seen().problem.contains("cannot read"), "{}", w.app.remotes()[0].seen().problem);
+    garbled.store(false, Ordering::Relaxed);
+    w.app.ask_remotes().await;
+    assert!(w.app.remotes()[0].seen().problem.is_empty() && matches!(w.app.job_lookup("@1:never"), spool::remote::Found::Gone), "and it is believed again once it can be read");
+
+    // A helper that may have taken a download, and did not say so in a way that can be
+    // read, is not doubled up on: the download is not started here as well.
+    let mut film = w.movie("A Film", 2020, "tt7654321");
+    film.path = root.join("films/A Film (2020)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut film).unwrap();
+    let mut post = Post::new();
+    post.add_file("a.film.2020.mkv", b"not much of a film", 30_000);
+    let refused = w.app.job_add(&film, &post.nzb(), "A.Film.2020").unwrap_err().to_string();
+    assert!(refused.contains("may have taken the download") && w.app.engine.jobs().is_empty(), "{refused}");
+
+    // One that starts refusing the work is no longer what it was when it was met: nothing
+    // is concluded from what it does not report, and it is not used until met again.
+    refusing.store(true, Ordering::Relaxed);
+    w.app.ask_remotes().await;
+    let seen = w.app.remotes()[0].seen();
+    assert!(!seen.usable && !seen.play && seen.problem.contains("not started to do work"), "{}", seen.problem);
+    assert!(matches!(w.app.job_lookup("@1:never"), spool::remote::Found::Unknown));
+    refusing.store(false, Ordering::Relaxed);
+    w.app.ask_remotes().await;
+    assert!(w.app.remotes()[0].seen().usable && w.app.remotes()[0].seen().problem.is_empty(), "and it is used again once it does the work again");
+
+    // Asked twice for one download, as happens when the first answer is lost on the way, a
+    // real helper starts it once, and has written down that it did.
+    let w2 = World::new(Mode::Active).await;
+    let (helper, url, _, _) = with_helper(&w2).await;
+    let mut post = Post::new();
+    post.add_file("a.film.2020.mkv", b"not much of a film", 30_000);
+    let nzb = post.nzb();
+    let http = reqwest::Client::new();
+    let mut ids = vec![];
+    for _ in 0..2 {
+        let said: Value = http.post(format!("{url}/helper/jobs?name=A.Film.2020&rid=one-request")).bearer_auth("a-key-of-sufficient-length").body(nzb.clone()).send().await.unwrap().json().await.unwrap();
+        ids.push(said["id"].as_str().unwrap().to_string());
+    }
+    assert_eq!((ids[0] == ids[1], helper.engine().jobs().len()), (true, 1));
+    let kept: Value = serde_json::from_slice(&std::fs::read(w2.root.join("helper-data/taken.json")).unwrap()).unwrap();
+    assert_eq!(kept["one-request"][0].as_str(), Some(ids[0].as_str()), "so a restart between the two would change nothing: {kept}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

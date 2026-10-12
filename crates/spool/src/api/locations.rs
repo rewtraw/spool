@@ -7,9 +7,9 @@ pub(super) async fn locations(State(app): State<App>) -> Json<Value> {
     Json(json!(app.location_report()))
 }
 
-/// Each helper: what it serves, and how it was last found.
-pub(super) async fn helpers(State(app): State<App>) -> Json<Value> {
-    Json(json!(app.helper_report()))
+/// Each linked Spool: what it serves, what it allows, and how it was last found.
+pub(super) async fn links(State(app): State<App>) -> Json<Value> {
+    Json(json!(app.link_report()))
 }
 
 /// Start looking through a location for films and shows to bring in. Nothing is changed.

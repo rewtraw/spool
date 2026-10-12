@@ -83,7 +83,11 @@ The server reaches downloads through one set of functions (`remote.rs`: `jobs`, 
 
 Paths are turned from one machine's to the other's by swapping a prefix. Spool still reads a finished download itself, across the share, to plan the import; the moves the plan calls for are then carried out by the helper. A move of a title between two folders the helper serves is handed to it whole.
 
-A download on a helper that cannot be asked is neither failed nor forgotten: looking it up answers "unknown", and it is waited for.
+A download on a helper that cannot be asked is neither failed nor forgotten: looking it up answers "unknown", and it is waited for. The same holds when the helper answers and its report cannot be read: what was last known is kept, and nothing is concluded from a download's absence. A request to start a download carries a name of its own, so that asking again after a lost answer starts nothing twice.
+
+A helper is one end of a link (`link/`). Before anything is asked of it, the two settle what they both speak, with a list of versions for each kind of thing a link does, and what the helper allows: to be seen, played from, worked on. The helper enforces what it allows; Spool only reads it.
+
+A film on a helper's disks can be played from the helper. Spool answers the player's request with a redirect that carries a ticket (`link/ticket.rs`): the share the file is in, its place there, and when the ticket runs out, signed with a key derived from the link's. The helper checks the ticket, opens the file by walking from the share's own folder a name at a time, each opened from the one before and no link followed, and sends it with the same code Spool sends files with (`serve.rs`). Only players at addresses named in the link's settings are redirected, by the address the connection came from and never by a header.
 
 ## What else is in a folder
 

@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#when-it-does-not-connect">When it does not connect</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#playing-from-the-helper">Playing from the helper</a><a class="sub" href="#when-it-does-not-connect">When it does not connect</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -143,11 +143,17 @@
 <td>Read to Spool&#39;s machine and written back</td>
 <td>Disk to disk inside the NAS</td>
 </tr>
+<tr>
+<td>Playing a film kept on the NAS, at home</td>
+<td>NAS to Spool&#39;s machine to the player</td>
+<td>From the NAS to the player, once you say which players; see <a href="#playing-from-the-helper">Playing from the helper</a></td>
+</tr>
 </tbody></table></div>
 <p>Still done by Spool across the share, as before:</p>
 <ul>
 <li>reading folders and each file&#39;s details, when a location is looked through or scanned;</li>
-<li>playing, subtitles, recycling and deleting;</li>
+<li>subtitles, recycling and deleting;</li>
+<li>playing, for every player you have not named as one to send to the helper;</li>
 <li>everything on a location the helper does not serve.</li>
 </ul>
 <p>A helper that cannot be reached takes nothing with it. Downloads for its part of the library run on Spool&#39;s machine and are filed across the share, as they would be without it; a notice says the helper is away; and what it was already downloading is waited for, not written off.</p>
@@ -175,6 +181,10 @@
 <tr>
 <td><code>SPOOL_HELPER_DOWNLOADS</code></td>
 <td>The folder it downloads into. It clears away only finished downloads of its own there.</td>
+</tr>
+<tr>
+<td><code>SPOOL_HELPER_GRANTS</code></td>
+<td>What it does for whoever holds the key: any of <code>see</code>, <code>play</code> and <code>work</code>, separated by commas. Left out, all three. Without <code>work</code> it downloads, files and moves nothing; without <code>play</code> it hands no file to a player.</td>
 </tr>
 </tbody></table></div>
 <p>Mount a folder it should only read as read-only in the container as well, so that the system refuses a write whatever is asked.</p>
@@ -207,7 +217,7 @@ volumes:
 <h3 id="2-let-spools-machine-see-the-downloads-folder"><a href="#2-let-spools-machine-see-the-downloads-folder">2. Let Spool&#39;s machine see the downloads folder</a></h3>
 <p>Spool reads what was downloaded before it files it: which file is the film, how long it runs, what is in it. So the helper&#39;s downloads folder has to be shared and mounted on Spool&#39;s machine, beside the library folders and under the name it has in the container (<code>/Volumes/nas/downloads</code> for the example above). Reading is enough; the share can be read-only.</p>
 <h3 id="3-tell-spool-about-the-helper"><a href="#3-tell-spool-about-the-helper">3. Tell Spool about the helper</a></h3>
-<p>Under Settings, General, Helpers, choose <strong>Add a helper</strong>:</p>
+<p>Under Settings, General, Linked Spools, choose <strong>Add a helper</strong>:</p>
 <div class="scroll"><table>
 <thead>
 <tr>
@@ -241,20 +251,36 @@ volumes:
 <p>There is nothing to set on a location. Every location whose folders lie under the first folder is served by the helper, and the settings page says which those are.</p>
 <h3 id="4-check"><a href="#4-check">4. Check</a></h3>
 <p><strong>Check this location</strong>, on a location the helper serves, asks the helper whether it sees the same folder Spool does, and says whether Spool can see the helper&#39;s downloads. Anything that fails comes with what to do about it.</p>
-<p>From then on, a download for a title on that location shows <strong>On</strong> and the helper&#39;s name in Activity, and nothing appears in the downloads folder on Spool&#39;s own machine. The Helpers section of the settings shows, for each helper, whether it answers, which locations it serves, how many downloads it is running and how much room it has for them.</p>
+<p>From then on, a download for a title on that location shows <strong>On</strong> and the helper&#39;s name in Activity, and nothing appears in the downloads folder on Spool&#39;s own machine. The Linked Spools section of the settings shows, for each helper, whether it answers, which locations it serves, how many downloads it is running and how much room it has for them.</p>
 <h3 id="on-truenas-scale"><a href="#on-truenas-scale">On TrueNAS SCALE</a></h3>
 <p>The helper is a custom app. Under Apps, Discover Apps, the menu beside Custom App offers <strong>Install via YAML</strong>: give it a name and paste the definition, with your datasets and a key of your own. From a shell on the NAS the same thing is one call:</p>
 <pre><code class="language-sh">midclt call -job app.create &#39;{&quot;custom_app&quot;: true, &quot;app_name&quot;: &quot;spool-helper&quot;, &quot;custom_compose_config_string&quot;: &quot;&lt;the definition&gt;&quot;}&#39;
 </code></pre>
 <p>Run it as the apps user (568), which is the user a share from TrueNAS usually maps everyone to, so that what the helper writes and what Spool writes across the share belong to the same owner. Share the helper&#39;s downloads folder over NFS, read-only, to the network Spool&#39;s machine is on.</p>
+<h2 id="playing-from-the-helper"><a href="#playing-from-the-helper">Playing from the helper</a></h2>
+<p>A film on the NAS is played, without a helper, by way of Spool&#39;s machine: the NAS sends it to Spool across the share, and Spool sends it on. A helper can hand the film to the player itself. Players still know one server, Spool, where they sign in, browse and report what was watched.</p>
+<ol>
+<li>A player asks Spool for a film, as it always does.</li>
+<li>If the film is on the helper&#39;s disks and the player is one you have named, Spool answers with the helper&#39;s address and a <strong>ticket</strong>.</li>
+<li>The player takes the film from the helper.</li>
+</ol>
+<p>The ticket names that one file, runs out after twelve hours, and is signed with a key made from the one Spool and the helper share. The helper hands a file to whoever comes with a ticket of Spool&#39;s and to nobody else; it has no sign-in and nothing to browse. It opens the file by going from the shared folder one name at a time and follows no link on the way, so a link placed in a shared folder leads nowhere. A library whose films are themselves links to somewhere else cannot be played from the helper; leave its players off the list below, and Spool goes on sending those films itself.</p>
+<p><strong>Which players are sent.</strong> None, until you say. Under Settings, General, Linked Spools, each helper has <strong>Players sent straight to it</strong>: ranges of addresses, such as <code>192.168.1.0/24</code> for a home network, or one player&#39;s address. A player at one of them is sent to the helper. Every other player, and every player while the field is empty, gets the film through Spool as before.</p>
+<p>Spool cannot work out by itself which players can reach the NAS, which is why it asks. A player away from home, coming in over a private network the NAS is not on, has to stay off the list.</p>
+<p><strong>Try it with one player first.</strong> Put in the address of one player and play a film that is on the NAS. Being sent elsewhere for a film is something a player has to follow, and a player that does not will fail to play. If it plays, and still plays after skipping forward, widen the range. Infuse on an Apple TV has not been tried yet.</p>
+<p><strong>The address players use.</strong> Players are sent to the address Spool itself uses for the helper. If they reach the NAS at a different one, give it under <strong>Address players use</strong>.</p>
+<p><strong>If the helper is away,</strong> nobody is sent to it and every film comes through Spool. A helper that stops in the middle of a film stops that film; starting it again plays it through Spool.</p>
+<p>The helper sends no more than 48 parts of files at once, and turns away the next request at once, without keeping it waiting.</p>
 <h2 id="when-it-does-not-connect"><a href="#when-it-does-not-connect">When it does not connect</a></h2>
 <p><strong>&quot;The helper did not answer&quot;, and Spool runs on a Mac.</strong> macOS asks before a program may reach other machines on the local network, and a Spool started as a service has nobody to ask: the request is refused without a word. Under System Settings, Privacy &amp; Security, Local Network, turn on <strong>spool</strong>. The sign is that the helper answers <code>curl</code> from a shell on the same Mac and not Spool. Sign the program with a stable identity, as for <a href="getting-started.html#running-it-as-a-service">a removable disk</a>, or macOS takes each new build for a new program and the permission has to be given again.</p>
-<p><strong>&quot;Does not speak as this Spool does&quot;.</strong> The two are different versions. Update them together; see below.</p>
+<p><strong>&quot;Does not speak as this Spool does&quot;.</strong> The two are too far apart in version to work together. Update both; see below.</p>
+<p><strong>&quot;From before it could hand films to players&quot;.</strong> The helper is older than playing from it. It goes on downloading, filing and moving; update it to play from it.</p>
 <p><strong>&quot;Downloads into a folder this machine should see and cannot&quot;.</strong> The helper is usable for moves, and downloads run on Spool&#39;s machine until the helper&#39;s downloads folder is shared and mounted there under the name it has in the container. Spool looks again by itself every half minute.</p>
 <p><strong>&quot;It does not see the folder where this machine does&quot;.</strong> The two folders given for the helper do not name the same place, or a share is mounted on Spool&#39;s machine under a different name than in the container.</p>
 <p><strong>The key is refused.</strong> The key in Spool&#39;s settings is not the one the helper was started with. A helper answers nothing, not even what version it is, without its key.</p>
 <h2 id="keeping-the-two-in-step"><a href="#keeping-the-two-in-step">Keeping the two in step</a></h2>
-<p>The helper and Spool must be the same version. Spool asks when it connects, and if the helper does not speak as it does, it leaves the helper unused and says so in a notice, until the two are updated together.</p>
+<p>Spool and a helper settle what they both understand when they connect. Each kind of thing a helper does, work and playing, is spoken in versions of its own, and the two use the newest they share. So a helper a release or two behind Spool goes on doing whatever both still understand, and the settings page says what that is. A helper from before this was so has the work and nothing else, as it always did.</p>
+<p>Update the two together when you can. If they have no version of the work in common, Spool leaves the helper unused and says so in a notice.</p>
 <p>The image is built and published by GitHub each time the main branch changes, as <code>ghcr.io/rewtraw/spool:latest</code>.</p>
 <p><code>deploy/helper.sh</code> updates a helper on TrueNAS SCALE over SSH: it waits for the image of the current commit to be built, asks the helper whether a restart would interrupt anything, pulls the image and restarts the app. <code>deploy/deploy.sh</code> runs it after updating Spool when <code>SPOOL_HELPER_HOST</code> is set. Its settings go in <code>deploy/local.env</code>, which is not tracked:</p>
 <pre><code class="language-sh">SPOOL_HELPER_HOST=root@nas            # where to reach the NAS over SSH

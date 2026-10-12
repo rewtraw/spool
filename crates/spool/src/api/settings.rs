@@ -10,7 +10,7 @@ pub(super) async fn get_general(State(app): State<App>) -> Json<General> {
     g.opensubtitles_api_key = mask(&g.opensubtitles_api_key);
     g.opensubtitles_password = mask(&g.opensubtitles_password);
     g.players_password = mask(&g.players_password);
-    for h in &mut g.helpers {
+    for h in &mut g.links {
         h.key = mask(&h.key);
     }
     Json(g)
@@ -52,11 +52,13 @@ pub(super) async fn put_general(State(app): State<App>, headers: HeaderMap, Json
     if g.locations != old.locations {
         g.locations = app.tidy_locations(std::mem::take(&mut g.locations)).map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;
     }
-    for h in &mut g.helpers {
-        h.key = unmask(std::mem::take(&mut h.key), old.helpers.iter().find(|o| o.id == h.id && h.id != 0).map(|o| o.key.as_str()).unwrap_or(""));
+    for h in &mut g.links {
+        h.key = unmask(std::mem::take(&mut h.key), old.links.iter().find(|o| o.id == h.id && h.id != 0).map(|o| o.key.as_str()).unwrap_or(""));
     }
-    if g.helpers != old.helpers {
-        g.helpers = crate::remote::tidy_helpers(std::mem::take(&mut g.helpers), &old.helpers).map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;
+    // The count of links given out is Spool's own to keep, whatever was sent.
+    g.link_seq = old.link_seq;
+    if g.links != old.links {
+        (g.links, g.link_seq) = crate::remote::tidy_links(std::mem::take(&mut g.links), &old.links, old.link_seq).map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;
     }
     if g.new_titles_location != 0 && !g.locations.iter().any(|l| l.id == g.new_titles_location && l.manage) {
         g.new_titles_location = 0;

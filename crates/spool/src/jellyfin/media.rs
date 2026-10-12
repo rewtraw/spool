@@ -5,89 +5,25 @@ use super::ids::Id;
 use super::items::{Library, Node};
 use crate::app::App;
 use crate::models::*;
+use crate::serve::send_file;
 use anyhow::Result;
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use std::path::{Path, PathBuf};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-/// What part of a file a request wants: first and last byte, and whether it asked for a part.
-/// An error means the range cannot be met.
-fn byte_range(header: Option<&str>, len: u64) -> Result<(u64, u64, bool), ()> {
-    let Some(spec) = header.and_then(|h| h.trim().strip_prefix("bytes=")) else { return Ok((0, len.saturating_sub(1), false)) };
-    // Only the first of several ranges is served.
-    let (from, to) = spec.split(',').next().unwrap_or("").trim().split_once('-').ok_or(())?;
-    let (start, end) = match (from.trim(), to.trim()) {
-        ("", "") => return Err(()),
-        ("", last) => {
-            let n: u64 = last.parse().map_err(|_| ())?;
-            (len.saturating_sub(n), len.saturating_sub(1))
-        }
-        (first, "") => (first.parse().map_err(|_| ())?, len.saturating_sub(1)),
-        (first, last) => (first.parse().map_err(|_| ())?, last.parse::<u64>().map_err(|_| ())?.min(len.saturating_sub(1))),
-    };
-    if len == 0 || start >= len || start > end {
-        return Err(());
-    }
-    Ok((start, end, true))
-}
-
-/// Send a file, or the part of it asked for, without holding more than a piece in memory.
-async fn send_file(path: &Path, headers: &HeaderMap, head: bool) -> Response {
-    let mut file = match tokio::fs::File::open(path).await {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "a player asked for a file that could not be opened");
-            return StatusCode::NOT_FOUND.into_response();
-        }
-    };
-    let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
-    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
-    let Ok((start, end, partial)) = byte_range(range, len) else {
-        return (StatusCode::RANGE_NOT_SATISFIABLE, [(header::CONTENT_RANGE, format!("bytes */{len}"))]).into_response();
-    };
-    let count = if len == 0 { 0 } else { end - start + 1 };
-    let mime = mime_guess::from_path(path).first().filter(|m| m.type_() == "video").map(|m| m.to_string()).unwrap_or_else(|| "video/x-matroska".into());
-    let mut response = Response::builder()
-        .status(if partial { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK })
-        .header(header::CONTENT_TYPE, mime)
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::CONTENT_LENGTH, count);
-    if partial {
-        response = response.header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{len}"));
-    }
-    if head || count == 0 {
-        return response.body(Body::empty()).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
-    }
-    if start > 0 && file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
-    const PIECE: u64 = 512 * 1024;
-    let pieces = futures::stream::unfold((file, count), |(mut file, left)| async move {
-        if left == 0 {
-            return None;
-        }
-        let mut buf = vec![0u8; left.min(PIECE) as usize];
-        match file.read(&mut buf).await {
-            Ok(0) => None,
-            Ok(n) => {
-                buf.truncate(n);
-                Some((Ok::<Bytes, std::io::Error>(Bytes::from(buf)), (file, left - n as u64)))
-            }
-            Err(e) => Some((Err(e), (file, 0))),
-        }
-    });
-    response.body(Body::from_stream(pieces)).unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
-/// The video itself: a film, an episode, or one named version of a film.
-pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool) -> Response {
+/// The video itself: a film, an episode, or one named version of a film. A player that can
+/// reach the machine holding the file is sent there with a ticket for it; any other is sent
+/// the file from here.
+pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool, player: Option<std::net::IpAddr>) -> Response {
     let Some(id) = Id::parse(id) else { return StatusCode::NOT_FOUND.into_response() };
     let path: Option<PathBuf> = Library::shared(app).ok().and_then(|lib| lib.extra_path(id).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| t.file_path(f))));
-    match path {
-        Some(p) => send_file(&p, headers, head).await,
-        None => StatusCode::NOT_FOUND.into_response(),
+    let Some(path) = path else { return StatusCode::NOT_FOUND.into_response() };
+    match app.play_direct(&path, player) {
+        // Followed for this request only: the next one is asked of Spool again, and may be
+        // answered differently.
+        Some(there) => (StatusCode::TEMPORARY_REDIRECT, [(header::LOCATION, there.as_str()), (header::CACHE_CONTROL, "private, no-store"), (header::REFERRER_POLICY, "no-referrer")]).into_response(),
+        None => send_file(&path, headers, head).await,
     }
 }
 
@@ -310,18 +246,6 @@ pub async fn fill_in(app: App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn byte_ranges_are_read_as_players_send_them() {
-        assert_eq!(byte_range(None, 1000), Ok((0, 999, false)));
-        assert_eq!(byte_range(Some("bytes=0-"), 1000), Ok((0, 999, true)));
-        assert_eq!(byte_range(Some("bytes=200-299"), 1000), Ok((200, 299, true)));
-        assert_eq!(byte_range(Some("bytes=900-5000"), 1000), Ok((900, 999, true)));
-        assert_eq!(byte_range(Some("bytes=-100"), 1000), Ok((900, 999, true)));
-        assert_eq!(byte_range(Some("bytes=1000-"), 1000), Err(()));
-        assert_eq!(byte_range(Some("bytes=5-2"), 1000), Err(()));
-        assert_eq!(byte_range(Some("bytes=abc"), 1000), Err(()));
-    }
 
     #[test]
     fn subtitles_can_be_given_as_webvtt() {
