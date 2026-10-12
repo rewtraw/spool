@@ -20,6 +20,8 @@ services:
     environment:
       TZ: Etc/UTC
       # At least 16 characters; Spool is given the same one. `openssl rand -hex 24` makes one.
+      # Leave it out to link the two with a code instead: the helper prints one in its log,
+      # or takes the one given as SPOOL_LINK_CODE (eight digits or more).
       SPOOL_HELPER_KEY: "change-me-to-a-long-random-key"
       # Folders it may file into and move titles within, separated by colons.
       SPOOL_HELPER_ROOTS: "/nas/movies:/nas/tv"

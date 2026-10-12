@@ -86,11 +86,12 @@ Under Settings, Library, choose **Link another Spool**:
 | --- | --- |
 | Name | What to call it, such as the NAS's name. |
 | Address | Where it answers, such as `http://nas:7978`. |
-| Key | The key it was started with. |
+| Code | The code the helper gave, if it was started without a key: see [Linking with a code](#linking-with-a-code). Choose **Link** beside it. |
+| Or its key | The key it was started with, if it was given one. |
 | The other machine's disks, as this machine sees them | The folder the shares are mounted under here, such as `/Volumes/nas`. |
 | The same folder, as the helper sees it | The folder they are mounted under in the container, such as `/nas`. |
 
-The key is not shown again once saved, and is not handed back to the browser.
+A key that was typed in is not shown again once saved, and is not handed back to the browser.
 
 The two folders must name the same place. A path is turned from one machine's to the other's by swapping them at its start: with the example above, `/Volumes/nas/movies/Heat (1995)` here is `/nas/movies/Heat (1995)` to the helper.
 
@@ -111,6 +112,23 @@ midclt call -job app.create '{"custom_app": true, "app_name": "spool-helper", "c
 ```
 
 Run it as the apps user (568), which is the user a share from TrueNAS usually maps everyone to, so that what the helper writes and what Spool writes across the share belong to the same owner. Share the helper's downloads folder over NFS, read-only, to the network Spool's machine is on.
+
+## Linking with a code
+
+A helper can be started without a key. It then does nothing for anybody until it has been linked, and says in its log how:
+
+```
+this helper is not linked yet: in Spool, under Settings, Library, link another Spool and type this code  code="4821 0937"
+```
+
+Type that code into Spool, beside the helper's address, and choose **Link**. The two agree a key between themselves, the helper writes it down, and from then on it is linked as if the key had been typed into both. The code is never sent, and neither is the key: each side sends the other one message made from the code, and only two that hold the same code come out with the same key.
+
+To choose the code yourself, start the helper with `SPOOL_LINK_CODE` set to eight digits or more, in place of `SPOOL_HELPER_KEY`. A code the helper makes up is a new one each time it starts.
+
+- **A wrong code** links nothing, and the helper takes five of them. After that it takes no code at all for ten minutes, the right one included, and for twice as long each time it happens again, up to a day. Starting it again with the same code does not give five more; starting it with a different code does. Anything on the network can use the tries up without knowing the code, which is why they come back.
+- **Once linked,** it takes no more codes. The key is in `link.json` in the helper's data folder, readable only by the helper. To link it afresh, stop it, delete that file, and start it again.
+- **A helper started with a key** is linked by that key and gives no code. Nothing changes for one that is set up this way already.
+- **What the code does not do.** It settles a key without the key being copied. What the two then say to each other is as open to the network they are on as it was before: on a home network that is the choice made by not using TLS, and a link over the internet wants a private network such as Tailscale under it.
 
 ## Playing from the helper
 

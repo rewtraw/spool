@@ -12,6 +12,16 @@ pub(super) async fn links(State(app): State<App>) -> Json<Value> {
     Json(json!(app.link_report()))
 }
 
+/// Link with the Spool at an address by the code it gave. The key the two agree is handed
+/// back for the link's settings, which are saved as any others are.
+pub(super) async fn link_pair(Json(b): Json<Value>) -> R<Value> {
+    let (url, code) = (b["url"].as_str().unwrap_or_default(), b["code"].as_str().unwrap_or_default());
+    match crate::remote::pair(url, code).await {
+        Ok(key) => Ok(Json(json!({"key": key}))),
+        Err(why) => Err(ApiError(StatusCode::BAD_REQUEST, why)),
+    }
+}
+
 /// Start looking through a location for films and shows to bring in. Nothing is changed.
 pub(super) async fn location_look(State(app): State<App>, Path(id): Path<u32>) -> R<Value> {
     if !app.placement().0.iter().any(|p| p.0.id == id && p.1) {

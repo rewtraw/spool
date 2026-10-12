@@ -1,7 +1,7 @@
 <script lang="ts">
   // The Library tab: each machine that holds some of the library, and the locations on it.
   import { api } from '../../lib/api';
-  import { app, act, loadStatus } from '../../lib/state.svelte';
+  import { app, act, loadStatus, toast } from '../../lib/state.svelte';
   import { bytes } from '../../lib/format';
 
   let general = $state<any>(null);
@@ -39,6 +39,25 @@
     links = await api.get<any[]>('/links').catch(() => links);
   }
   const linkOf = (id: number) => links.find((h) => h.id === id);
+  // Linking with the code the other Spool gave, in place of copying a key.
+  let codes = $state<Record<number, string>>({});
+  let linking = $state<number | null>(null);
+  async function linkWithCode(h: any, i: number) {
+    // Once the other side has taken the key it takes no more codes, so nothing that
+    // would stop the settings being saved is left to find out afterwards.
+    if (!h.name?.trim() || !h.url?.trim()) {
+      toast('Give it a name and an address first.', 'error');
+      return;
+    }
+    linking = i;
+    const got = await act(() => api.post<{ key: string }>('/links/pair', { url: h.url, code: codes[i] }));
+    linking = null;
+    if (!got) return;
+    h.key = got.key;
+    codes[i] = '';
+    if (await save()) toast(`Linked with ${h.name}.`);
+    else toast(`Linked with ${h.name}, but the settings were not saved. Put right what is wrong and save: the key is kept on this page until you do.`, 'error');
+  }
   function addLink() {
     (general.links ??= []).push({ id: 0, name: '', url: '', key: '', here: '', there: '', play_url: '', play_near: true, play_from: [] });
   }
@@ -95,10 +114,12 @@
 
   async function save() {
     for (const l of general.locations) (l.movie_profile = Number(l.movie_profile) || 0), (l.series_profile = Number(l.series_profile) || 0);
-    await act(() => api.put('/settings/general', general), 'Saved');
+    // What is on the page is kept when it cannot be saved: it may hold a key just agreed.
+    if ((await act(() => api.put('/settings/general', general), 'Saved')) === undefined) return false;
     loadStatus();
     load();
     setTimeout(loadLinks, 1500);
+    return true;
   }
 </script>
 
@@ -225,7 +246,13 @@
         <label class="field">Name<input class="input" bind:value={h.name} placeholder="The NAS's name" /></label>
         <label class="field">Address<input class="input mono" bind:value={h.url} placeholder="http://nas:7978" /></label>
       </div>
-      <label class="field">Key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with.</span></label>
+      <div class="cols">
+        <label class="field">Code
+          <div class="row"><input class="input mono grow" inputmode="numeric" autocomplete="off" bind:value={codes[i]} placeholder="1234 5678" /><button class="btn" type="button" disabled={!h.url || !(codes[i] ?? '').trim() || linking === i} onclick={() => linkWithCode(h, i)}>{linking === i ? 'Linking…' : 'Link'}</button></div>
+          <span class="hint">A helper started without a key prints a code in its log. Type it here and the two agree a key between themselves.</span>
+        </label>
+        <label class="field">Or its key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with, if it was given one.</span></label>
+      </div>
       <div class="cols">
         <label class="field">Its disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="/Volumes/nas" /></label>
         <label class="field">The same folder, as it sees it<input class="input mono" bind:value={h.there} placeholder="/nas" /></label>

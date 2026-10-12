@@ -15,6 +15,7 @@
 //! with a ticket from the Spool that drives it.
 
 use crate::local::{Blocked, FolderSummary, Survey};
+use crate::link::pair;
 use crate::link::ticket::{self, Signer};
 use crate::link::{Grants, Hello, Protocols, Share};
 use crate::relocate::{copy_all, listing, remove_all, CALLED_OFF};
@@ -42,8 +43,11 @@ pub const API: u32 = 1;
 /// What a helper is started with.
 #[derive(Clone, Debug)]
 pub struct Conf {
-    /// Whoever drives the helper sends this with every request.
+    /// Whoever drives the helper sends this with every request. Empty when the helper is
+    /// to be linked with a code instead, and holds whatever key comes of that.
     pub key: String,
+    /// The code to link it with, when it is given one; it makes one up otherwise.
+    pub code: Option<String>,
     /// The folders it may write to: the library folders it files into.
     pub roots: Vec<PathBuf>,
     /// Folders it may read and copy from, and never change.
@@ -73,6 +77,7 @@ impl Conf {
         let list = |name: &str| -> Vec<PathBuf> { std::env::var(name).unwrap_or_default().split(':').map(str::trim).filter(|p| !p.is_empty()).map(PathBuf::from).collect() };
         let conf = Conf {
             key: std::env::var("SPOOL_HELPER_KEY").unwrap_or_default().trim().to_string(),
+            code: std::env::var("SPOOL_LINK_CODE").ok().map(|c| pair::tidy(&c)).filter(|c| !c.is_empty()),
             roots: list("SPOOL_HELPER_ROOTS"),
             read_roots: list("SPOOL_HELPER_READ_ROOTS"),
             downloads: PathBuf::from(std::env::var("SPOOL_HELPER_DOWNLOADS").unwrap_or_default().trim()),
@@ -86,8 +91,11 @@ impl Conf {
     }
 
     pub fn checked(self) -> Result<Conf> {
-        if self.key.len() < 16 {
-            bail!("SPOOL_HELPER_KEY must be set to a key of at least 16 characters; the Spool that drives this helper is given the same one");
+        if !self.key.is_empty() && self.key.len() < 16 {
+            bail!("SPOOL_HELPER_KEY must be a key of at least 16 characters; the Spool that drives this helper is given the same one. Leave it out to link the two with a code instead");
+        }
+        if self.code.as_ref().is_some_and(|c| c.len() < pair::DIGITS) {
+            bail!("SPOOL_LINK_CODE must have at least {} digits", pair::DIGITS);
         }
         if self.roots.is_empty() {
             bail!("SPOOL_HELPER_ROOTS must name at least one folder the helper may file into, separated by colons");
@@ -146,13 +154,16 @@ struct Inner {
     saving: tokio::sync::Mutex<()>,
     /// The folders it works in, as the other end of the link is told of them.
     shares: Vec<Share>,
+    /// The key it shares with the Spool it is linked to, and what is made from it. None
+    /// until it has been linked: until then it does nothing for anybody.
+    linked: parking_lot::RwLock<Option<Arc<Linked>>>,
+    pairing: Mutex<Pairing>,
     /// The disk each shared folder was on when the helper started. A folder found on
     /// another since is one whose disk has gone from under it.
     disks: Vec<Option<u64>>,
     /// What was mounted inside the shared folders then: a disk of its own under a shared
     /// folder, which may go while the folder above it stays.
     mounts: Vec<PathBuf>,
-    signer: Signer,
     streams: Arc<tokio::sync::Semaphore>,
     looks: Arc<tokio::sync::Semaphore>,
     /// Downloads lately taken, by the name the asker gave the request and with when, so that
@@ -165,6 +176,45 @@ struct Inner {
     /// How many files it has filed and titles it has moved since it started.
     filed: AtomicUsize,
     moved: AtomicUsize,
+}
+
+/// The link's key, and what signs and checks tickets with it.
+struct Linked {
+    key: String,
+    signer: Signer,
+}
+
+impl Linked {
+    fn new(key: String) -> Arc<Linked> {
+        Arc::new(Linked { signer: Signer::new(&key), key })
+    }
+}
+
+/// How many wrong codes are taken before none is for a while, and how long that while is
+/// the first time, in seconds. It doubles each time, up to a day. Anyone on the network
+/// can use tries up without knowing the code, so they come back; a code is guessed no
+/// faster for it.
+const TRIES: u32 = 5;
+const REST: u64 = 600;
+const LONGEST_REST: u64 = 24 * 3600;
+/// How long a try may take. No more are ever under way than there are tries to be had.
+const TRY_FOR: Duration = Duration::from_secs(60);
+
+/// Where a helper stands in being linked with a code.
+#[derive(Default)]
+struct Pairing {
+    /// The code it gave. None when it was started with a key, or has been linked.
+    code: Option<String>,
+    /// Tries that did not end in a link. Kept across restarts for as long as the code is
+    /// the same, so that starting it again gives no more guesses at one code.
+    failures: u32,
+    /// How many times the tries have run out, and when codes are taken again.
+    rests: u32,
+    resting_until: u64,
+    /// Tries under way, by a name made up for each.
+    tries: HashMap<String, (Instant, pair::Giving)>,
+    /// The try that linked it, kept so that an asker whose answer was lost may ask again.
+    done: Option<(String, pair::Giving)>,
 }
 
 struct Refused(StatusCode, String);
@@ -202,7 +252,32 @@ impl Helper {
         let shares: Vec<Share> = conf.roots.iter().map(|p| Share::new(p, true)).chain(conf.read_roots.iter().map(|p| Share::new(p, false))).collect();
         let disks = shares.iter().map(|s| disk_of(&s.path)).collect();
         let mounts = mounted().into_iter().filter(|m| shares.iter().any(|s| m.starts_with(&s.path) && *m != s.path)).collect();
-        let signer = Signer::new(&conf.key);
+        // The key it was started with; failing that the one agreed last time; failing that
+        // it waits to be linked with a code. A key on disk that cannot be read is not
+        // taken for no key: that would open it to be linked again by whoever comes first.
+        let kept = data_dir.join("link.json");
+        let key = if !conf.key.is_empty() {
+            Some(conf.key.clone())
+        } else if kept.exists() {
+            let said: Value = serde_json::from_slice(&std::fs::read(&kept)?).with_context(|| format!("{} holds the key this helper was linked with and cannot be read; delete it to link the helper afresh", kept.display()))?;
+            Some(said["key"].as_str().filter(|k| k.len() >= 16).ok_or_else(|| anyhow!("{} holds no key; delete it to link the helper afresh", kept.display()))?.to_string())
+        } else {
+            None
+        };
+        let mut pairing = Pairing::default();
+        if key.is_none() {
+            let code = conf.code.clone().unwrap_or_else(pair::new_code);
+            let tried: Value = std::fs::read(data_dir.join("tries.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            if tried["code"].as_str() == Some(code_mark(&code).as_str()) {
+                (pairing.failures, pairing.rests, pairing.resting_until) = (tried["failures"].as_u64().unwrap_or(0) as u32, tried["rests"].as_u64().unwrap_or(0) as u32, tried["until"].as_u64().unwrap_or(0));
+            }
+            if pairing.resting_until > now() {
+                tracing::warn!(minutes = (pairing.resting_until - now()).div_ceil(60), "this helper has been given too many wrong codes and takes none for a while; start it with a new SPOOL_LINK_CODE to link it now");
+            } else {
+                tracing::info!(code = %pair::shown(&code), "this helper is not linked yet: in Spool, under Settings, Library, link another Spool and type this code");
+            }
+            pairing.code = Some(code);
+        }
         Ok(Helper(Arc::new(Inner {
             engine,
             conf,
@@ -211,9 +286,10 @@ impl Helper {
             pushed: Mutex::new(pushed),
             saving: Default::default(),
             shares,
+            linked: parking_lot::RwLock::new(key.map(Linked::new)),
+            pairing: Mutex::new(pairing),
             disks,
             mounts,
-            signer,
             streams: Arc::new(tokio::sync::Semaphore::new(STREAMS)),
             looks: Arc::new(tokio::sync::Semaphore::new(LOOKS)),
             taken: Mutex::new(std::fs::read(data_dir.join("taken.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()),
@@ -292,7 +368,7 @@ impl Helper {
     /// Everything the helper answers. The work is version 1 of the work protocol, and is
     /// answered only to whoever holds the key; a file is handed to whoever holds a ticket.
     pub fn router(&self) -> Router {
-        let play = Router::new().route("/link/play/v1/file", get(play)).with_state(self.clone());
+        let play = Router::new().route("/link/play/v1/file", get(play)).route("/link/pair/v1/start", post(pair_start)).route("/link/pair/v1/finish", post(pair_finish)).with_state(self.clone());
         let hello = Router::new().route("/link", get(hello)).layer(axum::middleware::from_fn_with_state(self.clone(), guard)).with_state(self.clone());
         play.merge(hello).merge(self.see()).merge(self.work())
     }
@@ -362,6 +438,15 @@ impl Helper {
             .layer(axum::middleware::from_fn_with_state(self.clone(), allowed_to_work))
             .layer(axum::middleware::from_fn_with_state(self.clone(), guard))
             .with_state(self.clone())
+    }
+
+    fn linked(&self) -> Option<Arc<Linked>> {
+        self.0.linked.read().clone()
+    }
+
+    /// Write down how many tries a code has had, so a restart does not forget.
+    fn keep_tries(&self, code: &str, p: &Pairing) -> Result<()> {
+        write_private(&self.0.data_dir.join("tries.json"), &serde_json::to_vec(&json!({"code": code_mark(code), "failures": p.failures, "rests": p.rests, "until": p.resting_until}))?)
     }
 
     /// Open the one file a ticket names. See [`open_inside`].
@@ -551,7 +636,8 @@ async fn play(State(h): State<Helper>, req: Request) -> Response {
     }
     let mut given = req.uri().query().unwrap_or("").split('&').filter_map(|pair| pair.strip_prefix("ticket="));
     let (Some(token), None) = (given.next(), given.next()) else { return no_store(Refused(StatusCode::BAD_REQUEST, "one ticket is needed".into()).into_response()) };
-    let ticket = match h.0.signer.verify(token, now()) {
+    let Some(linked) = h.linked() else { return no_store(Refused(StatusCode::FORBIDDEN, "this machine is not linked to a Spool yet".into()).into_response()) };
+    let ticket = match linked.signer.verify(token, now()) {
         Ok(t) => t,
         Err(ticket::Refused::Expired) => return no_store(Refused(StatusCode::GONE, "the ticket has run out".into()).into_response()),
         Err(ticket::Refused::Bad) => return no_store(Refused(StatusCode::UNAUTHORIZED, "the ticket is not one of ours".into()).into_response()),
@@ -573,10 +659,81 @@ async fn play(State(h): State<Helper>, req: Request) -> Response {
     no_store(crate::serve::send(tokio::fs::File::from_std(file), &path, req.headers(), head, permit).await)
 }
 
+/// A mark that says whether a code is the one tries were counted against, without being it.
+fn code_mark(code: &str) -> String {
+    ring::digest::digest(&ring::digest::SHA256, format!("spool/link/pair/tries/{code}").as_bytes()).as_ref()[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PairStart {
+    /// The asker's message.
+    msg: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PairFinish {
+    session: String,
+    proof: String,
+}
+
+/// The first half of being linked with a code: the asker's message is answered with this
+/// side's, and its proof that it holds the code. Each try counts against the code until
+/// it ends in a link, and it is counted before it is answered.
+async fn pair_start(State(h): State<Helper>, Json(b): Json<PairStart>) -> R {
+    if h.linked().is_some() {
+        return Err(Refused(StatusCode::CONFLICT, "this helper is linked already; to link it afresh, stop it, delete link.json from its data folder and start it again".into()));
+    }
+    let mut p = h.0.pairing.lock();
+    let Some(code) = p.code.clone() else { return Err(Refused(StatusCode::CONFLICT, "this helper is not waiting to be linked".into())) };
+    p.tries.retain(|_, (began, _)| began.elapsed() < TRY_FOR);
+    if p.resting_until > now() {
+        return Err(Refused(StatusCode::FORBIDDEN, format!("too many wrong codes have been tried; it takes none for another {} minutes, or start the helper with a new code", (p.resting_until - now()).div_ceil(60))));
+    }
+    let (giving, msg, proof) = pair::Giving::answer(&code, &b.msg).map_err(|_| Refused(StatusCode::BAD_REQUEST, "that is not the start of a link".into()))?;
+    p.failures += 1;
+    if p.failures >= TRIES {
+        (p.failures, p.resting_until, p.rests) = (0, now() + (REST << p.rests.min(16)).min(LONGEST_REST), p.rests + 1);
+    }
+    h.keep_tries(&code, &p)?;
+    let session = pair::session();
+    p.tries.insert(session.clone(), (Instant::now(), giving));
+    Ok(Json(json!({"session": session, "msg": msg, "proof": proof})))
+}
+
+/// The second half: the asker proves that it holds the code too. The key is written down
+/// before the asker is told, and from then on the helper is linked and takes no more codes.
+async fn pair_finish(State(h): State<Helper>, Json(b): Json<PairFinish>) -> R {
+    let mut p = h.0.pairing.lock();
+    // The answer to this was lost the first time, and the asker is asking again.
+    if p.done.as_ref().is_some_and(|(session, giving)| *session == b.session && giving.proved(&b.proof)) {
+        return Ok(Json(json!({"linked": true})));
+    }
+    let Some((began, giving)) = p.tries.remove(&b.session) else { return Err(Refused(StatusCode::NOT_FOUND, "no such try; start again".into())) };
+    if began.elapsed() >= TRY_FOR || h.linked().is_some() {
+        return Err(Refused(StatusCode::CONFLICT, "that try has run out; start again".into()));
+    }
+    if !giving.proved(&b.proof) {
+        return Err(Refused(StatusCode::UNAUTHORIZED, "the code is not the one this helper gave".into()));
+    }
+    let key = giving.key().to_string();
+    write_private(&h.0.data_dir.join("link.json"), &serde_json::to_vec(&json!({"key": key}))?)?;
+    *h.0.linked.write() = Some(Linked::new(key));
+    let code = p.code.take().unwrap_or_default();
+    (p.failures, p.rests, p.resting_until, p.done) = (0, 0, 0, Some((b.session, giving)));
+    p.tries.clear();
+    let _ = h.keep_tries(&code, &p);
+    tracing::info!("this helper is linked to a Spool");
+    Ok(Json(json!({"linked": true})))
+}
+
 /// Nothing is answered without the key, and the comparison takes the same time whatever is sent.
 async fn guard(State(h): State<Helper>, req: Request, next: Next) -> Response {
     let sent = req.headers().get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).unwrap_or("");
-    let (a, b) = (sent.as_bytes(), h.0.conf.key.as_bytes());
+    // One that is not linked yet has no key, and nothing sent is the key to it.
+    let Some(linked) = h.linked() else { return Refused(StatusCode::UNAUTHORIZED, "this helper is not linked to a Spool yet".into()).into_response() };
+    let (a, b) = (sent.as_bytes(), linked.key.as_bytes());
     let same = a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0;
     if !same {
         return Refused(StatusCode::UNAUTHORIZED, "the key is missing or wrong".into()).into_response();

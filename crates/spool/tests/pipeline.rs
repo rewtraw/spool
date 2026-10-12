@@ -2779,7 +2779,7 @@ async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, Path
     }
     std::os::unix::fs::symlink(&nas, &mnt).unwrap();
     let key = "a-key-of-sufficient-length".to_string();
-    let conf = spool::helper::Conf { key: key.clone(), roots: vec![nas.join("films")], read_roots: vec![nas.join("vault")], downloads: nas.join("downloads"), grants: spool::link::Grants::ALL }.checked().unwrap();
+    let conf = spool::helper::Conf { key: key.clone(), roots: vec![nas.join("films")], read_roots: vec![nas.join("vault")], downloads: nas.join("downloads"), code: None, grants: spool::link::Grants::ALL }.checked().unwrap();
     let helper = spool::helper::Helper::start(&w.root.join("helper-data"), conf).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -2983,6 +2983,100 @@ async fn fetch(http: &reqwest::Client, method: &str, url: &str, headers: &[(&str
     let resp = req.send().await.unwrap();
     let (status, head) = (resp.status().as_u16(), resp.headers().clone());
     (status, head, resp.bytes().await.unwrap().to_vec())
+}
+
+/// A helper started without a key is linked with a short code. Until then it does nothing
+/// for anybody; a wrong code agrees nothing; and it takes only so many.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_helper_is_linked_with_a_code_and_not_without() {
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let nas = w.root.join("nas");
+    for d in ["films", "downloads/complete"] {
+        std::fs::create_dir_all(nas.join(d)).unwrap();
+    }
+    let start = |data: &'static str, code: &'static str| {
+        let (nas, root) = (nas.clone(), w.root.clone());
+        async move {
+            let conf = spool::helper::Conf { key: String::new(), roots: vec![nas.join("films")], read_roots: vec![], downloads: nas.join("downloads"), code: Some(code.into()), grants: spool::link::Grants::ALL }.checked().unwrap();
+            let helper = spool::helper::Helper::start(&root.join(data), conf).await.unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let router = helper.router();
+            let serving = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+            (helper, url, serving)
+        }
+    };
+    let http = reqwest::Client::new();
+    let pair = |url: String, code: &'static str| {
+        let api = api.clone();
+        async move { call(&api, "POST", "/api/links/pair", json!({"url": url, "code": code})).await }
+    };
+
+    // Not linked: it has no key, so nothing is the key to it, and it hands out no files.
+    let (_helper, url, serving) = start("helper-a", "1234 5678").await;
+    for key in ["", "anything-at-all-that-is-long"] {
+        assert_eq!(http.get(format!("{url}/link")).bearer_auth(key).send().await.unwrap().status().as_u16(), 401);
+        assert_eq!(http.get(format!("{url}/helper/info")).bearer_auth(key).send().await.unwrap().status().as_u16(), 401);
+    }
+    assert_eq!(http.get(format!("{url}/link/play/v1/file?ticket=x")).send().await.unwrap().status().as_u16(), 403);
+
+    // A wrong code agrees nothing, and is told so.
+    let (status, said) = pair(url.clone(), "1234 5679").await;
+    assert_eq!((status, said["error"].as_str()), (400, Some("the code is not the one it gave")), "{said}");
+    assert_eq!(pair(url.clone(), "123").await.0, 400);
+    assert_eq!(http.get(format!("{url}/link")).bearer_auth("").send().await.unwrap().status().as_u16(), 401, "still not linked");
+
+    // The right code, however it is written: the two agree a key nobody copied.
+    let (status, said) = pair(url.clone(), "1234-5678").await;
+    assert_eq!(status, 200, "{said}");
+    let key = said["key"].as_str().unwrap().to_string();
+    assert!(key.len() >= 40, "{key}");
+    let hello: Value = http.get(format!("{url}/link")).bearer_auth(&key).send().await.unwrap().json().await.unwrap();
+    assert_eq!(hello["grants"]["work"].as_bool(), Some(true));
+    // Linked, it takes no more codes, not even the right one.
+    let (status, said) = pair(url.clone(), "1234 5678").await;
+    assert!(status == 400 && said["error"].as_str().unwrap().contains("linked already"), "{said}");
+
+    // Spool uses the key as it would one that was typed in.
+    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
+    g["links"] = json!([{"name": "Nas", "url": url, "key": key, "here": nas, "there": nas}]);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    w.app.ask_remotes().await;
+    assert!(w.app.remotes()[0].seen().usable, "{:?}", w.app.remotes()[0].seen());
+
+    // Started again, it is still linked, with the same key, and gives no new code.
+    serving.abort();
+    let (_helper, url, _serving) = start("helper-a", "1234 5678").await;
+    assert_eq!(http.get(format!("{url}/link")).bearer_auth(&key).send().await.unwrap().status().as_u16(), 200);
+    assert_eq!(http.get(format!("{url}/link")).bearer_auth("another-key-of-the-same-length-as-it-0000000").send().await.unwrap().status().as_u16(), 401);
+
+    // Another helper: after five wrong codes it takes none for a while, the right one
+    // included, and starting it again with the same code does not give five more.
+    let (_helper, url, serving) = start("helper-b", "8765 4321").await;
+    for _ in 0..5 {
+        assert_eq!(pair(url.clone(), "0000 0000").await.1["error"].as_str(), Some("the code is not the one it gave"));
+    }
+    let (status, said) = pair(url.clone(), "8765 4321").await;
+    assert!(status == 400 && said["error"].as_str().unwrap().contains("it takes none for another 10 minutes"), "{said}");
+    serving.abort();
+    let (_helper, url, serving) = start("helper-b", "8765 4321").await;
+    assert!(pair(url.clone(), "8765 4321").await.1["error"].as_str().unwrap().contains("too many wrong codes"));
+    serving.abort();
+    // The while passes, and the right code is taken again: nobody on the network can
+    // shut the owner out for good by guessing.
+    let kept = w.root.join("helper-b/tries.json");
+    let mut tries: Value = serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
+    assert_eq!((tries["failures"].as_u64(), tries["rests"].as_u64()), (Some(0), Some(1)), "{tries}");
+    tries["until"] = json!(1);
+    std::fs::write(&kept, tries.to_string()).unwrap();
+    let (_helper, url, serving) = start("helper-b", "8765 4321").await;
+    assert_eq!(pair(url.clone(), "0000 0000").await.1["error"].as_str(), Some("the code is not the one it gave"));
+    serving.abort();
+    // A new code is a new start.
+    let (_helper, url, _serving) = start("helper-b", "1111 2222").await;
+    assert_eq!(pair(url, "1111 2222").await.0, 200);
 }
 
 /// A helper asked with the mark of the report the asker already has keeps it waiting until
@@ -3307,7 +3401,7 @@ async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still
             std::fs::create_dir_all(root.join("films/Alpha (2001)")).unwrap();
             std::fs::create_dir_all(root.join("downloads/complete")).unwrap();
             std::fs::write(root.join("films/Alpha (2001)/Alpha (2001).mkv"), b"a film").unwrap();
-            let conf = spool::helper::Conf { key: KEY.into(), roots: vec![root.join("films")], read_roots: vec![], downloads: root.join("downloads"), grants }.checked().unwrap();
+            let conf = spool::helper::Conf { key: KEY.into(), roots: vec![root.join("films")], read_roots: vec![], downloads: root.join("downloads"), code: None, grants }.checked().unwrap();
             let helper = spool::helper::Helper::start(&root.join("data"), conf).await.unwrap();
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());

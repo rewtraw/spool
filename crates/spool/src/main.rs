@@ -46,7 +46,8 @@ enum Command {
     /// Compare where every library file is with where Spool would put it.
     CheckPaths,
     /// Run as a helper on the machine that holds the disks: download, unpack and file there,
-    /// as told by a Spool elsewhere. Told what it may touch by SPOOL_HELPER_KEY,
+    /// as told by a Spool elsewhere. Linked to that Spool by SPOOL_HELPER_KEY, or with a
+    /// code when it has none (SPOOL_LINK_CODE, or one it prints). Told what it may touch by
     /// SPOOL_HELPER_ROOTS, SPOOL_HELPER_READ_ROOTS and SPOOL_HELPER_DOWNLOADS.
     Helper {
         #[arg(long, default_value = "0.0.0.0:7979", env = "SPOOL_BIND")]

@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#playing-from-the-helper">Playing from the helper</a><a class="sub" href="#looking-through-its-own-folders">Looking through its own folders</a><a class="sub" href="#when-it-does-not-connect">When it does not connect</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#linking-with-a-code">Linking with a code</a><a class="sub" href="#playing-from-the-helper">Playing from the helper</a><a class="sub" href="#looking-through-its-own-folders">Looking through its own folders</a><a class="sub" href="#when-it-does-not-connect">When it does not connect</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -239,8 +239,12 @@ volumes:
 <td>Where it answers, such as <code>http://nas:7978</code>.</td>
 </tr>
 <tr>
-<td>Key</td>
-<td>The key it was started with.</td>
+<td>Code</td>
+<td>The code the helper gave, if it was started without a key: see <a href="#linking-with-a-code">Linking with a code</a>. Choose <strong>Link</strong> beside it.</td>
+</tr>
+<tr>
+<td>Or its key</td>
+<td>The key it was started with, if it was given one.</td>
 </tr>
 <tr>
 <td>The other machine&#39;s disks, as this machine sees them</td>
@@ -251,7 +255,7 @@ volumes:
 <td>The folder they are mounted under in the container, such as <code>/nas</code>.</td>
 </tr>
 </tbody></table></div>
-<p>The key is not shown again once saved, and is not handed back to the browser.</p>
+<p>A key that was typed in is not shown again once saved, and is not handed back to the browser.</p>
 <p>The two folders must name the same place. A path is turned from one machine&#39;s to the other&#39;s by swapping them at its start: with the example above, <code>/Volumes/nas/movies/Heat (1995)</code> here is <code>/nas/movies/Heat (1995)</code> to the helper.</p>
 <p>There is nothing to set on a location. Every location whose folders lie under the first folder is served by the helper, and the settings page says which those are.</p>
 <h3 id="4-check"><a href="#4-check">4. Check</a></h3>
@@ -262,6 +266,18 @@ volumes:
 <pre><code class="language-sh">midclt call -job app.create &#39;{&quot;custom_app&quot;: true, &quot;app_name&quot;: &quot;spool-helper&quot;, &quot;custom_compose_config_string&quot;: &quot;&lt;the definition&gt;&quot;}&#39;
 </code></pre>
 <p>Run it as the apps user (568), which is the user a share from TrueNAS usually maps everyone to, so that what the helper writes and what Spool writes across the share belong to the same owner. Share the helper&#39;s downloads folder over NFS, read-only, to the network Spool&#39;s machine is on.</p>
+<h2 id="linking-with-a-code"><a href="#linking-with-a-code">Linking with a code</a></h2>
+<p>A helper can be started without a key. It then does nothing for anybody until it has been linked, and says in its log how:</p>
+<pre><code>this helper is not linked yet: in Spool, under Settings, Library, link another Spool and type this code  code=&quot;4821 0937&quot;
+</code></pre>
+<p>Type that code into Spool, beside the helper&#39;s address, and choose <strong>Link</strong>. The two agree a key between themselves, the helper writes it down, and from then on it is linked as if the key had been typed into both. The code is never sent, and neither is the key: each side sends the other one message made from the code, and only two that hold the same code come out with the same key.</p>
+<p>To choose the code yourself, start the helper with <code>SPOOL_LINK_CODE</code> set to eight digits or more, in place of <code>SPOOL_HELPER_KEY</code>. A code the helper makes up is a new one each time it starts.</p>
+<ul>
+<li><strong>A wrong code</strong> links nothing, and the helper takes five of them. After that it takes no code at all for ten minutes, the right one included, and for twice as long each time it happens again, up to a day. Starting it again with the same code does not give five more; starting it with a different code does. Anything on the network can use the tries up without knowing the code, which is why they come back.</li>
+<li><strong>Once linked,</strong> it takes no more codes. The key is in <code>link.json</code> in the helper&#39;s data folder, readable only by the helper. To link it afresh, stop it, delete that file, and start it again.</li>
+<li><strong>A helper started with a key</strong> is linked by that key and gives no code. Nothing changes for one that is set up this way already.</li>
+<li><strong>What the code does not do.</strong> It settles a key without the key being copied. What the two then say to each other is as open to the network they are on as it was before: on a home network that is the choice made by not using TLS, and a link over the internet wants a private network such as Tailscale under it.</li>
+</ul>
 <h2 id="playing-from-the-helper"><a href="#playing-from-the-helper">Playing from the helper</a></h2>
 <p>A film on the NAS is played, without a helper, by way of Spool&#39;s machine: the NAS sends it to Spool across the share, and Spool sends it on. A helper can hand the film to the player itself. Players still know one server, Spool, where they sign in, browse and report what was watched.</p>
 <ol>

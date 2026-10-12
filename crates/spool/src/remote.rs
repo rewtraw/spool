@@ -19,7 +19,7 @@
 
 use crate::app::{App, Event};
 use crate::helper::Pushed;
-use crate::link::tailnet;
+use crate::link::{pair, tailnet};
 use crate::link::ticket::{plain, Signer};
 use crate::local::{Blocked, FolderSummary, Survey};
 use crate::link::{agreed, Grants, Hello, Net, Share};
@@ -124,6 +124,58 @@ pub struct Remote {
     /// have in it yet.
     fresh: Mutex<HashMap<String, (Instant, JobStatus)>>,
     seen: Mutex<Seen>,
+}
+
+/// Link with the Spool at an address by the code it gave: the two agree a key, which is
+/// returned once the other side has taken it. Nothing is kept here; whoever asked puts the
+/// key in the link's settings.
+pub async fn pair(url: &str, code: &str) -> std::result::Result<String, String> {
+    let base = url.trim().trim_end_matches('/');
+    if !(base.starts_with("http://") || base.starts_with("https://")) {
+        return Err("the address must start with http:// or https://".into());
+    }
+    if pair::tidy(code).len() < pair::DIGITS {
+        return Err(format!("the code has {} digits", pair::DIGITS));
+    }
+    let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
+    let said = |status: reqwest::StatusCode, body: &Value| match (status.as_u16(), body["error"].as_str()) {
+        (404, None) => "nothing there links with a code; it may be an older helper, which is linked with a key".to_string(),
+        (_, Some(why)) => why.to_string(),
+        (code, None) => format!("it answered {code}"),
+    };
+    let away = |e: reqwest::Error| format!("it did not answer: {}", e.without_url());
+    let (asking, msg) = pair::Asking::start(code);
+    let resp = http.post(format!("{base}/link/pair/v1/start")).json(&json!({"msg": msg})).send().await.map_err(away)?;
+    let (status, body) = (resp.status(), resp.json::<Value>().await.unwrap_or_default());
+    if !status.is_success() {
+        return Err(said(status, &body));
+    }
+    let (Some(session), Some(gave), Some(proof)) = (body["session"].as_str(), body["msg"].as_str(), body["proof"].as_str()) else { return Err("it answered in a way this Spool cannot read".into()) };
+    let (key, proof) = asking.finish(gave, proof).map_err(|e| match e {
+        pair::Failed::WrongCode => "the code is not the one it gave".to_string(),
+        pair::Failed::Garbled => "it answered in a way this Spool cannot read".to_string(),
+    })?;
+    // The answer to this may be lost after the other side has taken the key. Asked again,
+    // it says so; and failing that, the key itself is tried.
+    let finish = json!({"session": session, "proof": proof});
+    let mut why = String::new();
+    for _ in 0..3 {
+        match http.post(format!("{base}/link/pair/v1/finish")).json(&finish).send().await {
+            Ok(resp) if resp.status().is_success() => return Ok(key),
+            // It may have taken the key, lost its answer, and started again since.
+            Ok(resp) => {
+                let status = resp.status();
+                why = said(status, &resp.json::<Value>().await.unwrap_or_default());
+                break;
+            }
+            Err(e) => {
+                why = away(e);
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+    let taken = http.get(format!("{base}/link")).bearer_auth(&key).send().await.is_ok_and(|r| r.status().is_success());
+    if taken { Ok(key) } else { Err(why) }
 }
 
 /// Something a linked machine is asked to find in its own folders.
