@@ -65,6 +65,8 @@ It would also remove the need for the helper's downloads folder to be shared wit
 
 A location stops meaning folders on this machine and comes to mean folders on some linked Spool. A disk plugged in here, a NAS and another household are then one idea.
 
+**Machines and locations.** Two things, where the settings have three today. A machine is this one or a linked Spool: an address, a key, what it allows, and the players sent to it. A location is a pair of library folders, for films and for series, on exactly one machine. The main folders are the first location on this machine. What a link holds today as a pair of matching folders, one as this machine mounts the share and one as the other knows it, moves onto each location, and the mounted folder becomes something a location may have, used only by what still reads across a share. A location on a friend's Spool has none. This is built with stage 4.
+
 **The one rule.** Every folder has exactly one Spool that decides for it. Others may see what is in it, play from it, or work in it when told. None of them chooses what is downloaded, upgraded or deleted there. A helper needs that rule so that two machines never file the same thing, and sharing needs it so that nobody changes someone else's library.
 
 **Who enforces a grant.** The side that gives it, as a helper holds itself to the folders it was started with today. A linked Spool cannot widen what it was given.
@@ -78,7 +80,7 @@ A location stops meaning folders on this machine and comes to mean folders on so
 | 1 | Links. "Helpers" in the settings becomes "Linked Spools", each link with its grants, speaking a protocol with a version, so that two Spools on different releases still understand each other. | What a helper does today, on the footing the rest stands on. |
 | 2 | Play. The machine that holds a file serves it on a ticket. Spool sends a player on the same network there, and goes on relaying for a player elsewhere. | At home, a film on the NAS comes from the NAS. |
 | 3 | See, done where the disks are. The linked machine reads its own folders and reports what it finds. | Looking through a location and the nightly scan stop reading across the share. |
-| 4 | Finding and linking. A Spool announces itself on the network, is listed as found, and is linked with a short code; the two agree a key between themselves. A linked machine reports in, and is no longer asked how it stands every second. | No keys to copy. |
+| 4 | Machines and locations, and finding and linking. The settings for folders, locations and linked Spools become one list: each machine, and under it the locations on it. A location names the machine it is on and its folders there, in place of Spool working that out from where a share is mounted. A Spool announces itself on the network, is listed as found, and is linked with a short code; the two agree a key between themselves. A linked machine reports in, and is no longer asked how it stands every second. | One place to say where the library is. No keys to copy, and no folder typed twice. |
 | 5 | An account for each person who plays. | Each has what they have watched, and limits can be set; someone without a Spool of their own can be given an account. |
 | 6 | Links between households: See and Play, with limits set on the link. | Each household sees the others' libraries in its own. |
 
