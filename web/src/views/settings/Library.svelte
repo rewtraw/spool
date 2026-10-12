@@ -59,7 +59,7 @@
     else toast(`Linked with ${h.name}, but the settings were not saved. Put right what is wrong and save: the key is kept on this page until you do.`, 'error');
   }
   function addLink(from?: { name: string; url: string }) {
-    (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', here: '', there: '', play_url: '', play_near: true, play_from: [] });
+    (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', here: '', there: '', play_near: true });
   }
   // Spools heard of on the network that are not linked yet: addresses to try, no more.
   let found = $state<any[]>([]);
@@ -247,7 +247,7 @@
       <label class="check"><input type="checkbox" bind:checked={h.play_near} /> Send players on the same network straight to it</label>
       <span class="hint">A player on the same network as {h.name || 'this machine'} takes a film that is on its disks from it directly, with a ticket for that one film, and the film no longer passes through here. A device that reaches this Spool over Tailscale counts as on the network when it is at home. Away from home it is sent to {h.name || 'the machine'} over Tailscale, if {h.name || 'the machine'} is on your Tailscale under this name; if not, and for every other player, the film comes through this Spool.</span>
       <details open={!h.id}>
-      <summary class="small">How it is reached, and other players to send</summary>
+      <summary class="small">How it is reached</summary>
       <div class="cols">
         <label class="field">Name<input class="input" bind:value={h.name} placeholder="The NAS's name" /></label>
         <label class="field">Address<input class="input mono" bind:value={h.url} placeholder="http://nas:7978" /></label>
@@ -260,17 +260,10 @@
         <label class="field">Or its key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with, if it was given one.</span></label>
       </div>
       <div class="cols">
-        <label class="field">Its disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="/Volumes/nas" /></label>
-        <label class="field">The same folder, as it sees it<input class="input mono" bind:value={h.there} placeholder="/nas" /></label>
+        <label class="field">Its disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="Found by Spool" /></label>
+        <label class="field">The same folder, as it sees it<input class="input mono" bind:value={h.there} placeholder="Found by Spool" /></label>
       </div>
-      <span class="hint">Every location whose folders lie under the first is on this machine, and is listed under it here. A path is turned from one machine's to the other's by swapping these two at its start, so they must name the same folder.</span>
-      <div class="cols">
-        <label class="field">Other players sent straight to it
-          <input class="input mono" value={(h.play_from ?? []).join(', ')} onchange={(e) => (h.play_from = e.currentTarget.value.split(/[\s,]+/).filter(Boolean))} placeholder="192.168.1.0/24" />
-        </label>
-        <label class="field">Address players use<input class="input mono" bind:value={h.play_url} placeholder={h.url || 'http://nas:7978'} /></label>
-      </div>
-      <span class="hint">Ranges of addresses, or single ones, whose players are sent to it wherever they are: for a network the switch above does not cover. The second address is only needed if players reach this machine at a different address than this Spool does.</span>
+      <span class="hint">Leave these empty: once its shares are mounted on this machine, Spool finds the two by itself and checks them against what is in the shares. They are here to be looked at, and to set by hand where the shares are laid out differently on the two machines. Every location whose folders lie under the first is on this machine, and is listed under it.</span>
       <div><button class="btn small ghost danger" type="button" onclick={() => general.links.splice(i, 1)}>Unlink {h.name || 'it'}</button></div>
       </details>
     </div>

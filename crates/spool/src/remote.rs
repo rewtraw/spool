@@ -107,8 +107,6 @@ pub struct Remote {
     pub conf: LinkConf,
     http: reqwest::Client,
     signer: Signer,
-    /// The players that are sent to it for a file.
-    nets: Vec<Net>,
     /// The address it last answered from, which says what network it is on.
     at: Mutex<Option<IpAddr>>,
     /// Where it answers over Tailscale, when it is on Tailscale as well as the network
@@ -116,6 +114,8 @@ pub struct Remote {
     tailnet: Mutex<Option<String>>,
     /// Something is keeping in step with it.
     following: std::sync::atomic::AtomicBool,
+    /// When the folders it is mounted under here were last looked for.
+    sought: Mutex<Option<Instant>>,
     /// Its downloads as last reported, named and placed as this machine knows them.
     jobs: Mutex<Vec<JobStatus>>,
     /// Downloads handed over a moment ago, which a report already on its way back may not
@@ -225,20 +225,22 @@ fn wait<F: std::future::Future>(f: F) -> F::Output {
 impl Remote {
     fn new(conf: LinkConf) -> Remote {
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).build().expect("http client");
-        let (signer, nets) = (Signer::new(&conf.key), conf.play_from.iter().filter_map(|n| Net::parse(n).ok()).collect());
-        Remote { conf, http, signer, nets, at: Mutex::new(None), tailnet: Mutex::new(None), following: Default::default(), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
+        let signer = Signer::new(&conf.key);
+        Remote { conf, http, signer, at: Mutex::new(None), tailnet: Mutex::new(None), following: Default::default(), sought: Mutex::new(None), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
     }
 
     /// Where a player at this address can take a file from the linked machine itself: an
     /// address with a ticket for that one file. None when the player is not one of those
     /// sent there, or the machine is not handing files out just now.
     pub fn direct(&self, here: &Path, player: &[IpAddr]) -> Option<String> {
-        // One that is named, or on the machine's own network, takes the file at the address
-        // players there use. One elsewhere on Tailscale takes it over Tailscale, if the
-        // machine is there too.
-        let base = if player.iter().any(|p| self.nets.iter().any(|n| n.holds(*p))) || (self.conf.play_near && self.near(player)) {
-            if self.conf.play_url.is_empty() { self.conf.url.clone() } else { self.conf.play_url.clone() }
-        } else if self.conf.play_near && player.iter().any(|p| tailnet::ours(*p)) {
+        if !self.conf.play_near {
+            return None;
+        }
+        // One on the machine's own network takes the file where Spool reaches the machine.
+        // One elsewhere on Tailscale takes it over Tailscale, if the machine is there too.
+        let base = if self.near(player) {
+            self.conf.url.clone()
+        } else if player.iter().any(|p| tailnet::ours(*p)) {
             self.tailnet.lock().clone()?
         } else {
             return None;
@@ -286,6 +288,9 @@ impl Remote {
 
     /// A path on the helper, as this machine sees it.
     pub fn here(&self, there: &Path) -> Option<PathBuf> {
+        if self.conf.there.is_empty() {
+            return None;
+        }
         there.strip_prefix(&self.conf.there).ok().map(|rest| Path::new(&self.conf.here).join(rest))
     }
 
@@ -518,6 +523,7 @@ impl Remote {
                     next.problem = format!("{name}'s helper downloads into {}, which this machine should see at {} and cannot; share that folder and mount it, and until then downloads run here", complete.display(), here.display());
                 }
             }
+            None if self.conf.there.is_empty() => next.problem = format!("{name}'s shares have not been found on this machine yet. Mount them here and Spool finds them by itself; until then nothing is done on {name}"),
             None => next.problem = format!("{name}'s helper downloads into {}, which is outside {}; until its downloads folder is inside, downloads run here", complete.display(), self.conf.there),
         }
     }
@@ -620,29 +626,24 @@ pub fn tidy_links(list: Vec<LinkConf>, old: &[LinkConf], seq: u32) -> std::resul
     let mut next = old.iter().chain(&list).map(|h| h.id).max().unwrap_or(0).max(seq);
     let mut out: Vec<LinkConf> = vec![];
     for mut h in list {
-        (h.name, h.url, h.key, h.play_url) = (h.name.trim().to_string(), clean(&h.url), h.key.trim().to_string(), clean(&h.play_url));
+        (h.name, h.url, h.key) = (h.name.trim().to_string(), clean(&h.url), h.key.trim().to_string());
         (h.here, h.there) = (clean(&h.here), clean(&h.there));
-        h.play_from = h.play_from.iter().flat_map(|n| n.split([',', ' ', '\n'])).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).collect();
         if h.name.is_empty() {
             return Err("every helper needs a name".into());
         }
         if !web(&h.url) {
             return Err(format!("the address of {}'s helper must start with http:// or https://", h.name));
         }
-        if !h.play_url.is_empty() && !web(&h.play_url) {
-            return Err(format!("the address players use for {} must start with http:// or https://", h.name));
-        }
         if h.key.is_empty() {
             return Err(format!("{}'s helper needs its key", h.name));
         }
-        if !h.here.starts_with('/') || !h.there.starts_with('/') {
-            return Err(format!("the two folders of {}'s helper must be full paths, starting with /", h.name));
-        }
-        for range in &h.play_from {
-            Net::parse(range)?;
+        // Both, or neither: left empty, the two are found once it has been met.
+        let unset = h.here.is_empty() && h.there.is_empty();
+        if !unset && (!h.here.starts_with('/') || !h.there.starts_with('/')) {
+            return Err(format!("the two folders of {}'s helper must both be full paths, starting with /, or both be left for Spool to find", h.name));
         }
         // A folder is one helper's to work in, never two's.
-        if let Some(other) = out.iter().find(|o| Path::new(&o.here).starts_with(&h.here) || Path::new(&h.here).starts_with(&o.here)) {
+        if let Some(other) = out.iter().filter(|o| !unset && !o.here.is_empty()).find(|o| Path::new(&o.here).starts_with(&h.here) || Path::new(&h.here).starts_with(&o.here)) {
             return Err(format!("{} and {} are given the same folder on this machine; each folder is one helper's", other.name, h.name));
         }
         // A number is kept only by the link that already has it. Whatever else is sent, a
@@ -700,10 +701,65 @@ impl App {
         for job in changed {
             self.on_job(job);
         }
+        self.settle_folders(r).await;
         let problems: Vec<String> = self.remotes().iter().map(|r| r.seen().problem).filter(|p| !p.is_empty()).collect();
         let message = (!problems.is_empty()).then(|| problems.join(" "));
         if self.db.set_standing_attention("helper", message.as_deref(), json!({})).unwrap_or(false) {
             self.emit(Event::Attention);
+        }
+    }
+
+    /// Work out the two folders a link turns paths between, for a link that was given none:
+    /// the folder the other machine's shares lie under there, and the folder they are
+    /// mounted under here. Nothing is taken on trust. Every share must be where the pair
+    /// says it is, and something this machine sees in it must be there for the other
+    /// machine too, or the pair is not it.
+    ///
+    /// `mounts` is the shares mounted on this machine: what each is a share of, and where.
+    pub async fn find_folders(&self, r: &Arc<Remote>, mounts: Vec<(String, PathBuf)>) -> Option<(String, String)> {
+        fn shared<'a>(paths: impl Iterator<Item = &'a Path>) -> Option<PathBuf> {
+            paths.map(Path::to_path_buf).reduce(|a, b| a.components().zip(b.components()).take_while(|(x, y)| x == y).map(|(x, _)| x).collect())
+        }
+        let (shares, at) = (r.seen().shares, (*r.at.lock())?);
+        // Shares of that machine's, by its address or by the name in the link's own.
+        let host = reqwest::Url::parse(&r.conf.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+        let of_it = |from: &str| [at.to_string(), host.clone()].iter().any(|h| !h.is_empty() && (from.starts_with(&format!("{h}:")) || from.contains(&format!("@{h}/")) || from.starts_with(&format!("//{h}/"))));
+        let mounted: Vec<PathBuf> = mounts.into_iter().filter(|(from, _)| of_it(from)).map(|(_, on)| on).collect();
+        let there = shared(shares.iter().map(|s| s.path.as_path())).and_then(|p| if shares.len() == 1 { p.parent().map(Path::to_path_buf) } else { Some(p) })?;
+        let here = shared(mounted.iter().map(PathBuf::as_path)).and_then(|p| if mounted.len() == 1 { p.parent().map(Path::to_path_buf) } else { Some(p) })?;
+        if here.parent().is_none() || there.as_os_str().is_empty() {
+            return None;
+        }
+        let mut proved = 0;
+        for share in &shares {
+            let local = here.join(share.path.strip_prefix(&there).ok()?);
+            let looked = local.clone();
+            let first = tokio::task::spawn_blocking(move || crate::upkeep::within(Duration::from_secs(8), move || std::fs::read_dir(&looked).ok().map(|d| d.flatten().map(|e| e.file_name()).find(|n| !n.to_string_lossy().starts_with('.')))).flatten()).await.ok()??;
+            // An empty share proves nothing either way; one with something in it must match.
+            if let Some(name) = first {
+                if r.stat(&share.path.join(&name)).await.ok()?["exists"].as_bool() != Some(true) {
+                    return None;
+                }
+                proved += 1;
+            }
+        }
+        (proved > 0).then(|| (here.to_string_lossy().to_string(), there.to_string_lossy().to_string()))
+    }
+
+    /// Give a link that has no folders the ones found for it, and take it up afresh with them.
+    async fn settle_folders(&self, r: &Arc<Remote>) {
+        if !(r.conf.here.is_empty() && r.conf.there.is_empty()) || !r.seen().reachable || r.sought.lock().replace(Instant::now()).is_some_and(|last| last.elapsed() < Duration::from_secs(30)) {
+            return;
+        }
+        let mounts = tokio::task::spawn_blocking(crate::app::network_mounts).await.unwrap_or_default();
+        let Some((here, there)) = self.find_folders(r, mounts).await else { return };
+        let mut g = self.settings.general();
+        let Some(link) = g.links.iter_mut().find(|l| l.id == r.conf.id && l.here.is_empty() && l.there.is_empty()) else { return };
+        tracing::info!(helper = %r.conf.name, %here, %there, "found where its shares are mounted on this machine");
+        (link.here, link.there) = (here, there);
+        if self.settings.set_general(&g).is_ok() {
+            self.sync_remotes();
+            self.emit(Event::Locations);
         }
     }
 

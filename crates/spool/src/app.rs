@@ -395,6 +395,39 @@ pub fn free_space(p: &Path) -> Option<u64> {
     }
 }
 
+/// The shares from other machines that are mounted on this one: what each is a share of,
+/// as the system writes it (`nas:/export/films`, `//user@nas/films`), and where it is mounted.
+pub fn network_mounts() -> Vec<(String, PathBuf)> {
+    const KINDS: [&str; 6] = ["nfs", "nfs4", "smbfs", "cifs", "smb3", "afpfs"];
+    #[cfg(target_os = "macos")]
+    {
+        let text = |chars: &[libc::c_char]| unsafe { std::ffi::CStr::from_ptr(chars.as_ptr()) }.to_string_lossy().to_string();
+        let mut list: *mut libc::statfs = std::ptr::null_mut();
+        // SAFETY: the system fills in a list of its own and says how long it is; it is read
+        // at once and not kept.
+        let count = unsafe { libc::getmntinfo(&mut list, libc::MNT_NOWAIT) };
+        if count <= 0 || list.is_null() {
+            return vec![];
+        }
+        let mounts = unsafe { std::slice::from_raw_parts(list, count as usize) };
+        mounts.iter().filter(|m| KINDS.contains(&text(&m.f_fstypename).as_str())).map(|m| (text(&m.f_mntfromname), PathBuf::from(text(&m.f_mntonname)))).collect()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // A space in a name is written as \040 there.
+        let plain = |word: &str| word.replace("\\040", " ");
+        std::fs::read_to_string("/proc/self/mounts")
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| {
+                let mut words = line.split(' ');
+                let (from, on, kind) = (words.next()?, words.next()?, words.next()?);
+                KINDS.contains(&kind).then(|| (plain(from), PathBuf::from(plain(on))))
+            })
+            .collect()
+    }
+}
+
 pub fn is_mount_point(p: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let (Ok(me), Some(parent)) = (std::fs::metadata(p), p.parent()) else { return false };

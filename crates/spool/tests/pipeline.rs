@@ -3092,7 +3092,6 @@ async fn a_helper_answers_when_it_has_news_and_not_before() {
         async move { http.get(format!("{url}/link/work/v1/jobs{query}")).bearer_auth(KEY).send().await.unwrap().json::<Value>().await.unwrap() }
     };
     let first = ask(String::new()).await;
-    let stamp = first["stamp"].as_str().unwrap().to_string();
     assert_eq!(ask("?wait=20".into()).await["stamp"], first["stamp"], "asked without a mark, it answers at once");
 
     // Nothing changes: it answers when the wait is up, with the same report.
@@ -3254,6 +3253,25 @@ async fn a_linked_machine_looks_through_its_own_folders() {
         assert_eq!(ask("survey", key, body.clone()).await, status, "{body}");
     }
     assert_eq!(ask("folders", KEY, json!({"share": share("vault"), "kind": "movie"})).await, 200, "an empty library folder is only empty");
+
+    // A link that is given no folders finds them: where the other machine's shares lie
+    // there, and where they are mounted here, checked against what is in them.
+    std::fs::remove_file(&mnt).unwrap();
+    std::os::unix::fs::symlink(&nas, &mnt).unwrap();
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    (g["links"][0]["here"], g["links"][0]["there"], g["links"][0]["key"]) = (json!(""), json!(""), json!(KEY));
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert_eq!(status, 200, "{said}");
+    w.app.ask_remotes().await;
+    let link = w.app.remotes()[0].clone();
+    assert!(link.seen().problem.contains("have not been found on this machine yet"), "{}", link.seen().problem);
+    let host = url.trim_start_matches("http://").split(':').next().unwrap().to_string();
+    let mounts = |at: &Path| vec![(format!("{host}:/export/films"), at.join("films")), (format!("{host}:/export/vault"), at.join("vault")), ("elsewhere:/export/films".to_string(), w.root.join("other/films"))];
+    assert_eq!(w.app.find_folders(&link, mounts(&mnt)).await, Some((mnt.to_string_lossy().to_string(), nas.to_string_lossy().to_string())));
+    // Shares mounted here that are not that machine's, or do not hold what it holds, are not it.
+    assert_eq!(w.app.find_folders(&link, vec![("elsewhere:/export/films".to_string(), mnt.join("films"))]).await, None);
+    assert_eq!(w.app.find_folders(&link, mounts(&w.root.join("other"))).await, None, "another machine's films under the same names");
+    assert_eq!(w.app.find_folders(&link, vec![]).await, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3298,18 +3316,18 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     let (status, head, body) = fetch(&http, "GET", &stream, &part).await;
     assert_eq!((status, head["content-range"].to_str().unwrap(), &body[..]), (206, "bytes 1000-1999/200000", &film[1000..2000]));
 
-    // A player at an address the link names is sent to the machine that holds the film.
-    let send_from = |ranges: Value| {
+    // A player on the machine's own network is sent to the machine that holds the film.
+    let send_from = |near: Value| {
         let (api, app) = (api.clone(), w.app.clone());
         async move {
             let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-            g["links"][0]["play_from"] = ranges;
+            g["links"][0]["play_near"] = near;
             let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
             assert_eq!(status, 200, "{said}");
             app.ask_remotes().await;
         }
     };
-    send_from(json!(["127.0.0.0/8"])).await;
+    send_from(json!(true)).await;
     assert!(w.app.remotes()[0].seen().usable, "the key was kept though the page only ever saw it masked");
     let (status, head, _) = fetch(&http, "GET", &stream, &part).await;
     let there = head["location"].to_str().unwrap().to_string();
@@ -3320,20 +3338,13 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
     assert_eq!((activity["playing"][0]["title"].as_str(), activity["playing"][0]["from"].as_str()), (Some("Alpha"), Some("Nas")), "{}", activity["playing"]);
 
-    // Without naming anyone: players on the same network as the machine are sent to it.
-    send_from(json!([])).await;
-    assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 206, "nobody is named, and nothing says to send those nearby");
+    // Told to send nobody, it sends nobody, and says where the film comes from now.
+    send_from(json!(false)).await;
+    assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 206);
     let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
     assert_eq!(activity["playing"][0]["from"].as_str(), Some(""), "sent from here now");
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    g["links"][0]["play_near"] = json!(true);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
-    w.app.ask_remotes().await;
+    send_from(json!(true)).await;
     assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 307, "the player and the machine are on one network");
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    g["links"][0]["play_near"] = json!(false);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
-    send_from(json!(["127.0.0.0/8"])).await;
 
     // The film comes from the helper, with no key and no sign-in, and not by way of Spool:
     // the share is taken away from Spool's machine and the film still plays.
@@ -3385,16 +3396,11 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     std::fs::write(nas.join("downloads/half.mkv"), b"half a download").unwrap();
     assert_eq!(status_of(format!("{base}?ticket={}", made(share("vault"), "Way out/half.mkv", now))).await, 403);
 
-    // A player elsewhere is not sent to a machine it may not be able to reach.
+    // With the share back, and Spool told to send nobody, the film comes through Spool.
     std::os::unix::fs::symlink(&nas, &mnt).unwrap();
-    send_from(json!(["10.0.0.0/8", "192.168.69.76"])).await;
+    send_from(json!(false)).await;
     let (status, _, body) = fetch(&http, "GET", &stream, &part).await;
     assert_eq!((status, &body[..]), (206, &film[1000..2000]));
-    // What is not a range of addresses is said so, and nothing is saved.
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    g["links"][0]["play_from"] = json!(["the living room"]);
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
-    assert!(status == 400 && said["error"].as_str().unwrap().contains("not a range of addresses"), "{status} {said}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3450,7 +3456,7 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     let api = spool::api::router(w.app.clone());
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
     g["locations"] = json!([{"name": "Worker", "movie_root": root.join("films"), "manage": true}]);
-    g["links"] = json!([{"name": "Worker", "url": url, "key": KEY, "here": root, "there": root, "play_from": ["0.0.0.0/0"]}]);
+    g["links"] = json!([{"name": "Worker", "url": url, "key": KEY, "here": root, "there": root, "play_near": true}]);
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;

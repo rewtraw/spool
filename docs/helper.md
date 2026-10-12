@@ -88,14 +88,14 @@ Under Settings, Library, choose **Link another Spool**:
 | Address | Where it answers, such as `http://nas:7978`. |
 | Code | The code the helper gave, if it was started without a key: see [Linking with a code](#linking-with-a-code). Choose **Link** beside it. |
 | Or its key | The key it was started with, if it was given one. |
-| The other machine's disks, as this machine sees them | The folder the shares are mounted under here, such as `/Volumes/nas`. |
-| The same folder, as the helper sees it | The folder they are mounted under in the container, such as `/nas`. |
 
 A key that was typed in is not shown again once saved, and is not handed back to the browser.
 
-The two folders must name the same place. A path is turned from one machine's to the other's by swapping them at its start: with the example above, `/Volumes/nas/movies/Heat (1995)` here is `/nas/movies/Heat (1995)` to the helper.
+**Where its disks are.** Spool and the helper see the same files under different names: a film is `/Volumes/nas/movies/Heat (1995)` to one and `/nas/movies/Heat (1995)` to the other, and Spool turns one into the other by swapping the start. It finds the two starts by itself. Once the helper is linked and its shares are mounted on Spool's machine, Spool takes the folders the helper says it shares, finds the shares of that machine mounted here, and checks that something it sees in each is there for the helper too. Until it has, the link says that the shares have not been found yet.
 
-There is nothing to set on a location. Every location whose folders lie under the first folder is served by the helper, and the settings page says which those are.
+The two are shown under **How it is reached**, and can be set by hand there. That is only needed when the shares are not laid out the same way on the two machines, which the advice above about naming the folders avoids.
+
+Every location whose folders lie under the first of them is served by the helper, and the settings page lists it under the helper.
 
 ### 4. Check
 
@@ -157,13 +157,9 @@ The ticket names that one file, runs out after twelve hours, and is signed with 
 
 **A machine on both.** A linked machine that Spool reaches on the home network may be on your Tailscale as well. Spool looks for a device on its own Tailscale with the link's name, asks it what it is, and takes it for the same machine only if it answers as the link does. From then on a player away from home, on Tailscale, is sent to the machine's Tailscale address, and a player at home to its home address. The link's status says "also on Tailscale" when this has been found. The link's key is sent to that device to ask, so the name of a link should be the name of a machine of yours.
 
-**Other players.** Under **How it is reached, and other players to send** there is a list of further addresses: ranges such as `10.0.5.0/24`, or one player's address. A player at one of them is sent wherever it is. Use it for a second network at home, or to try one player before turning the switch on. Do not put in the whole Tailscale range unless the machine is on Tailscale too: a phone away from home would be sent to a machine it cannot reach.
-
 **Players that follow.** Being sent elsewhere for a film is something a player has to follow, and a player that does not will fail to play. Infuse 8.5 follows and seeks: on a Mac at home, and on a phone away from home, where the film came from the NAS over Tailscale. Infuse on an Apple TV has not been tried yet.
 
 **What is playing, and from where,** is at the top of Activity while it plays: the title, and the machine it comes from or "Through this Spool".
-
-**The address players use.** Players are sent to the address Spool itself uses for the helper. If they reach the NAS at a different one, give it under **Address players use**.
 
 **If the helper is away,** nobody is sent to it and every film comes through Spool. A helper that stops in the middle of a film stops that film; starting it again plays it through Spool.
 
