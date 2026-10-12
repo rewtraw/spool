@@ -113,6 +113,9 @@ pub struct Remote {
     nets: Vec<Net>,
     /// The address it last answered from, which says what network it is on.
     at: Mutex<Option<IpAddr>>,
+    /// Where it answers over Tailscale, when it is on Tailscale as well as the network
+    /// Spool reaches it on: the address a player away from home is sent to.
+    tailnet: Mutex<Option<String>>,
     /// Something is keeping in step with it.
     following: std::sync::atomic::AtomicBool,
     /// Its downloads as last reported, named and placed as this machine knows them.
@@ -173,23 +176,29 @@ impl Remote {
     fn new(conf: LinkConf) -> Remote {
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).build().expect("http client");
         let (signer, nets) = (Signer::new(&conf.key), conf.play_from.iter().filter_map(|n| Net::parse(n).ok()).collect());
-        Remote { conf, http, signer, nets, at: Mutex::new(None), following: Default::default(), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
+        Remote { conf, http, signer, nets, at: Mutex::new(None), tailnet: Mutex::new(None), following: Default::default(), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
     }
 
     /// Where a player at this address can take a file from the linked machine itself: an
     /// address with a ticket for that one file. None when the player is not one of those
     /// sent there, or the machine is not handing files out just now.
     pub fn direct(&self, here: &Path, player: &[IpAddr]) -> Option<String> {
-        if !(player.iter().any(|p| self.nets.iter().any(|n| n.holds(*p))) || (self.conf.play_near && self.near(player))) {
+        // One that is named, or on the machine's own network, takes the file at the address
+        // players there use. One elsewhere on Tailscale takes it over Tailscale, if the
+        // machine is there too.
+        let base = if player.iter().any(|p| self.nets.iter().any(|n| n.holds(*p))) || (self.conf.play_near && self.near(player)) {
+            if self.conf.play_url.is_empty() { self.conf.url.clone() } else { self.conf.play_url.clone() }
+        } else if self.conf.play_near && player.iter().any(|p| tailnet::ours(*p)) {
+            self.tailnet.lock().clone()?
+        } else {
             return None;
-        }
+        };
         let there = self.there(here)?;
         let seen = self.seen.lock();
         if !(seen.reachable && seen.play) {
             return None;
         }
         let (share, rel) = crate::link::place(&seen.shares, &there)?;
-        let base = if self.conf.play_url.is_empty() { &self.conf.url } else { &self.conf.play_url };
         Some(format!("{}/link/play/v1/file?ticket={}", base.trim_end_matches('/'), self.signer.issue(&share.id, &rel, crate::db::now().max(0) as u64)))
     }
 
@@ -419,7 +428,31 @@ impl Remote {
         // asked for downloads, so this is also how it is known to be there still.
         let secs = if !next.problem.is_empty() || (next.usable && !next.downloads_seen) { Some(20) } else if !next.usable { Some(5) } else { None };
         next.again = secs.map(|secs| Instant::now() + Duration::from_secs(secs));
+        let boot = next.boot.clone();
         *self.seen.lock() = next;
+        *self.tailnet.lock() = self.on_tailscale(&boot).await;
+    }
+
+    /// Where the machine answers over Tailscale, if it is on this machine's Tailscale under
+    /// the name the link has and is not reached that way already. It is the same machine
+    /// only if it says it started when this one did: a name alone settles nothing.
+    async fn on_tailscale(&self, boot: &str) -> Option<String> {
+        if boot.is_empty() || self.at.lock().is_none_or(tailnet::ours) {
+            return None;
+        }
+        let url = reqwest::Url::parse(&self.conf.url).ok()?;
+        for ip in tailnet::addresses_of(&self.conf.name).await {
+            let mut there = url.clone();
+            if there.set_ip_host(ip).is_err() {
+                continue;
+            }
+            let there = there.as_str().trim_end_matches('/').to_string();
+            let Ok(answer) = self.http.get(format!("{there}/link")).bearer_auth(&self.conf.key).timeout(Duration::from_secs(3)).send().await else { continue };
+            if answer.json::<Hello>().await.is_ok_and(|hello| hello.boot == boot) {
+                return Some(there);
+            }
+        }
+        None
     }
 
     /// The part of meeting a helper that is about work: that it speaks as this Spool does,
@@ -890,7 +923,7 @@ impl App {
                 let seen = r.seen();
                 let serves: Vec<String> = places.0.iter().filter(|p| [&p.0.movie_root, &p.0.series_root].into_iter().any(|root| !root.is_empty() && r.covers(Path::new(root)))).map(|p| p.0.name.clone()).collect();
                 let running = r.jobs().iter().filter(|j| !j.state.is_terminal() && j.state != JobState::Paused).count();
-                json!({"id": r.conf.id, "name": r.conf.name, "url": r.conf.url, "serves": serves, "downloads": running, "seen": seen, "at": *r.at.lock()})
+                json!({"id": r.conf.id, "name": r.conf.name, "url": r.conf.url, "serves": serves, "downloads": running, "seen": seen, "at": *r.at.lock(), "tailnet": *r.tailnet.lock()})
             })
             .collect()
     }
