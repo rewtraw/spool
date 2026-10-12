@@ -73,6 +73,10 @@ pub struct Seen {
     /// When to ask again what it is: something was wrong, and may have been put right.
     #[serde(skip)]
     again: Option<Instant>,
+    /// The mark on its last report. One that marks its reports keeps the next request
+    /// waiting until something has changed.
+    #[serde(skip)]
+    stamp: String,
 }
 
 /// Why a linked Spool did not do what it was asked.
@@ -98,6 +102,9 @@ impl std::error::Error for Fail {}
 
 type Asked<T> = std::result::Result<T, Fail>;
 
+/// How long a helper is left to answer when it has nothing new to say, in seconds.
+const HOLD: u64 = 25;
+
 pub struct Remote {
     pub conf: LinkConf,
     http: reqwest::Client,
@@ -106,6 +113,8 @@ pub struct Remote {
     nets: Vec<Net>,
     /// The address it last answered from, which says what network it is on.
     at: Mutex<Option<IpAddr>>,
+    /// Something is keeping in step with it.
+    following: std::sync::atomic::AtomicBool,
     /// Its downloads as last reported, named and placed as this machine knows them.
     jobs: Mutex<Vec<JobStatus>>,
     /// Downloads handed over a moment ago, which a report already on its way back may not
@@ -164,7 +173,7 @@ impl Remote {
     fn new(conf: LinkConf) -> Remote {
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).build().expect("http client");
         let (signer, nets) = (Signer::new(&conf.key), conf.play_from.iter().filter_map(|n| Net::parse(n).ok()).collect());
-        Remote { conf, http, signer, nets, at: Mutex::new(None), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
+        Remote { conf, http, signer, nets, at: Mutex::new(None), following: Default::default(), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
     }
 
     /// Where a player at this address can take a file from the linked machine itself: an
@@ -443,7 +452,9 @@ impl Remote {
     }
 
     /// Ask the helper how things stand. Returns the downloads that changed since last time.
-    async fn ask(&self, wanted: &Pushed) -> Vec<JobStatus> {
+    /// With `wait`, a helper that marks its reports is left to answer when something has
+    /// changed, or after that many seconds.
+    async fn ask(&self, wanted: &Pushed, wait: u64) -> Vec<JobStatus> {
         let due = {
             let seen = self.seen.lock();
             !seen.asked || !seen.reachable || seen.again.is_some_and(|at| Instant::now() >= at)
@@ -454,7 +465,20 @@ impl Remote {
         if !self.seen.lock().usable {
             return vec![];
         }
-        let said = match self.get("/helper/jobs").await {
+        // Its settings first: a request that waits for news would keep them waiting too.
+        if self.seen.lock().pushed.as_ref() != Some(wanted) {
+            let url = format!("{}/helper/config", self.conf.url.trim_end_matches('/'));
+            match self.send(self.http.put(url).json(wanted), Duration::from_secs(15)).await {
+                Ok(_) => self.seen.lock().pushed = Some(wanted.clone()),
+                Err(e) => tracing::warn!(helper = %self.conf.name, error = %e, "could not give the helper its settings"),
+            }
+        }
+        let stamp = self.seen.lock().stamp.clone();
+        let asked = match (wait, stamp.is_empty()) {
+            (0, _) | (_, true) => self.get("/helper/jobs").await,
+            _ => self.send(self.http.get(format!("{}/helper/jobs", self.conf.url.trim_end_matches('/'))).query(&[("since", stamp.as_str()), ("wait", &wait.to_string())]), Duration::from_secs(wait + 15)).await,
+        };
+        let said = match asked {
             Ok(said) => said,
             Err(Fail::Away { why, .. }) => {
                 self.away(why);
@@ -476,13 +500,6 @@ impl Remote {
                 return vec![];
             }
         }
-        if self.seen.lock().pushed.as_ref() != Some(wanted) {
-            let url = format!("{}/helper/config", self.conf.url.trim_end_matches('/'));
-            match self.send(self.http.put(url).json(wanted), Duration::from_secs(15)).await {
-                Ok(_) => self.seen.lock().pushed = Some(wanted.clone()),
-                Err(e) => tracing::warn!(helper = %self.conf.name, error = %e, "could not give the helper its settings"),
-            }
-        }
         // Every download has to be understood, or none of the report is believed: a
         // download missing from a report that could only half be read has not gone.
         let read: Option<Vec<JobStatus>> = said["jobs"].as_array().and_then(|list| list.iter().map(|j| serde_json::from_value::<JobStatus>(j.clone()).ok()).collect());
@@ -493,6 +510,7 @@ impl Remote {
             if std::mem::take(&mut seen.stale) {
                 seen.problem.clear();
             }
+            seen.stamp = said["stamp"].as_str().unwrap_or_default().to_string();
             seen.paused = said["paused"].as_bool().unwrap_or(false);
             seen.free = said["free"].as_u64();
             seen.busy = said["busy"].as_array().map(|b| b.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
@@ -586,60 +604,94 @@ impl App {
         Pushed { servers: self.settings.servers(), speed_limit: self.settings.speed_limit(), direct_unpack: g.direct_unpack, post_parallel: g.post_parallel as usize }
     }
 
-    /// Ask every helper how things stand, and act on what has changed.
-    pub async fn ask_remotes(&self) {
-        let wanted = self.pushed();
-        let mut problems = vec![];
-        // Each is asked on its own, so one that is slow to answer holds up none of the others.
-        let asked = futures::future::join_all(self.remotes().into_iter().map(|r| {
-            let wanted = &wanted;
-            async move {
-                let was = r.seen();
-                let changed = r.ask(wanted).await;
-                (r, was, changed)
-            }
-        }))
-        .await;
-        for (r, was, changed) in asked {
-            let now = r.seen();
-            // What was waiting on the helper to be filed can be finished now.
-            if now.usable && !was.usable {
-                let app = self.clone();
-                tokio::task::spawn_blocking(move || {
-                    if let Err(e) = app.recover() {
-                        tracing::warn!(error = %e, "could not finish interrupted imports");
-                    }
-                });
-            }
-            if was.asked && was.reachable != now.reachable {
-                if now.reachable {
-                    tracing::info!(helper = %r.conf.name, "the helper is back");
-                } else {
-                    tracing::warn!(helper = %r.conf.name, problem = %now.problem, "the helper cannot be reached; downloads for its part of the library run here until it is back");
+    /// Ask one helper how things stand, and act on what has changed.
+    async fn turn(&self, r: &Arc<Remote>, wait: u64) {
+        let was = r.seen();
+        let changed = r.ask(&self.pushed(), wait).await;
+        let now = r.seen();
+        // What was waiting on the helper to be filed can be finished now.
+        if now.usable && !was.usable {
+            let app = self.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = app.recover() {
+                    tracing::warn!(error = %e, "could not finish interrupted imports");
                 }
-                self.emit(Event::Locations);
-            }
-            if !now.problem.is_empty() {
-                problems.push(now.problem.clone());
-            }
-            for job in changed {
-                self.on_job(job);
-            }
+            });
         }
+        if was.asked && was.reachable != now.reachable {
+            if now.reachable {
+                tracing::info!(helper = %r.conf.name, "the helper is back");
+            } else {
+                tracing::warn!(helper = %r.conf.name, problem = %now.problem, "the helper cannot be reached; downloads for its part of the library run here until it is back");
+            }
+            self.emit(Event::Locations);
+        }
+        for job in changed {
+            self.on_job(job);
+        }
+        let problems: Vec<String> = self.remotes().iter().map(|r| r.seen().problem).filter(|p| !p.is_empty()).collect();
         let message = (!problems.is_empty()).then(|| problems.join(" "));
         if self.db.set_standing_attention("helper", message.as_deref(), json!({})).unwrap_or(false) {
             self.emit(Event::Attention);
         }
     }
 
-    /// Keep asking the helpers, often enough that a download's progress is worth watching.
+    /// Ask every helper how things stand, now, and act on what has changed.
+    pub async fn ask_remotes(&self) {
+        // Each is asked on its own, so one that is slow to answer holds up none of the others.
+        futures::future::join_all(self.remotes().iter().map(|r| self.turn(r, 0))).await;
+    }
+
+    /// Whether a helper is still one of those in the settings, as it was when it was made.
+    fn listed(&self, r: &Arc<Remote>) -> bool {
+        self.remotes.lock().iter().any(|x| Arc::ptr_eq(x, r))
+    }
+
+    /// Keep in step with one helper for as long as it is in the settings. One that marks
+    /// its reports is asked and left to answer when it has news, so a change is heard at
+    /// once and nothing is sent while nothing happens. Any other is asked once a second.
+    async fn follow(self, r: Arc<Remote>) {
+        let mut quiet = 0u32;
+        while self.listed(&r) {
+            let began = Instant::now();
+            tokio::select! {
+                _ = self.turn(&r, HOLD) => {}
+                // Settings it should have, or its leaving the settings, do not wait on it.
+                _ = async {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        if !self.listed(&r) || r.seen.lock().pushed.as_ref().is_some_and(|had| *had != self.pushed()) {
+                            break;
+                        }
+                    }
+                } => {}
+            }
+            let seen = r.seen();
+            quiet = if seen.reachable { 0 } else { (quiet + 1).min(4) };
+            // Never more than once a second; one that is away is tried less and less often,
+            // and one that only plays is asked nothing, only looked in on.
+            let pause = match (seen.reachable, seen.usable) {
+                (false, _) => Duration::from_millis(1000 * (1u64 << quiet) + began.elapsed().subsec_millis() as u64 % 500),
+                (true, false) => Duration::from_secs(5),
+                (true, true) => Duration::from_secs(1).saturating_sub(began.elapsed()),
+            };
+            tokio::time::sleep(pause).await;
+        }
+        r.following.store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Keep in step with the helpers in the settings, each on its own.
     pub fn spawn_remotes(&self) {
         self.sync_remotes();
         let app = self.clone();
         tokio::spawn(async move {
             loop {
-                app.ask_remotes().await;
-                tokio::time::sleep(Duration::from_millis(if app.remotes().is_empty() { 5000 } else { 1000 })).await;
+                for r in app.remotes() {
+                    if !r.following.swap(true, std::sync::atomic::Ordering::AcqRel) {
+                        tokio::spawn(app.clone().follow(r));
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
     }

@@ -60,6 +60,8 @@ pub struct Conf {
 /// and not kept waiting.
 const STREAMS: usize = 48;
 /// How many folders may be looked through at once, and how long one more waits its turn.
+/// The longest an asker is kept waiting for news.
+const HOLD: u64 = 30;
 const LOOKS: usize = 4;
 const LOOK_WAIT: Duration = Duration::from_secs(60);
 /// How long the name of a request for a download is remembered, in seconds.
@@ -629,14 +631,47 @@ async fn config(State(h): State<Helper>, Json(pushed): Json<Pushed>) -> R {
     Ok(Json(json!({"ok": true})))
 }
 
-async fn jobs(State(h): State<Helper>) -> R {
-    Ok(Json(json!({
+/// How things stand, with a mark that is the same for as long as nothing in it changes.
+fn report(h: &Helper) -> Value {
+    let mut report = json!({
         "boot": h.0.boot,
         "jobs": h.0.engine.jobs(),
         "paused": h.0.engine.is_paused(),
         "free": crate::app::free_space(&h.0.conf.downloads),
         "busy": h.busy(),
-    })))
+    });
+    // Room on the disk comes and goes by the byte with whatever else the machine is doing,
+    // which is not news. It is marked to the nearest gigabyte.
+    let mut marked = report.clone();
+    marked["free"] = json!(report["free"].as_u64().map(|free| free >> 30));
+    let digest = ring::digest::digest(&ring::digest::SHA256, marked.to_string().as_bytes());
+    report["stamp"] = json!(digest.as_ref()[..8].iter().map(|b| format!("{b:02x}")).collect::<String>());
+    report
+}
+
+#[derive(Deserialize)]
+struct Since {
+    /// The mark on the report the asker already has.
+    #[serde(default)]
+    since: String,
+    /// How long to wait for something to change before answering anyway, in seconds.
+    #[serde(default)]
+    wait: u64,
+}
+
+/// How things stand. Asked with the mark of the report it already has, the asker is kept
+/// waiting until something has changed, so that it hears at once without asking over and
+/// over. The whole report is sent each time, and the mark is made from all of it, so
+/// nothing that changes can be missed.
+async fn jobs(State(h): State<Helper>, Query(q): Query<Since>) -> R {
+    let until = Instant::now() + Duration::from_secs(q.wait.min(HOLD));
+    loop {
+        let now = report(&h);
+        if q.since.is_empty() || now["stamp"].as_str() != Some(q.since.as_str()) || Instant::now() >= until {
+            return Ok(Json(now));
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 #[derive(Deserialize)]

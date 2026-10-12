@@ -2985,6 +2985,60 @@ async fn fetch(http: &reqwest::Client, method: &str, url: &str, headers: &[(&str
     (status, head, resp.bytes().await.unwrap().to_vec())
 }
 
+/// A helper asked with the mark of the report the asker already has keeps it waiting until
+/// something changes, and then answers at once.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_helper_answers_when_it_has_news_and_not_before() {
+    use serde_json::Value;
+    use std::time::{Duration, Instant};
+    let w = World::new(Mode::Active).await;
+    let (_helper, url, _, _) = with_helper(&w).await;
+    const KEY: &str = "a-key-of-sufficient-length";
+    let http = reqwest::Client::new();
+    let ask = |query: String| {
+        let (http, url) = (http.clone(), url.clone());
+        async move { http.get(format!("{url}/helper/jobs{query}")).bearer_auth(KEY).send().await.unwrap().json::<Value>().await.unwrap() }
+    };
+    let first = ask(String::new()).await;
+    let stamp = first["stamp"].as_str().unwrap().to_string();
+    assert_eq!(ask("?wait=20".into()).await["stamp"], first["stamp"], "asked without a mark, it answers at once");
+
+    // Nothing changes: it answers when the wait is up, with the same report.
+    let began = Instant::now();
+    let same = ask(format!("?since={stamp}&wait=2")).await;
+    assert!(began.elapsed() >= Duration::from_millis(1800), "{:?}", began.elapsed());
+    assert_eq!(same["stamp"], first["stamp"]);
+
+    // Something changes while it waits: it answers then, not when the wait is up.
+    let began = Instant::now();
+    let waiting = tokio::spawn(ask(format!("?since={stamp}&wait=20")));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(http.post(format!("{url}/helper/queue/pause")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
+    let news = waiting.await.unwrap();
+    assert!(began.elapsed() < Duration::from_secs(5), "{:?}", began.elapsed());
+    assert_eq!((news["paused"].as_bool(), news["stamp"] != first["stamp"]), (Some(true), true), "{news}");
+    // A mark it does not know, as after a restart, is answered at once.
+    let began = Instant::now();
+    ask("?since=0000000000000000&wait=20".into()).await;
+    assert!(began.elapsed() < Duration::from_secs(2));
+
+    // Spool, keeping in step, hears of the change without being told to ask.
+    w.app.spawn_remotes();
+    for _ in 0..50 {
+        if w.app.remotes()[0].seen().paused {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(w.app.remotes()[0].seen().paused);
+    assert_eq!(http.post(format!("{url}/helper/queue/resume")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
+    let began = Instant::now();
+    while w.app.remotes()[0].seen().paused && began.elapsed() < Duration::from_secs(6) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(!w.app.remotes()[0].seen().paused, "heard within a moment, while a request was waiting on the helper");
+}
+
 /// The linked machine reads its own folders and says what is in them. What it says is taken
 /// over what the share shows, and what it cannot say is never taken for "nothing there".
 #[tokio::test(flavor = "multi_thread")]
