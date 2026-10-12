@@ -1,49 +1,67 @@
 //! Finding Spools on the home network.
 //!
-//! A helper says that it is there, the way printers and players do, and a Spool listens
-//! and lists what it hears so that an address need not be typed. Hearing of one links
-//! nothing: anything on a network can say it is a Spool, so what is heard is only ever an
-//! address to try, and the code or the key is still what links the two. An announcement
-//! carries no code, no key, no folder and nothing of what is in the library.
+//! A helper says that it is there, every few seconds, to whatever on its network is
+//! listening for Spools, and a Spool listens and lists what it hears so that an address
+//! need not be typed. Hearing of one links nothing: anything on a network can say it is a
+//! Spool, so what is heard is only ever an address to try, and the code or the key is
+//! still what links the two. What is said carries no code, no key, no folder and nothing
+//! of what is in the library.
+//!
+//! It is said to a group address of Spool's own and not through the system's own way of
+//! finding printers and players, which on a NAS belongs to a service that shares it with
+//! nobody.
 
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use parking_lot::Mutex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-/// What a Spool is known as to anything that looks for one.
-const KIND: &str = "_spool._tcp.local.";
+/// Where Spools say they are: a group address kept to one network, and a port.
+const GROUP: Ipv4Addr = Ipv4Addr::new(239, 255, 77, 79);
+const PORT: u16 = 7977;
+/// How often one says so, and how long one is kept after it was last heard.
+const EVERY: Duration = Duration::from_secs(5);
+const KEPT: Duration = Duration::from_secs(20);
 /// No more than this many are kept, however many say they are one.
 const MOST: usize = 32;
+
+/// What one says of itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Said {
+    /// The version of this way of saying it.
+    spool: u32,
+    name: String,
+    port: u16,
+    /// It is waiting to be linked with a code.
+    open: bool,
+}
 
 /// A Spool heard of on the network.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Found {
     pub name: String,
-    /// Where it says it answers. Tried by whoever chooses it, and trusted for nothing.
+    /// Where it answers: the address it was heard from and the port it named. Tried by
+    /// whoever chooses it, and trusted for nothing.
     pub url: String,
     /// It says it is waiting to be linked with a code.
     pub open: bool,
 }
 
-/// A name as it may go in an announcement: short, and nothing but what a name is made of.
+/// A name as it may be said: short, and nothing but what a name is made of.
 fn label(name: &str) -> String {
     let kept: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ' ')).take(40).collect();
     let kept = kept.trim();
     if kept.is_empty() { "spool".to_string() } else { kept.to_string() }
 }
 
-/// An address as it goes in a link's settings. The older kind of address is preferred, and
-/// one that only works on a single wire is left out.
-fn url_of(addrs: impl Iterator<Item = IpAddr>, port: u16) -> Option<String> {
-    let mut addrs: Vec<IpAddr> = addrs.filter(|ip| !ip.is_loopback() && !matches!(ip, IpAddr::V6(v6) if (v6.segments()[0] & 0xffc0) == 0xfe80)).collect();
-    addrs.sort_by_key(|ip| !ip.is_ipv4());
-    addrs.first().map(|ip| match ip {
-        IpAddr::V4(v4) => format!("http://{v4}:{port}"),
-        IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
-    })
+/// What was heard, if it is one of these and names somewhere that could answer.
+fn read(packet: &[u8], from: IpAddr) -> Option<Found> {
+    let said: Said = serde_json::from_slice(packet).ok()?;
+    (said.spool == 1 && said.port != 0 && !from.is_loopback()).then(|| Found { name: label(&said.name), url: format!("http://{from}:{}", said.port), open: said.open })
 }
 
 /// This machine's name, as it is known on the network.
@@ -56,78 +74,80 @@ pub fn host_name() -> String {
     label(name.split('.').next().unwrap_or_default())
 }
 
-/// Saying that a Spool is here, for as long as this is kept.
-pub struct Announced {
-    daemon: ServiceDaemon,
-    name: String,
-    port: u16,
+/// The addresses this machine has on networks other machines are on.
+fn here() -> Vec<Ipv4Addr> {
+    if_addrs::get_if_addrs().into_iter().flatten().filter(|i| !i.is_loopback()).filter_map(|i| match i.ip() {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
+    }).collect()
 }
 
-impl Announced {
-    /// Begin saying so. `open` is whether it is waiting to be linked with a code.
-    pub fn begin(name: &str, port: u16, open: bool) -> anyhow::Result<Announced> {
-        let said = Announced { daemon: ServiceDaemon::new()?, name: label(name), port };
-        said.say(open)?;
-        Ok(said)
-    }
-
-    /// Say it again, with whether it is waiting to be linked as that stands now.
-    pub fn say(&self, open: bool) -> anyhow::Result<()> {
-        let host = format!("{}.local.", self.name.replace([' ', '_'], "-"));
-        let info = ServiceInfo::new(KIND, &self.name, &host, "", self.port, &[("v", "1"), ("open", if open { "1" } else { "0" })][..])?.enable_addr_auto();
-        self.daemon.register(info)?;
-        Ok(())
-    }
-}
-
-impl Drop for Announced {
-    fn drop(&mut self) {
-        let _ = self.daemon.shutdown();
-    }
+/// Say that a Spool is here, under a name and at a port, for as long as the program runs.
+/// `open` is asked each time: whether it is waiting to be linked with a code just then.
+pub fn announce(name: &str, port: u16, open: impl Fn() -> bool + Send + 'static) -> std::io::Result<()> {
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_multicast_ttl_v4(1)?;
+    let name = label(name);
+    std::thread::Builder::new().name("spool-announce".into()).spawn(move || loop {
+        let said = serde_json::to_vec(&Said { spool: 1, name: name.clone(), port, open: open() }).expect("it can always be written");
+        // On every network it is on, since which of them a Spool is listening on is not known.
+        for ip in here() {
+            if socket.set_multicast_if_v4(&ip).is_ok() {
+                let _ = socket.send_to(&said, &SocketAddr::V4(SocketAddrV4::new(GROUP, PORT)).into());
+            }
+        }
+        std::thread::sleep(EVERY);
+    })?;
+    Ok(())
 }
 
 /// The Spools heard of, kept as they come and go.
-#[derive(Clone)]
-pub struct Heard {
-    found: Arc<Mutex<HashMap<String, Found>>>,
-    _daemon: Arc<ServiceDaemon>,
-}
+#[derive(Clone, Default)]
+pub struct Heard(Arc<Mutex<HashMap<String, (Instant, Found)>>>);
 
 impl Heard {
-    /// Begin listening. What is heard is kept until it says it is going, or is heard no more.
-    pub fn listen() -> anyhow::Result<Heard> {
-        let daemon = ServiceDaemon::new()?;
-        let events = daemon.browse(KIND)?;
-        let found: Arc<Mutex<HashMap<String, Found>>> = Default::default();
-        let keep = found.clone();
+    /// Begin listening, on every network this machine is on and any it joins later.
+    pub fn listen() -> std::io::Result<Heard> {
+        let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        socket.set_reuse_address(true)?;
+        #[cfg(unix)]
+        socket.set_reuse_port(true)?;
+        socket.bind(&SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, PORT)).into())?;
+        socket.set_read_timeout(Some(EVERY))?;
+        let socket: std::net::UdpSocket = socket.into();
+        let heard = Heard::default();
+        let keep = heard.clone();
         std::thread::Builder::new().name("spool-find".into()).spawn(move || {
-            while let Ok(event) = events.recv() {
-                match event {
-                    ServiceEvent::ServiceResolved(info) => {
-                        let Some(url) = url_of(info.get_addresses().iter().map(|a| a.to_ip_addr()), info.get_port()) else { continue };
-                        let full = info.get_fullname().to_string();
-                        let name = label(full.strip_suffix(KIND).unwrap_or(&full).trim_end_matches('.'));
-                        let mut keep = keep.lock();
-                        if keep.len() < MOST || keep.contains_key(&full) {
-                            keep.insert(full, Found { name, url, open: info.get_property_val_str("open") == Some("1") });
-                        }
+            let (mut joined, mut packet) = (Vec::new(), [0u8; 512]);
+            loop {
+                for ip in here() {
+                    if !joined.contains(&ip) && socket.join_multicast_v4(&GROUP, &ip).is_ok() {
+                        joined.push(ip);
                     }
-                    ServiceEvent::ServiceRemoved(_, full) => {
-                        keep.lock().remove(&full);
+                }
+                if let Ok((len, from)) = socket.recv_from(&mut packet) {
+                    if let Some(found) = read(&packet[..len], from.ip()) {
+                        keep.note(found);
                     }
-                    _ => {}
                 }
             }
         })?;
-        Ok(Heard { found, _daemon: Arc::new(daemon) })
+        Ok(heard)
+    }
+
+    fn note(&self, found: Found) {
+        let mut kept = self.0.lock();
+        kept.retain(|_, (when, _)| when.elapsed() < KEPT);
+        if kept.len() < MOST || kept.contains_key(&found.url) {
+            kept.insert(found.url.clone(), (Instant::now(), found));
+        }
     }
 
     /// What is heard of now, by name, without those at an address that is linked already.
     pub fn found(&self, linked: &[String]) -> Vec<Found> {
         let at = |url: &str| url.trim().trim_end_matches('/').to_ascii_lowercase();
-        let mut all: Vec<Found> = self.found.lock().values().filter(|f| !linked.iter().any(|l| at(l) == at(&f.url))).cloned().collect();
+        let mut all: Vec<Found> = self.0.lock().values().filter(|(when, f)| when.elapsed() < KEPT && !linked.iter().any(|l| at(l) == at(&f.url))).map(|(_, f)| f.clone()).collect();
         all.sort_by(|a, b| (&a.name, &a.url).cmp(&(&b.name, &b.url)));
-        all.dedup();
         all
     }
 }
@@ -137,21 +157,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn what_goes_in_an_announcement_is_plain() {
+    fn what_is_said_is_plain_and_what_is_heard_is_checked() {
         assert_eq!(label("  turk  "), "turk");
         assert_eq!(label("Trey's NAS (main).local"), "Treys NAS mainlocal");
         assert_eq!(label("../../<script>"), "script");
         assert_eq!(label("!!!"), "spool");
         assert_eq!(label(&"a".repeat(200)).len(), 40);
         assert!(!host_name().is_empty() && !host_name().contains('.'));
+
+        let from = "192.168.69.97".parse::<IpAddr>().unwrap();
+        let said = serde_json::to_vec(&Said { spool: 1, name: "<b>turk</b>".into(), port: 7978, open: true }).unwrap();
+        assert_eq!(read(&said, from), Some(Found { name: "bturkb".into(), url: "http://192.168.69.97:7978".into(), open: true }), "the address is the one it was heard from");
+        assert_eq!(read(&said, "127.0.0.1".parse().unwrap()), None);
+        for not_one in [&b"hello"[..], br#"{"spool":2,"name":"x","port":1,"open":false}"#, br#"{"spool":1,"name":"x","port":0,"open":false}"#, br#"{"spool":1,"name":"x","port":1,"open":false,"url":"http://elsewhere"}"#, b""] {
+            assert_eq!(read(not_one, from), None, "{}", String::from_utf8_lossy(not_one));
+        }
     }
 
     #[test]
-    fn an_address_heard_is_one_that_can_be_tried() {
-        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
-        assert_eq!(url_of([ip("fd00::7"), ip("192.168.69.97")].into_iter(), 7978).as_deref(), Some("http://192.168.69.97:7978"));
-        assert_eq!(url_of([ip("fd00::7")].into_iter(), 7978).as_deref(), Some("http://[fd00::7]:7978"));
-        assert_eq!(url_of([ip("127.0.0.1"), ip("fe80::1"), ip("::1")].into_iter(), 7978), None, "nothing that only this machine or this wire could use");
+    fn what_is_heard_is_kept_a_while_and_one_linked_already_is_not_offered() {
+        let heard = Heard::default();
+        let turk = Found { name: "turk".into(), url: "http://192.168.69.97:7978".into(), open: false };
+        heard.note(turk.clone());
+        heard.note(Found { open: true, ..turk.clone() });
+        assert_eq!(heard.found(&[]), [Found { open: true, ..turk.clone() }], "said again, it is the same one as it now is");
+        assert!(heard.found(&["http://192.168.69.97:7978/".into()]).is_empty());
+        heard.0.lock().values_mut().for_each(|(when, _)| *when = Instant::now() - KEPT);
+        assert!(heard.found(&[]).is_empty(), "one that has stopped saying so is no longer listed");
+        for n in 0..(MOST + 10) {
+            heard.note(Found { name: "x".into(), url: format!("http://10.0.0.{n}:1"), open: false });
+        }
+        assert_eq!(heard.found(&[]).len(), MOST);
     }
 
     /// Run by hand: it speaks on the network this machine is on, which a machine that only
@@ -160,21 +196,13 @@ mod tests {
     #[ignore]
     fn a_spool_that_says_it_is_here_is_heard() {
         let heard = Heard::listen().unwrap();
-        let said = Announced::begin("spool test helper", 47978, true).unwrap();
-        let wait = |open: bool| {
-            for _ in 0..80 {
-                if heard.found(&[]).iter().any(|f| f.name == "spool test helper" && f.open == open) {
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
+        announce("spool test helper", 47978, || true).unwrap();
+        for _ in 0..80 {
+            if heard.found(&[]).iter().any(|f| f.name == "spool test helper" && f.open && f.url.ends_with(":47978")) {
+                return;
             }
-            false
-        };
-        assert!(wait(true), "{:?}", heard.found(&[]));
-        let found = heard.found(&[]).into_iter().find(|f| f.name == "spool test helper").unwrap();
-        assert!(found.url.ends_with(":47978"), "{found:?}");
-        assert!(heard.found(&[found.url.clone()]).iter().all(|f| f.name != "spool test helper"), "one linked already is not offered again");
-        said.say(false).unwrap();
-        assert!(wait(false), "it says so when it has been linked");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        panic!("not heard: {:?}", heard.found(&[]));
     }
 }

@@ -3096,10 +3096,21 @@ async fn a_helper_answers_when_it_has_news_and_not_before() {
     assert_eq!(ask("?wait=20".into()).await["stamp"], first["stamp"], "asked without a mark, it answers at once");
 
     // Nothing changes: it answers when the wait is up, with the same report.
-    let began = Instant::now();
-    let same = ask(format!("?since={stamp}&wait=2")).await;
-    assert!(began.elapsed() >= Duration::from_millis(1800), "{:?}", began.elapsed());
-    assert_eq!(same["stamp"], first["stamp"]);
+    // (Room on the disk is part of the report, and the other tests are using the disk: a
+    // report that did change is not this case, so it is tried until one does not.)
+    let mut held = false;
+    for _ in 0..5 {
+        let stamp = ask(String::new()).await["stamp"].as_str().unwrap().to_string();
+        let began = Instant::now();
+        if ask(format!("?since={stamp}&wait=2")).await["stamp"].as_str() == Some(stamp.as_str()) {
+            assert!(began.elapsed() >= Duration::from_millis(1800), "{:?}", began.elapsed());
+            held = true;
+            break;
+        }
+    }
+    assert!(held, "it never once waited");
+    let first = ask(String::new()).await;
+    let stamp = first["stamp"].as_str().unwrap().to_string();
 
     // Something changes while it waits: it answers then, not when the wait is up.
     let began = Instant::now();

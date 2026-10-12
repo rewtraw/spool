@@ -115,13 +115,14 @@ Run it as the apps user (568), which is the user a share from TrueNAS usually ma
 
 ## Being found
 
-A helper says on the home network that it is there, as printers and players do, and Spool lists the ones it hears under Settings, Library, as **Found on this network**, each with its address and whether it is waiting to be linked. **Link it** starts a link with the name and address filled in; the code or the key is still yours to give.
+A helper says on the home network that it is there, every few seconds, and Spool lists the ones it hears under Settings, Library, as **Found on this network**, each with its address and whether it is waiting to be linked. **Link it** starts a link with the name and address filled in; the code or the key is still yours to give.
 
 - **Hearing of one links nothing.** Anything on a network can say it is a Spool. What is heard is an address to try, and what shows that the machine at it is yours is that it holds the code it gave you, or the key you gave it. With a code, a machine that is not the one you meant learns nothing from the attempt. A key, typed in, is sent to whatever is at the address, so with something found prefer its code.
-- **What it says** is its name, its port and whether it is waiting to be linked. No code, no key, no folders, nothing of the library.
+- **What it says** is its name, its port and whether it is waiting to be linked. No code, no key, no folders, nothing of the library. It says so to a group address of Spool's own (`239.255.77.79`, port 7977), which stays on the network it is said on, and not through Bonjour: on a NAS that belongs to a service that shares it with nobody.
 - **Its name** is the machine's own, or `SPOOL_NAME` if the helper is given one.
 - **In a container** the helper is heard only if it shares the host's network (`network_mode: host`): a container on its container system's own network neither hears nor is heard. Without that it works as before, and its address is typed.
 - **On a Mac,** Spool needs the Local Network permission to listen, the same one it needs to reach a helper at all.
+- **One that stops saying so** drops off the list in twenty seconds.
 
 ## Linking with a code
 

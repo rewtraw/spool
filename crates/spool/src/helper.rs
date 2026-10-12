@@ -154,8 +154,6 @@ struct Inner {
     /// until it has been linked: until then it does nothing for anybody.
     linked: parking_lot::RwLock<Option<Arc<Linked>>>,
     pairing: Mutex<Pairing>,
-    /// Its saying on the network that it is here, once it is.
-    announced: Mutex<Option<crate::link::find::Announced>>,
     /// The disk each shared folder was on when the helper started. A folder found on
     /// another since is one whose disk has gone from under it.
     disks: Vec<Option<u64>>,
@@ -286,7 +284,6 @@ impl Helper {
             shares,
             linked: parking_lot::RwLock::new(key.map(Linked::new)),
             pairing: Mutex::new(pairing),
-            announced: Mutex::new(None),
             disks,
             mounts,
             streams: Arc::new(tokio::sync::Semaphore::new(STREAMS)),
@@ -442,9 +439,9 @@ impl Helper {
     /// Say on the network that it is here, under a name and at a port, so that a Spool
     /// can list it and its address need not be typed. Not being able to costs nothing but that.
     pub fn announce(&self, name: &str, port: u16) {
-        match crate::link::find::Announced::begin(name, port, self.linked().is_none()) {
-            Ok(said) => *self.0.announced.lock() = Some(said),
-            Err(e) => tracing::warn!(error = %e, "could not say on the network that this helper is here; give Spool its address instead"),
+        let h = self.clone();
+        if let Err(e) = crate::link::find::announce(name, port, move || h.linked().is_none()) {
+            tracing::warn!(error = %e, "could not say on the network that this helper is here; give Spool its address instead");
         }
     }
 
@@ -732,9 +729,6 @@ async fn pair_finish(State(h): State<Helper>, Json(b): Json<PairFinish>) -> R {
     (p.failures, p.rests, p.resting_until, p.done) = (0, 0, 0, Some((b.session, giving)));
     p.tries.clear();
     let _ = h.keep_tries(&code, &p);
-    if let Some(said) = h.0.announced.lock().as_ref() {
-        let _ = said.say(false);
-    }
     tracing::info!("this helper is linked to a Spool");
     Ok(Json(json!({"linked": true})))
 }

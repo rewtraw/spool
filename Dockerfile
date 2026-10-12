@@ -42,6 +42,7 @@ ENV SPOOL_DATA_DIR=/data HOME=/data SPOOL_BIND=0.0.0.0:7979
 RUN mkdir -p /data && chmod 1777 /data
 VOLUME /data
 EXPOSE 7979
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/7979' || exit 1
+# Wherever it was told to answer: SPOOL_BIND names the port when it is not the usual one.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/${SPOOL_BIND##*:}' || exit 1
 ENTRYPOINT ["tini", "--", "spool"]
 CMD ["serve"]

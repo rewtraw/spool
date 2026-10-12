@@ -36,7 +36,8 @@ ring = "0.17"
 base64 = "0.22"
 tokio-util = { version = "0.7", features = ["io"] }
 spake2 = "0.4"
-mdns-sd = "0.21"
+if-addrs = "0.15"
+socket2 = "0.6"
 
 [dev-dependencies]
 spool-nntp = { path = "../spool-nntp", features = ["testing"] }
