@@ -927,15 +927,24 @@ fn sample(root: &Path, depth: usize) -> Option<(PathBuf, u64)> {
     })
 }
 
+/// Take away any marker left at the top of a folder. Only what a marker is: a file of that
+/// name with nothing in it. A file with anything in it is not one of these whatever it is
+/// called, and neither is a folder or a link, so nothing that holds anything is ever
+/// removed here.
+fn clear_marks_in(folder: &Path) {
+    for e in std::fs::read_dir(folder).into_iter().flatten().flatten() {
+        let ours = e.file_name().to_string_lossy().starts_with(MARK) && std::fs::symlink_metadata(e.path()).is_ok_and(|m| m.file_type().is_file() && m.len() == 0);
+        if ours {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 impl Helper {
     /// Take away any marker left in the folders it works in.
     fn clear_marks(&self) {
         let c = &self.0.conf;
-        for folder in c.roots.iter().chain([&c.downloads]) {
-            for e in std::fs::read_dir(folder).into_iter().flatten().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(MARK)) {
-                let _ = std::fs::remove_file(e.path());
-            }
-        }
+        c.roots.iter().chain([&c.downloads]).for_each(|folder| clear_marks_in(folder));
     }
 }
 
@@ -1157,6 +1166,36 @@ pub async fn serve(bind: &str, data_dir: &Path, conf: Conf) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_empty_file_of_a_markers_name_is_ever_cleared_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |name: &str| dir.path().join(name);
+        std::fs::write(at(".spool-here-abc"), b"").unwrap();
+        // None of these is a marker, whatever it is called or wherever it lies.
+        std::fs::write(at(".spool-here-has-something-in-it"), b"x").unwrap();
+        std::fs::write(at("A Film (1999).mkv"), b"a film").unwrap();
+        std::fs::write(at("empty but not a marker.mkv"), b"").unwrap();
+        std::fs::create_dir_all(at(".spool-here-a-folder")).unwrap();
+        std::fs::create_dir_all(at("A Film (2001)")).unwrap();
+        std::fs::write(at("A Film (2001)/.spool-here-deeper"), b"").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(at("A Film (1999).mkv"), at(".spool-here-a-link")).unwrap();
+        clear_marks_in(dir.path());
+        let mut left: Vec<String> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        left.sort();
+        let mut kept = vec![".spool-here-a-folder", ".spool-here-has-something-in-it", "A Film (1999).mkv", "A Film (2001)", "empty but not a marker.mkv"];
+        #[cfg(unix)]
+        kept.push(".spool-here-a-link");
+        kept.sort();
+        assert_eq!(left, kept);
+        assert!(at("A Film (2001)/.spool-here-deeper").exists(), "nothing inside a folder is looked at");
+        assert_eq!(std::fs::read(at("A Film (1999).mkv")).unwrap(), b"a film");
+        // A folder that is not there, or is a file, is nothing to clear.
+        clear_marks_in(&at("no such folder"));
+        clear_marks_in(&at("A Film (1999).mkv"));
+        assert_eq!(std::fs::read(at("A Film (1999).mkv")).unwrap(), b"a film");
+    }
 
     #[test]
     fn mount_points_are_read_from_the_list_linux_keeps() {
