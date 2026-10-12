@@ -128,7 +128,7 @@ Spool cannot work out by itself which players can reach the NAS, which is why it
 
 **Try it with one player first.** Put in the address of one player and play a film that is on the NAS. Being sent elsewhere for a film is something a player has to follow, and a player that does not will fail to play. If it plays, and still plays after skipping forward, widen the range. Infuse 8.5 on a Mac follows and seeks; Infuse on an Apple TV has not been tried yet.
 
-**A player that reaches Spool over Tailscale** is seen at its Tailscale address, even at home, so a home range does not cover it. Name such a player by its Tailscale address if it never leaves home. Do not put in the whole Tailscale range unless the NAS is on Tailscale too: a phone away from home would be sent to a NAS it cannot reach.
+**A player that reaches Spool over Tailscale** is seen at its Tailscale address, even at home. Spool asks Tailscale on its own machine where it is really talking to that player: when the two talk directly, the player is placed by that address, so a home range covers it at home and not away. A player reached through one of Tailscale's relays is taken to be away and gets the film through Spool. A player can also be named by its Tailscale address, and is then sent wherever it is. Do not put in the whole Tailscale range unless the NAS is on Tailscale too: a phone away from home would be sent to a NAS it cannot reach.
 
 **The address players use.** Players are sent to the address Spool itself uses for the helper. If they reach the NAS at a different one, give it under **Address players use**.
 

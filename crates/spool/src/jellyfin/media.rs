@@ -19,7 +19,14 @@ pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderM
     let Some(id) = Id::parse(id) else { return StatusCode::NOT_FOUND.into_response() };
     let path: Option<PathBuf> = Library::shared(app).ok().and_then(|lib| lib.extra_path(id).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| t.file_path(f))));
     let Some(path) = path else { return StatusCode::NOT_FOUND.into_response() };
-    match app.play_direct(&path, player) {
+    // A player on Tailscale is placed by where it is really reached, which is what says
+    // whether it can reach the other machine too.
+    // One named by its Tailscale address is still sent wherever it is.
+    let really = match player {
+        Some(ip) => crate::link::tailnet::really(ip).await,
+        None => None,
+    };
+    match app.play_direct(&path, really).or_else(|| app.play_direct(&path, player)) {
         // Followed for this request only: the next one is asked of Spool again, and may be
         // answered differently.
         Some(there) => (StatusCode::TEMPORARY_REDIRECT, [(header::LOCATION, there.as_str()), (header::CACHE_CONTROL, "private, no-store"), (header::REFERRER_POLICY, "no-referrer")]).into_response(),

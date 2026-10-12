@@ -9,6 +9,7 @@
 //! Each kind of thing a link can do is spoken in versions of its own, so that two Spools on
 //! different releases go on doing whatever they both still understand.
 
+pub mod tailnet;
 pub mod ticket;
 
 use serde::{Deserialize, Serialize};
