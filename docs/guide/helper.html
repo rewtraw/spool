@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#playing-from-the-helper">Playing from the helper</a><a class="sub" href="#when-it-does-not-connect">When it does not connect</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a class="on" aria-current="page" href="helper.html">A helper on the NAS</a><a class="sub" href="#what-the-helper-does-and-what-it-leaves-alone">What the helper does, and what it leaves alone</a><a class="sub" href="#what-it-may-touch">What it may touch</a><a class="sub" href="#setting-one-up">Setting one up</a><a class="sub" href="#playing-from-the-helper">Playing from the helper</a><a class="sub" href="#looking-through-its-own-folders">Looking through its own folders</a><a class="sub" href="#when-it-does-not-connect">When it does not connect</a><a class="sub" href="#keeping-the-two-in-step">Keeping the two in step</a><a class="sub" href="#limits">Limits</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -144,6 +144,11 @@
 <td>Disk to disk inside the NAS</td>
 </tr>
 <tr>
+<td>Reading what is in the NAS&#39;s folders</td>
+<td>Every folder listed across the network when a location is looked through or scanned</td>
+<td>Listed by the NAS, and only what it found sent over; see <a href="#looking-through-its-own-folders">Looking through its own folders</a></td>
+</tr>
+<tr>
 <td>Playing a film kept on the NAS, at home</td>
 <td>NAS to Spool&#39;s machine to the player</td>
 <td>From the NAS to the player, once you say which players; see <a href="#playing-from-the-helper">Playing from the helper</a></td>
@@ -151,7 +156,7 @@
 </tbody></table></div>
 <p>Still done by Spool across the share, as before:</p>
 <ul>
-<li>reading folders and each file&#39;s details, when a location is looked through or scanned;</li>
+<li>reading the details of a file that is new to Spool: how long it runs, what video and sound are in it;</li>
 <li>subtitles, recycling and deleting;</li>
 <li>playing, for every player you have not named as one to send to the helper;</li>
 <li>everything on a location the helper does not serve.</li>
@@ -272,6 +277,17 @@ volumes:
 <p><strong>The address players use.</strong> Players are sent to the address Spool itself uses for the helper. If they reach the NAS at a different one, give it under <strong>Address players use</strong>.</p>
 <p><strong>If the helper is away,</strong> nobody is sent to it and every film comes through Spool. A helper that stops in the middle of a film stops that film; starting it again plays it through Spool.</p>
 <p>The helper sends no more than 48 parts of files at once, and turns away the next request at once, without keeping it waiting.</p>
+<h2 id="looking-through-its-own-folders"><a href="#looking-through-its-own-folders">Looking through its own folders</a></h2>
+<p>When a location is looked through or scanned, Spool has to know what is in each title&#39;s folder: the film or the episodes, their sizes, and the pictures, trailers and notes beside them. Across a share that is one request after another for every folder. A helper is asked instead, reads the folder on its own disks, and sends back what it found. Nothing has to be set for this; it happens for every folder a helper serves, when both are recent enough.</p>
+<p><strong>What Spool concludes from it.</strong> A file on record that the helper no longer finds is taken off the record, as it is when Spool reads the folder itself. So an answer has to be a whole one:</p>
+<ul>
+<li>A folder the helper could not read to the end is not answered at all, and Spool concludes nothing about it until the next scan.</li>
+<li>A shared folder that is empty, or is on another disk than it was when the helper started, is taken for a disk that has gone. So is a folder under a disk that was mounted inside a shared folder then and is not now. The helper says so, and no title there loses its files on record.</li>
+<li>When the helper was asked and could not say, Spool does not then read the same folder across the share. The share shows the same disks.</li>
+</ul>
+<p><strong>Links.</strong> The helper follows no link inside the folders it shares, so that it never tells of anything outside them. A folder with a link in it, or reached through one, is read by Spool across the share, as before. The helper checks for links by name as it goes; a link put in place of a folder at the very moment it is being read could still be followed, which matters only once a link is given to someone who is not trusted with the disks.</p>
+<p><strong>A file that is new</strong> still has its details read by Spool across the share. If the helper tells of a file a moment before the share shows it, it is put on record at the next scan, and a compact version waits for the file it was made from.</p>
+<p>The helper looks through four folders at a time; more wait their turn.</p>
 <h2 id="when-it-does-not-connect"><a href="#when-it-does-not-connect">When it does not connect</a></h2>
 <p><strong>&quot;The helper did not answer&quot;, and Spool runs on a Mac.</strong> macOS asks before a program may reach other machines on the local network, and a Spool started as a service has nobody to ask: the request is refused without a word. Under System Settings, Privacy &amp; Security, Local Network, turn on <strong>spool</strong>. The sign is that the helper answers <code>curl</code> from a shell on the same Mac and not Spool. Sign the program with a stable identity, as for <a href="getting-started.html#running-it-as-a-service">a removable disk</a>, or macOS takes each new build for a new program and the permission has to be given again.</p>
 <p><strong>&quot;Does not speak as this Spool does&quot;.</strong> The two are too far apart in version to work together. Update both; see below.</p>
@@ -293,8 +309,9 @@ SPOOL_HELPER_KEY=&lt;the helper&#39;s key&gt;
 <h2 id="limits"><a href="#limits">Limits</a></h2>
 <ul>
 <li>The Usenet speed limit applies to Spool&#39;s machine and to each helper separately, so together they may use more than the limit.</li>
-<li>The folders a location is looked through or scanned from are still read across the share.</li>
-<li>A film played from the NAS still goes through Spool&#39;s machine to the player.</li>
+<li>A file that is new to Spool still has its details read across the share, a little of each.</li>
+<li>A film played from the NAS goes through Spool&#39;s machine for every player not named as one to send there.</li>
+<li>A folder with a link in it is read across the share, since the helper follows no link.</li>
 <li>A move between a helper&#39;s disks and anywhere else is Spool&#39;s own to carry out, across the share.</li>
 </ul>
 <nav class="around" aria-label="Other guides"><a class="prev" href="locations.html"><span>Before</span>A library in more than one place</a><a class="next" href="players.html"><span>Next</span>Playing on a television</a></nav>

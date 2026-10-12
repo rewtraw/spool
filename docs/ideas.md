@@ -33,13 +33,13 @@ Spool already records what these need: the change count described in [architectu
 
 | Job | Today | With the helper doing it |
 | --- | --- | --- |
-| Reading a folder and each file's details | Every file opened across the network when a location is looked through or scanned | Read on the NAS; only the findings cross |
+| Reading each new file's details | A little of each new file read across the network | Read on the NAS; only the findings cross |
 | Checking subtitles against the sound | The sound track read across the network | On the NAS |
 | Playing | NAS to Spool's machine to the player | From the NAS to the player directly; see [Linked Spools](#linked-spools) |
 
 It would also remove the need for the helper's downloads folder to be shared with Spool's machine, since Spool would no longer read a download before filing it.
 
-**What it would cost.** Each is a part of Spool that reads files directly today and would have to ask the helper instead: the import plan, the library scan and the subtitle check. Playing from the NAS means the helper serving files to players, which gives it a door to the outside that it does not have now.
+**What it would cost.** Each is a part of Spool that reads files directly today and would have to ask the helper instead: the import plan, the reading of a file's details and the subtitle check. (Listing what is in a folder is already the helper's; see [Looking through its own folders](helper.md#looking-through-its-own-folders).) Playing from the NAS means the helper serving files to players, which gives it a door to the outside that it does not have now.
 
 **Why it is waiting.** The jobs that move whole films across the network are the ones that were slow, and those are done. These read a little of each file.
 
@@ -47,7 +47,7 @@ It would also remove the need for the helper's downloads folder to be shared wit
 
 ## Linked Spools
 
-**What it is.** One idea in place of three. A [helper](helper.md) on a NAS, a NAS that plays its own films, and a library shared with another household were written up here as separate things. They are the same thing at different levels of trust: one Spool linked to another, with what the link allows as the only difference. This is being built, in the stages below. The first two are done: see [Playing from the helper](helper.md#playing-from-the-helper).
+**What it is.** One idea in place of three. A [helper](helper.md) on a NAS, a NAS that plays its own films, and a library shared with another household were written up here as separate things. They are the same thing at different levels of trust: one Spool linked to another, with what the link allows as the only difference. This is being built, in the stages below. The first three are done: see [Playing from the helper](helper.md#playing-from-the-helper) and [Looking through its own folders](helper.md#looking-through-its-own-folders).
 
 **What a link allows.** Two Spools are linked with a code. Each then grants the other some of three things:
 

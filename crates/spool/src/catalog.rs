@@ -288,15 +288,12 @@ impl App {
         let root = Path::new(copy.map(String::as_str).unwrap_or(&title.path));
         // Only the film or the episodes are library files. Trailers, featurettes, samples and
         // artwork are noted beside the title and otherwise left out of everything.
-        let (on_disk, local) = {
-            let (root, kind) = (root.to_path_buf(), title.kind);
-            tokio::task::spawn_blocking(move || crate::local::survey(&root, kind)).await.unwrap_or_default()
-        };
+        let crate::local::Survey { videos: on_disk, local } = self.survey(root, title.kind).await?;
         report.files_found += on_disk.len();
         let known: Vec<MediaFile> = self.db.files(id)?.into_iter().filter(|f| f.base.as_ref() == copy).collect();
 
         for f in &known {
-            if !on_disk.contains(&f.rel_path) {
+            if !on_disk.iter().any(|v| v.rel == f.rel_path) {
                 self.db.with(|c| c.execute("DELETE FROM files WHERE id = ?1", [f.id]))?;
                 if local.extras.iter().any(|e| e.rel_path == f.rel_path) {
                     // An earlier scan took an extra for the film. The file is still there.
@@ -312,10 +309,20 @@ impl App {
         let stem = |rel: &str| Path::new(rel).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
         // The originals first, so that a compact version finds the file it was made from
         // already on record when its turn comes.
-        let mut fresh: Vec<&String> = on_disk.iter().filter(|r| !known.iter().any(|f| f.rel_path == **r)).collect();
-        fresh.sort_by_key(|r| crate::compact::compact_source_stem(&stem(r)).is_some());
-        for rel in fresh {
-            let abs = root.join(rel);
+        let mut fresh: Vec<&crate::local::VideoFile> = on_disk.iter().filter(|v| !known.iter().any(|f| f.rel_path == v.rel)).collect();
+        fresh.sort_by_key(|v| crate::compact::compact_source_stem(&stem(&v.rel)).is_some());
+        // A linked machine may tell of a file a moment before the share shows it here. It is
+        // taken up when it can be read from here, which its details need; and while an
+        // original waits, so do the compact versions, which would otherwise be put on record
+        // as belonging to nothing.
+        let mut waiting = false;
+        for crate::local::VideoFile { rel, size } in fresh {
+            let (abs, size) = (root.join(rel), *size);
+            let is_compact = crate::compact::compact_source_stem(&stem(rel)).is_some();
+            if (waiting && is_compact) || !abs.exists() {
+                waiting |= !is_compact;
+                continue;
+            }
             // A compact version is known by its name, and belongs to the file it was made
             // from: the one of that name, wherever the title keeps it, or failing that the
             // file of the episode it names.
@@ -329,7 +336,6 @@ impl App {
                     })
                 }
             };
-            let size = std::fs::metadata(&abs).map(|m| m.len()).unwrap_or(0);
             let name = abs.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let flavor = title.kind.flavor();
             let episode_ids: Vec<i64> = match title.kind {
@@ -405,11 +411,6 @@ impl App {
         Ok(())
     }
 
-    async fn look_in_folder(&self, title: &Title) -> (Vec<String>, crate::local::Local) {
-        let (root, kind) = (std::path::PathBuf::from(&title.path), title.kind);
-        tokio::task::spawn_blocking(move || crate::local::survey(&root, kind)).await.unwrap_or_default()
-    }
-
     /// Note what a title's folder holds beside the film, if that has changed.
     fn keep_local(&self, id: i64, local: crate::local::Local) -> Result<()> {
         let Some(mut t) = self.db.title(id)? else { return Ok(()) };
@@ -457,7 +458,7 @@ impl App {
         if title.path.is_empty() || !self.title_online(&title) {
             return Ok(());
         }
-        let (_, local) = self.look_in_folder(&title).await;
+        let local = self.survey(Path::new(&title.path), title.kind).await?.local;
         let known = self.db.files(id)?;
         for f in known.iter().filter(|f| local.extras.iter().any(|e| e.rel_path == f.rel_path)) {
             self.db.with(|c| c.execute("DELETE FROM files WHERE id = ?1", [f.id]))?;
@@ -516,24 +517,5 @@ impl App {
             }
         }
         Ok((same, differ))
-    }
-}
-
-pub(crate) fn collect(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
-    for e in rd.flatten() {
-        let p = e.path();
-        // What a file system or a file manager keeps for itself is not part of the library:
-        // ".AppleDouble" and "._name" hold a Mac's notes about a file under that file's own
-        // name, "@eaDir" a NAS's thumbnails. Taken at their word they pass for posters and videos.
-        let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') || name == "@eaDir" || name == "#recycle" {
-            continue;
-        }
-        if p.is_dir() {
-            collect(&p, out);
-        } else {
-            out.push(p);
-        }
     }
 }

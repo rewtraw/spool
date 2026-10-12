@@ -19,7 +19,8 @@
 
 use crate::app::{App, Event};
 use crate::helper::Pushed;
-use crate::link::ticket::Signer;
+use crate::link::ticket::{plain, Signer};
+use crate::local::{Blocked, FolderSummary, Survey};
 use crate::link::{agreed, Grants, Hello, Net, Share};
 use crate::models::*;
 use crate::settings::LinkConf;
@@ -47,6 +48,8 @@ pub struct Seen {
     pub usable: bool,
     /// It hands files to players who come with a ticket.
     pub play: bool,
+    /// It looks through its own folders when asked, and says what is in them.
+    pub see: bool,
     /// What it allows this Spool.
     pub grants: Grants,
     /// It is from before links, and has the work and nothing else.
@@ -106,6 +109,37 @@ pub struct Remote {
     /// have in it yet.
     fresh: Mutex<HashMap<String, (Instant, JobStatus)>>,
     seen: Mutex<Seen>,
+}
+
+/// Something a linked machine is asked to find in its own folders.
+trait Looked: serde::de::DeserializeOwned + Send + 'static {
+    /// What it is called in the address it is asked for at.
+    const WHAT: &'static str;
+    /// Reading the same folder from this machine.
+    fn local(root: &Path, kind: Kind) -> std::result::Result<Self, Blocked>;
+    /// Whether every name in it is one that can be joined to a folder here and stay inside.
+    fn sound(&self) -> bool;
+}
+
+impl Looked for Survey {
+    const WHAT: &'static str = "survey";
+    fn local(root: &Path, kind: Kind) -> std::result::Result<Self, Blocked> {
+        crate::local::survey(root, kind, true)
+    }
+    fn sound(&self) -> bool {
+        let l = &self.local;
+        self.videos.iter().map(|v| &v.rel).chain(l.extras.iter().map(|e| &e.rel_path)).chain(l.art.iter().map(|a| &a.rel_path)).chain(&l.themes).all(|rel| plain(rel)) && (l.notes.rel_path.is_empty() || plain(&l.notes.rel_path))
+    }
+}
+
+impl Looked for Vec<FolderSummary> {
+    const WHAT: &'static str = "folders";
+    fn local(root: &Path, kind: Kind) -> std::result::Result<Self, Blocked> {
+        crate::local::folders(root, kind, true)
+    }
+    fn sound(&self) -> bool {
+        self.iter().all(|f| plain(&f.name) && !f.name.contains('/'))
+    }
 }
 
 /// What is known of a download when it is asked after.
@@ -300,10 +334,28 @@ impl Remote {
         Ok(self.post(&format!("/helper/moves/{id}/finish"), json!({"remove_original": remove_original}), Duration::from_secs(600)).await.map(|_| ())?)
     }
 
+    /// Have the linked machine look through one of its own folders, known here as `here`.
+    /// None when it does not do that for this Spool, or the folder is in none of the
+    /// folders it shares, and whoever asks has to look for themselves.
+    async fn look<T: Looked>(&self, here: &Path, kind: Kind) -> Option<Asked<T>> {
+        let there = self.there(here)?;
+        let (share, rel) = {
+            let seen = self.seen.lock();
+            if !(seen.reachable && seen.see) {
+                return None;
+            }
+            let share = seen.shares.iter().find(|s| there.starts_with(&s.path))?;
+            (share.id.clone(), there.strip_prefix(&share.path).ok()?.to_string_lossy().to_string())
+        };
+        let said = self.post(&format!("/link/see/v1/{}", T::WHAT), json!({"share": share, "rel": rel, "kind": kind}), Duration::from_secs(120)).await;
+        let garbled = || Fail::Garbled(format!("{}'s helper said what is in {} in a way this Spool cannot read", self.conf.name, here.display()));
+        Some(said.and_then(|v| serde_json::from_value::<T>(v).ok().filter(T::sound).ok_or_else(garbled)))
+    }
+
     /// What is known of the helper when it does not answer.
     fn away(&self, why: String) {
         let mut seen = self.seen.lock();
-        (seen.asked, seen.reachable, seen.usable, seen.play, seen.problem, seen.again) = (true, false, false, false, why, None);
+        (seen.asked, seen.reachable, seen.usable, seen.play, seen.see, seen.problem, seen.again) = (true, false, false, false, false, why, None);
     }
 
     /// Find out what the helper is: what it speaks, what it allows, and what it shares.
@@ -316,12 +368,13 @@ impl Remote {
                 Ok(hello) => {
                     let work = hello.grants.work && agreed(crate::link::WORK, &hello.protocols.work).is_some();
                     next.play = hello.grants.play && agreed(crate::link::PLAY, &hello.protocols.play).is_some();
+                    next.see = hello.grants.see && agreed(crate::link::SEE, &hello.protocols.see).is_some();
                     (next.boot, next.version, next.grants, next.shares) = (hello.boot, hello.version, hello.grants, hello.shares);
                     if work {
                         self.meet_work(&mut next).await;
                     } else if hello.grants.work {
                         next.problem = format!("{name}'s helper is version {} and does not speak of work as this Spool does; update the two", next.version);
-                    } else if !next.play {
+                    } else if !(next.play || next.see) {
                         next.problem = format!("{name}'s helper allows this Spool nothing it can use");
                     }
                 }
@@ -723,6 +776,33 @@ impl App {
             }
         }
         crate::import::move_file(src, dst)
+    }
+
+    /// Look through a folder: asked of the linked Spool whose disks it is on, where there
+    /// is one that tells, and read from here otherwise. A linked Spool that was asked and
+    /// could not say is not second-guessed across the share: the share shows the same disks,
+    /// and what could not be seen there is not known to be gone. The one exception is a
+    /// folder with links in it, which the linked Spool will not follow and this one may.
+    async fn look<T: Looked>(&self, root: &Path, kind: Kind) -> Result<T> {
+        if let Some(r) = self.remotes().into_iter().find(|r| r.covers(root)) {
+            match r.look::<T>(root, kind).await {
+                Some(Ok(found)) => return Ok(found),
+                Some(Err(Fail::Refused { status: 409, .. })) | None => {}
+                Some(Err(e)) => return Err(e.into()),
+            }
+        }
+        let root = root.to_path_buf();
+        Ok(tokio::task::spawn_blocking(move || T::local(&root, kind)).await??)
+    }
+
+    /// The films or episodes in a title's folder, and what lies beside them.
+    pub async fn survey(&self, root: &Path, kind: Kind) -> Result<Survey> {
+        self.look(root, kind).await
+    }
+
+    /// The folders in a library folder that hold a film or episodes.
+    pub async fn folders(&self, root: &Path, kind: Kind) -> Result<Vec<FolderSummary>> {
+        self.look(root, kind).await
     }
 
     /// Where a player can take a file from the machine that holds it, if there is a link to

@@ -11,7 +11,7 @@
 use crate::models::Kind;
 use serde::{Deserialize, Serialize};
 use spool_core::parser::is_video_file;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -510,11 +510,137 @@ pub fn read_notes(rel_path: &str, text: &str) -> Notes {
     n
 }
 
-/// Walk a title's folder. Returns the films or episodes found, as paths within it, and
-/// everything else worth knowing about. Reads the folder and its notes; changes nothing.
-pub fn survey(root: &Path, kind: Kind) -> (Vec<String>, Local) {
+/// A film or an episode found in a title's folder, by its path within it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct VideoFile {
+    pub rel: String,
+    pub size: u64,
+}
+
+/// What a look through a title's folder found: the films or episodes, and everything else
+/// worth knowing about. It is the same whether this machine looked or a linked one did.
+/// Records are removed on the strength of it, so it is never made of half a look, and one
+/// that arrives with a part missing is not read as one that found nothing.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Survey {
+    pub videos: Vec<VideoFile>,
+    pub local: Local,
+}
+
+impl Survey {
+    pub fn has(&self, rel: &str) -> bool {
+        self.videos.iter().any(|v| v.rel == rel)
+    }
+}
+
+/// A folder inside a library folder that holds a film or episodes, with how much.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FolderSummary {
+    pub name: String,
+    pub files: usize,
+    pub bytes: u64,
+    /// What a media server's notes in the folder say it is.
+    pub notes: Notes,
+}
+
+/// Why a folder could not be looked through to the end.
+#[derive(Debug)]
+pub enum Blocked {
+    /// Something in it is a link, and whoever looked does not follow links.
+    Link(PathBuf),
+    Unread(PathBuf, std::io::Error),
+}
+
+impl std::fmt::Display for Blocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Blocked::Link(p) => write!(f, "{} is a link, and links are not followed here", p.display()),
+            Blocked::Unread(p, e) => write!(f, "{} could not be read: {e}", p.display()),
+        }
+    }
+}
+
+impl std::error::Error for Blocked {}
+
+/// Folders inside folders, as deep as a library ever goes. Past this, something leads back
+/// to where it started.
+const DEEPEST: usize = 12;
+
+/// Every file under a folder. What cannot be read stops the look: half a list is not a list.
+/// With `follow`, a link is taken for what it leads to, as a library on this machine may be
+/// laid out; without, a link stops the look, so that nothing outside the folder is told of.
+fn collect(dir: &Path, follow: bool, depth: usize, out: &mut Vec<PathBuf>) -> Result<(), Blocked> {
+    let unread = |e| Blocked::Unread(dir.to_path_buf(), e);
+    if depth > DEEPEST {
+        return Err(unread(std::io::Error::other("its folders go deeper than a library's do")));
+    }
+    for e in std::fs::read_dir(dir).map_err(unread)? {
+        let e = e.map_err(unread)?;
+        // What a file system or a file manager keeps for itself is not part of the library:
+        // ".AppleDouble" and "._name" hold a Mac's notes about a file under that file's own
+        // name, "@eaDir" a NAS's thumbnails. Taken at their word they pass for posters and videos.
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') || name == "@eaDir" || name == "#recycle" {
+            continue;
+        }
+        let (p, kind) = (e.path(), e.file_type().map_err(unread)?);
+        let is_dir = if kind.is_symlink() {
+            if !follow {
+                return Err(Blocked::Link(p));
+            }
+            match std::fs::metadata(&p) {
+                Ok(meta) => meta.is_dir(),
+                // A link to nothing is nothing. One that cannot be followed is something unread.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(Blocked::Unread(p, e)),
+            }
+        } else {
+            kind.is_dir()
+        };
+        if is_dir {
+            collect(&p, follow, depth + 1, out)?;
+        } else {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
+/// The folders directly inside a library folder that hold a film or episodes. Trailers and
+/// other extras do not count: a folder with only those holds nothing to add. A folder that
+/// cannot be read is passed over, since nothing is concluded from its absence here.
+pub fn folders(root: &Path, kind: Kind, follow: bool) -> Result<Vec<FolderSummary>, Blocked> {
+    let unread = |e| Blocked::Unread(root.to_path_buf(), e);
+    let mut out = vec![];
+    for e in std::fs::read_dir(root).map_err(unread)? {
+        let e = e.map_err(unread)?;
+        let (path, name) = (e.path(), e.file_name().to_string_lossy().to_string());
+        if name.starts_with('.') || !path.is_dir() {
+            continue;
+        }
+        match survey(&path, kind, follow) {
+            Ok(found) if !found.videos.is_empty() => out.push(FolderSummary { name, files: found.videos.len(), bytes: found.videos.iter().map(|v| v.size).sum(), notes: found.local.notes }),
+            Ok(_) => {}
+            Err(Blocked::Link(p)) => return Err(Blocked::Link(p)),
+            Err(e) => tracing::warn!(error = %e, "a folder was passed over"),
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// Walk a title's folder. Reads the folder and its notes; changes nothing. A folder that is
+/// not there holds nothing; one that cannot be read to the end is an error, never an empty
+/// answer.
+pub fn survey(root: &Path, kind: Kind, follow: bool) -> Result<Survey, Blocked> {
     let mut files = vec![];
-    crate::catalog::collect(root, &mut files);
+    match std::fs::symlink_metadata(root) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Survey::default()),
+        Err(e) => return Err(Blocked::Unread(root.to_path_buf(), e)),
+        Ok(meta) if meta.file_type().is_symlink() && !follow => return Err(Blocked::Link(root.to_path_buf())),
+        Ok(_) => {}
+    }
+    collect(root, follow, 0, &mut files)?;
     let mut rels: Vec<String> = files.iter().filter_map(|p| p.strip_prefix(root).ok()).map(|r| r.to_string_lossy().to_string()).collect();
     rels.sort_by_key(|r| r.to_lowercase());
     let dir_of = |rel: &str| Path::new(rel).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
@@ -527,11 +653,11 @@ pub fn survey(root: &Path, kind: Kind) -> (Vec<String>, Local) {
     for rel in &rels {
         let dir = dir_of(rel);
         let siblings: Vec<String> = videos.iter().filter(|v| v.0 == dir).map(|v| v.1.clone()).collect();
-        let meta = std::fs::metadata(root.join(rel)).ok();
-        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified = meta.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let meta = std::fs::metadata(root.join(rel)).map_err(|e| Blocked::Unread(root.join(rel), e))?;
+        let size = meta.len();
+        let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
         match classify(rel, kind, &siblings) {
-            Class::Main => mains.push(rel.clone()),
+            Class::Main => mains.push(VideoFile { rel: rel.clone(), size }),
             Class::Extra(kind, name) => local.extras.push(Extra { rel_path: rel.clone(), kind, name, size }),
             Class::Art(kind, season) => local.art.push(LocalArt { rel_path: rel.clone(), kind, season, of: None, size, modified }),
             Class::PictureOf(stem) => {
@@ -559,7 +685,7 @@ pub fn survey(root: &Path, kind: Kind) -> (Vec<String>, Local) {
             Class::Ignored => {}
         }
     }
-    (mains, local)
+    Ok(Survey { videos: mains, local })
 }
 
 #[cfg(test)]
@@ -682,9 +808,35 @@ mod tests {
         lay("._The.Matrix.mkv");
         lay("@eaDir/The.Matrix.mkv/SYNOVIDEO_VIDEO_SCREENSHOT.jpg");
         lay(".DS_Store");
-        let (videos, local) = survey(dir.path(), Kind::Movie);
-        assert_eq!(videos, ["The.Matrix.mkv"]);
+        let Survey { videos, local } = survey(dir.path(), Kind::Movie, true).unwrap();
+        assert_eq!(videos.iter().map(|v| v.rel.as_str()).collect::<Vec<_>>(), ["The.Matrix.mkv"]);
         assert_eq!(local.art.iter().map(|a| a.rel_path.as_str()).collect::<Vec<_>>(), ["poster.jpg"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_look_is_whole_or_it_is_an_error() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let film = dir.path().join("Film (1999)");
+        std::fs::create_dir_all(film.join("Featurettes")).unwrap();
+        std::fs::write(film.join("Film (1999).mkv"), b"12345").unwrap();
+        let names = |s: Survey| s.videos.into_iter().map(|v| (v.rel, v.size)).collect::<Vec<_>>();
+        assert_eq!(names(survey(&film, Kind::Movie, false).unwrap()), [("Film (1999).mkv".to_string(), 5)]);
+        // A folder that is not there holds nothing, and that is an answer.
+        assert_eq!(survey(&dir.path().join("Gone (2000)"), Kind::Movie, false).unwrap(), Survey::default());
+        // A link to nothing is nothing to whoever follows links, and stops whoever does not.
+        symlink(dir.path().join("nowhere.mkv"), film.join("Film (1999) - 4K.mkv")).unwrap();
+        assert_eq!(names(survey(&film, Kind::Movie, true).unwrap()).len(), 1);
+        assert!(matches!(survey(&film, Kind::Movie, false), Err(Blocked::Link(_))));
+        std::fs::remove_file(film.join("Film (1999) - 4K.mkv")).unwrap();
+        // A folder that leads back into itself ends in an error, not in a look without end.
+        symlink(&film, film.join("Featurettes/again")).unwrap();
+        assert!(matches!(survey(&film, Kind::Movie, true), Err(Blocked::Unread(..))));
+        assert!(matches!(folders(dir.path(), Kind::Movie, false), Err(Blocked::Link(_))));
+        // What arrives with a part missing is not read as a look that found nothing.
+        assert!(serde_json::from_str::<Survey>("{}").is_err());
+        assert!(serde_json::from_str::<Survey>(r#"{"videos":[{"rel":"a.mkv"}],"local":{}}"#).is_err());
     }
 
     #[test]

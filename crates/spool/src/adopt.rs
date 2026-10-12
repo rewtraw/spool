@@ -170,26 +170,6 @@ struct Folder {
     notes: crate::local::Notes,
 }
 
-/// The folders directly inside a library folder that hold a film or episodes, with how much.
-/// Trailers and other extras do not count: a folder with only those holds nothing to add.
-fn folders(root: &str, kind: Kind) -> Vec<Folder> {
-    let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
-    let mut out = vec![];
-    for e in rd.flatten() {
-        let path = e.path();
-        if !path.is_dir() || e.file_name().to_string_lossy().starts_with('.') {
-            continue;
-        }
-        let (videos, local) = crate::local::survey(&path, kind);
-        if !videos.is_empty() {
-            let bytes = videos.iter().filter_map(|f| std::fs::metadata(path.join(f)).ok()).map(|m| m.len()).sum();
-            out.push(Folder { path: path.clone(), files: videos.len(), bytes, notes: local.notes });
-        }
-    }
-    out.sort_by(|a, b| a.path.cmp(&b.path));
-    out
-}
-
 impl App {
     /// Note that work on a location has stopped short, so nothing is left looking busy.
     pub fn adoption_failed(&self, why: &str) {
@@ -335,7 +315,13 @@ impl App {
         }
         *self.adoption.lock() = Some(Adoption { location: location_id, running: true, step: "looking".into(), ..Default::default() });
         let roots = [(Kind::Movie, loc.movie_root.clone()), (Kind::Series, loc.series_root.clone())];
-        let listed = tokio::task::spawn_blocking(move || roots.into_iter().filter(|(_, r)| !r.is_empty()).flat_map(|(k, r)| folders(&r, k).into_iter().map(move |f| (k, f))).collect::<Vec<_>>()).await.unwrap_or_default();
+        let mut listed = vec![];
+        for (kind, root) in roots.into_iter().filter(|(_, r)| !r.is_empty()) {
+            match self.folders(Path::new(&root), kind).await {
+                Ok(found) => listed.extend(found.into_iter().map(|f| (kind, Folder { path: Path::new(&root).join(&f.name), files: f.files, bytes: f.bytes, notes: f.notes }))),
+                Err(e) => bail!("{root} could not be looked through: {e:#}"),
+            }
+        }
         self.adoption_set(|a| a.total = listed.len());
         let here = self.db.titles(None).unwrap_or_default();
         for (kind, folder) in listed {

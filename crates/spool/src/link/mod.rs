@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 /// been released: what it means stays, and anything that would change it is a new version.
 pub const WORK: &[u32] = &[1];
 pub const PLAY: &[u32] = &[1];
+pub const SEE: &[u32] = &[1];
 
 /// What one side of a link lets the other do. Nothing, unless it says so.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,11 +61,14 @@ impl Grants {
 pub struct Protocols {
     pub work: Vec<u32>,
     pub play: Vec<u32>,
+    pub see: Vec<u32>,
 }
 
 impl Protocols {
-    pub fn ours() -> Protocols {
-        Protocols { work: WORK.to_vec(), play: PLAY.to_vec() }
+    /// What this Spool speaks, of the things it allows the other side.
+    pub fn allowed(g: Grants) -> Protocols {
+        let of = |granted: bool, versions: &[u32]| if granted { versions.to_vec() } else { vec![] };
+        Protocols { work: of(g.work, WORK), play: of(g.play, PLAY), see: of(g.see, SEE) }
     }
 }
 

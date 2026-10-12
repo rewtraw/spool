@@ -14,11 +14,12 @@ This part of Spool is new. It is tested end to end, with a helper and a Spool in
 | Repairing and unpacking | On Spool's machine | On the NAS |
 | Filing into the library | A copy across the network | A rename, or a copy from one of the NAS's disks to another |
 | Moving a title between two folders on the NAS | Read to Spool's machine and written back | Disk to disk inside the NAS |
+| Reading what is in the NAS's folders | Every folder listed across the network when a location is looked through or scanned | Listed by the NAS, and only what it found sent over; see [Looking through its own folders](#looking-through-its-own-folders) |
 | Playing a film kept on the NAS, at home | NAS to Spool's machine to the player | From the NAS to the player, once you say which players; see [Playing from the helper](#playing-from-the-helper) |
 
 Still done by Spool across the share, as before:
 
-- reading folders and each file's details, when a location is looked through or scanned;
+- reading the details of a file that is new to Spool: how long it runs, what video and sound are in it;
 - subtitles, recycling and deleting;
 - playing, for every player you have not named as one to send to the helper;
 - everything on a location the helper does not serve.
@@ -135,6 +136,22 @@ Spool cannot work out by itself which players can reach the NAS, which is why it
 
 The helper sends no more than 48 parts of files at once, and turns away the next request at once, without keeping it waiting.
 
+## Looking through its own folders
+
+When a location is looked through or scanned, Spool has to know what is in each title's folder: the film or the episodes, their sizes, and the pictures, trailers and notes beside them. Across a share that is one request after another for every folder. A helper is asked instead, reads the folder on its own disks, and sends back what it found. Nothing has to be set for this; it happens for every folder a helper serves, when both are recent enough.
+
+**What Spool concludes from it.** A file on record that the helper no longer finds is taken off the record, as it is when Spool reads the folder itself. So an answer has to be a whole one:
+
+- A folder the helper could not read to the end is not answered at all, and Spool concludes nothing about it until the next scan.
+- A shared folder that is empty, or is on another disk than it was when the helper started, is taken for a disk that has gone. So is a folder under a disk that was mounted inside a shared folder then and is not now. The helper says so, and no title there loses its files on record.
+- When the helper was asked and could not say, Spool does not then read the same folder across the share. The share shows the same disks.
+
+**Links.** The helper follows no link inside the folders it shares, so that it never tells of anything outside them. A folder with a link in it, or reached through one, is read by Spool across the share, as before. The helper checks for links by name as it goes; a link put in place of a folder at the very moment it is being read could still be followed, which matters only once a link is given to someone who is not trusted with the disks.
+
+**A file that is new** still has its details read by Spool across the share. If the helper tells of a file a moment before the share shows it, it is put on record at the next scan, and a compact version waits for the file it was made from.
+
+The helper looks through four folders at a time; more wait their turn.
+
 ## When it does not connect
 
 **"The helper did not answer", and Spool runs on a Mac.** macOS asks before a program may reach other machines on the local network, and a Spool started as a service has nobody to ask: the request is refused without a word. Under System Settings, Privacy & Security, Local Network, turn on **spool**. The sign is that the helper answers `curl` from a shell on the same Mac and not Spool. Sign the program with a stable identity, as for [a removable disk](getting-started.md#running-it-as-a-service), or macOS takes each new build for a new program and the permission has to be given again.
@@ -172,6 +189,7 @@ A helper that restarts in the middle of things picks up its downloads where they
 ## Limits
 
 - The Usenet speed limit applies to Spool's machine and to each helper separately, so together they may use more than the limit.
-- The folders a location is looked through or scanned from are still read across the share.
-- A film played from the NAS still goes through Spool's machine to the player.
+- A file that is new to Spool still has its details read across the share, a little of each.
+- A film played from the NAS goes through Spool's machine for every player not named as one to send there.
+- A folder with a link in it is read across the share, since the helper follows no link.
 - A move between a helper's disks and anywhere else is Spool's own to carry out, across the share.

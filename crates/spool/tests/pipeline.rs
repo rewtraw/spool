@@ -2985,6 +2985,120 @@ async fn fetch(http: &reqwest::Client, method: &str, url: &str, headers: &[(&str
     (status, head, resp.bytes().await.unwrap().to_vec())
 }
 
+/// The linked machine reads its own folders and says what is in them. What it says is taken
+/// over what the share shows, and what it cannot say is never taken for "nothing there".
+#[tokio::test(flavor = "multi_thread")]
+async fn a_linked_machine_looks_through_its_own_folders() {
+    use serde_json::{json, Value};
+    use spool::models::Kind;
+    let w = World::new(Mode::Active).await;
+    let (_helper, url, nas, mnt) = with_helper(&w).await;
+    let api = spool::api::router(w.app.clone());
+    let lay = |at: PathBuf, bytes: usize| {
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(at, vec![7u8; bytes]).unwrap();
+    };
+    lay(nas.join("films/Alpha (2001)/Alpha (2001).mkv"), 3000);
+    lay(nas.join("films/Alpha (2001)/poster.jpg"), 10);
+    lay(nas.join("films/Beta (2002)/Beta (2002).mkv"), 500);
+    lay(nas.join("films/Beta (2002)/Beta (2002) - 1080p.mkv"), 200);
+    lay(nas.join("films/Only a trailer/Trailers/teaser.mkv"), 50);
+
+    let (_, links) = call(&api, "GET", "/api/links", Value::Null).await;
+    assert_eq!(links[0]["seen"]["see"].as_bool(), Some(true), "{links}");
+    let share = |name: &str| links[0]["seen"]["shares"].as_array().unwrap().iter().find(|s| s["path"].as_str().unwrap().ends_with(name)).unwrap()["id"].as_str().unwrap().to_string();
+
+    // A library folder: the folders in it that hold a film, and how much.
+    let folders = w.app.folders(&mnt.join("films"), Kind::Movie).await.unwrap();
+    assert_eq!(folders.iter().map(|f| (f.name.as_str(), f.files, f.bytes)).collect::<Vec<_>>(), [("Alpha (2001)", 1, 3000), ("Beta (2002)", 2, 700)]);
+
+    // From here on this machine sees other disks than the linked one has, as it would if
+    // the share were stale. What the linked machine says is what is taken.
+    let other = w.root.join("other");
+    lay(other.join("films/Alpha (2001)/Seen across the share.mkv"), 1);
+    std::fs::remove_file(&mnt).unwrap();
+    std::os::unix::fs::symlink(&other, &mnt).unwrap();
+    let alpha = mnt.join("films/Alpha (2001)");
+    let found = w.app.survey(&alpha, Kind::Movie).await.unwrap();
+    assert_eq!(found.videos.iter().map(|v| (v.rel.as_str(), v.size)).collect::<Vec<_>>(), [("Alpha (2001).mkv", 3000)]);
+    assert_eq!(found.local.art.iter().map(|a| a.rel_path.as_str()).collect::<Vec<_>>(), ["poster.jpg"]);
+    // A folder that is not there, on a disk that is, holds nothing.
+    assert!(w.app.survey(&mnt.join("films/Gamma (2003)"), Kind::Movie).await.unwrap().videos.is_empty());
+
+    // A film it tells of that cannot be read from here yet is not put on record without
+    // its details, and one on record that it no longer has is taken off.
+    let mut title = w.movie("Alpha", 2001, "tt0000001");
+    title.path = alpha.to_string_lossy().to_string();
+    w.app.db.save_title(&mut title).unwrap();
+    let mut report = Default::default();
+    w.app.scan_title(title.id, &mut report).await.unwrap();
+    assert!(w.app.db.files(title.id).unwrap().is_empty(), "not readable from here yet");
+    lay(other.join("films/Alpha (2001)/Alpha (2001).mkv"), 3000);
+    w.app.scan_title(title.id, &mut report).await.unwrap();
+    assert_eq!(w.app.db.files(title.id).unwrap().iter().map(|f| (f.rel_path.as_str(), f.size)).collect::<Vec<_>>(), [("Alpha (2001).mkv", 3000)]);
+
+    // A compact version it tells of waits for its original, and is not put on record as
+    // a film of its own for want of one.
+    lay(nas.join("films/Beta (2002)/Beta (2002) - Compact 1080p.mkv"), 100);
+    for name in ["Beta (2002) - Compact 1080p.mkv", "Beta (2002) - 1080p.mkv"] {
+        lay(other.join("films/Beta (2002)").join(name), 100);
+    }
+    let mut beta = w.movie("Beta", 2002, "tt0000002");
+    beta.path = mnt.join("films/Beta (2002)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut beta).unwrap();
+    w.app.scan_title(beta.id, &mut report).await.unwrap();
+    assert_eq!(w.app.db.files(beta.id).unwrap().iter().map(|f| f.rel_path.as_str()).collect::<Vec<_>>(), ["Beta (2002) - 1080p.mkv"], "the original cannot be read yet, so its compact version waits");
+    lay(other.join("films/Beta (2002)/Beta (2002).mkv"), 500);
+    w.app.scan_title(beta.id, &mut report).await.unwrap();
+    let files = w.app.db.files(beta.id).unwrap();
+    let original = files.iter().find(|f| f.rel_path == "Beta (2002).mkv").unwrap().id;
+    assert_eq!(files.iter().find(|f| f.rel_path.contains("Compact")).unwrap().compact_of, Some(original));
+
+    // A shared folder with nothing in it is a disk that has gone. Nothing is concluded:
+    // the look fails, and the film on record stays on record.
+    let (kept, emptied) = (w.root.join("kept"), nas.join("films"));
+    std::fs::rename(&emptied, &kept).unwrap();
+    std::fs::create_dir_all(&emptied).unwrap();
+    assert!(w.app.survey(&alpha, Kind::Movie).await.is_err());
+    assert!(w.app.scan_title(title.id, &mut report).await.is_err());
+    assert_eq!(w.app.db.files(title.id).unwrap().len(), 1, "what could not be seen is not known to be gone");
+    std::fs::remove_dir(&emptied).unwrap();
+    std::fs::rename(&kept, &emptied).unwrap();
+
+    // The linked machine follows no link, so nothing outside what it shares is told of.
+    // This machine may follow one, and reads such a folder for itself.
+    std::os::unix::fs::symlink(w.root.join("kept-elsewhere"), nas.join("films/Alpha (2001)/Extras")).unwrap();
+    let http = reqwest::Client::new();
+    let ask = |what: &'static str, key: &'static str, body: Value| {
+        let (http, url) = (http.clone(), url.clone());
+        async move { http.post(format!("{url}/link/see/v1/{what}")).bearer_auth(key).json(&body).send().await.unwrap().status().as_u16() }
+    };
+    const KEY: &str = "a-key-of-sufficient-length";
+    assert_eq!(ask("survey", KEY, json!({"share": share("films"), "rel": "Alpha (2001)", "kind": "movie"})).await, 409);
+    let found = w.app.survey(&alpha, Kind::Movie).await.unwrap();
+    assert_eq!(found.videos.iter().map(|v| v.rel.as_str()).collect::<Vec<_>>(), ["Alpha (2001).mkv", "Seen across the share.mkv"], "read from here");
+    std::fs::remove_file(nas.join("films/Alpha (2001)/Extras")).unwrap();
+    // Nor on the way to a folder: one reached through a link is not looked through.
+    std::os::unix::fs::symlink(nas.join("films/Beta (2002)"), nas.join("films/By another name")).unwrap();
+    assert_eq!(ask("survey", KEY, json!({"share": share("films"), "rel": "By another name", "kind": "movie"})).await, 409);
+    std::fs::remove_file(nas.join("films/By another name")).unwrap();
+
+    // What is asked for is held to the shared folders, and nothing is said without the key.
+    for (status, key, body) in [
+        (200, KEY, json!({"share": share("films"), "rel": "Alpha (2001)", "kind": "movie"})),
+        (200, KEY, json!({"share": share("films"), "kind": "movie"})),
+        (401, "another-key-of-the-same-size", json!({"share": share("films"), "rel": "Alpha (2001)", "kind": "movie"})),
+        (404, KEY, json!({"share": "000000000000", "rel": "Alpha (2001)", "kind": "movie"})),
+        (400, KEY, json!({"share": share("films"), "rel": "../vault", "kind": "movie"})),
+        (400, KEY, json!({"share": share("films"), "rel": "/etc", "kind": "movie"})),
+        (503, KEY, json!({"share": share("vault"), "rel": "Alpha (2001)", "kind": "movie"})),
+        (503, KEY, json!({"share": share("vault"), "kind": "movie"})),
+    ] {
+        assert_eq!(ask("survey", key, body.clone()).await, status, "{body}");
+    }
+    assert_eq!(ask("folders", KEY, json!({"share": share("vault"), "kind": "movie"})).await, 200, "an empty library folder is only empty");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     use serde_json::{json, Value};
@@ -3137,7 +3251,7 @@ async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     assert_eq!(http.get(format!("{url}/link")).send().await.unwrap().status().as_u16(), 401, "it says nothing of itself without the key");
     let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
-    assert_eq!((hello["grants"].to_string().as_str(), hello["protocols"].to_string().as_str()), (r#"{"play":true,"see":true,"work":false}"#, r#"{"play":[1],"work":[]}"#), "{hello}");
+    assert_eq!((hello["grants"].to_string().as_str(), hello["protocols"].to_string().as_str()), (r#"{"play":true,"see":true,"work":false}"#, r#"{"play":[1],"see":[1],"work":[]}"#), "{hello}");
     for (method, path) in [("GET", "/helper/info"), ("GET", "/helper/jobs"), ("POST", "/helper/fs/remove"), ("POST", "/helper/moves"), ("PUT", "/helper/config")] {
         let resp = http.request(method.parse().unwrap(), format!("{url}{path}")).bearer_auth(KEY).json(&json!({"path": root.join("films/Alpha (2001)")})).send().await.unwrap();
         assert_eq!(resp.status().as_u16(), 403, "{method} {path}");
@@ -3150,7 +3264,9 @@ async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still
     let router = helper.router();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
-    assert_eq!(hello["protocols"].to_string(), r#"{"play":[],"work":[1]}"#);
+    assert_eq!(hello["protocols"].to_string(), r#"{"play":[],"see":[],"work":[1]}"#);
+    let asked = http.post(format!("{url}/link/see/v1/survey")).bearer_auth(KEY).json(&json!({"share": hello["shares"][0]["id"], "rel": "Alpha (2001)", "kind": "movie"})).send().await.unwrap();
+    assert_eq!(asked.status().as_u16(), 403, "it was not started to say what is in its folders");
     assert_eq!(http.get(format!("{url}/helper/info")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
     assert_eq!(http.get(format!("{url}/link/play/v1/file?ticket={}", ticket_for(&hello))).send().await.unwrap().status().as_u16(), 403);
 

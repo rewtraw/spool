@@ -14,6 +14,7 @@
 //! allowing: the work above, and playing, which is handing one file to a player who comes
 //! with a ticket from the Spool that drives it.
 
+use crate::local::{Blocked, FolderSummary, Survey};
 use crate::link::ticket::{self, Signer};
 use crate::link::{Grants, Hello, Protocols, Share};
 use crate::relocate::{copy_all, listing, remove_all, CALLED_OFF};
@@ -58,6 +59,9 @@ pub struct Conf {
 /// a time and lets go of them as it skips about; past this, one more is turned away at once
 /// and not kept waiting.
 const STREAMS: usize = 48;
+/// How many folders may be looked through at once, and how long one more waits its turn.
+const LOOKS: usize = 4;
+const LOOK_WAIT: Duration = Duration::from_secs(60);
 /// How long the name of a request for a download is remembered, in seconds.
 const REMEMBERED: u64 = 3600;
 
@@ -140,8 +144,15 @@ struct Inner {
     saving: tokio::sync::Mutex<()>,
     /// The folders it works in, as the other end of the link is told of them.
     shares: Vec<Share>,
+    /// The disk each shared folder was on when the helper started. A folder found on
+    /// another since is one whose disk has gone from under it.
+    disks: Vec<Option<u64>>,
+    /// What was mounted inside the shared folders then: a disk of its own under a shared
+    /// folder, which may go while the folder above it stays.
+    mounts: Vec<PathBuf>,
     signer: Signer,
     streams: Arc<tokio::sync::Semaphore>,
+    looks: Arc<tokio::sync::Semaphore>,
     /// Downloads lately taken, by the name the asker gave the request and with when, so that
     /// one asked for twice because the answer was lost is started once. Written down, so
     /// that this holds across a restart as the downloads themselves do.
@@ -186,7 +197,9 @@ impl Helper {
         };
         let engine = Engine::start(Self::engine_config(&conf, &pushed)).await?;
         let boot = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
-        let shares = conf.roots.iter().map(|p| Share::new(p, true)).chain(conf.read_roots.iter().map(|p| Share::new(p, false))).collect();
+        let shares: Vec<Share> = conf.roots.iter().map(|p| Share::new(p, true)).chain(conf.read_roots.iter().map(|p| Share::new(p, false))).collect();
+        let disks = shares.iter().map(|s| disk_of(&s.path)).collect();
+        let mounts = mounted().into_iter().filter(|m| shares.iter().any(|s| m.starts_with(&s.path) && *m != s.path)).collect();
         let signer = Signer::new(&conf.key);
         Ok(Helper(Arc::new(Inner {
             engine,
@@ -196,8 +209,11 @@ impl Helper {
             pushed: Mutex::new(pushed),
             saving: Default::default(),
             shares,
+            disks,
+            mounts,
             signer,
             streams: Arc::new(tokio::sync::Semaphore::new(STREAMS)),
+            looks: Arc::new(tokio::sync::Semaphore::new(LOOKS)),
             taken: Mutex::new(std::fs::read(data_dir.join("taken.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()),
             ops: Mutex::new(HashMap::new()),
             filing: AtomicUsize::new(0),
@@ -276,7 +292,52 @@ impl Helper {
     pub fn router(&self) -> Router {
         let play = Router::new().route("/link/play/v1/file", get(play)).with_state(self.clone());
         let hello = Router::new().route("/link", get(hello)).layer(axum::middleware::from_fn_with_state(self.clone(), guard)).with_state(self.clone());
-        play.merge(hello).merge(self.work())
+        play.merge(hello).merge(self.see()).merge(self.work())
+    }
+
+    /// Version 1 of the see protocol: what is in the folders that are shared.
+    fn see(&self) -> Router {
+        Router::new()
+            .route("/link/see/v1/survey", post(look::<Survey>))
+            .route("/link/see/v1/folders", post(look::<Vec<FolderSummary>>))
+            .layer(axum::middleware::from_fn_with_state(self.clone(), allowed_to_see))
+            .layer(axum::middleware::from_fn_with_state(self.clone(), guard))
+            .with_state(self.clone())
+    }
+
+    /// The folder a look is asked for, if it is in a shared folder whose disk is there.
+    /// When records are removed on the strength of the answer (`removes`), a shared folder
+    /// that is empty is taken for one whose disk has gone: saying "nothing here" of it would
+    /// have every record of its files removed. So is one found on another disk than it was
+    /// on, or with a disk gone that was mounted on the way to the folder asked for.
+    fn looked_at(&self, ask: &Look, removes: bool) -> std::result::Result<PathBuf, Refused> {
+        let i = self.0.shares.iter().position(|s| s.id == ask.share).ok_or_else(|| Refused(StatusCode::NOT_FOUND, "no folder is shared under that name".into()))?;
+        if !(ask.rel.is_empty() || ticket::plain(&ask.rel)) {
+            return Err(Refused(StatusCode::BAD_REQUEST, format!("{} is not a place inside a shared folder", ask.rel)));
+        }
+        let root = &self.0.shares[i].path;
+        let target = if ask.rel.is_empty() { root.clone() } else { root.join(&ask.rel) };
+        let gone = |what: String| Refused(StatusCode::SERVICE_UNAVAILABLE, what);
+        let where_it_was = disk_of(root).is_some_and(|d| self.0.disks[i].is_none_or(|was| was == d));
+        if !where_it_was {
+            return Err(gone(format!("{} cannot be read, or is not on the disk it was on", root.display())));
+        }
+        if !std::fs::read_dir(root).is_ok_and(|mut d| !removes || d.next().is_some_and(|e| e.is_ok())) {
+            return Err(gone(format!("{} cannot be read or is empty", root.display())));
+        }
+        let now = mounted();
+        if let Some(lost) = self.0.mounts.iter().find(|m| target.starts_with(m) && !now.contains(m)) {
+            return Err(gone(format!("the disk that was at {} is not there", lost.display())));
+        }
+        // No link is followed on the way to the folder, any more than inside it.
+        let mut at = root.clone();
+        for part in Path::new(&ask.rel).components() {
+            at.push(part);
+            if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err(Refused(StatusCode::CONFLICT, format!("{} is a link, and links are not followed here", at.display())));
+            }
+        }
+        Ok(target)
     }
 
     fn work(&self) -> Router {
@@ -364,6 +425,39 @@ fn open_inside(root: &Path, rel: &str) -> std::result::Result<std::fs::File, Ins
     std::fs::File::open(path).map_err(|_| Inside::Missing)
 }
 
+/// Where disks are mounted, as Linux lists them; nothing on a system that does not.
+fn mounted() -> Vec<PathBuf> {
+    std::fs::read_to_string("/proc/self/mountinfo").map(|list| mount_points(&list)).unwrap_or_default()
+}
+
+/// The mount points in a list of mounts, of which the fifth word on each line is one, with
+/// a space, tab, newline or backslash in a name written as a backslash and three digits.
+fn mount_points(list: &str) -> Vec<PathBuf> {
+    let plain = |word: &str| {
+        let (bytes, mut out, mut i) = (word.as_bytes(), Vec::new(), 0);
+        while i < bytes.len() {
+            let code = (bytes[i] == b'\\').then(|| bytes.get(i + 1..i + 4)).flatten().and_then(|d| std::str::from_utf8(d).ok()).and_then(|d| u8::from_str_radix(d, 8).ok());
+            out.push(code.unwrap_or(bytes[i]));
+            i += if code.is_some() { 4 } else { 1 };
+        }
+        PathBuf::from(String::from_utf8_lossy(&out).to_string())
+    };
+    list.lines().filter_map(|line| line.split(' ').nth(4)).map(plain).collect()
+}
+
+/// The disk a folder is on, as the system numbers it.
+fn disk_of(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path).ok().map(|m| m.dev())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::metadata(path).ok().map(|_| 0)
+    }
+}
+
 fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -376,13 +470,70 @@ async fn allowed_to_work(State(h): State<Helper>, req: Request, next: Next) -> R
     next.run(req).await
 }
 
+/// What is in the shared folders is told only where that was allowed.
+async fn allowed_to_see(State(h): State<Helper>, req: Request, next: Next) -> Response {
+    if !h.0.conf.grants.see {
+        return Refused(StatusCode::FORBIDDEN, "this machine was not started to say what is in its folders".into()).into_response();
+    }
+    next.run(req).await
+}
+
+/// Which folder to look through, by the share it is in and its place there, and for what.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Look {
+    share: String,
+    #[serde(default)]
+    rel: String,
+    kind: crate::models::Kind,
+}
+
+/// Something that can be found by looking through a folder here. No link is followed, so
+/// nothing outside the shared folders is told of.
+trait Findable: Serialize + Send + 'static {
+    /// Whether records are removed on the strength of the answer.
+    const REMOVES: bool;
+    fn find(root: &Path, kind: crate::models::Kind) -> std::result::Result<Self, Blocked>
+    where
+        Self: Sized;
+}
+
+impl Findable for Survey {
+    const REMOVES: bool = true;
+    fn find(root: &Path, kind: crate::models::Kind) -> std::result::Result<Self, Blocked> {
+        crate::local::survey(root, kind, false)
+    }
+}
+
+impl Findable for Vec<FolderSummary> {
+    const REMOVES: bool = false;
+    fn find(root: &Path, kind: crate::models::Kind) -> std::result::Result<Self, Blocked> {
+        crate::local::folders(root, kind, false)
+    }
+}
+
+/// Look through one folder and say what is in it. An answer is a whole one: a folder that
+/// could not be read to the end is refused, not answered with what was read.
+async fn look<T: Findable>(State(h): State<Helper>, Json(ask): Json<Look>) -> R {
+    // Its turn is kept until the looking is over, whether or not whoever asked is still there.
+    let turn = tokio::time::timeout(LOOK_WAIT, h.0.looks.clone().acquire_owned()).await.ok().and_then(|t| t.ok()).ok_or_else(|| Refused(StatusCode::SERVICE_UNAVAILABLE, "too many folders are being looked through at once".into()))?;
+    let found = tokio::task::spawn_blocking(move || {
+        let _turn = turn;
+        let root = h.looked_at(&ask, T::REMOVES)?;
+        T::find(&root, ask.kind).map_err(|e| Refused(if matches!(e, Blocked::Link(_)) { StatusCode::CONFLICT } else { StatusCode::SERVICE_UNAVAILABLE }, e.to_string()))
+    })
+    .await
+    .map_err(|_| Refused(StatusCode::INTERNAL_SERVER_ERROR, "the look did not finish".into()))??;
+    Ok(Json(serde_json::to_value(found)?))
+}
+
 /// What this end of the link is, speaks and allows.
 async fn hello(State(h): State<Helper>) -> Json<Hello> {
     let grants = h.0.conf.grants;
     Json(Hello {
         boot: h.0.boot.clone(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        protocols: Protocols { work: if grants.work { crate::link::WORK.to_vec() } else { vec![] }, play: if grants.play { crate::link::PLAY.to_vec() } else { vec![] } },
+        protocols: Protocols::allowed(grants),
         grants,
         // Without leave to see or play, what is here is nobody's business.
         shares: if grants.see || grants.play || grants.work { h.0.shares.clone() } else { vec![] },
@@ -739,6 +890,13 @@ pub async fn serve(bind: &str, data_dir: &Path, conf: Conf) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mount_points_are_read_from_the_list_linux_keeps() {
+        let list = "36 35 0:31 / /turk/movies rw,noatime shared:1 - zfs Goliath/media/movies rw\n37 35 0:32 / /turk/tv\\040shows/a\\134b rw - zfs Goliath/tv rw\nshort line\n";
+        assert_eq!(mount_points(list), [PathBuf::from("/turk/movies"), PathBuf::from("/turk/tv shows/a\\b")]);
+        assert!(mount_points("").is_empty());
+    }
 
     #[test]
     fn a_file_is_opened_inside_its_folder_and_no_link_is_followed() {
