@@ -53,8 +53,6 @@ pub struct Seen {
     pub see: bool,
     /// What it allows this Spool.
     pub grants: Grants,
-    /// It is from before links, and has the work and nothing else.
-    pub legacy: bool,
     /// The folders it shares.
     pub shares: Vec<Share>,
     /// Its folder of finished downloads can be read from this machine, which filing needs.
@@ -139,7 +137,7 @@ pub async fn pair(url: &str, code: &str) -> std::result::Result<String, String> 
     }
     let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).timeout(Duration::from_secs(15)).build().map_err(|e| e.to_string())?;
     let said = |status: reqwest::StatusCode, body: &Value| match (status.as_u16(), body["error"].as_str()) {
-        (404, None) => "nothing there links with a code; it may be an older helper, which is linked with a key".to_string(),
+        (404, None) => "nothing there links with a code".to_string(),
         (_, Some(why)) => why.to_string(),
         (code, None) => format!("it answered {code}"),
     };
@@ -337,7 +335,7 @@ impl Remote {
     async fn add(&self, nzb: &[u8], name: &str) -> Asked<String> {
         // The request is given a name of its own. If its answer is lost it is asked again
         // under that name, and the helper starts the download once however often it hears.
-        let path = format!("/helper/jobs?name={}&rid={}", urlencoding::encode(name), &crate::settings::new_key()[..16]);
+        let path = format!("/link/work/v1/jobs?name={}&rid={}", urlencoding::encode(name), &crate::settings::new_key()[..16]);
         // Once one try may have got through, the helper may be downloading, whatever a
         // later try says: only its own word, under the same name, settles it.
         let mut in_doubt: Option<String> = None;
@@ -372,11 +370,11 @@ impl Remote {
 
     /// One action on one download, named as the helper names it.
     async fn act(&self, own: &str, action: &str, body: Value) -> Result<()> {
-        Ok(self.post(&format!("/helper/jobs/{own}/{action}"), body, Duration::from_secs(15)).await.map(|_| ())?)
+        Ok(self.post(&format!("/link/work/v1/jobs/{own}/{action}"), body, Duration::from_secs(15)).await.map(|_| ())?)
     }
 
     async fn remove(&self, own: &str, files: bool) -> Result<()> {
-        let url = format!("{}/helper/jobs/{own}?files={files}", self.conf.url.trim_end_matches('/'));
+        let url = format!("{}/link/work/v1/jobs/{own}?files={files}", self.conf.url.trim_end_matches('/'));
         self.send(self.http.delete(url), Duration::from_secs(30)).await?;
         self.jobs.lock().retain(|j| j.id != format!("{}{own}", self.prefix()));
         Ok(())
@@ -385,27 +383,27 @@ impl Remote {
     /// File one thing into the library on the helper's own disks. A film copied between two
     /// of its disks takes a while, so it is given a long time to answer.
     pub async fn file_move(&self, from: &Path, to: &Path) -> Result<()> {
-        Ok(self.post("/helper/fs/move", json!({"from": from, "to": to}), Duration::from_secs(4 * 3600)).await.map(|_| ())?)
+        Ok(self.post("/link/work/v1/fs/move", json!({"from": from, "to": to}), Duration::from_secs(4 * 3600)).await.map(|_| ())?)
     }
 
     /// Clear away the folder a finished download left.
     pub async fn remove_output(&self, there: &Path) -> Result<()> {
-        Ok(self.post("/helper/fs/remove", json!({"path": there}), Duration::from_secs(120)).await.map(|_| ())?)
+        Ok(self.post("/link/work/v1/fs/remove", json!({"path": there}), Duration::from_secs(120)).await.map(|_| ())?)
     }
 
     pub async fn stat(&self, there: &Path) -> Result<Value> {
-        Ok(self.post("/helper/fs/stat", json!({"path": there}), Duration::from_secs(10)).await?)
+        Ok(self.post("/link/work/v1/fs/stat", json!({"path": there}), Duration::from_secs(10)).await?)
     }
 
     pub async fn move_start(&self, from: &Path, to: &Path, working: &Path, keep_original: bool) -> Result<String> {
-        let said = self.post("/helper/moves", json!({"from": from, "to": to, "working": working, "keep_original": keep_original}), Duration::from_secs(30)).await?;
+        let said = self.post("/link/work/v1/moves", json!({"from": from, "to": to, "working": working, "keep_original": keep_original}), Duration::from_secs(30)).await?;
         said["id"].as_str().map(str::to_string).ok_or_else(|| anyhow!("{}'s helper gave no name for the move", self.conf.name))
     }
 
     /// How a move stands. `Ok(None)` is the helper saying it knows of no such move, which
     /// is what one that has restarted says.
     pub async fn move_state(&self, id: &str) -> Result<Option<Value>> {
-        match self.get(&format!("/helper/moves/{id}")).await {
+        match self.get(&format!("/link/work/v1/moves/{id}")).await {
             Ok(said) => Ok(Some(said)),
             Err(Fail::Refused { status: 404, .. }) => Ok(None),
             Err(e) => Err(e.into()),
@@ -413,11 +411,11 @@ impl Remote {
     }
 
     pub async fn move_cancel(&self, id: &str) -> Result<()> {
-        Ok(self.post(&format!("/helper/moves/{id}/cancel"), json!({}), Duration::from_secs(15)).await.map(|_| ())?)
+        Ok(self.post(&format!("/link/work/v1/moves/{id}/cancel"), json!({}), Duration::from_secs(15)).await.map(|_| ())?)
     }
 
     pub async fn move_finish(&self, id: &str, remove_original: bool) -> Result<()> {
-        Ok(self.post(&format!("/helper/moves/{id}/finish"), json!({"remove_original": remove_original}), Duration::from_secs(600)).await.map(|_| ())?)
+        Ok(self.post(&format!("/link/work/v1/moves/{id}/finish"), json!({"remove_original": remove_original}), Duration::from_secs(600)).await.map(|_| ())?)
     }
 
     /// Have the linked machine look through one of its own folders, known here as `here`.
@@ -466,12 +464,6 @@ impl Remote {
                 }
                 Err(_) => next.problem = format!("{name}'s helper answered in a way this Spool cannot read"),
             },
-            // One from before links says it knows no such address. It has the work, as it
-            // always did, and nothing else.
-            Err(Fail::Refused { status: 404, .. }) => {
-                (next.legacy, next.grants) = (true, Grants { work: true, ..Default::default() });
-                self.meet_work(&mut next).await;
-            }
             Err(Fail::Away { why, .. }) => return self.away(why),
             Err(Fail::Refused { why, .. } | Fail::Garbled(why)) => next.problem = why,
         }
@@ -511,16 +503,10 @@ impl Remote {
     /// and that what it downloads can be read from here, which filing needs.
     async fn meet_work(&self, next: &mut Seen) {
         let name = &self.conf.name;
-        let info = match self.get("/helper/info").await {
+        let info = match self.get("/link/work/v1/info").await {
             Ok(info) => info,
             Err(e) => return next.problem = e.to_string(),
         };
-        if next.legacy {
-            (next.boot, next.version) = (info["boot"].as_str().unwrap_or_default().to_string(), info["version"].as_str().unwrap_or_default().to_string());
-            if info["api"].as_u64() != Some(crate::helper::API as u64) {
-                return next.problem = format!("{name}'s helper is version {} and does not speak as this Spool does; update the two together", next.version);
-            }
-        }
         next.usable = true;
         let complete = PathBuf::from(info["complete"].as_str().unwrap_or_default());
         match self.here(&complete) {
@@ -552,7 +538,7 @@ impl Remote {
         }
         // Its settings first: a request that waits for news would keep them waiting too.
         if self.seen.lock().pushed.as_ref() != Some(wanted) {
-            let url = format!("{}/helper/config", self.conf.url.trim_end_matches('/'));
+            let url = format!("{}/link/work/v1/config", self.conf.url.trim_end_matches('/'));
             match self.send(self.http.put(url).json(wanted), Duration::from_secs(15)).await {
                 Ok(_) => self.seen.lock().pushed = Some(wanted.clone()),
                 Err(e) => tracing::warn!(helper = %self.conf.name, error = %e, "could not give the helper its settings"),
@@ -560,8 +546,8 @@ impl Remote {
         }
         let stamp = self.seen.lock().stamp.clone();
         let asked = match (wait, stamp.is_empty()) {
-            (0, _) | (_, true) => self.get("/helper/jobs").await,
-            _ => self.send(self.http.get(format!("{}/helper/jobs", self.conf.url.trim_end_matches('/'))).query(&[("since", stamp.as_str()), ("wait", &wait.to_string())]), Duration::from_secs(wait + 15)).await,
+            (0, _) | (_, true) => self.get("/link/work/v1/jobs").await,
+            _ => self.send(self.http.get(format!("{}/link/work/v1/jobs", self.conf.url.trim_end_matches('/'))).query(&[("since", stamp.as_str()), ("wait", &wait.to_string())]), Duration::from_secs(wait + 15)).await,
         };
         let said = match asked {
             Ok(said) => said,
@@ -894,7 +880,7 @@ impl App {
         }
         for r in self.remotes() {
             tokio::spawn(async move {
-                if let Err(e) = r.post(&format!("/helper/queue/{}", if pause { "pause" } else { "resume" }), json!({}), Duration::from_secs(15)).await {
+                if let Err(e) = r.post(&format!("/link/work/v1/queue/{}", if pause { "pause" } else { "resume" }), json!({}), Duration::from_secs(15)).await {
                     tracing::warn!(helper = %r.conf.name, error = %format!("{e:#}"), "could not pause or resume the helper's downloads");
                 }
             });

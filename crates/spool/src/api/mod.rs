@@ -269,8 +269,6 @@ fn api_routes() -> Router<App> {
         .route("/api/titles/bulk", post(bulk_titles))
         .route("/api/links", get(links))
         .route("/api/links/pair", post(link_pair))
-        // The name these went by before; kept for whatever still asks under it.
-        .route("/api/helpers", get(links))
         .route("/api/titles/move", post(move_titles))
         .route("/api/titles/move/cancel", post(cancel_moves))
         .route("/api/blocklist/clear", post(clear_blocklist))

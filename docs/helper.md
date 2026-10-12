@@ -182,8 +182,6 @@ The helper looks through four folders at a time; more wait their turn.
 
 **"Does not speak as this Spool does".** The two are too far apart in version to work together. Update both; see below.
 
-**"From before it could hand films to players".** The helper is older than playing from it. It goes on downloading, filing and moving; update it to play from it.
-
 **"Downloads into a folder this machine should see and cannot".** The helper is usable for moves, and downloads run on Spool's machine until the helper's downloads folder is shared and mounted there under the name it has in the container. Spool looks again by itself every half minute.
 
 **"It does not see the folder where this machine does".** The two folders given for the helper do not name the same place, or a share is mounted on Spool's machine under a different name than in the container.

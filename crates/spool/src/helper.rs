@@ -36,10 +36,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// What the two sides must agree on to work together. Raised when either would
-/// misunderstand the other.
-pub const API: u32 = 1;
-
 /// What a helper is started with.
 #[derive(Clone, Debug)]
 pub struct Conf {
@@ -420,20 +416,20 @@ impl Helper {
 
     fn work(&self) -> Router {
         Router::new()
-            .route("/helper/info", get(info))
-            .route("/helper/config", put(config))
-            .route("/helper/jobs", get(jobs).post(add))
-            .route("/helper/jobs/{id}", axum::routing::delete(remove))
-            .route("/helper/jobs/{id}/{action}", post(job_action))
-            .route("/helper/queue/{action}", post(queue_action))
-            .route("/helper/availability", post(availability))
-            .route("/helper/fs/stat", post(stat))
-            .route("/helper/fs/move", post(file_move))
-            .route("/helper/fs/remove", post(output_remove))
-            .route("/helper/moves", post(move_start))
-            .route("/helper/moves/{id}", get(move_state))
-            .route("/helper/moves/{id}/cancel", post(move_cancel))
-            .route("/helper/moves/{id}/finish", post(move_finish))
+            .route("/link/work/v1/info", get(info))
+            .route("/link/work/v1/config", put(config))
+            .route("/link/work/v1/jobs", get(jobs).post(add))
+            .route("/link/work/v1/jobs/{id}", axum::routing::delete(remove))
+            .route("/link/work/v1/jobs/{id}/{action}", post(job_action))
+            .route("/link/work/v1/queue/{action}", post(queue_action))
+            .route("/link/work/v1/availability", post(availability))
+            .route("/link/work/v1/fs/stat", post(stat))
+            .route("/link/work/v1/fs/move", post(file_move))
+            .route("/link/work/v1/fs/remove", post(output_remove))
+            .route("/link/work/v1/moves", post(move_start))
+            .route("/link/work/v1/moves/{id}", get(move_state))
+            .route("/link/work/v1/moves/{id}/cancel", post(move_cancel))
+            .route("/link/work/v1/moves/{id}/finish", post(move_finish))
             .layer(axum::extract::DefaultBodyLimit::max(64 << 20))
             .layer(axum::middleware::from_fn_with_state(self.clone(), allowed_to_work))
             .layer(axum::middleware::from_fn_with_state(self.clone(), guard))
@@ -683,7 +679,7 @@ struct PairFinish {
 /// it ends in a link, and it is counted before it is answered.
 async fn pair_start(State(h): State<Helper>, Json(b): Json<PairStart>) -> R {
     if h.linked().is_some() {
-        return Err(Refused(StatusCode::CONFLICT, "this helper is linked already; to link it afresh, stop it, delete link.json from its data folder and start it again".into()));
+        return Err(Refused(StatusCode::CONFLICT, "this helper is linked already. One linked with a code is linked afresh by stopping it, deleting link.json from its data folder and starting it again; one started with a key is linked by that key".into()));
     }
     let mut p = h.0.pairing.lock();
     let Some(code) = p.code.clone() else { return Err(Refused(StatusCode::CONFLICT, "this helper is not waiting to be linked".into())) };
@@ -746,7 +742,6 @@ async fn info(State(h): State<Helper>) -> R {
     let root = |p: &PathBuf, writable: bool| json!({"path": p, "writable": writable, "there": p.is_dir(), "free": crate::app::free_space(p)});
     let roots: Vec<Value> = c.roots.iter().map(|p| root(p, true)).chain(c.read_roots.iter().map(|p| root(p, false))).collect();
     Ok(Json(json!({
-        "api": API,
         "version": env!("CARGO_PKG_VERSION"),
         "boot": h.0.boot,
         "downloads": c.downloads,

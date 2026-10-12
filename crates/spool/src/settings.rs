@@ -131,7 +131,6 @@ pub struct General {
     pub new_titles_location: u32,
     /// The Spools this one is linked to. They were called helpers, and settings saved under
     /// that name are read as they are.
-    #[serde(alias = "helpers")]
     pub links: Vec<LinkConf>,
     /// The highest number a link has been given, so that none is ever given again.
     pub link_seq: u32,

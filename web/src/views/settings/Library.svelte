@@ -237,7 +237,6 @@
     {@const now = linkOf(h.id)}
     <div class="place">
       {#if now?.seen.problem}<p class="small warn">{now.seen.problem}</p>{/if}
-      {#if now?.seen.legacy && (h.play_near || (h.play_from ?? []).length)}<p class="small warn">This helper is from before it could hand films to players. Update it, and until then every film is sent through this Spool.</p>{/if}
       <label class="check"><input type="checkbox" bind:checked={h.play_near} /> Send players on the same network straight to it</label>
       <span class="hint">A player on the same network as {h.name || 'this machine'} takes a film that is on its disks from it directly, with a ticket for that one film, and the film no longer passes through here. A device that reaches this Spool over Tailscale counts as on the network when it is at home. Away from home it is sent to {h.name || 'the machine'} over Tailscale, if {h.name || 'the machine'} is on your Tailscale under this name; if not, and for every other player, the film comes through this Spool.</span>
       <details open={!h.id}>

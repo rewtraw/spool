@@ -2789,10 +2789,7 @@ async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, Path
     let api = spool::api::router(w.app.clone());
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["locations"] = json!([{"name": "Shelf", "movie_root": mnt.join("films"), "manage": true}, {"name": "Vault", "movie_root": mnt.join("vault"), "manage": false}]);
-    // Sent under the name links went by before, as a page left open across an update would:
-    // it is taken as it is.
-    g.as_object_mut().unwrap().remove("links");
-    g["helpers"] = json!([{"name": "Nas", "url": url, "key": key, "here": mnt, "there": nas}]);
+    g["links"] = json!([{"name": "Nas", "url": url, "key": key, "here": mnt, "there": nas}]);
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
@@ -2808,7 +2805,7 @@ async fn a_helper_downloads_and_files_on_its_own_disks() {
     let api = spool::api::router(w.app.clone());
 
     // Spool knows the helper, what it serves, and that it can read what the helper downloads.
-    let (_, helpers) = call(&api, "GET", "/api/helpers", Value::Null).await;
+    let (_, helpers) = call(&api, "GET", "/api/links", Value::Null).await;
     assert_eq!((helpers[0]["name"].as_str(), helpers[0]["serves"].to_string().as_str(), helpers[0]["seen"]["usable"].as_bool(), helpers[0]["seen"]["downloads_seen"].as_bool()), (Some("Nas"), r#"["Shelf","Vault"]"#, Some(true), Some(true)), "{helpers}");
     // Its key is not handed back to the browser.
     let (_, general) = call(&api, "GET", "/api/settings/general", Value::Null).await;
@@ -2862,7 +2859,7 @@ async fn a_helper_downloads_and_files_on_its_own_disks() {
     g["links"][0]["url"] = json!("http://127.0.0.1:9");
     assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
     w.app.ask_remotes().await;
-    let (_, helpers) = call(&api, "GET", "/api/helpers", Value::Null).await;
+    let (_, helpers) = call(&api, "GET", "/api/links", Value::Null).await;
     assert_eq!(helpers[0]["seen"]["reachable"].as_bool(), Some(false), "{helpers}");
     assert!(w.app.db.attention(false).unwrap().iter().any(|a| a.message.contains("Nas's helper did not answer")), "a notice says the helper is away");
     let mut waiting = w.app.db.title_acquisitions(film.id).unwrap().remove(0);
@@ -2925,8 +2922,8 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
         }
     };
     const KEY: &str = "a-key-of-sufficient-length";
-    assert_eq!(http.get(format!("{url}/helper/info")).send().await.unwrap().status().as_u16(), 401);
-    assert_eq!(ask("not-the-key", "/helper/fs/stat", json!({"path": nas.join("films/Alpha (2001)")})).await.0, 401);
+    assert_eq!(http.get(format!("{url}/link/work/v1/info")).send().await.unwrap().status().as_u16(), 401);
+    assert_eq!(ask("not-the-key", "/link/work/v1/fs/stat", json!({"path": nas.join("films/Alpha (2001)")})).await.0, 401);
     let outside = w.root.join("Movies/Elsewhere (1999)");
     lay(outside.join("Elsewhere (1999).mkv"), b"not the helper's");
     lay(nas.join("films/Neighbour (1990)/Neighbour (1990).mkv"), b"another film");
@@ -2934,32 +2931,32 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
     let film = nas.join("films/Alpha (2001)/Alpha (2001).mkv");
     for (path, body, status, why) in [
         // Out of its folders, by either end.
-        ("/helper/fs/move", json!({"from": film, "to": outside.join("taken.mkv")}), 403, "outside the folders"),
-        ("/helper/fs/move", json!({"from": outside.join("Elsewhere (1999).mkv"), "to": nas.join("films/taken.mkv")}), 403, "outside the folders"),
+        ("/link/work/v1/fs/move", json!({"from": film, "to": outside.join("taken.mkv")}), 403, "outside the folders"),
+        ("/link/work/v1/fs/move", json!({"from": outside.join("Elsewhere (1999).mkv"), "to": nas.join("films/taken.mkv")}), 403, "outside the folders"),
         // Out of them by climbing.
-        ("/helper/fs/move", json!({"from": film, "to": format!("{}/films/../../Movies/taken.mkv", nas.display())}), 400, "not a plain full path"),
+        ("/link/work/v1/fs/move", json!({"from": film, "to": format!("{}/films/../../Movies/taken.mkv", nas.display())}), 400, "not a plain full path"),
         // Out of the folder it only reads: nothing is moved away from it or removed.
-        ("/helper/fs/move", json!({"from": kept.join("Alpha (2001).mkv"), "to": nas.join("films/taken.mkv")}), 403, "only reads"),
-        ("/helper/moves", json!({"from": kept, "to": nas.join("films/Taken (2001)"), "working": nas.join("films/.spool-moving-9"), "keep_original": false}), 403, "only reads"),
-        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("vault/Taken (2001)"), "working": nas.join("vault/.spool-moving-9"), "keep_original": true}), 403, "only reads"),
+        ("/link/work/v1/fs/move", json!({"from": kept.join("Alpha (2001).mkv"), "to": nas.join("films/taken.mkv")}), 403, "only reads"),
+        ("/link/work/v1/moves", json!({"from": kept, "to": nas.join("films/Taken (2001)"), "working": nas.join("films/.spool-moving-9"), "keep_original": false}), 403, "only reads"),
+        ("/link/work/v1/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("vault/Taken (2001)"), "working": nas.join("vault/.spool-moving-9"), "keep_original": true}), 403, "only reads"),
         // The working folder is cleared before use, so it is never one that holds anything:
         // not the title itself, and not its neighbour.
-        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/Alpha (2001)"), "keep_original": false}), 400, ".spool-moving-"),
-        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/Neighbour (1990)"), "keep_original": true}), 400, ".spool-moving-"),
-        ("/helper/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Alpha (2001)/Inside"), "working": nas.join("films/Alpha (2001)/.spool-moving-9"), "keep_original": true}), 400, "into itself"),
+        ("/link/work/v1/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/Alpha (2001)"), "keep_original": false}), 400, ".spool-moving-"),
+        ("/link/work/v1/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/Neighbour (1990)"), "keep_original": true}), 400, ".spool-moving-"),
+        ("/link/work/v1/moves", json!({"from": nas.join("films/Alpha (2001)"), "to": nas.join("films/Alpha (2001)/Inside"), "working": nas.join("films/Alpha (2001)/.spool-moving-9"), "keep_original": true}), 400, "into itself"),
         // However the title's own folder is named.
-        ("/helper/moves", json!({"from": nas.join("films/.spool-moving-7"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/.spool-moving-7"), "keep_original": true}), 400, "the title's own folder"),
-        ("/helper/moves", json!({"from": nas.join("films"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/.spool-moving-7"), "keep_original": true}), 403, "outside the folders"),
+        ("/link/work/v1/moves", json!({"from": nas.join("films/.spool-moving-7"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/.spool-moving-7"), "keep_original": true}), 400, "the title's own folder"),
+        ("/link/work/v1/moves", json!({"from": nas.join("films"), "to": nas.join("films/Beta (2002)"), "working": nas.join("films/.spool-moving-7"), "keep_original": true}), 403, "outside the folders"),
         // Only a finished download is ever cleared away, never a library folder or a whole root.
-        ("/helper/fs/remove", json!({"path": nas.join("films/Alpha (2001)")}), 403, "not a finished download"),
-        ("/helper/fs/remove", json!({"path": nas.join("downloads/complete")}), 403, "not a finished download"),
-        ("/helper/fs/remove", json!({"path": nas.join("films")}), 403, "outside the folders"),
+        ("/link/work/v1/fs/remove", json!({"path": nas.join("films/Alpha (2001)")}), 403, "not a finished download"),
+        ("/link/work/v1/fs/remove", json!({"path": nas.join("downloads/complete")}), 403, "not a finished download"),
+        ("/link/work/v1/fs/remove", json!({"path": nas.join("films")}), 403, "outside the folders"),
     ] {
         let (got, said) = ask(KEY, path, body.clone()).await;
         assert!(got == status && said.contains(why), "{path} {body}: {got} {said}");
     }
     assert!(outside.join("Elsewhere (1999).mkv").exists() && film.exists() && kept.join("Alpha (2001).mkv").exists() && nas.join("films/Neighbour (1990)/Neighbour (1990).mkv").exists() && nas.join("films/.spool-moving-7/Odd (1980).mkv").exists(), "and nothing was touched by any of it");
-    assert_eq!(ask(KEY, "/helper/fs/stat", json!({"path": film})).await.1.contains(r#""exists":true"#), true);
+    assert_eq!(ask(KEY, "/link/work/v1/fs/stat", json!({"path": film})).await.1.contains(r#""exists":true"#), true);
 
     // Off the helper's disks altogether, a move is Spool's own to carry out, as before.
     let (status, said) = call(&api, "POST", "/api/titles/move", json!({"ids": [alpha.id], "location": 0})).await;
@@ -3018,7 +3015,7 @@ async fn a_helper_is_linked_with_a_code_and_not_without() {
     let (_helper, url, serving) = start("helper-a", "1234 5678").await;
     for key in ["", "anything-at-all-that-is-long"] {
         assert_eq!(http.get(format!("{url}/link")).bearer_auth(key).send().await.unwrap().status().as_u16(), 401);
-        assert_eq!(http.get(format!("{url}/helper/info")).bearer_auth(key).send().await.unwrap().status().as_u16(), 401);
+        assert_eq!(http.get(format!("{url}/link/work/v1/info")).bearer_auth(key).send().await.unwrap().status().as_u16(), 401);
     }
     assert_eq!(http.get(format!("{url}/link/play/v1/file?ticket=x")).send().await.unwrap().status().as_u16(), 403);
 
@@ -3091,7 +3088,7 @@ async fn a_helper_answers_when_it_has_news_and_not_before() {
     let http = reqwest::Client::new();
     let ask = |query: String| {
         let (http, url) = (http.clone(), url.clone());
-        async move { http.get(format!("{url}/helper/jobs{query}")).bearer_auth(KEY).send().await.unwrap().json::<Value>().await.unwrap() }
+        async move { http.get(format!("{url}/link/work/v1/jobs{query}")).bearer_auth(KEY).send().await.unwrap().json::<Value>().await.unwrap() }
     };
     let first = ask(String::new()).await;
     let stamp = first["stamp"].as_str().unwrap().to_string();
@@ -3107,7 +3104,7 @@ async fn a_helper_answers_when_it_has_news_and_not_before() {
     let began = Instant::now();
     let waiting = tokio::spawn(ask(format!("?since={stamp}&wait=20")));
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(http.post(format!("{url}/helper/queue/pause")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
+    assert_eq!(http.post(format!("{url}/link/work/v1/queue/pause")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
     let news = waiting.await.unwrap();
     assert!(began.elapsed() < Duration::from_secs(5), "{:?}", began.elapsed());
     assert_eq!((news["paused"].as_bool(), news["stamp"] != first["stamp"]), (Some(true), true), "{news}");
@@ -3125,7 +3122,7 @@ async fn a_helper_answers_when_it_has_news_and_not_before() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(w.app.remotes()[0].seen().paused);
-    assert_eq!(http.post(format!("{url}/helper/queue/resume")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
+    assert_eq!(http.post(format!("{url}/link/work/v1/queue/resume")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
     let began = Instant::now();
     while w.app.remotes()[0].seen().paused && began.elapsed() < Duration::from_secs(6) {
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -3266,7 +3263,7 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     // The two have settled what the helper allows and what it shares.
     let (_, links) = call(&api, "GET", "/api/links", Value::Null).await;
     let seen = &links[0]["seen"];
-    assert_eq!((seen["usable"].as_bool(), seen["play"].as_bool(), seen["legacy"].as_bool(), seen["grants"].to_string().as_str()), (Some(true), Some(true), Some(false), r#"{"play":true,"see":true,"work":true}"#), "{links}");
+    assert_eq!((seen["usable"].as_bool(), seen["play"].as_bool(), seen["grants"].to_string().as_str()), (Some(true), Some(true), r#"{"play":true,"see":true,"work":true}"#), "{links}");
     let share = |name: &str| seen["shares"].as_array().unwrap().iter().find(|s| s["path"].as_str().unwrap().ends_with(name)).unwrap()["id"].as_str().unwrap().to_string();
 
     // Players reach Spool on a socket, and are known by the address they come from.
@@ -3389,7 +3386,7 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still_works() {
+async fn a_link_does_only_what_it_was_started_allowing() {
     use serde_json::{json, Value};
     use spool::link::Grants;
     let w = World::new(Mode::Active).await;
@@ -3418,7 +3415,7 @@ async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still
     assert_eq!(http.get(format!("{url}/link")).send().await.unwrap().status().as_u16(), 401, "it says nothing of itself without the key");
     let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
     assert_eq!((hello["grants"].to_string().as_str(), hello["protocols"].to_string().as_str()), (r#"{"play":true,"see":true,"work":false}"#, r#"{"play":[1],"see":[1],"work":[]}"#), "{hello}");
-    for (method, path) in [("GET", "/helper/info"), ("GET", "/helper/jobs"), ("POST", "/helper/fs/remove"), ("POST", "/helper/moves"), ("PUT", "/helper/config")] {
+    for (method, path) in [("GET", "/link/work/v1/info"), ("GET", "/link/work/v1/jobs"), ("POST", "/link/work/v1/fs/remove"), ("POST", "/link/work/v1/moves"), ("PUT", "/link/work/v1/config")] {
         let resp = http.request(method.parse().unwrap(), format!("{url}{path}")).bearer_auth(KEY).json(&json!({"path": root.join("films/Alpha (2001)")})).send().await.unwrap();
         assert_eq!(resp.status().as_u16(), 403, "{method} {path}");
     }
@@ -3433,25 +3430,21 @@ async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still
     assert_eq!(hello["protocols"].to_string(), r#"{"play":[],"see":[],"work":[1]}"#);
     let asked = http.post(format!("{url}/link/see/v1/survey")).bearer_auth(KEY).json(&json!({"share": hello["shares"][0]["id"], "rel": "Alpha (2001)", "kind": "movie"})).send().await.unwrap();
     assert_eq!(asked.status().as_u16(), 403, "it was not started to say what is in its folders");
-    assert_eq!(http.get(format!("{url}/helper/info")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
+    assert_eq!(http.get(format!("{url}/link/work/v1/info")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
     assert_eq!(http.get(format!("{url}/link/play/v1/file?ticket={}", ticket_for(&hello))).send().await.unwrap().status().as_u16(), 403);
 
-    // A helper from before links knows no such address. Spool takes it for what it is: it
-    // has the work, as it always did, and is sent no players.
-    let (helper, listener, url, root) = start("older", Grants::ALL).await;
-    let older = axum::Router::new().route("/link", axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND })).route("/link/{*rest}", axum::routing::any(|| async { axum::http::StatusCode::NOT_FOUND })).fallback_service(helper.router());
-    tokio::spawn(async move { axum::serve(listener, older).await.unwrap() });
+    // Spool takes one that only works for what it is: nobody is sent to it for a film.
+    let root = w.root.join("worker");
     let api = spool::api::router(w.app.clone());
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    g["locations"] = json!([{"name": "Older", "movie_root": root.join("films"), "manage": true}]);
-    g["links"] = json!([{"name": "Old", "url": url, "key": KEY, "here": root, "there": root, "play_from": ["0.0.0.0/0"]}]);
+    g["locations"] = json!([{"name": "Worker", "movie_root": root.join("films"), "manage": true}]);
+    g["links"] = json!([{"name": "Worker", "url": url, "key": KEY, "here": root, "there": root, "play_from": ["0.0.0.0/0"]}]);
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
-    let old = w.app.remotes()[0].clone();
-    let seen = old.seen();
-    assert_eq!((seen.usable, seen.legacy, seen.play, seen.downloads_seen, seen.grants), (true, true, false, true, Grants { work: true, ..Default::default() }), "{}", seen.problem);
-    assert!(w.app.play_direct(&root.join("films/Alpha (2001)/Alpha (2001).mkv"), &["127.0.0.1".parse().unwrap()]).is_none(), "nobody is sent to a helper that cannot hand out files");
+    let seen = w.app.remotes()[0].seen();
+    assert_eq!((seen.usable, seen.play, seen.see, seen.downloads_seen, seen.grants), (true, false, false, true, Grants { work: true, ..Default::default() }), "{}", seen.problem);
+    assert!(w.app.play_direct(&root.join("films/Alpha (2001)/Alpha (2001).mkv"), &["127.0.0.1".parse().unwrap()]).is_none(), "nobody is sent to a helper that does not hand out files");
 
     // Two links are never given the same folder, and a number once given is not given again.
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
@@ -3490,9 +3483,10 @@ async fn a_report_that_cannot_be_read_and_an_answer_that_is_lost_cost_nothing() 
     let job = json!({"id": "j1", "name": "A.Film.2020", "state": "downloading", "total_bytes": 100, "done_bytes": 10, "speed": 5, "eta_secs": 18, "missing_articles": 0, "damaged_articles": 0, "message": "", "error": null, "output_path": null, "added_at": 1});
     let (flag, no, complete) = (garbled.clone(), refusing.clone(), root.join("downloads/complete"));
     let stand_in = axum::Router::new()
-        .route("/helper/info", axum::routing::get(move || { let complete = complete.clone(); async move { axum::Json(json!({"api": 1, "version": "0.0.9", "boot": "b1", "complete": complete})) } }))
-        .route("/helper/config", axum::routing::put(|| async { axum::Json(json!({"ok": true})) }))
-        .route("/helper/jobs", axum::routing::get(move || {
+        .route("/link", axum::routing::get(|| async { axum::Json(json!({"boot": "b1", "version": "9.9.9", "protocols": {"work": [1]}, "grants": {"work": true}, "shares": []})) }))
+        .route("/link/work/v1/info", axum::routing::get(move || { let complete = complete.clone(); async move { axum::Json(json!({"version": "9.9.9", "boot": "b1", "complete": complete})) } }))
+        .route("/link/work/v1/config", axum::routing::put(|| async { axum::Json(json!({"ok": true})) }))
+        .route("/link/work/v1/jobs", axum::routing::get(move || {
             let (flag, no, job) = (flag.clone(), no.clone(), job.clone());
             async move {
                 if no.load(Ordering::Relaxed) {
@@ -3553,7 +3547,7 @@ async fn a_report_that_cannot_be_read_and_an_answer_that_is_lost_cost_nothing() 
     let http = reqwest::Client::new();
     let mut ids = vec![];
     for _ in 0..2 {
-        let said: Value = http.post(format!("{url}/helper/jobs?name=A.Film.2020&rid=one-request")).bearer_auth("a-key-of-sufficient-length").body(nzb.clone()).send().await.unwrap().json().await.unwrap();
+        let said: Value = http.post(format!("{url}/link/work/v1/jobs?name=A.Film.2020&rid=one-request")).bearer_auth("a-key-of-sufficient-length").body(nzb.clone()).send().await.unwrap().json().await.unwrap();
         ids.push(said["id"].as_str().unwrap().to_string());
     }
     assert_eq!((ids[0] == ids[1], helper.engine().jobs().len()), (true, 1));
