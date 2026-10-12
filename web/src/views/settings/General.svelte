@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The General tab: mode, folders, further locations, how releases are chosen, connections,
+  // The General tab: mode, the library's machines and locations, downloads, how releases are chosen, connections,
   // subtitles, players and AI access.
   import { api } from '../../lib/api';
   import { app, act, loadStatus, toast } from '../../lib/state.svelte';
@@ -73,8 +73,18 @@
     linkTimer = setInterval(loadLinks, 5000);
     return () => clearInterval(linkTimer);
   });
-  function addPlace() {
-    general.locations.push({ id: 0, name: '', movie_root: '', series_root: '', volume: '', manage: false });
+  // A location is on the machine whose disks its folders are mounted under.
+  const under = (folder: string, root: string) => !!root && !!folder && (folder === root || folder.startsWith(root.replace(/\/+$/, '') + '/'));
+  const linkFor = (l: any) => (general.links ?? []).find((h: any) => under(l.movie_root, h.here) || under(l.series_root, h.here));
+  // The folders a linked Spool shares, as this machine sees them, to choose a location's from.
+  const sharedHere = (h: any): string[] => (linkOf(h.id)?.seen.shares ?? []).map((s: any) => s.path).filter((path: string) => under(path, h.there)).map((path: string) => h.here.replace(/\/+$/, '') + path.slice(h.there.replace(/\/+$/, '').length));
+  const sharedBy = (l: any) => {
+    const at = (general.links ?? []).indexOf(linkFor(l));
+    return at < 0 ? undefined : `shared-${at}`;
+  };
+  function addPlace(on?: any) {
+    const start = on ? on.here.replace(/\/+$/, '') + '/' : '';
+    general.locations.push({ id: 0, name: '', movie_root: start, series_root: '', volume: '', manage: false });
   }
   async function watchFound(id: number) {
     clearTimeout(foundTimer);
@@ -125,6 +135,159 @@
   }
 </script>
 
+{#snippet mainCard()}
+  {@const main = placeOf(0)}
+  <div class="place">
+    <div class="row wrap">
+      <b>{main?.name ?? 'Library'}</b>
+      {#if main}<span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', 'the main location', general.new_titles_location === 0 ? 'new titles go here' : '', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>{/if}
+    </div>
+    {#if general.movie_root || general.series_root}<div class="mono small faint where">{[general.movie_root, general.series_root].filter(Boolean).join(' · ')}</div>{/if}
+    <details open={!general.movie_root && !general.series_root}>
+    <summary class="small">Folders</summary>
+    <div class="cols">
+      <label class="field">Movies<input class="input mono" bind:value={general.movie_root} placeholder="/Volumes/Media/Movies" /></label>
+      <label class="field">Series<input class="input mono" bind:value={general.series_root} placeholder="/Volumes/Media/TV Shows" /></label>
+    </div>
+    <label class="field">Disk that must be mounted<input class="input mono" bind:value={general.required_volume} placeholder="/Volumes/Media" /><span class="hint">If this disk is not mounted, Spool pauses instead of writing somewhere else. Leave empty to skip the check.</span></label>
+    <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
+    </details>
+    {#if main}{@render checked(0)}{/if}
+  </div>
+{/snippet}
+
+{#snippet placeCard(l: any, i: number)}
+    {@const p = placeOf(l.id)}
+    <div class="place">
+      <div class="row wrap">
+        <b>{l.name || 'A new location'}</b>
+        {#if p}<span class="small" class:warn={!p.online}>{[p.online ? 'Reachable' : 'Cannot be reached', l.manage ? '' : 'only read', l.id && general.new_titles_location === l.id ? 'new titles go here' : '', `${p.titles} ${p.titles === 1 ? 'title' : 'titles'}`, p.bytes ? bytes(p.bytes) : '', p.free != null ? `${bytes(p.free)} free` : ''].filter(Boolean).join(' · ')}</span>{:else}<span class="faint small">Save to start using it.</span>{/if}
+        <span class="grow"></span>
+        {#if p}<button class="btn small" type="button" disabled={!p.online || working} onclick={() => lookThrough(l.id)}>Look for films and shows</button>{/if}
+      </div>
+      {#if l.movie_root || l.series_root}<div class="mono small faint where">{[l.movie_root, l.series_root].filter(Boolean).join(' · ')}</div>{/if}
+      <details open={!l.id}>
+      <summary class="small">Folders, and what Spool may do here</summary>
+      <div class="cols">
+        <label class="field">Name<input class="input" bind:value={l.name} placeholder="Goliath" /></label>
+        <label class="field">Disk or share that must be mounted<input class="input mono" bind:value={l.volume} placeholder="/Volumes/Goliath" /><span class="hint">Leave empty if the folders below only have to be readable.</span></label>
+      </div>
+      <div class="cols">
+        <label class="field">Movies<input class="input mono" bind:value={l.movie_root} list={sharedBy(l)} placeholder="/Volumes/Goliath/movies" /></label>
+        <label class="field">Series<input class="input mono" bind:value={l.series_root} list={sharedBy(l)} placeholder="/Volumes/Goliath/tv" /></label>
+      </div>
+      <label class="check"><input type="checkbox" bind:checked={l.manage} onchange={() => { if (!l.manage && general.new_titles_location === l.id) general.new_titles_location = 0; }} /> Let Spool change files here</label>
+      <span class="hint">Off, Spool lists and plays what is here and changes nothing: no downloads, upgrades, renames, subtitles or deletions. On, it treats this location like the main one.</span>
+      <div class="cols">
+        <label class="field">Profile for films here
+          <select class="input" bind:value={l.movie_profile}>
+            <option value={0}>The usual one</option>
+            {#each app.profiles.filter((x) => x.kind === 'movie') as x}<option value={x.id}>{x.name}</option>{/each}
+          </select>
+        </label>
+        <label class="field">Profile for series here
+          <select class="input" bind:value={l.series_profile}>
+            <option value={0}>The usual one</option>
+            {#each app.profiles.filter((x) => x.kind === 'tv') as x}<option value={x.id}>{x.name}</option>{/each}
+          </select>
+        </label>
+      </div>
+      <span class="hint">Given to titles added here or brought in from here; titles already in the library keep theirs. A library kept as it is wants a profile with no size target and no upgrades.</span>
+      {#if l.id}<label class="check"><input type="radio" bind:group={general.new_titles_location} value={l.id} disabled={!l.manage} /> New titles go here{#if !l.manage}<span class="faint small">&nbsp;(needs "Let Spool change files here")</span>{/if}</label>{/if}
+      <div><button class="btn small ghost danger" type="button" onclick={() => general.locations.splice(i, 1)}>Remove this location</button></div>
+      </details>
+      {#if p}{@render checked(l.id)}{/if}
+      {#if foundBy[l.id]}
+        {@const found = foundBy[l.id]}
+        <div class="found">
+          {#if found.running}
+            <p class="muted">{found.step === 'adding' ? 'Adding' : 'Looking'}: {found.done} of {found.total || '…'} folders.</p>
+          {:else}
+            <p><b>{found.message}.</b> Nothing on the location is moved or changed by adding.</p>
+            {#if foundIn(found, 'unclear').length}
+              <details>
+                <summary>Unclear ({foundIn(found, 'unclear').length}): choose what each is, or leave it out</summary>
+                <div class="list">
+                  {#each foundIn(found, 'unclear') as f (f.folder)}
+                    <div class="item">
+                      <div class="mono small">{f.folder}</div>
+                      <div class="row wrap">
+                        {#each f.matches as m}
+                          <button class="btn small" class:primary={picks[f.folder] === m} type="button" onclick={() => (picks[f.folder] === m ? delete picks[f.folder] : (picks[f.folder] = m))}>{m.title}{m.year ? ` (${m.year})` : ''}</button>
+                        {/each}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              </details>
+            {/if}
+            {#each [['unknown', 'Not recognised'], ['have', 'Already in the library'], ['failed', 'Could not be added'], ['new', 'To add'], ['added', 'Added']] as [state, label]}
+              {#if foundIn(found, state).length}
+                <details>
+                  <summary>{label} ({foundIn(found, state).length})</summary>
+                  <div class="list">
+                    {#each foundIn(found, state) as f (f.folder)}
+                      <div class="item"><div class="mono small">{f.folder}</div><div class="faint small">{#if f.matches[0]}{f.matches[0].title}{f.matches[0].year ? ` (${f.matches[0].year})` : ''}{#if f.note} · {/if}{/if}{f.note}</div></div>
+                    {/each}
+                  </div>
+                </details>
+              {/if}
+            {/each}
+            {#if foundIn(found, 'new').length + pickedOn(l.id).length}
+              <div class="row wrap">
+                <button class="btn primary" type="button" onclick={() => addFound(l.id)}>Add {foundIn(found, 'new').length + pickedOn(l.id).length} to the library</button>
+                {#if l.manage}<label class="check"><input type="checkbox" bind:checked={monitorAdopted} /> Monitor them, so Spool looks for upgrades and missing episodes</label>{/if}
+              </div>
+            {/if}
+          {/if}
+        </div>
+      {/if}
+    </div>
+{/snippet}
+
+{#snippet linkCard(h: any, i: number)}
+    {@const now = linkOf(h.id)}
+    <div class="place">
+      <details open={!h.id}>
+      <summary class="small">How it is reached, and which players are sent to it</summary>
+      <div class="cols">
+        <label class="field">Name<input class="input" bind:value={h.name} placeholder="The NAS's name" /></label>
+        <label class="field">Address<input class="input mono" bind:value={h.url} placeholder="http://nas:7978" /></label>
+      </div>
+      <label class="field">Key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with.</span></label>
+      <div class="cols">
+        <label class="field">The other machine's disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="/Volumes/nas" /></label>
+        <label class="field">The same folder, as the helper sees it<input class="input mono" bind:value={h.there} placeholder="/nas" /></label>
+      </div>
+      <span class="hint">Every location whose folders lie under the first is on this machine, and is listed under it here. A path is turned from one machine's to the other's by swapping these two at its start, so they must name the same folder.</span>
+      <div class="cols">
+        <label class="field">Players sent straight to it
+          <input class="input mono" value={(h.play_from ?? []).join(', ')} onchange={(e) => (h.play_from = e.currentTarget.value.split(/[\s,]+/).filter(Boolean))} placeholder="192.168.1.0/24" />
+        </label>
+        <label class="field">Address players use<input class="input mono" bind:value={h.play_url} placeholder={h.url || 'http://nas:7978'} /></label>
+      </div>
+      <span class="hint">A player at one of these addresses is sent to this machine for a film it holds, with a ticket for that one film, and the film no longer passes through here. Give ranges of addresses, such as your home network's, or one player's address to try it with. Left empty, every film is sent through this Spool, as it is for any player not named. The second address is only needed if players reach the machine at a different one from Spool.</span>
+      </details>
+      <div class="row wrap">
+        {#if now}
+          <span class="small" class:warn={!now.seen.usable || !now.seen.downloads_seen}>
+            {[!now.seen.asked ? 'Not asked yet' : !now.seen.reachable ? 'Cannot be reached' : !now.seen.usable && !now.seen.play ? 'Cannot be used' : 'Answering',
+              now.seen.reachable ? allows(now.seen) : '',
+              now.serves.length ? `serves ${now.serves.join(' and ')}` : 'serves no location yet',
+              now.seen.usable && now.downloads ? `${now.downloads} ${now.downloads === 1 ? 'download' : 'downloads'} running` : '',
+              now.seen.free != null ? `${bytes(now.seen.free)} free for downloads` : ''].filter(Boolean).join(' · ')}
+          </span>
+        {:else}
+          <span class="faint small">Save to start using it.</span>
+        {/if}
+        <span class="grow"></span>
+        <button class="btn small ghost danger" type="button" onclick={() => general.links.splice(i, 1)}>Remove</button>
+      </div>
+      {#if now?.seen.problem}<p class="small warn">{now.seen.problem}</p>{/if}
+      {#if now?.seen.legacy && (h.play_from ?? []).length}<p class="small warn">This helper is from before it could hand films to players. Update it, and until then every film is sent through this Spool.</p>{/if}
+    </div>
+{/snippet}
+
 {#snippet checked(id: number)}
   <div class="row wrap">
     <button class="btn small" type="button" disabled={checks[id] === 'running'} onclick={() => checkPlace(id)}>{checks[id] === 'running' ? 'Checking…' : 'Check this location'}</button>
@@ -154,169 +317,37 @@
     </fieldset>
 
     <fieldset class="card">
-      <legend>Folders</legend>
-      <label class="field">Movies<input class="input mono" bind:value={general.movie_root} placeholder="/Volumes/Media/Movies" /></label>
-      <label class="field">Series<input class="input mono" bind:value={general.series_root} placeholder="/Volumes/Media/TV Shows" /></label>
+      <legend>Library</legend>
+      <p class="muted">Where the library is: each machine that holds some of it, and under each the locations on it. A location is a folder of films and a folder of series. This machine always has one; another disk, or a share from another machine mounted here, can be added beside it. While a location cannot be reached its titles are shown as offline and left alone; nothing is searched for or downloaded again because files there cannot be seen.</p>
+      <div class="machine">
+        <div class="row wrap"><b>This machine</b><span class="small faint">decides everything, and serves the library</span></div>
+        {@render mainCard()}
+        {#each general.locations as l, i (i)}{#if !linkFor(l)}{@render placeCard(l, i)}{/if}{/each}
+        <div><button class="btn" type="button" onclick={() => addPlace()}>Add a location</button></div>
+      </div>
+      {#each general.links ?? [] as h, hi (hi)}
+        <div class="machine">
+          <div class="row wrap"><b>{h.name || 'A linked Spool'}</b><span class="small faint">a Spool on the machine that holds these disks</span></div>
+          {@render linkCard(h, hi)}
+          {#each general.locations as l, i (i)}{#if linkFor(l) === h}{@render placeCard(l, i)}{/if}{/each}
+          <datalist id={`shared-${hi}`}>{#each sharedHere(h) as folder}<option value={folder}></option>{/each}</datalist>
+          <div><button class="btn" type="button" disabled={!h.here} onclick={() => addPlace(h)}>Add a location on {h.name || 'it'}</button></div>
+        </div>
+      {/each}
+      <div><button class="btn" type="button" onclick={addLink}>Link another Spool</button></div>
+      <p class="hint">A linked Spool is, today, a helper: a small Spool on a machine that holds some of the disks, such as a NAS. It downloads, unpacks and files onto its own disks, moves titles between them, looks through its own folders and can hand a film to a player itself, so that nothing crosses the network to this machine and back. Without one, or while one cannot be reached, a location on another machine works across the share. See the <a href="https://rewtraw.github.io/spool/guide/helper.html" target="_blank" rel="noreferrer">guide</a>.</p>
+      <p class="hint">Titles already in the library stay where they are. When the place chosen for new titles cannot be reached, they go to this machine's main location. A title being added can be put somewhere else from its own box.</p>
+    </fieldset>
+
+    <fieldset class="card">
+      <legend>Downloads</legend>
       <label class="field">Downloads<input class="input mono" bind:value={general.downloads_dir} placeholder="/Volumes/Media/downloads" /><span class="hint">Keep this on the same disk as the library so finished files are moved, not copied.</span></label>
-      <label class="field">Disk that must be mounted<input class="input mono" bind:value={general.required_volume} placeholder="/Volumes/Media" /><span class="hint">If this disk is not mounted, Spool pauses instead of writing somewhere else. Leave empty to skip the check.</span></label>
       <label class="field narrow">Keep free on the downloads disk (GB)<input class="input" type="number" min="0" bind:value={general.min_free_gb} /><span class="hint">Spool does not start a download that would leave less than this free once it has finished unpacking.</span></label>
       <label class="field narrow">Let downloads wait for room, up to (GB)<input class="input" type="number" min="0" bind:value={general.space_wait_gb} /><span class="hint">When the disk is short, Spool still queues what it finds, up to this much beyond the free space, and holds it without downloading until there is room. 0 makes it skip them instead.</span></label>
       <label class="check"><input type="checkbox" bind:checked={general.direct_unpack} /> Unpack while downloading</label>
       <span class="hint">Posts packed as uncompressed RAR volumes are unpacked as each volume arrives and the volume is deleted once verified, so a download needs about half the room and no extraction step. Anything else is handled the usual way.</span>
       <label class="field narrow">Downloads checked and unpacked at once<input class="input" type="number" min="1" max="8" bind:value={general.post_parallel} /><span class="hint">Takes effect the next time Spool starts.</span></label>
       <label class="field narrow">Keep replaced and deleted files for (days)<input class="input" type="number" min="0" bind:value={general.recycle_days} /><span class="hint">They wait in a <code>.spool-recycle</code> folder in the library and are removed automatically after this long. 0 deletes them at once, with no way back.</span></label>
-    </fieldset>
-
-    <fieldset class="card">
-      <legend>Locations</legend>
-      <p class="muted">The library can live in more than one place: another disk, or a share from another machine mounted on this one. Each location has folders of its own. While one cannot be reached its titles are shown as offline and left alone; nothing is searched for or downloaded again because files there cannot be seen.</p>
-      {#if placeOf(0)}
-        {@const main = placeOf(0)}
-        <div class="place">
-          <div class="row wrap">
-            <b>{main.name}</b>
-            <span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>
-          </div>
-          <span class="hint">The folders under Folders above, where downloads also land. Spool changes files here.</span>
-          {@render checked(0)}
-          <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
-        </div>
-      {/if}
-      {#each general.locations as l, i (i)}
-        {@const p = placeOf(l.id)}
-        <div class="place">
-          <div class="cols">
-            <label class="field">Name<input class="input" bind:value={l.name} placeholder="Goliath" /></label>
-            <label class="field">Disk or share that must be mounted<input class="input mono" bind:value={l.volume} placeholder="/Volumes/Goliath" /><span class="hint">Leave empty if the folders below only have to be readable.</span></label>
-          </div>
-          <div class="cols">
-            <label class="field">Movies<input class="input mono" bind:value={l.movie_root} placeholder="/Volumes/Goliath/movies" /></label>
-            <label class="field">Series<input class="input mono" bind:value={l.series_root} placeholder="/Volumes/Goliath/tv" /></label>
-          </div>
-          <label class="check"><input type="checkbox" bind:checked={l.manage} onchange={() => { if (!l.manage && general.new_titles_location === l.id) general.new_titles_location = 0; }} /> Let Spool change files here</label>
-          <span class="hint">Off, Spool lists and plays what is here and changes nothing: no downloads, upgrades, renames, subtitles or deletions. On, it treats this location like the main one.</span>
-          <div class="cols">
-            <label class="field">Profile for films here
-              <select class="input" bind:value={l.movie_profile}>
-                <option value={0}>The usual one</option>
-                {#each app.profiles.filter((x) => x.kind === 'movie') as x}<option value={x.id}>{x.name}</option>{/each}
-              </select>
-            </label>
-            <label class="field">Profile for series here
-              <select class="input" bind:value={l.series_profile}>
-                <option value={0}>The usual one</option>
-                {#each app.profiles.filter((x) => x.kind === 'tv') as x}<option value={x.id}>{x.name}</option>{/each}
-              </select>
-            </label>
-          </div>
-          <span class="hint">Given to titles added here or brought in from here; titles already in the library keep theirs. A library kept as it is wants a profile with no size target and no upgrades.</span>
-          {#if l.id}<label class="check"><input type="radio" bind:group={general.new_titles_location} value={l.id} disabled={!l.manage} /> New titles go here{#if !l.manage}<span class="faint small">&nbsp;(needs "Let Spool change files here")</span>{/if}</label>{/if}
-          <div class="row wrap">
-            {#if p}
-              <span class="small" class:warn={!p.online}>{[p.online ? 'Reachable' : 'Cannot be reached', `${p.titles} ${p.titles === 1 ? 'title' : 'titles'}`, p.bytes ? bytes(p.bytes) : '', p.free != null ? `${bytes(p.free)} free` : ''].filter(Boolean).join(' · ')}</span>
-              <span class="grow"></span>
-              <button class="btn small" type="button" disabled={!p.online || working} onclick={() => lookThrough(l.id)}>Look for films and shows</button>
-            {:else}
-              <span class="faint small grow">Save to start using it.</span>
-            {/if}
-            <button class="btn small ghost danger" type="button" onclick={() => general.locations.splice(i, 1)}>Remove</button>
-          </div>
-          {#if p}{@render checked(l.id)}{/if}
-          {#if foundBy[l.id]}
-            {@const found = foundBy[l.id]}
-            <div class="found">
-              {#if found.running}
-                <p class="muted">{found.step === 'adding' ? 'Adding' : 'Looking'}: {found.done} of {found.total || '…'} folders.</p>
-              {:else}
-                <p><b>{found.message}.</b> Nothing on the location is moved or changed by adding.</p>
-                {#if foundIn(found, 'unclear').length}
-                  <details>
-                    <summary>Unclear ({foundIn(found, 'unclear').length}): choose what each is, or leave it out</summary>
-                    <div class="list">
-                      {#each foundIn(found, 'unclear') as f (f.folder)}
-                        <div class="item">
-                          <div class="mono small">{f.folder}</div>
-                          <div class="row wrap">
-                            {#each f.matches as m}
-                              <button class="btn small" class:primary={picks[f.folder] === m} type="button" onclick={() => (picks[f.folder] === m ? delete picks[f.folder] : (picks[f.folder] = m))}>{m.title}{m.year ? ` (${m.year})` : ''}</button>
-                            {/each}
-                          </div>
-                        </div>
-                      {/each}
-                    </div>
-                  </details>
-                {/if}
-                {#each [['unknown', 'Not recognised'], ['have', 'Already in the library'], ['failed', 'Could not be added'], ['new', 'To add'], ['added', 'Added']] as [state, label]}
-                  {#if foundIn(found, state).length}
-                    <details>
-                      <summary>{label} ({foundIn(found, state).length})</summary>
-                      <div class="list">
-                        {#each foundIn(found, state) as f (f.folder)}
-                          <div class="item"><div class="mono small">{f.folder}</div><div class="faint small">{#if f.matches[0]}{f.matches[0].title}{f.matches[0].year ? ` (${f.matches[0].year})` : ''}{#if f.note} · {/if}{/if}{f.note}</div></div>
-                        {/each}
-                      </div>
-                    </details>
-                  {/if}
-                {/each}
-                {#if foundIn(found, 'new').length + pickedOn(l.id).length}
-                  <div class="row wrap">
-                    <button class="btn primary" type="button" onclick={() => addFound(l.id)}>Add {foundIn(found, 'new').length + pickedOn(l.id).length} to the library</button>
-                    {#if l.manage}<label class="check"><input type="checkbox" bind:checked={monitorAdopted} /> Monitor them, so Spool looks for upgrades and missing episodes</label>{/if}
-                  </div>
-                {/if}
-              {/if}
-            </div>
-          {/if}
-        </div>
-      {/each}
-      <div><button class="btn" type="button" onclick={addPlace}>Add a location</button></div>
-      <p class="hint">Titles already in the library stay where they are. When the place chosen for new titles cannot be reached, they go to the first location above. A title being added can be put somewhere else from its own box.</p>
-    </fieldset>
-
-    <fieldset class="card">
-      <legend>Linked Spools</legend>
-      <p class="muted">A Spool on another machine that this one is linked to. Today that is a helper: a small Spool on the machine that holds some of the disks, such as a NAS. It downloads, unpacks and files onto its own disks, and moves titles between them, so that nothing crosses the network to this machine and back. It can also hand a film to a player itself. Spool here still decides everything and is the one server players know. <a class="link" href="https://rewtraw.github.io/spool/guide/helper.html" target="_blank" rel="noreferrer">Setting one up</a></p>
-      {#each general.links ?? [] as h, i (i)}
-        {@const now = linkOf(h.id)}
-        <div class="place">
-          <div class="cols">
-            <label class="field">Name<input class="input" bind:value={h.name} placeholder="The NAS's name" /></label>
-            <label class="field">Address<input class="input mono" bind:value={h.url} placeholder="http://nas:7978" /></label>
-          </div>
-          <label class="field">Key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with.</span></label>
-          <div class="cols">
-            <label class="field">The other machine's disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="/Volumes/nas" /></label>
-            <label class="field">The same folder, as the helper sees it<input class="input mono" bind:value={h.there} placeholder="/nas" /></label>
-          </div>
-          <span class="hint">Every location whose folders lie under the first is served by this helper. A path is turned from one machine's to the other's by swapping these two at its start, so they must name the same folder.</span>
-          <div class="cols">
-            <label class="field">Players sent straight to it
-              <input class="input mono" value={(h.play_from ?? []).join(', ')} onchange={(e) => (h.play_from = e.currentTarget.value.split(/[\s,]+/).filter(Boolean))} placeholder="192.168.1.0/24" />
-            </label>
-            <label class="field">Address players use<input class="input mono" bind:value={h.play_url} placeholder={h.url || 'http://nas:7978'} /></label>
-          </div>
-          <span class="hint">A player at one of these addresses is sent to this machine for a film it holds, with a ticket for that one film, and the film no longer passes through here. Give ranges of addresses, such as your home network's, or one player's address to try it with. Left empty, every film is sent through this Spool, as it is for any player not named. The second address is only needed if players reach the machine at a different one from Spool.</span>
-          <div class="row wrap">
-            {#if now}
-              <span class="small" class:warn={!now.seen.usable || !now.seen.downloads_seen}>
-                {[!now.seen.asked ? 'Not asked yet' : !now.seen.reachable ? 'Cannot be reached' : !now.seen.usable && !now.seen.play ? 'Cannot be used' : 'Answering',
-                  now.seen.reachable ? allows(now.seen) : '',
-                  now.serves.length ? `serves ${now.serves.join(' and ')}` : 'serves no location yet',
-                  now.seen.usable && now.downloads ? `${now.downloads} ${now.downloads === 1 ? 'download' : 'downloads'} running` : '',
-                  now.seen.free != null ? `${bytes(now.seen.free)} free for downloads` : ''].filter(Boolean).join(' · ')}
-              </span>
-            {:else}
-              <span class="faint small">Save to start using it.</span>
-            {/if}
-            <span class="grow"></span>
-            <button class="btn small ghost danger" type="button" onclick={() => general.links.splice(i, 1)}>Remove</button>
-          </div>
-          {#if now?.seen.problem}<p class="small warn">{now.seen.problem}</p>{/if}
-          {#if now?.seen.legacy && (h.play_from ?? []).length}<p class="small warn">This helper is from before it could hand films to players. Update it, and until then every film is sent through this Spool.</p>{/if}
-        </div>
-      {/each}
-      <div><button class="btn" type="button" onclick={addLink}>Add a helper</button></div>
-      <p class="hint">Without a helper, or while one cannot be reached, a location on another machine works as before: downloads run here and are filed across the share, and films are sent to players from here. "Check this location" says what a location's helper sees.</p>
     </fieldset>
 
     <fieldset class="card">

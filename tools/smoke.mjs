@@ -115,7 +115,7 @@ const pages = [
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
   ['archive', '#/archive', ['Archive'], true],
-  ['settings-general', '#/settings/general', ['Mode', 'Locations', 'Players'], false],
+  ['settings-general', '#/settings/general', ['Mode', 'Library', 'Players'], false],
   ['settings-usenet', '#/settings/usenet', ['Speed'], false],
   ['settings-indexers', '#/settings/indexers', [/Add an indexer/], false],
   ['settings-profiles', '#/settings/profiles', ['Hard size limits'], true],

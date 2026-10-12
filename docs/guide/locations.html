@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A library in more than one place · Spool</title>
-<meta name="description" content="Spool always has a main location: the Movies and Series folders under Settings, General, Folders. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.">
+<meta name="description" content="Spool always has a main location: the first one listed under This machine in Settings, General, Library. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.">
 <link rel="icon" href="../assets/mark.svg">
 <style>
   :root {
@@ -111,7 +111,7 @@
     </aside>
     <article>
 <h1>A library in more than one place</h1>
-<p>Spool always has a main location: the Movies and Series folders under Settings, General, Folders. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.</p>
+<p>Spool always has a main location: the first one listed under This machine in Settings, General, Library. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.</p>
 <p>This part of Spool is new. It is tested with folders that come and go; it has had little use yet with a network share over weeks.</p>
 <h2 id="managed-or-only-read"><a href="#managed-or-only-read">Managed, or only read</a></h2>
 <p>Each location has a box, &quot;Let Spool change files here&quot;.</p>
@@ -159,7 +159,7 @@
 <ol>
 <li><p><strong>Mount it first.</strong> Spool reads ordinary folders. A share from a NAS has to be mounted by the system, at the same path every time, before Spool can use it. See <a href="#mounting-a-share">Mounting a share</a>.</p>
 </li>
-<li><p>Under Settings, General, More locations, choose <strong>Add a location</strong> and fill in:</p>
+<li><p>Under Settings, General, Library, choose <strong>Add a location</strong> and fill in:</p>
 <div class="scroll"><table>
 <thead>
 <tr>
@@ -266,7 +266,7 @@
 <p>Spool checks each location on a thread of its own with a short wait, because a network share that has gone can otherwise keep a program waiting for minutes.</p>
 <h2 id="where-new-titles-go"><a href="#where-new-titles-go">Where new titles go</a></h2>
 <p>Once there is a managed location beside the main one, &quot;Put new titles on&quot; chooses which receives titles you add, and the box for adding a title under Discover offers the same choice for that one title. Titles already in the library stay where they are. If the chosen location cannot be reached when a title is added, the title goes to the main library.</p>
-<p>The downloads folder is one folder, under Settings, General, Folders. A download filed onto a different disk is copied there and checked instead of moved, which takes longer for a large file.</p>
+<p>The downloads folder is one folder, under Settings, General, Downloads. A download filed onto a different disk is copied there and checked instead of moved, which takes longer for a large file.</p>
 <h2 id="mounting-a-share"><a href="#mounting-a-share">Mounting a share</a></h2>
 <p>How to mount a share is the system&#39;s business, not Spool&#39;s. What matters to Spool is that it is mounted at the same path each time and comes back by itself after a restart.</p>
 <ul>

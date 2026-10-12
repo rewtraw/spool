@@ -80,7 +80,7 @@ Spool reads what was downloaded before it files it: which file is the film, how 
 
 ### 3. Tell Spool about the helper
 
-Under Settings, General, Linked Spools, choose **Add a helper**:
+Under Settings, General, Library, choose **Link another Spool**:
 
 | Field | What to put |
 | --- | --- |
@@ -122,7 +122,7 @@ A film on the NAS is played, without a helper, by way of Spool's machine: the NA
 
 The ticket names that one file, runs out after twelve hours, and is signed with a key made from the one Spool and the helper share. The helper hands a file to whoever comes with a ticket of Spool's and to nobody else; it has no sign-in and nothing to browse. It opens the file by going from the shared folder one name at a time and follows no link on the way, so a link placed in a shared folder leads nowhere. A library whose films are themselves links to somewhere else cannot be played from the helper; leave its players off the list below, and Spool goes on sending those films itself.
 
-**Which players are sent.** None, until you say. Under Settings, General, Linked Spools, each helper has **Players sent straight to it**: ranges of addresses, such as `192.168.1.0/24` for a home network, or one player's address. A player at one of them is sent to the helper. Every other player, and every player while the field is empty, gets the film through Spool as before.
+**Which players are sent.** None, until you say. Under Settings, General, Library, each linked machine has **Players sent straight to it**: ranges of addresses, such as `192.168.1.0/24` for a home network, or one player's address. A player at one of them is sent to the helper. Every other player, and every player while the field is empty, gets the film through Spool as before.
 
 Spool cannot work out by itself which players can reach the NAS, which is why it asks. A player away from home, coming in over a private network the NAS is not on, has to stay off the list.
 

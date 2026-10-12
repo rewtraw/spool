@@ -131,6 +131,34 @@
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
+/* A machine that holds some of the library, with the locations on it set in from its name. */
+.settings .machine {
+  display: grid;
+  gap: 4px;
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--line);
+}
+.settings .machine > .place {
+  margin-left: 14px;
+  padding: 14px 0 14px 16px;
+  border-top: 0;
+  border-left: 2px solid var(--line);
+}
+.settings .machine > div:last-child {
+  margin-left: 14px;
+  padding: 8px 0 8px 16px;
+}
+.settings .place .where {
+  overflow-wrap: anywhere;
+}
+.settings .machine details > summary {
+  cursor: pointer;
+  color: var(--muted, inherit);
+}
+.settings .machine details[open] {
+  display: grid;
+  gap: 12px;
+}
 .settings .checks {
   display: grid;
   gap: 4px;
