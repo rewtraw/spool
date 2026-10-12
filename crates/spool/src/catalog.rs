@@ -16,6 +16,9 @@ pub struct ScanReport {
     /// Records that had taken a trailer or another extra for the film, now put right.
     pub extras: usize,
     pub unmatched: Vec<String>,
+    /// Titles whose folders could not be looked through to the end, so nothing was
+    /// concluded about them this time.
+    pub put_off: Vec<String>,
 }
 
 impl App {
@@ -487,7 +490,8 @@ impl App {
         }
         for t in self.db.titles(None)? {
             if let Err(e) = self.scan_title(t.id, &mut report).await {
-                tracing::warn!(title = %t.title, error = %e, "scan failed");
+                tracing::warn!(title = %t.title, error = %format!("{e:#}"), "its folder could not be looked through; nothing is concluded about it");
+                report.put_off.push(t.title.clone());
             }
         }
         self.emit(Event::Title { id: 0 });

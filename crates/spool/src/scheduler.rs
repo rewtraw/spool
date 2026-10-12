@@ -16,7 +16,14 @@ impl App {
             "rss" => self.rss_sync().await,
             "backlog" => self.backlog().await,
             "refresh" => self.refresh_due(true).await,
-            "scan" => self.scan_all().await.map(|r| format!("{} files on disk, {} added, {} missing, {} unmatched", r.files_found, r.files_added, r.files_missing, r.unmatched.len())),
+            "scan" => self.scan_all().await.map(|r| {
+                let put_off = match r.put_off.len() {
+                    0 => String::new(),
+                    1 => format!("; {} could not be looked through and was left as it is", r.put_off[0]),
+                    n => format!("; {n} titles could not be looked through and were left as they are"),
+                };
+                format!("{} files on disk, {} added, {} missing, {} unmatched{put_off}", r.files_found, r.files_added, r.files_missing, r.unmatched.len())
+            }),
             "housekeeping" => self.housekeeping().await,
             "smaller" => self.smaller_copies().await,
             "subtitles" => self.subtitle_sweep().await,

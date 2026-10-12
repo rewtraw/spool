@@ -80,7 +80,7 @@ Spool reads what was downloaded before it files it: which file is the film, how 
 
 ### 3. Tell Spool about the helper
 
-Under Settings, General, Library, choose **Link another Spool**:
+Under Settings, Library, choose **Link another Spool**:
 
 | Field | What to put |
 | --- | --- |
@@ -122,13 +122,15 @@ A film on the NAS is played, without a helper, by way of Spool's machine: the NA
 
 The ticket names that one file, runs out after twelve hours, and is signed with a key made from the one Spool and the helper share. The helper hands a file to whoever comes with a ticket of Spool's and to nobody else; it has no sign-in and nothing to browse. It opens the file by going from the shared folder one name at a time and follows no link on the way, so a link placed in a shared folder leads nowhere. A library whose films are themselves links to somewhere else cannot be played from the helper; leave its players off the list below, and Spool goes on sending those films itself.
 
-**Which players are sent.** None, until you say. Under Settings, General, Library, each linked machine has **Players sent straight to it**: ranges of addresses, such as `192.168.1.0/24` for a home network, or one player's address. A player at one of them is sent to the helper. Every other player, and every player while the field is empty, gets the film through Spool as before.
+**Which players are sent.** None, until you say. Under Settings, Library, each linked machine has **Send players on the same network straight to it**. On, a player on the same network as the machine is sent to it; every other player, and every player while it is off, gets the film through Spool as before. The same network means the same stretch of addresses as the one the machine answers Spool from: the first three numbers of an address such as `192.168.1.20`.
 
-Spool cannot work out by itself which players can reach the NAS, which is why it asks. A player away from home, coming in over a private network the NAS is not on, has to stay off the list.
+**A player that reaches Spool over Tailscale** is seen at its Tailscale address, even at home. Spool asks Tailscale on its own machine where it is really talking to that player: when the two talk directly, the player is placed by that address, so it counts as on the network at home and not away. A player reached through one of Tailscale's relays is taken to be away and gets the film through Spool. If the linked machine is itself reached over Tailscale, every player on Tailscale counts as near it.
 
-**Try it with one player first.** Put in the address of one player and play a film that is on the NAS. Being sent elsewhere for a film is something a player has to follow, and a player that does not will fail to play. If it plays, and still plays after skipping forward, widen the range. Infuse 8.5 on a Mac follows and seeks; Infuse on an Apple TV has not been tried yet.
+**Other players.** Under **How it is reached, and other players to send** there is a list of further addresses: ranges such as `10.0.5.0/24`, or one player's address. A player at one of them is sent wherever it is. Use it for a second network at home, or to try one player before turning the switch on. Do not put in the whole Tailscale range unless the machine is on Tailscale too: a phone away from home would be sent to a machine it cannot reach.
 
-**A player that reaches Spool over Tailscale** is seen at its Tailscale address, even at home. Spool asks Tailscale on its own machine where it is really talking to that player: when the two talk directly, the player is placed by that address, so a home range covers it at home and not away. A player reached through one of Tailscale's relays is taken to be away and gets the film through Spool. A player can also be named by its Tailscale address, and is then sent wherever it is. Do not put in the whole Tailscale range unless the NAS is on Tailscale too: a phone away from home would be sent to a NAS it cannot reach.
+**Players that follow.** Being sent elsewhere for a film is something a player has to follow, and a player that does not will fail to play. Infuse 8.5 on a Mac follows and seeks; Infuse on an Apple TV has not been tried yet.
+
+**What is playing, and from where,** is at the top of Activity while it plays: the title, and the machine it comes from or "Through this Spool".
 
 **The address players use.** Players are sent to the address Spool itself uses for the helper. If they reach the NAS at a different one, give it under **Address players use**.
 
@@ -145,6 +147,8 @@ When a location is looked through or scanned, Spool has to know what is in each 
 - A folder the helper could not read to the end is not answered at all, and Spool concludes nothing about it until the next scan.
 - A shared folder that is empty, or is on another disk than it was when the helper started, is taken for a disk that has gone. So is a folder under a disk that was mounted inside a shared folder then and is not now. The helper says so, and no title there loses its files on record.
 - When the helper was asked and could not say, Spool does not then read the same folder across the share. The share shows the same disks.
+
+A scan says how many titles it left as they were for this reason, and names the title when there is one.
 
 **Links.** The helper follows no link inside the folders it shares, so that it never tells of anything outside them. A folder with a link in it, or reached through one, is read by Spool across the share, as before. The helper checks for links by name as it goes; a link put in place of a folder at the very moment it is being read could still be followed, which matters only once a link is given to someone who is not trusted with the disks.
 

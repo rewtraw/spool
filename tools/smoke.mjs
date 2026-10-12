@@ -11,7 +11,7 @@
 // Chrome's own --screenshot fires before that.
 //
 // Needs Chrome or Chromium (CHROME names it if it is somewhere unusual) and an instance
-// without an app password. Pages that show keys (General, Usenet, Indexers) are checked and
+// without an app password. Pages that show keys (General, Library, Usenet, Indexers) are checked and
 // never pictured.
 
 import { spawn } from 'node:child_process';
@@ -115,7 +115,8 @@ const pages = [
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
   ['archive', '#/archive', ['Archive'], true],
-  ['settings-general', '#/settings/general', ['Mode', 'Library', 'Players'], false],
+  ['settings-general', '#/settings/general', ['Mode', 'Downloads', 'Players'], false],
+  ['settings-library', '#/settings/library', ['This machine', 'Add a location'], false],
   ['settings-usenet', '#/settings/usenet', ['Speed'], false],
   ['settings-indexers', '#/settings/indexers', [/Add an indexer/], false],
   ['settings-profiles', '#/settings/profiles', ['Hard size limits'], true],

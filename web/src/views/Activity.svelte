@@ -208,6 +208,21 @@
       <div class="progress" role="progressbar" aria-label="Queue progress" aria-valuenow={Math.round(pct(totals.done, totals.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(totals.done, totals.total)}%"></i></div>
     </div>
   {/if}
+  {#if (data.playing ?? []).length}
+    <div class="section-title movehead">Playing now</div>
+    <div class="stack moves">
+      {#each data.playing as p (p.title_id + p.since)}
+        <div class="card item">
+          <div class="grow">
+            <div class="row wrap top">
+              <a class="t" href="#/title/{p.title_id}">{p.title}</a>
+              <span class="chip accent">{p.from ? `From ${p.from}` : 'Through this Spool'}</span>
+            </div>
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
   {#if moving}
     <div class="section-title movehead">Moving to another location</div>
     <div class="stack moves">

@@ -25,6 +25,23 @@ pub enum Event {
     Locations,
 }
 
+/// Something a player is playing.
+#[derive(Clone, Debug, Serialize)]
+pub struct Playing {
+    pub title: String,
+    pub title_id: i64,
+    /// The linked machine the player takes it from; empty when it is sent from here.
+    pub from: String,
+    pub since: i64,
+    /// When the player last asked for some of it or said how far it had got.
+    pub seen: i64,
+    #[serde(skip)]
+    path: PathBuf,
+}
+
+/// How long a player may say nothing before it is taken to have stopped, in seconds.
+const QUIET: i64 = 120;
+
 pub struct Inner {
     pub db: Db,
     pub settings: Settings,
@@ -56,6 +73,8 @@ pub struct Inner {
     pub adoption: Mutex<Option<crate::adopt::Adoption>>,
     /// When a player last reported that it was playing something.
     pub last_playing: std::sync::atomic::AtomicI64,
+    /// What each player is playing, by the address it came from.
+    pub playing: Mutex<HashMap<std::net::IpAddr, Playing>>,
     /// Titles being moved between locations.
     pub moves: Mutex<crate::relocate::Moves>,
     pub encodes: Mutex<crate::compact::Encodes>,
@@ -114,6 +133,39 @@ pub fn http_client() -> reqwest::Client {
 }
 
 impl App {
+    /// Note that a player has asked for a file, and where it is being sent for it.
+    pub fn note_playing(&self, player: std::net::IpAddr, path: &Path, from: Option<&str>) {
+        let now = crate::db::now();
+        let mut playing = self.playing.lock();
+        if let Some(p) = playing.get_mut(&player).filter(|p| p.path == path) {
+            (p.seen, p.from) = (now, from.unwrap_or_default().to_string());
+            return;
+        }
+        let Some(t) = self.db.titles(None).ok().and_then(|all| all.into_iter().find(|t| !t.path.is_empty() && (path.starts_with(&t.path) || t.also.iter().any(|a| path.starts_with(a))))) else { return };
+        playing.insert(player, Playing { title: t.title, title_id: t.id, from: from.unwrap_or_default().to_string(), since: now, seen: now, path: path.to_path_buf() });
+    }
+
+    /// A player said how far it had got, or that it had stopped.
+    pub fn note_progress(&self, player: Option<std::net::IpAddr>, stopped: bool) {
+        let Some(player) = player else { return };
+        let mut playing = self.playing.lock();
+        if stopped {
+            playing.remove(&player);
+        } else if let Some(p) = playing.get_mut(&player) {
+            p.seen = crate::db::now();
+        }
+    }
+
+    /// What is being played now, the longest-running first.
+    pub fn playing_now(&self) -> Vec<Playing> {
+        let now = crate::db::now();
+        let mut playing = self.playing.lock();
+        playing.retain(|_, p| now - p.seen < QUIET);
+        let mut all: Vec<Playing> = playing.values().cloned().collect();
+        all.sort_by_key(|p| p.since);
+        all
+    }
+
     pub async fn start(data_dir: &Path, db: Db) -> anyhow::Result<App> {
         Self::start_with(data_dir, db, None).await
     }
@@ -166,6 +218,7 @@ impl App {
             moves: Mutex::new(Default::default()),
             encodes: Mutex::new(Default::default()),
             last_playing: Default::default(),
+            playing: Default::default(),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),

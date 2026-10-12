@@ -19,6 +19,7 @@
 
 use crate::app::{App, Event};
 use crate::helper::Pushed;
+use crate::link::tailnet;
 use crate::link::ticket::{plain, Signer};
 use crate::local::{Blocked, FolderSummary, Survey};
 use crate::link::{agreed, Grants, Hello, Net, Share};
@@ -103,6 +104,8 @@ pub struct Remote {
     signer: Signer,
     /// The players that are sent to it for a file.
     nets: Vec<Net>,
+    /// The address it last answered from, which says what network it is on.
+    at: Mutex<Option<IpAddr>>,
     /// Its downloads as last reported, named and placed as this machine knows them.
     jobs: Mutex<Vec<JobStatus>>,
     /// Downloads handed over a moment ago, which a report already on its way back may not
@@ -161,14 +164,14 @@ impl Remote {
     fn new(conf: LinkConf) -> Remote {
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).build().expect("http client");
         let (signer, nets) = (Signer::new(&conf.key), conf.play_from.iter().filter_map(|n| Net::parse(n).ok()).collect());
-        Remote { conf, http, signer, nets, jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
+        Remote { conf, http, signer, nets, at: Mutex::new(None), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
     }
 
     /// Where a player at this address can take a file from the linked machine itself: an
     /// address with a ticket for that one file. None when the player is not one of those
     /// sent there, or the machine is not handing files out just now.
-    pub fn direct(&self, here: &Path, player: IpAddr) -> Option<String> {
-        if !self.nets.iter().any(|n| n.holds(player)) {
+    pub fn direct(&self, here: &Path, player: &[IpAddr]) -> Option<String> {
+        if !(player.iter().any(|p| self.nets.iter().any(|n| n.holds(*p))) || (self.conf.play_near && self.near(player))) {
             return None;
         }
         let there = self.there(here)?;
@@ -179,6 +182,16 @@ impl Remote {
         let (share, rel) = crate::link::place(&seen.shares, &there)?;
         let base = if self.conf.play_url.is_empty() { &self.conf.url } else { &self.conf.play_url };
         Some(format!("{}/link/play/v1/file?ticket={}", base.trim_end_matches('/'), self.signer.issue(&share.id, &rel, crate::db::now().max(0) as u64)))
+    }
+
+    /// Whether a player is on the network this machine is reached on: the same stretch of
+    /// addresses as the one it answers from, or Tailscale when that is how it is reached.
+    fn near(&self, player: &[IpAddr]) -> bool {
+        let Some(at) = *self.at.lock() else { return false };
+        if tailnet::ours(at) {
+            return player.iter().any(|p| tailnet::ours(*p));
+        }
+        player.iter().any(|p| Net::around(at).holds(*p))
     }
 
     pub fn seen(&self) -> Seen {
@@ -212,6 +225,9 @@ impl Remote {
         let name = &self.conf.name;
         let away = |e: reqwest::Error| Fail::Away { sent: !e.is_connect(), why: format!("{name}'s helper did not answer: {}", e.without_url()) };
         let resp = req.bearer_auth(&self.conf.key).timeout(patience).send().await.map_err(away)?;
+        if let Some(from) = resp.remote_addr() {
+            *self.at.lock() = Some(from.ip());
+        }
         let status = resp.status();
         let body: Option<Value> = serde_json::from_slice(&resp.bytes().await.map_err(away)?).ok();
         if !status.is_success() {
@@ -807,9 +823,10 @@ impl App {
 
     /// Where a player can take a file from the machine that holds it, if there is a link to
     /// that machine that hands files out and the player is one of those sent there.
-    pub fn play_direct(&self, file: &Path, player: Option<IpAddr>) -> Option<String> {
-        let player = player?;
-        self.remotes().iter().find_map(|r| r.direct(file, player))
+    /// `player` is every address the player is known by: the one it came from, and the one
+    /// it is really at when it came over Tailscale. Returns the machine's name and the address.
+    pub fn play_direct(&self, file: &Path, player: &[IpAddr]) -> Option<(String, String)> {
+        self.remotes().iter().find_map(|r| Some((r.conf.name.clone(), r.direct(file, player)?)))
     }
 
     /// What the settings page and the check-up show of each link.
@@ -821,7 +838,7 @@ impl App {
                 let seen = r.seen();
                 let serves: Vec<String> = places.0.iter().filter(|p| [&p.0.movie_root, &p.0.series_root].into_iter().any(|root| !root.is_empty() && r.covers(Path::new(root)))).map(|p| p.0.name.clone()).collect();
                 let running = r.jobs().iter().filter(|j| !j.state.is_terminal() && j.state != JobState::Paused).count();
-                json!({"id": r.conf.id, "name": r.conf.name, "url": r.conf.url, "serves": serves, "downloads": running, "seen": seen})
+                json!({"id": r.conf.id, "name": r.conf.name, "url": r.conf.url, "serves": serves, "downloads": running, "seen": seen, "at": *r.at.lock()})
             })
             .collect()
     }

@@ -54,7 +54,9 @@ pub struct LinkConf {
     pub there: String,
     /// Where it answers players, when that is not where it answers this Spool.
     pub play_url: String,
-    /// The players that are sent to it for a file it holds: ranges of addresses, such as
+    /// Players on the same network as it are sent to it for a file it holds.
+    pub play_near: bool,
+    /// Further players that are sent to it: ranges of addresses, such as
     /// `192.168.1.0/24`. With none, every player is served through this Spool.
     pub play_from: Vec<String>,
 }

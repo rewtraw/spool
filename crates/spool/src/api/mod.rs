@@ -229,6 +229,7 @@ async fn players(State(app): State<App>) -> Json<Value> {
         "port": g.players_port,
         "status": *app.player_status.lock(),
         "signed_in": app.player_tokens.lock().len(),
+        "playing": app.playing_now(),
         "requests": app.player_requests.lock().iter().cloned().collect::<Vec<_>>(),
     }))
 }

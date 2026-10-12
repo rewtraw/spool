@@ -3159,6 +3159,24 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     assert_eq!((status, head["cache-control"].to_str().unwrap()), (307, "private, no-store"));
     assert!(there.starts_with(&format!("{url}/link/play/v1/file?ticket=")), "{there}");
     assert!(!w.app.player_requests.lock().iter().any(|line| line.contains(there.rsplit('=').next().unwrap())), "no ticket is kept in what Spool remembers of requests");
+    // What is playing, and that it comes from the other machine, is there to be seen.
+    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    assert_eq!((activity["playing"][0]["title"].as_str(), activity["playing"][0]["from"].as_str()), (Some("Alpha"), Some("Nas")), "{}", activity["playing"]);
+
+    // Without naming anyone: players on the same network as the machine are sent to it.
+    send_from(json!([])).await;
+    assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 206, "nobody is named, and nothing says to send those nearby");
+    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    assert_eq!(activity["playing"][0]["from"].as_str(), Some(""), "sent from here now");
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["links"][0]["play_near"] = json!(true);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    w.app.ask_remotes().await;
+    assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 307, "the player and the machine are on one network");
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["links"][0]["play_near"] = json!(false);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    send_from(json!(["127.0.0.0/8"])).await;
 
     // The film comes from the helper, with no key and no sign-in, and not by way of Spool:
     // the share is taken away from Spool's machine and the film still plays.
@@ -3285,7 +3303,7 @@ async fn a_link_does_only_what_it_was_started_allowing_and_an_older_helper_still
     let old = w.app.remotes()[0].clone();
     let seen = old.seen();
     assert_eq!((seen.usable, seen.legacy, seen.play, seen.downloads_seen, seen.grants), (true, true, false, true, Grants { work: true, ..Default::default() }), "{}", seen.problem);
-    assert!(w.app.play_direct(&root.join("films/Alpha (2001)/Alpha (2001).mkv"), Some("127.0.0.1".parse().unwrap())).is_none(), "nobody is sent to a helper that cannot hand out files");
+    assert!(w.app.play_direct(&root.join("films/Alpha (2001)/Alpha (2001).mkv"), &["127.0.0.1".parse().unwrap()]).is_none(), "nobody is sent to a helper that cannot hand out files");
 
     // Two links are never given the same folder, and a number once given is not given again.
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;

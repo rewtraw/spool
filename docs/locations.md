@@ -1,6 +1,6 @@
 # A library in more than one place
 
-Spool always has a main location: the first one listed under This machine in Settings, General, Library. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.
+Spool always has a main location: the first one listed under This machine in Settings, Library. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.
 
 This part of Spool is new. It is tested with folders that come and go; it has had little use yet with a network share over weeks.
 
@@ -22,7 +22,7 @@ Only read is the right choice for a library that something else looks after, or 
 ## Adding a location
 
 1. **Mount it first.** Spool reads ordinary folders. A share from a NAS has to be mounted by the system, at the same path every time, before Spool can use it. See [Mounting a share](#mounting-a-share).
-2. Under Settings, General, Library, choose **Add a location** and fill in:
+2. Under Settings, Library, choose **Add a location** and fill in:
 
    | Field | What to put |
    | --- | --- |

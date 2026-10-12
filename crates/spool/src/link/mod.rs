@@ -134,6 +134,13 @@ impl Net {
         Ok(Net { addr, bits })
     }
 
+    /// The stretch of addresses a home network gives the machines on it, around one of
+    /// them: those that share its first three numbers, or the first half of a long address.
+    pub fn around(ip: IpAddr) -> Net {
+        let addr = plain_addr(ip);
+        Net { addr, bits: if addr.is_ipv4() { 24 } else { 64 } }
+    }
+
     pub fn holds(&self, ip: IpAddr) -> bool {
         let same = |a: u128, b: u128, width: u32| self.bits == 0 || (a ^ b) >> (width - self.bits as u32) == 0;
         match (self.addr, plain_addr(ip)) {
@@ -191,6 +198,9 @@ mod tests {
         assert!(v6.holds(ip("fd7a:115c:a1e0::1")) && !v6.holds(ip("fd7a:115c:a1e1::1")) && !v6.holds(ip("10.0.0.1")));
         assert!(Net::parse("0.0.0.0/0").unwrap().holds(ip("8.8.8.8")));
         assert!(Net::parse("10.0.0.0/8").unwrap().holds(ip("10.255.0.1")));
+        let near = Net::around(ip("192.168.69.97"));
+        assert!(near.holds(ip("192.168.69.53")) && !near.holds(ip("192.168.70.53")) && !near.holds(ip("100.105.199.49")));
+        assert!(Net::around(ip("fd00:1:2:3::9")).holds(ip("fd00:1:2:3:ffff::1")) && !Net::around(ip("fd00:1:2:3::9")).holds(ip("fd00:1:2:4::1")));
         for bad in ["", "home", "192.168.1.0/33", "192.168.1/24", "fd00::/129", "192.168.1.0/x"] {
             assert!(Net::parse(bad).is_err(), "{bad:?}");
         }
