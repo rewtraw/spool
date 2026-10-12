@@ -57,7 +57,7 @@ export async function act<T>(fn: () => Promise<T>, success?: string): Promise<T 
 export async function loadStatus() {
   try {
     app.status = await api.get('/status');
-    app.attention = app.status.attention;
+    app.attention = app.status.attention + (app.status.asks ?? 0);
     app.online = true;
   } catch (e: any) {
     if (e?.status === 0) app.online = false;

@@ -439,6 +439,31 @@ const MIGRATIONS: &[&str] = &[
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
     "#,
+    r#"
+    -- What someone has asked for: a film or a series that is not in the library, named by the
+    -- ids it is looked up by. Once it is added, the title it became.
+    CREATE TABLE asks (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        tmdb_id INTEGER,
+        tvmaze_id INTEGER,
+        tvdb_id INTEGER,
+        title TEXT NOT NULL,
+        year INTEGER NOT NULL DEFAULT 0,
+        poster TEXT NOT NULL DEFAULT '',
+        -- "asked", "added" or "declined".
+        state TEXT NOT NULL DEFAULT 'asked',
+        title_id INTEGER REFERENCES titles(id) ON DELETE SET NULL,
+        asked_at INTEGER NOT NULL,
+        answered_at INTEGER NOT NULL DEFAULT 0
+    );
+    -- One ask of a title to an account, however many times it is sent.
+    CREATE UNIQUE INDEX asks_one ON asks(account_id, kind, COALESCE(tmdb_id, 0), COALESCE(tvmaze_id, 0));
+
+    -- Whether what an account asks for is added without waiting for anyone to say so.
+    ALTER TABLE accounts ADD COLUMN adds INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 impl Db {

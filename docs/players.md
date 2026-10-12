@@ -60,9 +60,30 @@ Each person who plays has an account of their own. What they have watched, where
 - **A new password** signs every one of that person's players out, and nobody else's.
 - **Stop sign-in** turns an account away without removing it: its players are signed out, and what it has watched is kept for when it is allowed again.
 - **Removing** an account removes what it watched and played with it. The library is not touched.
-- **Players** signed in to an account are listed under it, each with what it called itself and when it was last seen, and can be signed out one at a time.
+- **Players** signed in to an account are listed under it, each with what it called itself and when it was last seen, and can be signed out one at a time. A player not seen for ninety days is signed out by itself, so the list holds the players there are.
+- **Choosing who.** A player that shows a list of people to sign in as is given the names of the accounts that may sign in. Whether a player shows one is the player's doing; one that does not asks for the name.
 
 The account there was before there were several is the first one, with what had been watched and the players that were signed in.
+
+## Bringing what was watched in Plex
+
+With Plex set up under Settings, Plex, each account has **Bring watched from Plex**. Films and episodes Plex has as watched are marked watched for that account, and ones stopped part-way are given the place to carry on from.
+
+- **It only adds.** Nothing watched here is unmarked, and a place kept here is not moved.
+- **Whose history it is.** Plex answers for whoever its token belongs to, which is the person who set Plex up. Other people in a Plex Home are not read.
+- **What it covers.** Titles that Spool tracks and Plex has. It can be run again at any time, and brings only what is new.
+
+## Asking for something
+
+The players' address, opened in a browser, is a page where the people who play ask for a film or a series the library has not got: `http://<the machine>:8096`. They choose who they are, give their password if the account has one, search by name and ask.
+
+- **What is asked for waits** under **Asked for** on Home and in Settings, Players, with who asked. **Add it** adds it to the library and looks for it, as adding it under Discover would; **Not this time** turns it down.
+- **Whoever asked sees how it stands** on the same page: asked, on its way, ready to play, or not this time. A series is ready when its first episode is, and says how many it has.
+- **Added at once.** Each account has **Add what they ask for at once**. On, what that person asks for is added without waiting for you. It is off for a new account.
+- **Two people asking for the same thing** are answered together.
+- **What it opens.** The page signs in as a player does, so it is listed among the account's players. It can look titles up, ask, and take back its own asks. It cannot see the library's settings or anyone else's asks.
+
+There is no message sent when something is ready: the page says so when it is next opened.
 
 ## Seeing what players are doing
 

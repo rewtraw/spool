@@ -7,6 +7,7 @@
 
 mod discovery;
 pub mod ids;
+mod asking;
 pub(crate) mod items;
 mod media;
 
@@ -150,7 +151,8 @@ impl Call {
 
     /// Who is asking: the account the player's token is signed in to. The token is found
     /// by what it hashes to, so how long that takes says nothing of how nearly a guess was
-    /// right. That it was seen is written down once in a few minutes.
+    /// right. That it was seen is written down once in a few minutes. One that signed in
+    /// before players' names were kept is given the name it goes by now.
     fn signed(&self) -> Option<crate::app::Signed> {
         let token = self.token()?;
         let mut players = self.app.players.lock();
@@ -159,6 +161,12 @@ impl Call {
         if now - who.seen > 300 {
             who.seen = now;
             let _ = self.app.db.device_seen(&token);
+        }
+        if who.device.is_empty() {
+            let name = self.client("Device");
+            if !name.is_empty() && self.app.db.name_device(&token, &name, &self.client("Client")).is_ok() {
+                who.device = name;
+            }
         }
         Some(who.clone())
     }
@@ -358,10 +366,12 @@ impl Call {
 
         // What a player may ask before it has signed in.
         match (reading, path.as_slice()) {
-            (true, []) => return ([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], "Spool is serving its library to players here. Add this address to a player as a Jellyfin server.").into_response(),
+            // In a browser this address is where the people who play ask for something new.
+            (true, []) => return ([(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], include_str!("ask.html")).into_response(),
             (_, ["system", "ping"]) => return Json(json!("Jellyfin Server")).into_response(),
             (true, ["system", "info", "public"]) => return Json(self.system_info(false)).into_response(),
-            (true, ["users", "public"]) => return Json(json!([])).into_response(),
+            // Who may sign in, so that a player can offer the names to choose from.
+            (true, ["users", "public"]) => return Json(self.app.db.accounts().unwrap_or_default().iter().filter(|a| a.enabled).map(|a| self.user(a)).collect::<Vec<_>>()).into_response(),
             (true, ["branding", "configuration"]) => return Json(json!({"LoginDisclaimer": "", "CustomCss": "", "SplashscreenEnabled": false})).into_response(),
             (true, ["branding", "css" | "css.css"]) => return ([(header::CONTENT_TYPE, "text/css")], "").into_response(),
             (true, ["quickconnect", "enabled"]) => return Json(json!(false)).into_response(),
@@ -385,6 +395,13 @@ impl Call {
                 }
                 no_content()
             }
+
+            // Asking for something the library has not got: not part of Jellyfin's API, and
+            // used by the page this door gives a browser.
+            (true, ["spool", "find"]) => asking::answer(self.app.asks_find(me.id, self.q.get("q").unwrap_or("")).await.map(|found| json!(found))),
+            (true, ["spool", "asks"]) => asking::answer(self.app.asks_report(Some(me.id)).map(|mine| json!(mine))),
+            (false, ["spool", "asks"]) if self.method == Method::POST => asking::ask(&self.app, &me, &self.body).await,
+            (false, ["spool", "asks", id]) if self.method == Method::DELETE => asking::withdraw(&self.app, &me, id),
 
             (true, ["userviews"] | ["users", _, "views"] | ["library", "mediafolders"]) => match self.library() {
                 Ok(lib) => page(self.views(&lib), 2, 0),

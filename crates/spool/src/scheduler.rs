@@ -148,6 +148,11 @@ impl App {
         // Removals are remembered for three months so that anything keeping a copy of the library
         // can be told what went; after that it is told to read everything again.
         let _ = self.db.prune_changes(crate::db::now() - 90 * 86400);
+        // A player not seen in that long has been put away, sold or wiped: its sign-in is not
+        // worth keeping, and the list of them should hold the players there are.
+        if self.db.remove_devices_unseen(crate::db::now() - crate::app::SIGNED_IN_FOR).is_ok_and(|gone| gone > 0) {
+            self.reload_players();
+        }
         let dir = self.data_dir.join("backups");
         std::fs::create_dir_all(&dir)?;
         let name = format!("spool-{}.db", chrono::Local::now().format("%Y%m%d"));

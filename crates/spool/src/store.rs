@@ -284,8 +284,8 @@ impl Db {
 
     pub fn accounts(&self) -> Result<Vec<Account>> {
         self.with(|c| {
-            let mut s = c.prepare("SELECT id, name, password, enabled, created_at FROM accounts ORDER BY id")?;
-            let rows = s.query_map([], |r| Ok(Account { id: r.get(0)?, name: r.get(1)?, password: r.get(2)?, enabled: r.get(3)?, created_at: r.get(4)? }))?;
+            let mut s = c.prepare("SELECT id, name, password, enabled, created_at, adds FROM accounts ORDER BY id")?;
+            let rows = s.query_map([], |r| Ok(Account { id: r.get(0)?, name: r.get(1)?, password: r.get(2)?, enabled: r.get(3)?, created_at: r.get(4)?, adds: r.get(5)? }))?;
             rows.collect()
         })
     }
@@ -303,7 +303,7 @@ impl Db {
     }
 
     pub fn save_account(&self, a: &Account) -> Result<()> {
-        self.with(|c| c.execute("UPDATE accounts SET name = ?2, password = ?3, enabled = ?4 WHERE id = ?1", params![a.id, a.name, a.password, a.enabled]))?;
+        self.with(|c| c.execute("UPDATE accounts SET name = ?2, password = ?3, enabled = ?4, adds = ?5 WHERE id = ?1", params![a.id, a.name, a.password, a.enabled, a.adds]))?;
         Ok(())
     }
 
@@ -330,6 +330,102 @@ impl Db {
     pub fn device_seen(&self, token: &str) -> Result<()> {
         self.with(|c| c.execute("UPDATE devices SET seen_at = ?2 WHERE token = ?1", params![token, now()]))?;
         Ok(())
+    }
+
+    /// What a player said it was, kept for one that signed in before that was written down.
+    pub fn name_device(&self, token: &str, name: &str, client: &str) -> Result<()> {
+        self.with(|c| c.execute("UPDATE devices SET name = ?2, client = ?3 WHERE token = ?1", params![token, name, client]))?;
+        Ok(())
+    }
+
+    /// Sign out the players that have not been seen since a time, and say how many.
+    pub fn remove_devices_unseen(&self, since: i64) -> Result<usize> {
+        self.with(|c| c.execute("DELETE FROM devices WHERE MAX(seen_at, created_at) < ?1", [since]))
+    }
+
+    // ------------------------------------------------------------ asks
+
+    /// What has been asked for, newest first: everyone's, or one account's.
+    pub fn asks(&self, account: Option<i64>) -> Result<Vec<Ask>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT id, account_id, kind, tmdb_id, tvmaze_id, tvdb_id, title, year, poster, state, title_id, asked_at, answered_at FROM asks WHERE ?1 IS NULL OR account_id = ?1 ORDER BY asked_at DESC, id DESC")?;
+            let rows = s.query_map(params![account], |r| {
+                Ok(Ask {
+                    id: r.get(0)?,
+                    account_id: r.get(1)?,
+                    kind: Kind::parse(&r.get::<_, String>(2)?).unwrap_or(Kind::Movie),
+                    tmdb_id: r.get(3)?,
+                    tvmaze_id: r.get(4)?,
+                    tvdb_id: r.get(5)?,
+                    title: r.get(6)?,
+                    year: r.get(7)?,
+                    poster: r.get(8)?,
+                    state: r.get(9)?,
+                    title_id: r.get(10)?,
+                    asked_at: r.get(11)?,
+                    answered_at: r.get(12)?,
+                })
+            })?;
+            rows.collect()
+        })
+    }
+
+    pub fn ask(&self, id: i64) -> Result<Option<Ask>> {
+        Ok(self.asks(None)?.into_iter().find(|a| a.id == id))
+    }
+
+    /// Keep an ask, and say which it is. An account has one ask of a title: sent twice, the
+    /// one already kept is the answer.
+    pub fn add_ask(&self, a: &Ask) -> Result<i64> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO asks(account_id, kind, tmdb_id, tvmaze_id, tvdb_id, title, year, poster, state, title_id, asked_at, answered_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                 ON CONFLICT DO NOTHING",
+                params![a.account_id, a.kind.as_str(), a.tmdb_id, a.tvmaze_id, a.tvdb_id, a.title, a.year, a.poster, a.state, a.title_id, a.asked_at, a.answered_at],
+            )?;
+            c.query_row(
+                "SELECT id FROM asks WHERE account_id = ?1 AND kind = ?2 AND COALESCE(tmdb_id, 0) = COALESCE(?3, 0) AND COALESCE(tvmaze_id, 0) = COALESCE(?4, 0)",
+                params![a.account_id, a.kind.as_str(), a.tmdb_id, a.tvmaze_id],
+                |r| r.get(0),
+            )
+        })
+    }
+
+    /// Answer what was asked: added, as the title it became, or declined.
+    pub fn answer_ask(&self, id: i64, state: &str, title_id: Option<i64>) -> Result<()> {
+        self.with(|c| c.execute("UPDATE asks SET state = ?2, title_id = ?3, answered_at = ?4 WHERE id = ?1", params![id, state, title_id, now()]))?;
+        Ok(())
+    }
+
+    /// Remove an ask: any, or only if it is this account's. Says whether there was one.
+    pub fn remove_ask(&self, id: i64, of: Option<i64>) -> Result<bool> {
+        Ok(self.with(|c| c.execute("DELETE FROM asks WHERE id = ?1 AND (?2 IS NULL OR account_id = ?2)", params![id, of]))? > 0)
+    }
+
+    /// Add to what an account has watched from what another library says of it, and never
+    /// take away: watched there, it is watched here; stopped part-way there, with nothing
+    /// kept here, it carries on from that place. Read and written as one step, so that what
+    /// a player reports meanwhile is not written over. Says what was added: (watched, a place).
+    pub fn add_watched(&self, account: i64, kind: &str, id: i64, seen: u32, place: f64, at: i64) -> Result<(bool, bool)> {
+        self.tx(|tx| {
+            let had: Option<(f64, bool)> = tx.query_row("SELECT position, played FROM watched WHERE account_id = ?1 AND kind = ?2 AND ref_id = ?3", params![account, kind, id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            let (position, played) = had.unwrap_or((0.0, false));
+            let (mark, keep) = (seen > 0 && !played, seen == 0 && place > 0.0 && !played && position == 0.0);
+            if mark {
+                tx.execute(
+                    "INSERT INTO watched(account_id, kind, ref_id, played, play_count, last_played_at, updated_at) VALUES (?1,?2,?3,1,?4,?5,?6)
+                     ON CONFLICT(account_id, kind, ref_id) DO UPDATE SET played = 1, play_count = MAX(play_count, ?4), last_played_at = MAX(last_played_at, ?5), updated_at = ?6",
+                    params![account, kind, id, seen, at, now()],
+                )?;
+            } else if keep {
+                tx.execute(
+                    "INSERT INTO watched(account_id, kind, ref_id, position, last_played_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6)
+                     ON CONFLICT(account_id, kind, ref_id) DO UPDATE SET position = ?4, last_played_at = MAX(last_played_at, ?5), updated_at = ?6",
+                    params![account, kind, id, place, at, now()],
+                )?;
+            }
+            Ok((mark, keep))
+        })
     }
 
     /// Sign players out: one by its token, or every player of an account.

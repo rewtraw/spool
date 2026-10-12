@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a class="on" aria-current="page" href="players.html">On a television</a><a class="sub" href="#turning-it-on">Turning it on</a><a class="sub" href="#adding-it-in-infuse">Adding it in Infuse</a><a class="sub" href="#what-the-player-gets">What the player gets</a><a class="sub" href="#nothing-is-converted">Nothing is converted</a><a class="sub" href="#away-from-home">Away from home</a><a class="sub" href="#people">People</a><a class="sub" href="#seeing-what-players-are-doing">Seeing what players are doing</a><a class="sub" href="#what-is-not-there">What is not there</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a class="on" aria-current="page" href="players.html">On a television</a><a class="sub" href="#turning-it-on">Turning it on</a><a class="sub" href="#adding-it-in-infuse">Adding it in Infuse</a><a class="sub" href="#what-the-player-gets">What the player gets</a><a class="sub" href="#nothing-is-converted">Nothing is converted</a><a class="sub" href="#away-from-home">Away from home</a><a class="sub" href="#people">People</a><a class="sub" href="#bringing-what-was-watched-in-plex">Bringing what was watched in Plex</a><a class="sub" href="#asking-for-something">Asking for something</a><a class="sub" href="#seeing-what-players-are-doing">Seeing what players are doing</a><a class="sub" href="#what-is-not-there">What is not there</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -158,9 +158,27 @@
 <li><strong>A new password</strong> signs every one of that person&#39;s players out, and nobody else&#39;s.</li>
 <li><strong>Stop sign-in</strong> turns an account away without removing it: its players are signed out, and what it has watched is kept for when it is allowed again.</li>
 <li><strong>Removing</strong> an account removes what it watched and played with it. The library is not touched.</li>
-<li><strong>Players</strong> signed in to an account are listed under it, each with what it called itself and when it was last seen, and can be signed out one at a time.</li>
+<li><strong>Players</strong> signed in to an account are listed under it, each with what it called itself and when it was last seen, and can be signed out one at a time. A player not seen for ninety days is signed out by itself, so the list holds the players there are.</li>
+<li><strong>Choosing who.</strong> A player that shows a list of people to sign in as is given the names of the accounts that may sign in. Whether a player shows one is the player&#39;s doing; one that does not asks for the name.</li>
 </ul>
 <p>The account there was before there were several is the first one, with what had been watched and the players that were signed in.</p>
+<h2 id="bringing-what-was-watched-in-plex"><a href="#bringing-what-was-watched-in-plex">Bringing what was watched in Plex</a></h2>
+<p>With Plex set up under Settings, Plex, each account has <strong>Bring watched from Plex</strong>. Films and episodes Plex has as watched are marked watched for that account, and ones stopped part-way are given the place to carry on from.</p>
+<ul>
+<li><strong>It only adds.</strong> Nothing watched here is unmarked, and a place kept here is not moved.</li>
+<li><strong>Whose history it is.</strong> Plex answers for whoever its token belongs to, which is the person who set Plex up. Other people in a Plex Home are not read.</li>
+<li><strong>What it covers.</strong> Titles that Spool tracks and Plex has. It can be run again at any time, and brings only what is new.</li>
+</ul>
+<h2 id="asking-for-something"><a href="#asking-for-something">Asking for something</a></h2>
+<p>The players&#39; address, opened in a browser, is a page where the people who play ask for a film or a series the library has not got: <code>http://&lt;the machine&gt;:8096</code>. They choose who they are, give their password if the account has one, search by name and ask.</p>
+<ul>
+<li><strong>What is asked for waits</strong> under <strong>Asked for</strong> on Home and in Settings, Players, with who asked. <strong>Add it</strong> adds it to the library and looks for it, as adding it under Discover would; <strong>Not this time</strong> turns it down.</li>
+<li><strong>Whoever asked sees how it stands</strong> on the same page: asked, on its way, ready to play, or not this time. A series is ready when its first episode is, and says how many it has.</li>
+<li><strong>Added at once.</strong> Each account has <strong>Add what they ask for at once</strong>. On, what that person asks for is added without waiting for you. It is off for a new account.</li>
+<li><strong>Two people asking for the same thing</strong> are answered together.</li>
+<li><strong>What it opens.</strong> The page signs in as a player does, so it is listed among the account&#39;s players. It can look titles up, ask, and take back its own asks. It cannot see the library&#39;s settings or anyone else&#39;s asks.</li>
+</ul>
+<p>There is no message sent when something is ready: the page says so when it is next opened.</p>
 <h2 id="seeing-what-players-are-doing"><a href="#seeing-what-players-are-doing">Seeing what players are doing</a></h2>
 <ul>
 <li><strong>Now.</strong> What is playing is at the top of Activity, with who is playing it, on what, and whether it comes from a linked machine or through Spool. The same is under each person in Settings, Players.</li>

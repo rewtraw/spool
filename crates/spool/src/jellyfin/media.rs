@@ -27,7 +27,12 @@ pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderM
         None => None,
     };
     let known: Vec<std::net::IpAddr> = really.into_iter().chain(player).collect();
-    let sent = app.play_direct(&path, &known);
+    // Sent there only if the file opens there now: a disk asleep or a share gone would
+    // otherwise leave the player with nothing, when it could have had the file from here.
+    let sent = match app.play_direct(&path, &known) {
+        Some((name, there)) if app.opens_there(&path, &there).await => Some((name, there)),
+        _ => None,
+    };
     if let (Some(who), false) = (who, head) {
         app.note_playing(who, &path, sent.as_ref().map(|s| s.0.as_str()));
     }

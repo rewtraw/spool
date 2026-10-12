@@ -218,6 +218,7 @@ async fn status(State(app): State<App>) -> R<Value> {
         "library_bytes": files.values().map(|f| f.1).sum::<u64>(),
         "free_bytes": free(if g.movie_root.is_empty() { &g.series_root } else { &g.movie_root }),
         "attention": app.db.attention(false)?.len(),
+        "asks": app.asks_waiting(),
         "warnings": warnings,
         "tasks": app.tasks.lock().clone(),
     })))
@@ -277,6 +278,10 @@ fn api_routes() -> Router<App> {
         .route("/api/accounts/{id}", put(account_change).delete(account_remove))
         .route("/api/accounts/{id}/devices/{device}", delete(device_remove))
         .route("/api/accounts/{id}/plays", get(account_plays))
+        .route("/api/accounts/{id}/plex", post(account_from_plex))
+        .route("/api/asks", get(asks))
+        .route("/api/asks/{id}", delete(ask_remove))
+        .route("/api/asks/{id}/{answer}", post(ask_answer))
         .route("/api/links", get(links))
         .route("/api/links/pair", post(link_pair))
         .route("/api/links/found", get(links_found))

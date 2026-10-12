@@ -1070,6 +1070,37 @@ impl App {
         self.remotes().iter().find_map(|r| Some((r.conf.name.clone(), r.direct(file, player)?)))
     }
 
+    /// Whether the machine a player is about to be sent to can open the file just now. It is
+    /// asked for the start of the file with the player's own ticket, and what it said stands
+    /// for a minute, or a quarter of one when it could not. A machine that is slow to say is
+    /// taken as one that cannot, so that the file is sent from here instead.
+    pub async fn opens_there(&self, file: &Path, there: &str) -> bool {
+        const STANDS: i64 = 60;
+        let now = crate::db::now();
+        // The same machine may be asked at its address at home or its Tailscale one, and
+        // answering at one says nothing of the other.
+        let key = (there.split('?').next().unwrap_or(there).to_string(), file.to_path_buf());
+        if let Some((at, ok)) = self.opened.lock().get(&key).copied() {
+            if now - at < if ok { STANDS } else { STANDS / 4 } {
+                return ok;
+            }
+        }
+        let ok = match self.http.head(there).timeout(std::time::Duration::from_secs(2)).send().await {
+            Ok(r) if r.status().is_success() => true,
+            // Busy with as many players as it takes: true of this moment and not of the file,
+            // so this player has the film from here and the next is asked after afresh.
+            Ok(r) if r.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE => return false,
+            _ => false,
+        };
+        if !ok {
+            tracing::warn!(file = %file.display(), "a linked machine could not open a file for a player; sending it from here");
+        }
+        let mut opened = self.opened.lock();
+        opened.retain(|_, (at, _)| now - *at < STANDS);
+        opened.insert(key, (now, ok));
+        ok
+    }
+
     /// What the settings page and the check-up show of each link.
     pub fn link_report(&self) -> Vec<Value> {
         let places = self.placement();

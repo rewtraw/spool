@@ -3,7 +3,8 @@
 //
 //   bun tools/smoke.mjs http://localhost:7979             check every page
 //   bun tools/smoke.mjs http://localhost:7979 --shots DIR  and keep a picture of each
-//   bun tools/smoke.mjs --shot URL OUT.png [WIDTHxHEIGHT]  one picture of one page
+//   bun tools/smoke.mjs --shot URL OUT.png [WIDTHxHEIGHT] [SCRIPT]  one picture of one page,
+//                                                          after running SCRIPT in it if given
 //
 // The tests in crates/ check what Spool records and answers. This checks what a person
 // sees: that each page loads its data, draws, and throws no error while doing it. It drives
@@ -25,7 +26,7 @@ const one = args[0] === '--shot' ? args.slice(1) : null;
 const shots = flag('--shots');
 const base = (one ? null : args[0])?.replace(/\/$/, '');
 if (!one && !base) {
-  console.error('usage: bun tools/smoke.mjs <address of a running Spool> [--shots DIR]\n       bun tools/smoke.mjs --shot URL OUT.png [WIDTHxHEIGHT]');
+  console.error('usage: bun tools/smoke.mjs <address of a running Spool> [--shots DIR]\n       bun tools/smoke.mjs --shot URL OUT.png [WIDTHxHEIGHT] [SCRIPT]');
   process.exit(2);
 }
 
@@ -77,6 +78,12 @@ async function open(width = 1280, height = 1400) {
       await sleep(400);
       return text();
     },
+    /** Run something in the page, wait for what it starts, and give back what it answered. */
+    async run(expression) {
+      const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+      await sleep(900);
+      return r.result?.value;
+    },
     async picture(file) {
       const shot = await send('Page.captureScreenshot', { format: 'png' });
       await Bun.write(file, Buffer.from(shot.data, 'base64'));
@@ -86,10 +93,11 @@ async function open(width = 1280, height = 1400) {
 }
 
 if (one) {
-  const [url, file, size = '1280x1400'] = one;
+  const [url, file, size = '1280x1400', script] = one;
   const [w, h] = size.split('x').map(Number);
   const tab = await open(w, h);
   await tab.go(url);
+  if (script) await tab.run(script);
   await tab.picture(file);
   console.log(`wrote ${file}`);
   done(0);
@@ -116,7 +124,7 @@ const pages = [
   ['activity', '#/activity', ['Activity', ...moving], true],
   ['archive', '#/archive', ['Archive'], true],
   ['settings-general', '#/settings/general', ['Mode', 'Downloads', 'Connections'], false],
-  ['settings-players', '#/settings/players', ['People', 'Lately'], true],
+  ['settings-players', '#/settings/players', ['People', 'Asked for', 'Lately'], true],
   ['settings-library', '#/settings/library', ['This machine', 'Add a location'], false],
   ['settings-usenet', '#/settings/usenet', ['Speed'], false],
   ['settings-indexers', '#/settings/indexers', [/Add an indexer/], false],

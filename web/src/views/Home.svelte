@@ -6,6 +6,8 @@
   import JobLine from '../components/JobLine.svelte';
 
   let attention = $state<any[]>([]);
+  // What the people who play have asked for and nobody has answered yet.
+  let asks = $state<any[]>([]);
   let arrivals = $state<any[]>([]);
   let upcoming = $state<any[]>([]);
   let activity = $state<any[]>([]);
@@ -23,6 +25,7 @@
       api.get('/activity').catch(() => ({ items: [] })),
     ]);
     api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
+    api.get<any[]>('/asks').then((a) => (asks = a.filter((x) => x.status === 'asked'))).catch(() => {});
     attention = a;
     arrivals = h.filter((x: any) => x.kind === 'imported' || x.kind === 'upgraded').slice(0, 12);
     const today = new Date().toISOString().slice(0, 10);
@@ -64,6 +67,12 @@
     load();
   }
 
+  async function answer(a: any, how: 'add' | 'decline') {
+    await act(() => api.post(`/asks/${a.id}/${how}`), how === 'add' ? `Added ${a.title}. Looking for it.` : `${a.account} is told: not this time`);
+    if (how === 'add') await loadTitles();
+    load();
+  }
+
   async function dismissAll() {
     if (!confirm(`Dismiss all ${attention.length} notices? Nothing is deleted; anything still wrong will be raised again.`)) return;
     await act(() => api.post('/attention/dismiss-all'), 'Dismissed');
@@ -96,6 +105,27 @@
 {#each app.status?.warnings ?? [] as w}
   <div class="notice warn">{w}</div>
 {/each}
+
+{#if asks.length}
+  <section>
+    <div class="row"><div class="section-title grow">Asked for</div><a class="more" href="#/settings/players">Everything asked for</a></div>
+    <div class="stack">
+      {#each asks as a (a.id)}
+        <div class="card attention asked">
+          <div class="thumb"><Poster src={a.poster} title={a.title} kind={a.kind} /></div>
+          <div class="grow">
+            <div class="row wrap"><span class="t">{a.title}</span><span class="faint">{[a.year || '', a.kind === 'movie' ? 'Film' : 'Series'].filter(Boolean).join(' · ')}</span></div>
+            <p class="msg"><b>{a.account}</b> asked for this {ago(a.asked_at)}.</p>
+            <div class="row wrap actions">
+              <button class="btn small primary" onclick={() => answer(a, 'add')}>Add it</button>
+              <button class="btn small ghost" onclick={() => answer(a, 'decline')}>Not this time</button>
+            </div>
+          </div>
+        </div>
+      {/each}
+    </div>
+  </section>
+{/if}
 
 {#if attention.length}
   <section>
@@ -266,6 +296,9 @@
     gap: 14px;
     padding: 14px;
     border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  }
+  .asked {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   }
   .thumb {
     width: 54px;

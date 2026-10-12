@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0d0f" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f1e7" media="(prefers-color-scheme: light)">
+<meta name="referrer" content="no-referrer">
+<title>Spool</title>
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30; --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-ink: #fff; --accent-soft: rgba(77, 120, 255, 0.16); --ok: #7fb891; --warn: #e2b45f; --bad: #e5735f;
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1; --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1); --ok: #2f7d4a; --warn: #9a6a0a; --bad: #b8402b;
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  main { max-width: 760px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px 64px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 28px; }
+  h1 { font: 600 28px/1.1 var(--serif); margin: 0; letter-spacing: -0.01em; }
+  h2 { font: 600 13px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin: 36px 0 12px; }
+  .grow { flex: 1; }
+  .muted { color: var(--muted); }
+  .small { font-size: 14px; }
+  p { margin: 0 0 14px; }
+  button, input { font: inherit; color: inherit; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); cursor: pointer; font-weight: 500; font-size: 15px; white-space: nowrap; }
+  .btn:hover:not(:disabled) { border-color: var(--faint); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); padding: 0 8px; }
+  .input { width: 100%; min-height: 46px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); outline: none; }
+  .input:focus { border-color: var(--accent); }
+  .people { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .person { min-height: 64px; font: 600 18px/1.2 var(--serif); }
+  .person[aria-pressed='true'] { border-color: var(--accent); background: var(--accent-soft); }
+  form.pass { display: flex; gap: 10px; margin-top: 14px; }
+  .list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow: hidden; }
+  .item { display: flex; gap: 14px; align-items: center; padding: 12px; border-top: 1px solid var(--line); }
+  .item:first-child { border-top: 0; }
+  .art { flex: none; width: 54px; aspect-ratio: 2 / 3; border-radius: 6px; background: var(--raised); border: 1px solid var(--line); overflow: hidden; }
+  .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .what { flex: 1; min-width: 0; }
+  .what b { display: block; font: 600 17px/1.25 var(--serif); }
+  .what span { display: block; font-size: 14px; color: var(--muted); }
+  .what .about { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--faint); margin-top: 2px; }
+  .chip { display: inline-flex; align-items: center; min-height: 26px; padding: 0 10px; border-radius: 999px; font-size: 13px; font-weight: 550; background: var(--raised); color: var(--muted); white-space: nowrap; }
+  .chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  .chip.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+  .chip.accent { color: var(--accent); background: var(--accent-soft); }
+  .side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .error { color: var(--bad); font-size: 14px; margin-top: 10px; min-height: 1.5em; }
+  [hidden] { display: none !important; }
+  @media (max-width: 480px) { .item { align-items: flex-start; } .what .about { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Spool</h1>
+    <span class="grow"></span>
+    <span id="me" class="muted small"></span>
+    <button id="out" class="btn ghost" type="button" hidden>Sign out</button>
+  </header>
+
+  <section id="door" hidden>
+    <p class="muted">Ask for a film or a series to be added to the library. Who is asking?</p>
+    <div id="people" class="people"></div>
+    <form id="pass" class="pass" hidden>
+      <input id="word" class="input" type="password" placeholder="Password" autocomplete="current-password">
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+    <div id="doorError" class="error"></div>
+  </section>
+
+  <section id="room" hidden>
+    <input id="q" class="input" type="search" placeholder="A film or a series, by name" autocomplete="off" enterkeyhint="search">
+    <div id="findError" class="error"></div>
+    <div id="found" class="list" hidden></div>
+    <h2 id="mineHead" hidden>What you have asked for</h2>
+    <div id="mine" class="list" hidden></div>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} } };
+  let token = store.get('spool-token');
+  let name = store.get('spool-name') || '';
+  let device = store.get('spool-device');
+  if (!device) { device = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set('spool-device', device); }
+
+  // What this browser calls itself, as a player would: it is listed with the account's players.
+  const ua = navigator.userAgent;
+  const on = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'a browser';
+  const auth = () => `MediaBrowser Client="Spool", Device="Browser on ${on}", DeviceId="${device}", Version="1"` + (token ? `, Token="${token}"` : '');
+
+  async function ask(method, path, body) {
+    const r = await fetch(path, { method, headers: { 'X-Emby-Authorization': auth(), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    if (r.status === 401 && token) { leave(); throw new Error('Signed out. Sign in again.'); }
+    const text = await r.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+    if (!r.ok) throw new Error((data && data.error) || text || `That did not work (${r.status}).`);
+    return data;
+  }
+
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const STATUS = { asked: ['Asked', ''], coming: ['On its way', 'accent'], ready: ['Ready to play', 'ok'], declined: ['Not this time', 'warn'], gone: ['No longer in the library', ''] };
+
+  function row(t, side) {
+    const item = el('div', 'item');
+    const art = el('div', 'art');
+    if (typeof t.poster === 'string' && /^https?:\/\//.test(t.poster)) {
+      const img = el('img');
+      img.loading = 'lazy'; img.alt = ''; img.referrerPolicy = 'no-referrer'; img.src = t.poster;
+      img.onerror = () => img.remove();
+      art.append(img);
+    }
+    const what = el('div', 'what');
+    const here = t.status === 'ready' && t.kind === 'series' && t.of ? `${t.have} of ${t.of} episodes` : '';
+    what.append(el('b', '', t.title), el('span', '', [t.kind === 'movie' ? 'Film' : 'Series', t.year || '', here].filter(Boolean).join(' · ')));
+    if (t.overview) what.append(el('span', 'about', t.overview));
+    const s = el('div', 'side');
+    side(s);
+    item.append(art, what, s);
+    return item;
+  }
+
+  const chip = (t) => {
+    const [label, tone] = STATUS[t.status] || [t.status, ''];
+    return el('span', `chip ${tone}`, label);
+  };
+
+  // ---- signing in
+  let chosen = null;
+  async function door() {
+    $('room').hidden = true; $('door').hidden = false; $('out').hidden = true; $('me').textContent = '';
+    $('pass').hidden = true; $('doorError').textContent = ''; chosen = null;
+    const people = await ask('GET', '/Users/Public').catch(() => []);
+    const list = $('people');
+    list.replaceChildren();
+    if (!people.length) { $('doorError').textContent = 'Nobody can sign in here yet.'; return; }
+    for (const p of people) {
+      const b = el('button', 'btn person', p.Name);
+      b.type = 'button'; b.setAttribute('aria-pressed', 'false');
+      b.onclick = () => {
+        chosen = p;
+        for (const other of list.children) other.setAttribute('aria-pressed', String(other === b));
+        $('doorError').textContent = '';
+        if (p.HasPassword) { $('pass').hidden = false; $('word').value = ''; $('word').focus(); } else { $('pass').hidden = true; enter(''); }
+      };
+      list.append(b);
+    }
+  }
+  async function enter(word) {
+    if (!chosen) return;
+    try {
+      const r = await ask('POST', '/Users/AuthenticateByName', { Username: chosen.Name, Pw: word });
+      token = r.AccessToken; name = r.User.Name;
+      store.set('spool-token', token); store.set('spool-name', name);
+      room();
+    } catch (e) { $('doorError').textContent = /Invalid/.test(e.message) ? 'That is not the password.' : e.message; }
+  }
+  $('pass').onsubmit = (e) => { e.preventDefault(); enter($('word').value); };
+  function leave() { token = null; store.set('spool-token', null); store.set('spool-name', null); door(); }
+  $('out').onclick = async () => { await ask('POST', '/Sessions/Logout').catch(() => {}); leave(); };
+
+  // ---- asking
+  let last = [];
+  function showFound() {
+    const list = $('found');
+    list.replaceChildren(...last.map((t) => row(t, (side) => {
+      if (t.status && t.status !== 'declined') { side.append(chip(t)); return; }
+      const b = el('button', 'btn primary', t.status === 'declined' ? 'Ask again' : 'Ask for it');
+      b.type = 'button';
+      b.onclick = async () => {
+        b.disabled = true; $('findError').textContent = '';
+        try { const a = await ask('POST', '/spool/asks', { kind: t.kind, tmdb_id: t.tmdb_id, tvmaze_id: t.tvmaze_id }); t.status = a.status; showFound(); mine(); }
+        catch (e) { $('findError').textContent = e.message; b.disabled = false; }
+      };
+      side.append(b);
+    })));
+    list.hidden = !last.length;
+  }
+  let typing = 0, asked = 0;
+  $('q').oninput = () => {
+    clearTimeout(typing);
+    typing = setTimeout(async () => {
+      const q = $('q').value.trim(), n = ++asked;
+      $('findError').textContent = '';
+      if (!q) { last = []; showFound(); return; }
+      try {
+        const found = await ask('GET', '/spool/find?q=' + encodeURIComponent(q));
+        if (n !== asked) return;
+        last = found; showFound();
+        if (!found.length) $('findError').textContent = 'Nothing by that name was found.';
+      } catch (e) { if (n === asked) $('findError').textContent = e.message; }
+    }, 350);
+  };
+  async function mine() {
+    if (!token) return;
+    const all = await ask('GET', '/spool/asks').catch(() => null);
+    if (!all) return;
+    $('mine').replaceChildren(...all.map((t) => row(t, (side) => {
+      side.append(chip(t));
+      const b = el('button', 'btn ghost small', t.status === 'asked' ? 'Take back' : 'Clear');
+      b.type = 'button';
+      b.onclick = async () => { b.disabled = true; await ask('DELETE', '/spool/asks/' + t.id).catch(() => {}); mine(); };
+      side.append(b);
+    })));
+    $('mine').hidden = $('mineHead').hidden = !all.length;
+  }
+  function room() {
+    $('door').hidden = true; $('room').hidden = false; $('out').hidden = false; $('me').textContent = name;
+    $('q').value = ''; last = []; showFound(); mine();
+  }
+  setInterval(() => { if (token && !document.hidden) mine(); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (token && !document.hidden) mine(); });
+
+  token ? room() : door();
+})();
+</script>
+</body>
+</html>

@@ -269,6 +269,60 @@ impl App {
         Ok(if nudged > 0 { format!("{count} items read from Plex; asked it to rescan {nudged} folders that changed or that it was behind on") } else { format!("{count} items read from Plex") })
     }
 
+    /// Bring what was watched in Plex to an account here: films and episodes Plex has as
+    /// watched are marked watched, and ones stopped part-way are given the place to carry on
+    /// from. It only adds: nothing watched here is unmarked, and a place kept here is left.
+    /// Plex answers for whoever its token belongs to, so it is that person's history.
+    pub async fn plex_watched(&self, account: i64) -> Result<Value> {
+        // Which Plex item each title is comes from Spool's copy of Plex's list.
+        if self.plex_index()?.items.is_empty() {
+            self.plex_sync().await?;
+        }
+        let idx = self.plex_index()?;
+        let titles = self.db.titles(None)?;
+        let known: HashMap<&str, &Title> = titles.iter().filter_map(|t| Some((idx.find(t)?.rating_key.as_str(), t))).collect();
+        let keep = |kind: &str, id: i64, m: &Value| -> Result<(u32, u32)> {
+            let seen = m["viewCount"].as_u64().unwrap_or(0).min(u32::MAX as u64) as u32;
+            let (marked, placed) = self.db.add_watched(account, kind, id, seen, m["viewOffset"].as_f64().unwrap_or(0.0) / 1000.0, m["lastViewedAt"].as_i64().unwrap_or(0))?;
+            Ok((marked as u32, placed as u32))
+        };
+        let (mut films, mut episodes, mut resumed) = (0, 0, 0);
+        let mut of: HashMap<i64, HashMap<(u32, u32), i64>> = HashMap::new();
+        let sections = self.plex_get("/library/sections").await?;
+        for sec in sections["MediaContainer"]["Directory"].as_array().into_iter().flatten() {
+            let key = sec["key"].as_str().unwrap_or_default();
+            match sec["type"].as_str() {
+                Some("movie") => {
+                    let all = self.plex_get(&format!("/library/sections/{key}/all")).await?;
+                    for m in all["MediaContainer"]["Metadata"].as_array().into_iter().flatten() {
+                        let Some(t) = m["ratingKey"].as_str().and_then(|k| known.get(k)).filter(|t| t.kind == Kind::Movie) else { continue };
+                        let (marked, placed) = keep("movie", t.id, m)?;
+                        films += marked;
+                        resumed += placed;
+                    }
+                }
+                Some("show") => {
+                    // Every episode of the section at once: type 4 is Plex's number for an episode.
+                    let all = self.plex_get(&format!("/library/sections/{key}/all?type=4")).await?;
+                    for m in all["MediaContainer"]["Metadata"].as_array().into_iter().flatten() {
+                        let Some(t) = m["grandparentRatingKey"].as_str().and_then(|k| known.get(k)).filter(|t| t.kind == Kind::Series) else { continue };
+                        let (Some(season), Some(number)) = (m["parentIndex"].as_u64(), m["index"].as_u64()) else { continue };
+                        if !of.contains_key(&t.id) {
+                            of.insert(t.id, self.db.episodes(t.id)?.into_iter().map(|e| ((e.season, e.episode), e.id)).collect());
+                        }
+                        let Some(id) = of[&t.id].get(&(season as u32, number as u32)) else { continue };
+                        let (marked, placed) = keep("episode", *id, m)?;
+                        episodes += marked;
+                        resumed += placed;
+                    }
+                }
+                _ => {}
+            }
+        }
+        tracing::info!(account, films, episodes, resumed, "what was watched in Plex was brought over");
+        Ok(serde_json::json!({"films": films, "episodes": episodes, "resumed": resumed}))
+    }
+
     pub fn plex_index(&self) -> Result<PlexIndex> {
         let state: Value = self.db.get_setting("plex_state");
         let items: Vec<PlexItem> = self.db.with(|c| {

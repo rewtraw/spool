@@ -163,6 +163,8 @@ The ticket names that one file, runs out after twelve hours, and is signed with 
 
 **What is playing, and from where,** is at the top of Activity while it plays: the title, and the machine it comes from or "Through this Spool".
 
+**Asked before sending.** Before a player is sent to the helper, Spool asks it whether that file opens there now, and sends the film itself if it does not or if the helper takes more than two seconds to say. What it said stands for a minute, so a film being skipped about in is not asked after each time.
+
 **If the helper is away,** nobody is sent to it and every film comes through Spool. A helper that stops in the middle of a film stops that film; starting it again plays it through Spool.
 
 The helper sends no more than 48 parts of files at once, and turns away the next request at once, without keeping it waiting.

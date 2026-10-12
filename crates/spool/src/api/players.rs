@@ -23,7 +23,7 @@ pub(super) async fn accounts(State(app): State<App>) -> R<Value> {
         .map(|a| {
             let on: Vec<Value> = devices.iter().filter(|d| d.account_id == a.id).map(|d| json!({"id": device_name(&d.token), "name": d.name, "client": d.client, "created_at": d.created_at, "seen_at": d.seen_at})).collect();
             json!({
-                "id": a.id, "name": a.name, "enabled": a.enabled, "has_password": !a.password.is_empty(), "created_at": a.created_at,
+                "id": a.id, "name": a.name, "enabled": a.enabled, "adds": a.adds, "has_password": !a.password.is_empty(), "created_at": a.created_at,
                 "devices": on, "playing": playing.iter().filter(|p| p.account.eq_ignore_ascii_case(&a.name)).collect::<Vec<_>>(),
                 "totals": totals.get(&a.id).cloned().unwrap_or_default(),
             })
@@ -40,6 +40,8 @@ pub(super) struct AccountChange {
     /// Left out, the password stays as it is; empty, the account has none.
     password: Option<String>,
     enabled: Option<bool>,
+    /// Whether what the account asks for is added without waiting.
+    adds: Option<bool>,
 }
 
 fn named(name: &str) -> Result<String, ApiError> {
@@ -87,6 +89,9 @@ pub(super) async fn account_change(State(app): State<App>, Path(id): Path<i64>, 
         out |= a.enabled && !enabled;
         a.enabled = enabled;
     }
+    if let Some(adds) = b.adds {
+        a.adds = adds;
+    }
     app.db.save_account(&a)?;
     if out {
         app.db.remove_devices(None, Some(id))?;
@@ -117,4 +122,34 @@ pub(super) async fn device_remove(State(app): State<App>, Path((id, device)): Pa
 /// What one account has played, newest first.
 pub(super) async fn account_plays(State(app): State<App>, Path(id): Path<i64>) -> R<Vec<Play>> {
     Ok(Json(app.db.plays(Some(id), 200)?))
+}
+
+/// Sittings and watched marks from Plex, for the account they are to be kept under.
+pub(super) async fn account_from_plex(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+    app.db.account(id)?.ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such account".into()))?;
+    Ok(Json(app.plex_watched(id).await?))
+}
+
+/// What has been asked for, by anyone, with how each stands.
+pub(super) async fn asks(State(app): State<App>) -> R<Vec<Value>> {
+    Ok(Json(app.asks_report(None)?))
+}
+
+/// Answer an ask: `add` it to the library, or `decline` it.
+pub(super) async fn ask_answer(State(app): State<App>, Path((id, answer)): Path<(i64, String)>) -> R<Value> {
+    match answer.as_str() {
+        "add" => Ok(Json(json!({"title_id": app.ask_add(id).await?.id}))),
+        "decline" => {
+            app.ask_decline(id)?;
+            Ok(Json(json!({"ok": true})))
+        }
+        _ => Err(ApiError(StatusCode::NOT_FOUND, format!("an ask is answered with add or decline, not {answer}"))),
+    }
+}
+
+/// Clear an ask away. The title it became, if any, stays in the library.
+pub(super) async fn ask_remove(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+    app.db.remove_ask(id, None)?;
+    app.emit(Event::Attention);
+    Ok(Json(json!({"ok": true})))
 }

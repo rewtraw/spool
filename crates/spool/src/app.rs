@@ -26,6 +26,9 @@ pub enum Event {
     Locations,
 }
 
+/// How long a player stays signed in without being seen, in seconds: ninety days.
+pub const SIGNED_IN_FOR: i64 = 90 * 86400;
+
 /// A player that is signed in: whose account it is on, and what it said it was.
 #[derive(Clone, Debug)]
 pub struct Signed {
@@ -117,6 +120,13 @@ pub struct Inner {
     pub heard: std::sync::OnceLock<crate::link::find::Heard>,
     /// What each signed-in player is playing, by the token it holds.
     pub playing: Mutex<HashMap<String, Playing>>,
+    /// Whether a linked machine opened a file when last asked, and when that was, by the
+    /// address it was asked at and the file: asked again only once in a while.
+    pub opened: Mutex<HashMap<(String, std::path::PathBuf), (i64, bool)>>,
+    /// Held while an ask is kept or added, so that two at once make one ask and one title.
+    pub asking: tokio::sync::Mutex<()>,
+    /// How many titles each account has had looked up in the minute that began at a time.
+    pub looked_up: Mutex<HashMap<i64, (i64, u32)>>,
     /// Titles being moved between locations.
     pub moves: Mutex<crate::relocate::Moves>,
     pub encodes: Mutex<crate::compact::Encodes>,
@@ -280,6 +290,9 @@ impl App {
             encodes: Mutex::new(Default::default()),
             last_playing: Default::default(),
             playing: Default::default(),
+            opened: Default::default(),
+            asking: Default::default(),
+            looked_up: Default::default(),
             heard: Default::default(),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),

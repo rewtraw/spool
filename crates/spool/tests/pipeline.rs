@@ -776,6 +776,203 @@ async fn plex_items_are_matched_to_titles_and_the_differences_listed() {
 }
 
 /// One JSON-RPC call to the MCP endpoint.
+#[tokio::test(flavor = "multi_thread")]
+async fn what_was_watched_in_plex_is_brought_to_an_account_and_nothing_is_unmarked() {
+    use axum::extract::Query;
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let seen = w.movie("Seen In Plex", 2001, "tt0000001");
+    let half = w.movie("Half Seen In Plex", 2002, "tt0000002");
+    let here = w.movie("Seen Here Only", 2003, "tt0000003");
+    let (show, eps) = w.series("Example World", 296762, &[(1, 1, "The Original"), (1, 2, "Chestnut")]);
+    w.app.db.add_account("Ada", "").unwrap();
+    // Seen here already, and part-way through another: neither is Plex's to change.
+    w.app.db.save_watched(1, "movie", here.id, &Watched { played: true, play_count: 1, ..Default::default() }).unwrap();
+    w.app.db.save_watched(1, "episode", eps[1], &Watched { position: 90.0, ..Default::default() }).unwrap();
+
+    async fn sections() -> axum::Json<Value> {
+        axum::Json(json!({"MediaContainer": {"Directory": [{"key": "1", "type": "movie", "title": "Movies"}, {"key": "2", "type": "show", "title": "TV"}]}}))
+    }
+    async fn films() -> axum::Json<Value> {
+        axum::Json(json!({"MediaContainer": {"Metadata": [
+            {"ratingKey": "10", "title": "Seen In Plex", "year": 2001, "Guid": [{"id": "imdb://tt0000001"}], "viewCount": 2, "lastViewedAt": 1_700_000_000},
+            {"ratingKey": "11", "title": "Half Seen In Plex", "year": 2002, "Guid": [{"id": "imdb://tt0000002"}], "viewOffset": 600_000, "lastViewedAt": 1_700_000_100},
+            {"ratingKey": "12", "title": "Seen Here Only", "year": 2003, "Guid": [{"id": "imdb://tt0000003"}]},
+            {"ratingKey": "13", "title": "Not In Spool", "year": 1999, "viewCount": 1}
+        ]}}))
+    }
+    async fn shows(Query(q): Query<HashMap<String, String>>) -> axum::Json<Value> {
+        axum::Json(if q.get("type").is_some_and(|t| t == "4") {
+            json!({"MediaContainer": {"Metadata": [
+                {"ratingKey": "21", "grandparentRatingKey": "20", "parentIndex": 1, "index": 1, "viewCount": 1, "lastViewedAt": 1_700_000_200},
+                {"ratingKey": "22", "grandparentRatingKey": "20", "parentIndex": 1, "index": 2, "viewOffset": 30_000},
+                {"ratingKey": "23", "grandparentRatingKey": "20", "parentIndex": 9, "index": 9, "viewCount": 1},
+                {"ratingKey": "31", "grandparentRatingKey": "30", "parentIndex": 1, "index": 1, "viewCount": 1}
+            ]}})
+        } else {
+            json!({"MediaContainer": {"Metadata": [{"ratingKey": "20", "title": "Example World", "year": 2016, "Guid": [{"id": "tvdb://296762"}], "leafCount": 2, "Location": [{"path": "/tv/Example World"}]}]}})
+        })
+    }
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = axum::Router::new()
+        .route("/identity", get(|| async { axum::Json(json!({"MediaContainer": {"machineIdentifier": "abc123"}})) }))
+        .route("/library/sections", get(sections))
+        .route("/library/sections/1/all", get(films))
+        .route("/library/sections/2/all", get(shows));
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut g = w.app.settings.general();
+    g.plex_url = format!("http://{addr}");
+    g.plex_token = "t".into();
+    w.app.settings.set_general(&g).unwrap();
+    let api = spool::api::router(w.app.clone());
+
+    // Spool had not read Plex's library; bringing the history over reads it first.
+    let (status, brought) = call(&api, "POST", "/api/accounts/1/plex", Value::Null).await;
+    assert_eq!((status, brought.to_string().as_str()), (200, r#"{"episodes":1,"films":1,"resumed":1}"#));
+    let of = |account: i64, kind: &str, id: i64| w.app.db.watched(account, kind, id).unwrap();
+    let film = of(1, "movie", seen.id);
+    assert_eq!((film.played, film.play_count, film.last_played_at), (true, 2, 1_700_000_000));
+    let part = of(1, "movie", half.id);
+    assert_eq!((part.played, part.position, part.last_played_at), (false, 600.0, 1_700_000_100), "carried on from where Plex had it");
+    assert!(of(1, "movie", here.id).played, "what was watched here stays watched though Plex has not seen it");
+    assert!(of(1, "episode", eps[0]).played);
+    assert_eq!(of(1, "episode", eps[1]).position, 90.0, "a place kept here is not moved to Plex's");
+    assert_eq!(w.app.db.files(show.id).unwrap().len(), 0, "nothing but what was watched is touched");
+    assert!(!of(2, "movie", seen.id).played, "one account's, and nobody else's");
+    // Asked again, there is nothing left to bring; and another account may have the same.
+    let (_, again) = call(&api, "POST", "/api/accounts/1/plex", Value::Null).await;
+    assert_eq!(again.to_string(), r#"{"episodes":0,"films":0,"resumed":0}"#);
+    let (_, hers) = call(&api, "POST", "/api/accounts/2/plex", Value::Null).await;
+    assert_eq!(hers.to_string(), r#"{"episodes":1,"films":1,"resumed":2}"#);
+    assert_eq!(call(&api, "POST", "/api/accounts/99/plex", Value::Null).await.0, 404);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
+    use serde_json::{json, Value};
+    let source = details_source().await;
+    let w = World::with_sources(Mode::Shadow, Some((&source, &source))).await;
+    let mut g = w.app.settings.general();
+    g.tmdb_api_key = "key".into();
+    g.players_enabled = true;
+    w.app.settings.set_general(&g).unwrap();
+    w.app.db.add_account("Ada", &spool::settings::hash_password("her-own").unwrap()).unwrap();
+    let (api, jf) = (spool::api::router(w.app.clone()), spool::jellyfin::router(w.app.clone()));
+    let read = |bytes: &[u8]| serde_json::from_slice::<Value>(bytes).unwrap_or(Value::Null);
+
+    // The players' address gives a browser a page to ask from, which signs in as a player does.
+    let (status, head, body) = player(&jf, "GET", "/", None, Value::Null).await;
+    assert_eq!((status, head["content-type"].to_str().unwrap()), (200, "text/html; charset=utf-8"));
+    assert!(String::from_utf8_lossy(&body).contains("Who is asking?"));
+    let sign_in = |name: &'static str, pw: &'static str| {
+        let jf = jf.clone();
+        async move { read(&player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": name, "Pw": pw})).await.2)["AccessToken"].as_str().unwrap().to_string() }
+    };
+    let (me, ada) = (sign_in("spool", "").await, sign_in("Ada", "her-own").await);
+    let (me, ada) = (Some(me.as_str()), Some(ada.as_str()));
+    let asks_of = |who: Option<&str>| {
+        let jf = jf.clone();
+        let who = who.map(str::to_string);
+        async move { serde_json::from_slice::<Value>(&player(&jf, "GET", "/spool/asks", who.as_deref(), Value::Null).await.2).unwrap() }
+    };
+    let waiting = || {
+        let api = api.clone();
+        async move { call(&api, "GET", "/api/status", Value::Null).await.1["asks"].as_u64() }
+    };
+
+    // Nothing is found or asked for without signing in.
+    assert_eq!(player(&jf, "GET", "/spool/find?q=Heat", None, Value::Null).await.0, 401);
+    assert_eq!(player(&jf, "POST", "/spool/asks", None, json!({"kind": "movie", "tmdb_id": 949})).await.0, 401);
+    let (status, _, body) = player(&jf, "GET", "/spool/find?q=Heat", me, Value::Null).await;
+    let found = read(&body);
+    assert_eq!((status, found.as_array().unwrap().len(), found[0]["title"].as_str(), found[0]["tmdb_id"].as_u64(), found[0]["status"].as_str()), (200, 1, Some("Heat"), Some(949), Some("")), "{found}");
+
+    // Asked for, it waits; asked for twice, it is one ask; and what it is called is read
+    // from where titles are looked up, whatever the page sent.
+    let (status, _, body) = player(&jf, "POST", "/spool/asks", me, json!({"kind": "movie", "tmdb_id": 949, "title": "Something Else"})).await;
+    let asked = read(&body);
+    assert_eq!((status, asked["status"].as_str(), asked["title"].as_str(), asked["year"].as_u64()), (200, Some("asked"), Some("Heat"), Some(1995)), "{asked}");
+    let (_, _, body) = player(&jf, "POST", "/spool/asks", me, json!({"kind": "movie", "tmdb_id": 949})).await;
+    assert_eq!(read(&body)["id"], asked["id"]);
+    assert_eq!(player(&jf, "POST", "/spool/asks", me, json!({"kind": "movie"})).await.0, 400);
+    assert_eq!(player(&jf, "POST", "/spool/asks", me, json!({"kind": "music", "tmdb_id": 1})).await.0, 400);
+    let (_, _, body) = player(&jf, "GET", "/spool/find?q=Heat", me, Value::Null).await;
+    assert_eq!(read(&body)[0]["status"], "asked");
+    let (_, _, body) = player(&jf, "POST", "/spool/asks", ada, json!({"kind": "movie", "tmdb_id": 949})).await;
+    let hers = read(&body);
+    assert_ne!(hers["id"], asked["id"], "each has an ask of their own");
+    assert_eq!(waiting().await, Some(2));
+    assert_eq!(asks_of(me).await.as_array().unwrap().len(), 1, "one sees one's own asks and no one else's");
+    assert!(w.app.db.titles(None).unwrap().is_empty(), "nothing is added until someone says so");
+
+    // Whoever runs Spool sees who asked for what, and adding it answers everyone who did.
+    let (_, all) = call(&api, "GET", "/api/asks", Value::Null).await;
+    assert_eq!(all.as_array().unwrap().iter().map(|a| (a["account"].as_str().unwrap(), a["status"].as_str().unwrap())).collect::<Vec<_>>(), [("Ada", "asked"), ("spool", "asked")], "{all}");
+    let (status, added) = call(&api, "POST", &format!("/api/asks/{}/add", asked["id"]), Value::Null).await;
+    assert_eq!(status, 200, "{added}");
+    let heat = w.app.db.title(added["title_id"].as_i64().unwrap()).unwrap().unwrap();
+    assert_eq!((heat.title.as_str(), heat.monitored), ("Heat", true));
+    assert_eq!(waiting().await, Some(0));
+    assert_eq!((asks_of(me).await[0]["status"].as_str(), asks_of(ada).await[0]["status"].as_str()), (Some("coming"), Some("coming")));
+    assert_eq!(call(&api, "POST", &format!("/api/asks/{}/add", hers["id"]), Value::Null).await.0, 200, "saying so twice does no harm");
+    assert_eq!(w.app.db.titles(None).unwrap().len(), 1);
+    // Once there is something to play, whoever asked is told so.
+    w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, 'x.mkv', 1, '{}')", [heat.id])).unwrap();
+    assert_eq!(asks_of(ada).await[0]["status"], "ready");
+    let (_, _, body) = player(&jf, "GET", "/spool/find?q=Heat", ada, Value::Null).await;
+    assert_eq!(read(&body)[0]["status"], "ready");
+
+    // Turned down, it says so, and may be asked for again as a new ask.
+    let (_, _, body) = player(&jf, "POST", "/spool/asks", ada, json!({"kind": "movie", "tmdb_id": 593})).await;
+    let solaris = read(&body);
+    assert_eq!(call(&api, "POST", &format!("/api/asks/{}/decline", solaris["id"]), Value::Null).await.0, 200);
+    assert_eq!(call(&api, "POST", &format!("/api/asks/{}/burn", solaris["id"]), Value::Null).await.0, 404);
+    assert_eq!((asks_of(ada).await[0]["status"].as_str(), waiting().await), (Some("declined"), Some(0)));
+    let (_, _, body) = player(&jf, "POST", "/spool/asks", ada, json!({"kind": "movie", "tmdb_id": 593})).await;
+    let again = read(&body);
+    assert_eq!((again["status"].as_str(), again["answered_at"].as_i64(), waiting().await), (Some("asked"), Some(0), Some(1)));
+    // An ask is taken back by whoever made it, and by nobody else.
+    assert_eq!(player(&jf, "DELETE", &format!("/spool/asks/{}", again["id"]), me, Value::Null).await.0, 404);
+    assert_eq!(player(&jf, "DELETE", &format!("/spool/asks/{}", again["id"]), ada, Value::Null).await.0, 200);
+    assert_eq!((asks_of(ada).await.as_array().unwrap().len(), waiting().await), (1, Some(0)));
+
+    // An account whose asks are added at once does not wait; and what the library has
+    // already is not asked for twice over: it only remains to say when it is ready.
+    assert_eq!(call(&api, "PUT", "/api/accounts/2", json!({"adds": true})).await.0, 200);
+    let (_, people) = call(&api, "GET", "/api/accounts", Value::Null).await;
+    assert_eq!((people["accounts"][0]["adds"].as_bool(), people["accounts"][1]["adds"].as_bool()), (Some(false), Some(true)));
+    let (_, _, body) = player(&jf, "POST", "/spool/asks", ada, json!({"kind": "series", "tvmaze_id": 77})).await;
+    let series = read(&body);
+    assert_eq!((series["status"].as_str(), series["title"].as_str(), waiting().await), (Some("coming"), Some("Example World"), Some(0)), "{series}");
+    assert_eq!(w.app.db.titles(Some(Kind::Series)).unwrap().len(), 1);
+    let (_, _, body) = player(&jf, "POST", "/spool/asks", me, json!({"kind": "series", "tvmaze_id": 77})).await;
+    assert_eq!((read(&body)["status"].as_str(), read(&body)["title_id"] == series["title_id"], w.app.db.titles(None).unwrap().len()), (Some("coming"), true, 2));
+    // Removed from the library, what was asked for says it has gone, and a title added
+    // afterwards under the number it had is not mistaken for it. Asked for again, it waits again.
+    w.app.db.delete_title(heat.id).unwrap();
+    let heat_of = |asks: Value| asks.as_array().unwrap().iter().find(|a| a["title"] == "Heat").unwrap().clone();
+    assert_eq!(heat_of(asks_of(me).await)["status"], "gone");
+    let other = w.movie("Something Else", 1990, "tt0000990");
+    assert_eq!((other.id >= heat.id, heat_of(asks_of(me).await)["status"].as_str()), (true, Some("gone")));
+    let (_, _, body) = player(&jf, "POST", "/spool/asks", me, json!({"kind": "movie", "tmdb_id": 949})).await;
+    assert_eq!((read(&body)["status"].as_str(), waiting().await), (Some("asked"), Some(1)));
+    // Two asks of one title at once make one ask.
+    let twice = |jf: axum::Router, who: String| async move { player(&jf, "POST", "/spool/asks", Some(&who), json!({"kind": "movie", "tmdb_id": 593})).await.0 };
+    let who = me.unwrap().to_string();
+    assert_eq!(tokio::join!(twice(jf.clone(), who.clone()), twice(jf.clone(), who.clone())), (200, 200));
+    assert_eq!(asks_of(me).await.as_array().unwrap().iter().filter(|a| a["title"] == "Solaris").count(), 1);
+    // Looking up is counted, and past a point in a minute it is refused.
+    let mut refused = 0;
+    for _ in 0..40 {
+        refused += (player(&jf, "GET", "/spool/find?q=Heat", me, Value::Null).await.0 == 400) as u32;
+    }
+    assert!((8..=20).contains(&refused), "{refused} of forty were refused");
+    assert_eq!(call(&api, "DELETE", "/api/accounts/2", Value::Null).await.0, 200);
+    let (_, all) = call(&api, "GET", "/api/asks", Value::Null).await;
+    assert!(all.as_array().unwrap().iter().all(|a| a["account"] == "spool"), "{all}");
+}
+
 async fn mcp(router: &axum::Router, key: Option<&str>, method: &str, params: serde_json::Value) -> (u16, serde_json::Value) {
     use tower::ServiceExt;
     let mut req = axum::http::Request::builder().method("POST").uri("/mcp").header("content-type", "application/json");
@@ -1876,6 +2073,32 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Ada", "Pw": "her-own"})).await.0, 401);
     let (_, status) = call(&app_api, "GET", "/api/players", Value::Null).await;
     assert_eq!((status["enabled"].as_bool(), status["signed_in"].as_u64()), (Some(true), Some(1)));
+    // A player may ask who there is to sign in as before it has: the accounts that may, by
+    // name, and nothing that would let it in.
+    let (status, _, body) = player(&jf, "GET", "/Users/Public", None, Value::Null).await;
+    let offered = read(&body);
+    assert_eq!((status, offered.as_array().unwrap().len(), offered[0]["Name"].as_str(), offered[0]["HasPassword"].as_bool()), (200, 1, Some("spool"), Some(true)), "Ada may not sign in, so is not offered: {offered}");
+    assert!(!offered.to_string().contains("argon2"));
+    assert_eq!(call(&app_api, "PUT", "/api/accounts/2", json!({"enabled": true})).await.0, 200);
+    let (_, _, body) = player(&jf, "GET", "/Users/Public", None, Value::Null).await;
+    assert_eq!(read(&body).as_array().unwrap().iter().map(|u| u["Name"].as_str().unwrap()).collect::<Vec<_>>(), ["spool", "Ada"]);
+
+    // A player that signed in before names were kept is given the one it goes by when it
+    // next asks for anything; and one not seen for ninety days is signed out, where one that
+    // has only not been seen yet is kept.
+    let at = spool::db::now();
+    for (token, created_at) in [("carried-over", at - 86400), ("long-gone", at - spool::app::SIGNED_IN_FOR - 86400)] {
+        w.app.db.add_device(&Device { token: token.into(), account_id: 1, name: String::new(), client: String::new(), created_at, seen_at: 0 }).unwrap();
+        w.app.db.with(|c| c.execute("UPDATE devices SET seen_at = 0 WHERE token = ?1", [token])).unwrap();
+    }
+    w.app.reload_players();
+    assert_eq!(w.app.db.remove_devices_unseen(at - spool::app::SIGNED_IN_FOR).unwrap(), 1);
+    w.app.reload_players();
+    assert_eq!(player(&jf, "GET", "/Users/Me", Some("long-gone"), Value::Null).await.0, 401);
+    assert_eq!(player(&jf, "GET", "/Users/Me", Some("carried-over"), Value::Null).await.0, 200);
+    let named = w.app.db.devices().unwrap().into_iter().find(|d| d.token == "carried-over").unwrap();
+    assert_eq!((named.name.as_str(), named.client.as_str()), ("Apple TV", "Infuse-Direct"));
+
     // Removed, an account takes what it watched with it, and leaves the others' alone.
     assert_eq!(call(&app_api, "DELETE", "/api/accounts/2", Value::Null).await.0, 200);
     assert_eq!(w.app.db.watched(2, "movie", movie.id).unwrap().position, 0.0);
@@ -3424,6 +3647,24 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     assert_eq!(activity["playing"][0]["from"].as_str(), Some(""), "sent from here now");
     send_from(json!(true)).await;
     assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 307, "the player and the machine are on one network");
+
+    // A player is sent there only if the file opens there now. The machine will not follow a
+    // link in what it shares, so when the film is one, the player has it from here instead;
+    // and what the machine said stands for a little while, so it is asked again after.
+    let (real, aside) = (folder.join("Alpha (2001).mkv"), w.root.join("aside.mkv"));
+    std::fs::rename(&real, &aside).unwrap();
+    std::os::unix::fs::symlink(&aside, &real).unwrap();
+    assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 307, "it opened a moment ago, and is not asked again so soon");
+    w.app.opened.lock().clear();
+    let (status, head, body) = fetch(&http, "GET", &stream, &part).await;
+    assert_eq!((status, head["content-range"].to_str().unwrap(), &body[..]), (206, "bytes 1000-1999/200000", &film[1000..2000]), "sent from here when the machine cannot open it");
+    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    assert_eq!(activity["playing"][0]["from"].as_str(), Some(""));
+    std::fs::remove_file(&real).unwrap();
+    std::fs::rename(&aside, &real).unwrap();
+    assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 206, "and that it could not stands for a little while too");
+    w.app.opened.lock().clear();
+    assert_eq!(fetch(&http, "GET", &stream, &part).await.0, 307);
 
     // The film comes from the helper, with no key and no sign-in, and not by way of Spool:
     // the share is taken away from Spool's machine and the film still plays.

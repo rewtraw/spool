@@ -6,6 +6,7 @@ pub mod anime;
 pub mod api;
 pub mod app;
 pub mod archive;
+pub mod asks;
 pub mod art;
 pub mod catalog;
 pub mod db;

@@ -395,7 +395,30 @@ pub struct Account {
     pub password: String,
     /// One that is not may not sign in, and its players are turned away.
     pub enabled: bool,
+    /// What it asks for is added at once, without waiting for anyone to say so.
+    pub adds: bool,
     pub created_at: i64,
+}
+
+/// Something someone asked to have in the library.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Ask {
+    pub id: i64,
+    pub account_id: i64,
+    pub kind: Kind,
+    pub tmdb_id: Option<u32>,
+    pub tvmaze_id: Option<u32>,
+    /// A series' other id, which is what the library knows one by when it came from elsewhere.
+    pub tvdb_id: Option<u32>,
+    pub title: String,
+    pub year: u32,
+    pub poster: String,
+    /// "asked", "added" or "declined".
+    pub state: String,
+    /// The title it became, once added.
+    pub title_id: Option<i64>,
+    pub asked_at: i64,
+    pub answered_at: i64,
 }
 
 /// A player that is signed in.
