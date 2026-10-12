@@ -4,117 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Spool: one service for your movie and TV library</title>
-<meta name="description" content="Spool finds, downloads, verifies, files and plays movies and television. One process, one queue and one web app in place of Radarr, Sonarr and SABnzbd.">
-<meta property="og:title" content="Spool">
-<meta property="og:description" content="One service that finds, downloads, verifies and files movies and television.">
+<meta name="description" content="Spool finds, downloads, verifies, files and plays movies and television, on every machine that holds part of the library. One process, one queue and one web app in place of Radarr, Sonarr and SABnzbd.">
+<meta property="og:title" content="Spool: one service for your movie and TV library">
+<meta property="og:description" content="Spool finds, downloads, verifies, files and plays movies and television, on every machine that holds part of the library. One process, one queue and one web app in place of Radarr, Sonarr and SABnzbd.">
 <meta property="og:image" content="assets/library.png">
 <link rel="icon" href="assets/mark.svg">
-<style>
-  :root {
-    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
-    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
-    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16); --ok: #7fb891;
-    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
-    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
-    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
-    color-scheme: dark;
-  }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
-      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
-      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1); --ok: #2f7d4a;
-      color-scheme: light;
-    }
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
-  a { color: inherit; text-decoration: none; }
-  img { max-width: 100%; height: auto; display: block; }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
-
-  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
-  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
-  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(assets/mark.svg) center / contain no-repeat; mask: url(assets/mark.svg) center / contain no-repeat; }
-  nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
-  nav a:hover { color: var(--text); }
-
-  .hero { padding: 64px 0 40px; max-width: 820px; }
-  h1 { font: 600 clamp(40px, 6.4vw, 68px)/1.04 var(--serif); letter-spacing: -0.015em; margin: 0 0 22px; text-wrap: balance; }
-  .lede { font-size: clamp(18px, 2.1vw, 21px); color: var(--muted); max-width: 640px; margin: 0 0 30px; }
-  .lede b { color: var(--text); font-weight: 500; }
-  .cta { display: flex; gap: 12px; flex-wrap: wrap; }
-  .btn { display: inline-flex; align-items: center; height: 46px; padding: 0 20px; border-radius: 10px; font-weight: 600; font-size: 15.5px; border: 1px solid var(--line); background: var(--surface); }
-  .btn:hover { border-color: var(--muted); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn.primary:hover { filter: brightness(1.08); }
-
-  .window { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #0d0d0f; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35); }
-  .window .bar { display: flex; gap: 7px; padding: 12px 14px; background: #151518; border-bottom: 1px solid #2a2a30; }
-  .window .bar i { width: 11px; height: 11px; border-radius: 50%; background: #2f2f36; }
-  .hero-shot { margin: 28px 0 0; }
-
-  section { padding: 84px 0 0; }
-  .eyebrow { font-size: 12.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); font-weight: 600; margin: 0 0 12px; }
-  h2 { font: 600 clamp(28px, 3.8vw, 40px)/1.12 var(--serif); letter-spacing: -0.01em; margin: 0 0 16px; text-wrap: balance; }
-  .sub { color: var(--muted); max-width: 640px; margin: 0; }
-
-  .merge { display: grid; grid-template-columns: 1fr auto 1fr; gap: 28px; align-items: center; margin-top: 36px; }
-  .stack { display: grid; gap: 10px; }
-  .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 14px 16px; }
-  .chip b { display: block; font-weight: 600; }
-  .chip span { color: var(--muted); font-size: 14.5px; }
-  .chip.maybe { border-style: dashed; background: none; }
-  .arrow { color: var(--faint); font-size: 30px; }
-  .one { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 14px; padding: 26px; }
-  .one .brand { font-size: 28px; margin-bottom: 10px; }
-  .one p { margin: 0; color: var(--muted); font-size: 15.5px; }
-
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; margin-top: 36px; }
-  .grid div { background: var(--bg); padding: 26px 24px; }
-  .grid h3 { font: 600 19px/1.25 var(--serif); margin: 0 0 8px; }
-  .grid p { margin: 0; color: var(--muted); font-size: 15.5px; }
-  .grid > a { background: var(--bg); padding: 26px 24px; }
-  .grid > a:hover { background: var(--surface); }
-  .grid > a h3::after { content: ' →'; color: var(--accent); }
-
-  .show { display: grid; grid-template-columns: 5fr 7fr; gap: 48px; align-items: center; }
-  .show.flip { grid-template-columns: 7fr 5fr; }
-  .show.flip .copy { order: 2; }
-  .copy ul { list-style: none; padding: 0; margin: 20px 0 0; display: grid; gap: 12px; }
-  .copy li { padding-left: 22px; position: relative; color: var(--muted); font-size: 16px; }
-  .copy li::before { content: ''; position: absolute; left: 0; top: 0.62em; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-  .copy li b { color: var(--text); font-weight: 600; }
-
-  pre { margin: 28px 0 0; padding: 22px 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14.5px/1.75 var(--mono); overflow-x: auto; }
-  pre .c { color: var(--faint); }
-  .note { color: var(--muted); font-size: 15.5px; max-width: 700px; margin: 18px 0 0; }
-  .note a, footer a, a.more { color: var(--accent); }
-  .note a:hover, footer a:hover, a.more:hover { text-decoration: underline; }
-  a.more { display: block; margin-top: 10px; font-size: 14.5px; }
-
-  footer { margin-top: 96px; padding: 30px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: grid; gap: 8px; }
-
-  @media (max-width: 860px) {
-    nav a.hide { display: none; }
-    .hero { padding-top: 36px; }
-    .merge { grid-template-columns: 1fr; }
-    .arrow { transform: rotate(90deg); justify-self: center; }
-    .grid { grid-template-columns: 1fr; }
-    .show, .show.flip { grid-template-columns: 1fr; gap: 26px; }
-    .show.flip .copy { order: 0; }
-    section { padding-top: 60px; }
-  }
-</style>
+<link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
 <div class="wrap">
   <header>
-    <a class="brand" href="#"><span class="mark"></span>Spool</a>
+    <a class="brand" href="./"><span class="mark"></span>Spool</a>
     <nav>
-      <a class="hide" href="#how">How it works</a>
-      <a class="hide" href="#start">Get started</a>
+      <a class="hide" href="downloading.html">Downloading</a>
+      <a class="hide" href="library.html">Library</a>
+      <a class="hide" href="playing.html">Playing</a>
+      <a class="hide" href="machines.html">Machines</a>
       <a href="guide/">Guides</a>
       <a href="https://github.com/rewtraw/spool">GitHub</a>
     </nav>
@@ -122,7 +27,7 @@
 
   <div class="hero">
     <h1>One service for your movie and TV library.</h1>
-    <p class="lede">Spool finds, downloads, verifies and files movies and television. <b>One process, one queue and one web app</b> where there used to be three.</p>
+    <p class="lede">Spool finds, downloads, verifies, files and plays movies and television, on every machine that holds part of the library. <b>One process, one queue and one web app</b> where there used to be three.</p>
     <div class="cta">
       <a class="btn primary" href="#start">Get started</a>
       <a class="btn" href="guide/">Read the guides</a>
@@ -155,134 +60,13 @@
 
   <section id="how">
     <p class="eyebrow">What it does</p>
-    <h2>Careful about what it downloads, and about your disk.</h2>
-    <div class="grid">
-      <div><h3>Explains every choice</h3><p>Each release it sees gets a recorded verdict: accepted, or rejected with the reason. "Why didn't it take that one" always has an answer.</p></div>
-      <div><h3>Looks before it downloads</h3><p>A release is sampled on your Usenet servers first. Posts that have expired are skipped in seconds, not after an hour.</p></div>
-      <div><h3>Unpacks as it downloads</h3><p>Uncompressed RAR posts are unpacked volume by volume while they arrive, so they need about half the room and no extraction step.</p></div>
-      <div><h3>Whole seasons, one source</h3><p>For series it prefers a pack or one group's complete run over a scatter of episodes, and searches by name when an indexer's ids fall short.</p></div>
-      <div><h3>Sizes you choose</h3><p>Profiles carry a size target. Oversized releases are a last resort, and a file that is too big can be swapped for a smaller copy.</p></div>
-      <div><h3>More than one version</h3><p>Keep a 4K copy beside a small one, or two cuts of the same film. Upgrades replace the main file and leave the others alone.</p></div>
-      <div><h3>Original language first</h3><p>It knows what language a title was made in, ranks dubs last, and follows anime's own episode numbering.</p></div>
-      <div><h3>Reads awkward names</h3><p>Releases named without a year, never linked to an id, or handed over with garbled non-Latin text are still recognised for what they are.</p></div>
-      <div><h3>Cautious by default</h3><p>It starts in a mode that changes nothing, journals every import, recycles replaced files and will not write when the media disk is missing.</p></div>
-    </div>
-  </section>
-
-  <section class="show">
-    <div class="copy">
-      <p class="eyebrow">The archive</p>
-      <h2>Delete to make room. Get it back later.</h2>
-      <p class="sub">Spool keeps the small file that describes every release it downloads, and the next-best options beside it.</p>
-      <ul>
-        <li><b>Re-download without an indexer</b>, even after the title has left your library.</li>
-        <li><b>Still searchable when an indexer is down.</b> Saved releases join every search.</li>
-        <li><b>Honest about availability.</b> It checks whether a saved release is still on Usenet before offering it.</li>
-      </ul>
-    </div>
-    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/archive.png" alt="The archive, listing saved releases per title with whether each is still on Usenet" width="1440" height="960"></div>
-  </section>
-
-  <section class="show flip">
-    <div class="copy">
-      <p class="eyebrow">Disk space</p>
-      <h2>Knows what is using the disk, and what could go.</h2>
-      <p class="sub">A full disk stops everything. Spool treats space as part of the job.</p>
-      <ul>
-        <li><b>Downloads wait for room</b> under one notice, and start by themselves when it appears.</li>
-        <li><b>Largest titles first</b>, with whether Plex says they were watched and whether a saved release exists.</li>
-        <li><b>Find a smaller copy</b> of anything over its profile's target, in one click.</li>
-      </ul>
-    </div>
-    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/space.png" alt="The disk space page: free space and the largest titles with their Plex and archive status" width="1440" height="960"></div>
-  </section>
-
-  <section class="show">
-    <div class="copy">
-      <p class="eyebrow">Subtitles</p>
-      <h2>Subtitles it has listened to.</h2>
-      <p class="sub">Fetching a subtitle file is easy. Knowing it is in time with your copy of the film is the hard part, so Spool checks.</p>
-      <ul>
-        <li><b>Keeps what the release brings</b>, and finds missing languages on OpenSubtitles.</li>
-        <li><b>Listens to the film.</b> It compares when people speak with when the subtitles say they do.</li>
-        <li><b>Corrects what it can.</b> A file that is late, early or timed for another frame rate is retimed.</li>
-        <li><b>Discards what does not fit</b> and tries the next, so a subtitle for a different cut never stays.</li>
-      </ul>
-    </div>
-    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/subtitles.png" alt="A film with two versions; its subtitle files are marked in time or corrected" width="1440" height="960"></div>
-  </section>
-
-  <section class="show flip">
-    <div class="copy">
-      <p class="eyebrow">In bulk</p>
-      <h2>Tidy a whole shelf at once.</h2>
-      <p class="sub">Select as many titles as you like and act on them together.</p>
-      <ul>
-        <li><b>Monitor, change profile, search or refresh</b> a selection, with searches running in the background.</li>
-        <li><b>Move a selection</b> to another disk or share, one title at a time in the background.</li>
-        <li><b>Free space in one go</b>: delete the files of everything you have watched, or look for smaller copies.</li>
-        <li><b>The same for the queue</b>: pause, resume or remove several downloads together.</li>
-      </ul>
-    </div>
-    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/select.png" alt="The library with several titles selected and a bar of actions for them" width="1440" height="960"></div>
-  </section>
-
-  <section>
-    <p class="eyebrow">On the television</p>
-    <h2>Plays what it files.</h2>
-    <p class="sub">Spool can answer as a Jellyfin server, so a player such as Infuse on Apple TV opens the library directly. There is no second server to run and no folders to share. <a class="more" href="guide/players.html">Playing on a television</a></p>
-    <div class="grid">
-      <div><h3>Found by itself</h3><p>Players on the same network see Spool without being given an address. It has its own port and its own sign-in, which opens nothing but playback.</p></div>
-      <div><h3>The library as Spool knows it</h3><p>Posters, cast, scores, collections, seasons and episodes, with search, recently added, continue watching and next up.</p></div>
-      <div><h3>Every file as it is</h3><p>Nothing is transcoded. Each version of a film is offered, with its subtitles, and where you stopped is remembered for next time.</p></div>
-    </div>
-  </section>
-
-  <section>
-    <p class="eyebrow">Collections</p>
-    <h2>Keeps a story together.</h2>
-    <p class="sub">Films that belong to a series, and an anime's series, films and side stories, are grouped by themselves: in the library, on players that speak to Jellyfin, and in Plex if you want it there. <a class="more" href="guide/collections.html">Collections and anime</a></p>
-    <div class="grid">
-      <div><h3>In order, with what is missing</h3><p>Each collection lists its titles in order of release or of the story, says what to watch next, and shows the works you do not have with a button to add them.</p></div>
-      <div><h3>An anime's whole story</h3><p>Spool reads AniList, which needs no account, to relate a series to its films, OVAs, recaps and spin-offs, and marks the ones that can be skipped.</p></div>
-      <div><h3>Yours to change</h3><p>Rename a collection, reorder it, take a title out or make a collection of your own. Your changes stand over what the sources say.</p></div>
-    </div>
-  </section>
-
-  <section>
-    <p class="eyebrow">The library you already have</p>
-    <h2>Takes your folders as it finds them.</h2>
-    <p class="sub">Spool can look through a disk or a share from a NAS and bring in the films and shows already there, where they lie. Nothing is moved or renamed to suit it.</p>
-    <div class="grid">
-      <div><h3>In more than one place</h3><p>Add further disks and shares beside the main library. Each is managed like the main one or only read, in which case Spool lists and plays what is there and writes nothing. <a class="more" href="guide/locations.html">More than one place</a></p></div>
-      <div><h3>Away means left alone</h3><p>When a NAS is switched off its titles are shown as offline. Nothing is searched for or downloaded again because files cannot be seen. <a class="more" href="guide/locations.html#when-a-location-cannot-be-reached">When a location is away</a></p></div>
-      <div><h3>Moved when you say</h3><p>Send a title, or a whole selection, to another location. Its folder is copied whole and checked before the original is taken away, with progress in Activity and a way to cancel. <a class="more" href="guide/locations.html#moving-a-title-to-another-location">Moving a title</a></p></div>
-      <div><h3>One title, two places</h3><p>A film kept on two disks is one entry with both copies, offered to players as versions. A series can have its seasons split between places. <a class="more" href="guide/locations.html#one-title-in-two-places">One title in two places</a></p></div>
-      <div><h3>A profile for each place</h3><p>An archive of untouched discs and a small disk for everyday viewing want different things. Each location has its own quality profile, and Spool shows how each profile fits what is on disk.</p></div>
-      <div><h3>Knows what else is in a folder</h3><p>Trailers, extras, your own posters and a media server's notes are recognised under the names Plex, Jellyfin, Emby and Kodi use. An upgrade replaces the film and nothing else. <a class="more" href="guide/local-files.html">Every name it knows</a></p></div>
-    </div>
-    <p class="note">Before pointing Spool at files you care about, read <a href="guide/your-library.html">what it changes and what it never touches</a>.</p>
-  </section>
-
-  <section>
-    <p class="eyebrow">Compact versions</p>
-    <h2>The whole film at home, a small one for the road.</h2>
-    <p class="sub">Spool can make a smaller copy of a film or an episode and keep it beside the original, as a version a player can choose. The original is never touched. <a class="more" href="guide/compact.html">Compact versions</a></p>
-    <div class="grid">
-      <div><h3>Made on the video hardware</h3><p>On an Apple silicon Mac a 47 GB film on disc becomes 5 GB at 1080p in about ten minutes, with the processor left nearly idle.</p></div>
-      <div><h3>Kept as a version</h3><p>HDR, every sound track, subtitles and chapters are carried over. Players are offered both; searches and upgrades go on looking at the original.</p></div>
-      <div><h3>One, some or all</h3><p>Make one from a film's page, several from the library, everything that would gain from one, or each download as it arrives. Progress is in Activity.</p></div>
-    </div>
-  </section>
-
-  <section>
-    <p class="eyebrow">A helper on the NAS</p>
-    <h2>Does the heavy work where the disks are.</h2>
-    <p class="sub">When part of the library is on another machine, a small Spool there does the file work on its own disks, told what to do by the one you already run. Nothing crosses the network and back. <a class="more" href="guide/helper.html">A helper on the NAS</a></p>
-    <div class="grid">
-      <div><h3>Downloads land in place</h3><p>The NAS fetches, repairs and unpacks for the titles it holds, and files each with a local move. The film is in the library seconds after it is unpacked.</p></div>
-      <div><h3>Disk to disk, NAS to player</h3><p>A title moved between two of the NAS's folders is copied inside the NAS. At home a player can take a film from the NAS itself, on a ticket for that one film, while Spool stays the one server it knows.</p></div>
-      <div><h3>Only what it is given</h3><p>The helper works inside the folders it is started with and nowhere else, never writes to one marked as read, and answers nothing without its key. If it is away, Spool carries on as before.</p></div>
+    <h2>From "I want this" to playing on the television.</h2>
+    <p class="sub">Four things, each of which used to be a program of its own, or a job nobody had.</p>
+    <div class="grid two">
+      <a href="downloading.html"><h3>Finds and downloads</h3><p>Every release it sees gets a verdict and a reason. What it takes is checked before it is fetched, unpacked as it arrives, and remembered so that it can be had again.</p></a>
+      <a href="library.html"><h3>Looks after the library</h3><p>It takes your folders as it finds them, in as many places as they are. It keeps a story together, subtitles in time, and the disk from filling.</p></a>
+      <a href="playing.html"><h3>Plays what it files</h3><p>Infuse and other players open the library as Spool knows it, at home and away. A film comes from the machine that holds it, with a small version for a slow line.</p></a>
+      <a href="machines.html"><h3>Works across machines</h3><p>A NAS does its own downloading, filing and playing. It is found on the network and linked with a short code, and no folder is typed twice.</p></a>
     </div>
   </section>
 

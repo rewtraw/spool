@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>More than one machine: Spool</title>
+<meta name="description" content="A small Spool on a NAS downloads, files and plays from its own disks, directed by the one you already run. Found on the network, linked with a short code.">
+<meta property="og:title" content="More than one machine: Spool">
+<meta property="og:description" content="A small Spool on a NAS downloads, files and plays from its own disks, directed by the one you already run. Found on the network, linked with a short code.">
+<meta property="og:image" content="assets/library.png">
+<link rel="icon" href="assets/mark.svg">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="./"><span class="mark"></span>Spool</a>
+    <nav>
+      <a class="hide" href="downloading.html">Downloading</a>
+      <a class="hide" href="library.html">Library</a>
+      <a class="hide" href="playing.html">Playing</a>
+      <a class="hide" href="machines.html" aria-current="page">Machines</a>
+      <a href="guide/">Guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="hero page">
+    <h1>Every machine that holds part of the library.</h1>
+    <p class="lede">A library outgrows one machine: a disk here, a NAS there. One Spool decides, and a small Spool on each of the others does the work on its own disks.</p>
+  </div>
+
+  <section>
+    <p class="eyebrow">A helper on the NAS</p>
+    <h2>Does the heavy work where the disks are.</h2>
+    <p class="sub">When part of the library is on another machine, a small Spool there does the file work on its own disks, told what to do by the one you already run. Nothing crosses the network and back. <a class="more" href="guide/helper.html">A helper on the NAS</a></p>
+    <div class="grid">
+      <div><h3>Downloads land in place</h3><p>The NAS fetches, repairs and unpacks for the titles it holds, and files each with a local move. The film is in the library seconds after it is unpacked.</p></div>
+      <div><h3>Disk to disk, NAS to player</h3><p>A title moved between two of the NAS's folders is copied inside the NAS. At home a player can take a film from the NAS itself, on a ticket for that one film, while Spool stays the one server it knows.</p></div>
+      <div><h3>Only what it is given</h3><p>The helper works inside the folders it is started with and nowhere else, never writes to one marked as read, and answers nothing to anyone it is not linked to. If it is away, Spool carries on as before.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Setting it up</p>
+    <h2>Found, linked with a code, and nothing typed twice.</h2>
+    <p class="sub">Two machines that have to agree on an address, a key and a pair of folders are three chances to get it wrong. Spool asks for none of them. <a class="more" href="guide/helper.html#linking-with-a-code">Linking with a code</a></p>
+    <div class="grid">
+      <div><h3>Found on the network</h3><p>A helper says that it is there, and Spool lists it with its address. Hearing of one links nothing: what it says is a name and a port, and no more.</p></div>
+      <div><h3>Linked with a short code</h3><p>The helper gives eight digits. Typed into Spool, they let the two agree a key between themselves. Neither the code nor the key crosses the network, and a wrong guess learns nothing.</p></div>
+      <div><h3>Finds its own folders</h3><p>The two machines see the same files under different names. Spool works out how one maps to the other from the shares that are mounted, and checks it against what is in them.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">What a link allows</p>
+    <h2>Three things, given by the machine that has the disks.</h2>
+    <p class="sub">A link is between two Spools, and what it allows is the only difference between a helper of your own and, later, a friend's library. The side that gives a thing is the side that holds to it. <a class="more" href="guide/ideas.html#linked-spools">Linked Spools</a></p>
+    <div class="grid">
+      <div><h3>See</h3><p>Say what is in the folders it shares. The NAS looks through its own disks and sends what it found: hundreds of folders in a fraction of a second, where reading them across a share took far longer.</p></div>
+      <div><h3>Play</h3><p>Hand one file to whoever holds a ticket for it. A ticket names that file, runs out in hours, and opens nothing else: no sign-in, and nothing to browse.</p></div>
+      <div><h3>Work</h3><p>Download, file, move and convert on its own disks, as directed. Each folder has one Spool that decides for it, so two machines never file the same thing.</p></div>
+    </div>
+    <p class="note">The linked machine says when it has news, so nothing is asked over and over while nothing happens. If it is away, its titles are shown as offline and left alone, and Spool carries on with the rest.</p>
+  </section>
+
+  <div class="next"><span>Before: <a href="playing.html">Playing</a></span><span>Next: <a href="guide/helper.html">The guide to a helper on the NAS</a></span></div>
+
+  <footer>
+    <div>Spool is free software under the <a href="https://github.com/rewtraw/spool/blob/main/LICENSE">GNU GPL v3</a>. Its release-name parsers are ported from Radarr and Sonarr.</div>
+    <div>Movie details come from TMDB; this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from TVmaze. The titles shown are public-domain films with placeholder artwork.</div>
+    <div>Spool is a tool for managing a media library. You are responsible for what you use it to download.</div>
+  </footer>
+</div>
+</body>
+</html>

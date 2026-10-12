@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The library: Spool</title>
+<meta name="description" content="Spool takes the folders you have, in as many places as they are, keeps a story together and subtitles in time, and knows what is using the disk.">
+<meta property="og:title" content="The library: Spool">
+<meta property="og:description" content="Spool takes the folders you have, in as many places as they are, keeps a story together and subtitles in time, and knows what is using the disk.">
+<meta property="og:image" content="assets/space.png">
+<link rel="icon" href="assets/mark.svg">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="./"><span class="mark"></span>Spool</a>
+    <nav>
+      <a class="hide" href="downloading.html">Downloading</a>
+      <a class="hide" href="library.html" aria-current="page">Library</a>
+      <a class="hide" href="playing.html">Playing</a>
+      <a class="hide" href="machines.html">Machines</a>
+      <a href="guide/">Guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="hero page">
+    <h1>Your library, as you keep it.</h1>
+    <p class="lede">Spool takes the folders you have, wherever they are, and changes nothing it was not asked to. Then it keeps them in order: stories together, subtitles in time, and room on the disk.</p>
+  </div>
+
+  <section>
+    <p class="eyebrow">The library you already have</p>
+    <h2>Takes your folders as it finds them.</h2>
+    <p class="sub">Spool can look through a disk or a share from a NAS and bring in the films and shows already there, where they lie. Nothing is moved or renamed to suit it.</p>
+    <div class="grid">
+      <div><h3>In more than one place</h3><p>Add further disks and shares beside the main library. Each is managed like the main one or only read, in which case Spool lists and plays what is there and writes nothing. <a class="more" href="guide/locations.html">More than one place</a></p></div>
+      <div><h3>Away means left alone</h3><p>When a NAS is switched off its titles are shown as offline. Nothing is searched for or downloaded again because files cannot be seen. <a class="more" href="guide/locations.html#when-a-location-cannot-be-reached">When a location is away</a></p></div>
+      <div><h3>Moved when you say</h3><p>Send a title, or a whole selection, to another location. Its folder is copied whole and checked before the original is taken away, with progress in Activity and a way to cancel. <a class="more" href="guide/locations.html#moving-a-title-to-another-location">Moving a title</a></p></div>
+      <div><h3>One title, two places</h3><p>A film kept on two disks is one entry with both copies, offered to players as versions. A series can have its seasons split between places. <a class="more" href="guide/locations.html#one-title-in-two-places">One title in two places</a></p></div>
+      <div><h3>A profile for each place</h3><p>An archive of untouched discs and a small disk for everyday viewing want different things. Each location has its own quality profile, and Spool shows how each profile fits what is on disk.</p></div>
+      <div><h3>Knows what else is in a folder</h3><p>Trailers, extras, your own posters and a media server's notes are recognised under the names Plex, Jellyfin, Emby and Kodi use. An upgrade replaces the film and nothing else. <a class="more" href="guide/local-files.html">Every name it knows</a></p></div>
+    </div>
+    <p class="note">Before pointing Spool at files you care about, read <a href="guide/your-library.html">what it changes and what it never touches</a>.</p>
+  </section>
+
+  <section>
+    <p class="eyebrow">Collections</p>
+    <h2>Keeps a story together.</h2>
+    <p class="sub">Films that belong to a series, and an anime's series, films and side stories, are grouped by themselves: in the library, on players that speak to Jellyfin, and in Plex if you want it there. <a class="more" href="guide/collections.html">Collections and anime</a></p>
+    <div class="grid">
+      <div><h3>In order, with what is missing</h3><p>Each collection lists its titles in order of release or of the story, says what to watch next, and shows the works you do not have with a button to add them.</p></div>
+      <div><h3>An anime's whole story</h3><p>Spool reads AniList, which needs no account, to relate a series to its films, OVAs, recaps and spin-offs, and marks the ones that can be skipped.</p></div>
+      <div><h3>Yours to change</h3><p>Rename a collection, reorder it, take a title out or make a collection of your own. Your changes stand over what the sources say.</p></div>
+    </div>
+  </section>
+
+  <section class="show">
+    <div class="copy">
+      <p class="eyebrow">Subtitles</p>
+      <h2>Subtitles it has listened to.</h2>
+      <p class="sub">Fetching a subtitle file is easy. Knowing it is in time with your copy of the film is the hard part, so Spool checks.</p>
+      <ul>
+        <li><b>Keeps what the release brings</b>, and finds missing languages on OpenSubtitles.</li>
+        <li><b>Listens to the film.</b> It compares when people speak with when the subtitles say they do.</li>
+        <li><b>Corrects what it can.</b> A file that is late, early or timed for another frame rate is retimed.</li>
+        <li><b>Discards what does not fit</b> and tries the next, so a subtitle for a different cut never stays.</li>
+      </ul>
+    </div>
+    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/subtitles.png" alt="A film with two versions; its subtitle files are marked in time or corrected" width="1440" height="960"></div>
+  </section>
+
+  <section class="show flip">
+    <div class="copy">
+      <p class="eyebrow">In bulk</p>
+      <h2>Tidy a whole shelf at once.</h2>
+      <p class="sub">Select as many titles as you like and act on them together.</p>
+      <ul>
+        <li><b>Monitor, change profile, search or refresh</b> a selection, with searches running in the background.</li>
+        <li><b>Move a selection</b> to another disk or share, one title at a time in the background.</li>
+        <li><b>Free space in one go</b>: delete the files of everything you have watched, or look for smaller copies.</li>
+        <li><b>The same for the queue</b>: pause, resume or remove several downloads together.</li>
+      </ul>
+    </div>
+    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/select.png" alt="The library with several titles selected and a bar of actions for them" width="1440" height="960"></div>
+  </section>
+
+  <section class="show">
+    <div class="copy">
+      <p class="eyebrow">Disk space</p>
+      <h2>Knows what is using the disk, and what could go.</h2>
+      <p class="sub">A full disk stops everything. Spool treats space as part of the job.</p>
+      <ul>
+        <li><b>Downloads wait for room</b> under one notice, and start by themselves when it appears.</li>
+        <li><b>Largest titles first</b>, with whether Plex says they were watched and whether a saved release exists.</li>
+        <li><b>Find a smaller copy</b> of anything over its profile's target, in one click.</li>
+      </ul>
+    </div>
+    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/space.png" alt="The disk space page: free space and the largest titles with their Plex and archive status" width="1440" height="960"></div>
+  </section>
+
+  <div class="next"><span>Before: <a href="downloading.html">Downloading</a></span><span>Next: <a href="playing.html">Playing</a></span></div>
+
+  <footer>
+    <div>Spool is free software under the <a href="https://github.com/rewtraw/spool/blob/main/LICENSE">GNU GPL v3</a>. Its release-name parsers are ported from Radarr and Sonarr.</div>
+    <div>Movie details come from TMDB; this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from TVmaze. The titles shown are public-domain films with placeholder artwork.</div>
+    <div>Spool is a tool for managing a media library. You are responsible for what you use it to download.</div>
+  </footer>
+</div>
+</body>
+</html>
