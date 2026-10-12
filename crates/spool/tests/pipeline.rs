@@ -142,6 +142,8 @@ impl World {
         }
         std::fs::create_dir_all(root.join("Movies")).unwrap();
         std::fs::create_dir_all(root.join("TV Shows")).unwrap();
+        // Someone to play as: tests that are about accounts make more.
+        app.db.add_account("spool", "").unwrap();
         app.spawn_tracker();
         World { _tmp: tmp, root, app, indexer, usenet, post: Post::new() }
     }
@@ -1689,9 +1691,10 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
 
     let mut g = w.app.settings.general();
     g.players_enabled = true;
-    g.players_password = "tv-pass".into();
     w.app.settings.set_general(&g).unwrap();
-    assert!(spool::settings::is_hashed(&w.app.settings.general().players_password));
+    let mut me = w.app.db.account(1).unwrap().unwrap();
+    me.password = spool::settings::hash_password("tv-pass").unwrap();
+    w.app.db.save_account(&me).unwrap();
     let jf = spool::jellyfin::router(w.app.clone());
     let read = |bytes: &[u8]| serde_json::from_slice::<Value>(bytes).unwrap_or(Value::Null);
 
@@ -1789,7 +1792,7 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     let resume = read(&body);
     assert_eq!((resume["Items"][0]["Id"].as_str(), resume["Items"][0]["UserData"]["PlaybackPositionTicks"].as_i64()), (Some(film_id.as_str()), Some(10_000_000)));
     assert_eq!(player(&jf, "POST", "/Sessions/Playing/Stopped", t, json!({"ItemId": film_id, "PositionTicks": 19_500_000})).await.0, 204);
-    let seen = w.app.db.watched("movie", movie.id).unwrap();
+    let seen = w.app.db.watched(1, "movie", movie.id).unwrap();
     assert_eq!((seen.played, seen.play_count, seen.position), (true, 1, 0.0));
     let (_, _, body) = player(&jf, "GET", "/UserItems/Resume", t, Value::Null).await;
     assert_eq!(read(&body)["TotalRecordCount"], 0);
@@ -1826,20 +1829,57 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     let log = w.app.player_requests.lock().iter().cloned().collect::<Vec<_>>().join("\n");
     assert!(log.contains("/Shows/NextUp") && log.contains("Infuse-Direct/8.5") && !log.contains(&token), "{log}");
 
-    // A new password signs every player out.
+    // Each person has an account of their own. Another is added, and has watched nothing
+    // of what the first has: the film the first finished is unplayed to them.
     let mut g = w.app.settings.general();
     g.password = String::new();
     w.app.settings.set_general(&g).unwrap();
+    let (status, added) = call(&app_api, "POST", "/api/accounts", json!({"name": "Ada", "password": "her-own"})).await;
+    assert_eq!((status, added["id"].as_i64()), (200, Some(2)), "{added}");
+    assert_eq!(call(&app_api, "POST", "/api/accounts", json!({"name": "ada"})).await.0, 409, "one name, whatever its capitals");
+    assert_eq!(call(&app_api, "POST", "/api/accounts", json!({"name": "  "})).await.0, 400);
+    assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Ada", "Pw": "tv-pass"})).await.0, 401, "one account's password is not another's");
+    let (status, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "ada", "Pw": "her-own"})).await;
+    assert_eq!(status, 200);
+    let hers = read(&body);
+    assert_eq!(hers["User"]["Name"], "Ada");
+    assert_ne!(hers["User"]["Id"], signed["User"]["Id"], "each account is its own person to a player");
+    let ada = hers["AccessToken"].as_str().unwrap().to_string();
+    let a = Some(ada.as_str());
+    let (_, _, body) = player(&jf, "GET", &format!("/Items/{film_id}"), a, Value::Null).await;
+    assert_eq!(read(&body)["UserData"]["Played"], false, "what one has watched is not what another has");
+    let (_, _, body) = player(&jf, "GET", &format!("/Items/{film_id}"), t, Value::Null).await;
+    assert_eq!(read(&body)["UserData"]["Played"], true);
+    assert_eq!(player(&jf, "POST", "/Sessions/Playing/Progress", a, json!({"ItemId": film_id, "PositionTicks": 20_000_000})).await.0, 204);
+    assert_eq!(w.app.db.watched(2, "movie", movie.id).unwrap().position, 2.0);
+    assert_eq!(w.app.db.watched(1, "movie", movie.id).unwrap().position, 0.0);
+
+    // The accounts, the players signed in to each, and nothing that would let one in.
+    let (_, listed) = call(&app_api, "GET", "/api/accounts", Value::Null).await;
+    let of = |name: &str| listed["accounts"].as_array().unwrap().iter().find(|x| x["name"] == name).unwrap().clone();
+    assert_eq!((of("spool")["has_password"].as_bool(), of("spool")["devices"].as_array().unwrap().len(), of("Ada")["devices"][0]["client"].as_str()), (Some(true), 1, Some("Infuse-Direct")), "{listed}");
+    assert!(!listed.to_string().contains(&ada) && !listed.to_string().contains(&token) && !listed.to_string().contains("argon2"), "no token and no password leaves by this door");
+
+    // A player is signed out by name; a new password signs out every player of the account,
+    // and of that account only; and an account that may not sign in is turned away.
+    let hers_device = of("Ada")["devices"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(call(&app_api, "DELETE", &format!("/api/accounts/2/devices/{hers_device}"), Value::Null).await.0, 200);
+    assert_eq!(player(&jf, "GET", "/Users/Me", a, Value::Null).await.0, 401);
     assert_eq!(player(&jf, "GET", "/Users/Me", t, Value::Null).await.0, 200);
-    let (_, shown) = call(&app_api, "GET", "/api/settings/general", Value::Null).await;
-    assert_eq!(shown["players_password"], "********");
-    let mut changed = shown.clone();
-    changed["players_password"] = json!("another");
-    assert_eq!(call(&app_api, "PUT", "/api/settings/general", changed).await.0, 200);
+    assert_eq!(call(&app_api, "PUT", "/api/accounts/1", json!({"password": "another"})).await.0, 200);
     assert_eq!(player(&jf, "GET", "/Users/Me", t, Value::Null).await.0, 401);
     assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "spool", "Pw": "another"})).await.0, 200);
+    let (_, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Ada", "Pw": "her-own"})).await;
+    let ada = read(&body)["AccessToken"].as_str().unwrap().to_string();
+    assert_eq!(call(&app_api, "PUT", "/api/accounts/2", json!({"enabled": false})).await.0, 200);
+    assert_eq!(player(&jf, "GET", "/Users/Me", Some(ada.as_str()), Value::Null).await.0, 401);
+    assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Ada", "Pw": "her-own"})).await.0, 401);
     let (_, status) = call(&app_api, "GET", "/api/players", Value::Null).await;
     assert_eq!((status["enabled"].as_bool(), status["signed_in"].as_u64()), (Some(true), Some(1)));
+    // Removed, an account takes what it watched with it, and leaves the others' alone.
+    assert_eq!(call(&app_api, "DELETE", "/api/accounts/2", Value::Null).await.0, 200);
+    assert_eq!(w.app.db.watched(2, "movie", movie.id).unwrap().position, 0.0);
+    assert!(w.app.db.watched(1, "movie", movie.id).unwrap().played);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1891,7 +1931,8 @@ async fn every_change_to_the_library_is_counted_and_can_be_asked_for() {
     assert!(!at("episode", eps[0]).unwrap().removed);
 
     // What a player reports is counted too, under the title it belongs to.
-    db.save_watched("episode", eps[1], &Watched { position: 30.0, ..Default::default() }).unwrap();
+    db.add_account("someone", "").unwrap();
+    db.save_watched(1, "episode", eps[1], &Watched { position: 30.0, ..Default::default() }).unwrap();
     assert_eq!(at("watched_episode", eps[1]).map(|c| c.title_id), Some(show.id));
 
     // The web app's list: everything the first time, then only what moved.
@@ -3363,9 +3404,18 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     assert_eq!((status, head["cache-control"].to_str().unwrap()), (307, "private, no-store"));
     assert!(there.starts_with(&format!("{url}/link/play/v1/file?ticket=")), "{there}");
     assert!(!w.app.player_requests.lock().iter().any(|line| line.contains(there.rsplit('=').next().unwrap())), "no ticket is kept in what Spool remembers of requests");
-    // What is playing, and that it comes from the other machine, is there to be seen.
+    // What is playing, who by and on what, and that it comes from the other machine.
     let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
-    assert_eq!((activity["playing"][0]["title"].as_str(), activity["playing"][0]["from"].as_str()), (Some("Alpha"), Some("Nas")), "{}", activity["playing"]);
+    let now = &activity["playing"][0];
+    assert_eq!((now["title"].as_str(), now["from"].as_str(), now["account"].as_str(), now["device"].as_str()), (Some("Alpha"), Some("Nas"), Some("spool"), Some("Apple TV")), "{}", activity["playing"]);
+    // The sitting is written down as the player says how far it has got.
+    let film_id = stream.rsplit("/Videos/").next().unwrap().split('/').next().unwrap().to_string();
+    for (path, body) in [("/Sessions/Playing", json!({"ItemId": film_id, "PositionTicks": 0})), ("/Sessions/Playing/Progress", json!({"ItemId": film_id, "PositionTicks": 600_000_000i64, "IsPaused": false}))] {
+        assert_eq!(http.post(format!("{spool_url}{path}")).header("x-emby-authorization", &auth).json(&body).send().await.unwrap().status().as_u16(), 204);
+    }
+    let (_, people) = call(&api, "GET", "/api/accounts", Value::Null).await;
+    let (me, sat) = (&people["accounts"][0], &people["recent"][0]);
+    assert_eq!((me["totals"]["plays"].as_u64(), me["playing"][0]["title"].as_str(), sat["account"].as_str(), sat["play"]["title"].as_str(), sat["play"]["source"].as_str(), sat["play"]["device"].as_str(), sat["play"]["position"].as_f64()), (Some(1), Some("Alpha"), Some("spool"), Some("Alpha"), Some("Nas"), Some("Apple TV"), Some(60.0)), "{people}");
 
     // Told to send nobody, it sends nobody, and says where the film comes from now.
     send_from(json!(false)).await;

@@ -1,6 +1,7 @@
 //! Shared application state.
 
 use crate::db::Db;
+use crate::models::Play;
 use crate::metadata::Metadata;
 use crate::settings::{Mode, Settings};
 use parking_lot::Mutex;
@@ -25,11 +26,50 @@ pub enum Event {
     Locations,
 }
 
+/// A player that is signed in: whose account it is on, and what it said it was.
+#[derive(Clone, Debug)]
+pub struct Signed {
+    /// The token it holds, which is also what it is known by here.
+    pub token: String,
+    pub account: i64,
+    pub account_name: String,
+    pub device: String,
+    /// When it was last noted as seen, so that this is written down once in a while and
+    /// not with every request.
+    pub seen: i64,
+}
+
+/// What a player says it is playing when it reports how far it has got.
+pub struct Sitting<'a> {
+    /// "movie" or "episode", and its id.
+    pub kind: &'a str,
+    pub ref_id: i64,
+    pub title_id: i64,
+    pub title: &'a str,
+    pub position: f64,
+    pub paused: bool,
+    pub finished: bool,
+    pub stopped: bool,
+}
+
 /// Something a player is playing.
 #[derive(Clone, Debug, Serialize)]
 pub struct Playing {
     pub title: String,
     pub title_id: i64,
+    /// Who is playing it, and on what.
+    pub account: String,
+    pub device: String,
+    /// The record of this sitting, once the player has said how far it has got.
+    #[serde(skip)]
+    play: i64,
+    #[serde(skip)]
+    subject: (String, i64),
+    #[serde(skip)]
+    reported: i64,
+    /// Whether it said it was paused when it last reported.
+    #[serde(skip)]
+    paused: bool,
     /// The linked machine the player takes it from; empty when it is sent from here.
     pub from: String,
     pub since: i64,
@@ -75,8 +115,8 @@ pub struct Inner {
     pub last_playing: std::sync::atomic::AtomicI64,
     /// The Spools heard of on the network, once this one is listening.
     pub heard: std::sync::OnceLock<crate::link::find::Heard>,
-    /// What each player is playing, by the address it came from.
-    pub playing: Mutex<HashMap<std::net::IpAddr, Playing>>,
+    /// What each signed-in player is playing, by the token it holds.
+    pub playing: Mutex<HashMap<String, Playing>>,
     /// Titles being moved between locations.
     pub moves: Mutex<crate::relocate::Moves>,
     pub encodes: Mutex<crate::compact::Encodes>,
@@ -90,14 +130,15 @@ pub struct Inner {
     /// The OpenSubtitles sign-in in use, and when it was made.
     pub subtitle_login: Mutex<Option<(String, i64)>>,
     /// Players that have signed in, by the token each was given. Oldest first.
-    pub player_tokens: Mutex<Vec<String>>,
+    /// The players that are signed in, by the token each holds. See [`App::reload_players`].
+    pub players: Mutex<HashMap<String, Signed>>,
     /// Wrong passwords from players lately: (how many, when the last one was).
     pub player_failures: Mutex<(u32, i64)>,
     /// The last few hundred requests players made, for working out what one of them wants.
     pub player_requests: Mutex<std::collections::VecDeque<String>>,
     /// The library as last read for players, with the database's change count and the count of
     /// locations coming and going at the time.
-    pub player_library: Mutex<Option<((i64, u64), Arc<crate::jellyfin::items::Library>)>>,
+    pub player_library: Mutex<Option<((i64, u64), Arc<crate::jellyfin::items::Data>)>>,
     /// Where players are being served, or why they are not.
     pub player_status: Mutex<String>,
     /// Releases being sent to the downloader right now, keyed by title and release name.
@@ -136,26 +177,50 @@ pub fn http_client() -> reqwest::Client {
 
 impl App {
     /// Note that a player has asked for a file, and where it is being sent for it.
-    pub fn note_playing(&self, player: std::net::IpAddr, path: &Path, from: Option<&str>) {
+    pub fn note_playing(&self, who: &Signed, path: &Path, from: Option<&str>) {
         let now = crate::db::now();
         let mut playing = self.playing.lock();
-        if let Some(p) = playing.get_mut(&player).filter(|p| p.path == path) {
+        if let Some(p) = playing.get_mut(&who.token).filter(|p| p.path == path) {
             (p.seen, p.from) = (now, from.unwrap_or_default().to_string());
             return;
         }
         let Some(t) = self.db.titles(None).ok().and_then(|all| all.into_iter().find(|t| !t.path.is_empty() && (path.starts_with(&t.path) || t.also.iter().any(|a| path.starts_with(a))))) else { return };
-        playing.insert(player, Playing { title: t.title, title_id: t.id, from: from.unwrap_or_default().to_string(), since: now, seen: now, path: path.to_path_buf() });
+        playing.insert(who.token.clone(), Playing { title: t.title, title_id: t.id, account: who.account_name.clone(), device: who.device.clone(), play: 0, subject: Default::default(), reported: now, paused: false, from: from.unwrap_or_default().to_string(), since: now, seen: now, path: path.to_path_buf() });
     }
 
-    /// A player said how far it had got, or that it had stopped.
-    pub fn note_progress(&self, player: Option<std::net::IpAddr>, stopped: bool) {
-        let Some(player) = player else { return };
+    /// A player said how far it had got, or that it had stopped. What it is playing is
+    /// kept as playing, and the sitting is written down: begun the first time it reports,
+    /// and carried on each time after, by the time that has passed while it was not paused.
+    pub fn note_sitting(&self, who: &Signed, s: &Sitting) {
+        let now = crate::db::now();
         let mut playing = self.playing.lock();
-        if stopped {
-            playing.remove(&player);
-        } else if let Some(p) = playing.get_mut(&player) {
-            p.seen = crate::db::now();
+        let Some(p) = playing.get_mut(&who.token) else { return };
+        p.seen = now;
+        if p.play == 0 || p.subject != (s.kind.to_string(), s.ref_id) {
+            let begun = Play { account_id: who.account, kind: s.kind.to_string(), ref_id: s.ref_id, title_id: s.title_id, title: s.title.to_string(), device: who.device.clone(), source: p.from.clone(), started_at: now, position: s.position, finished: s.finished, ..Default::default() };
+            (p.play, p.subject) = (self.db.play_begin(&begun).unwrap_or(0), (s.kind.to_string(), s.ref_id));
+        } else {
+            // The time since it last reported was watched if it was playing then, and
+            // reported in the meantime as players do, every few seconds. A longer gap is
+            // one it was not playing in.
+            let gap = now - p.reported;
+            let watched = if p.paused || !(0..=30).contains(&gap) { 0 } else { gap };
+            let _ = self.db.play_on(p.play, watched as f64, s.position, &p.from, s.finished);
         }
+        (p.reported, p.paused) = (now, s.paused);
+        if s.stopped {
+            playing.remove(&who.token);
+        }
+    }
+
+    /// Read again who is signed in: the players of every account that may sign in.
+    ///
+    /// Read while the list is held, so that of two readings the later one is the one that
+    /// stands, and a player signed out is never put back by a reading begun before.
+    pub fn reload_players(&self) {
+        let mut players = self.players.lock();
+        let accounts: HashMap<i64, String> = self.db.accounts().unwrap_or_default().into_iter().filter(|a| a.enabled).map(|a| (a.id, a.name)).collect();
+        *players = self.db.devices().unwrap_or_default().into_iter().filter_map(|d| Some((d.token.clone(), Signed { token: d.token, account: d.account_id, account_name: accounts.get(&d.account_id)?.clone(), device: d.name, seen: d.seen_at }))).collect();
     }
 
     /// What is being played now, the longest-running first.
@@ -176,18 +241,12 @@ impl App {
     /// TVmaze's) in place of the real ones.
     pub async fn start_with(data_dir: &Path, db: Db, sources: Option<(&str, &str)>) -> anyhow::Result<App> {
         let sessions: HashSet<String> = db.get_setting::<Vec<String>>("sessions").into_iter().collect();
-        let player_tokens: Vec<String> = db.get_setting("player_tokens");
         let settings = Settings::new(db.clone());
         // API and MCP access always go through a key, so there is always one.
         let mut g = settings.general();
         if g.api_key.is_empty() {
             g.api_key = crate::settings::new_key();
             settings.set_general(&g)?;
-        }
-        // A password saved in the clear by an earlier version is hashed where it sits.
-        if [&g.password, &g.players_password].into_iter().any(|p| !p.is_empty() && !crate::settings::is_hashed(p)) {
-            settings.set_general(&g)?;
-            tracing::info!("the app password is now stored as a hash");
         }
         let engine = Engine::start(engine_config(&settings, data_dir)).await?;
         let http = http_client();
@@ -198,7 +257,7 @@ impl App {
             (meta.anilist_base, meta.anime_ids_url) = (format!("{tvmaze}/anilist"), format!("{tvmaze}/anime-ids.json"));
         }
         let (events, _) = broadcast::channel(1024);
-        Ok(App(Arc::new(Inner {
+        let app = App(Arc::new(Inner {
             db,
             settings,
             engine,
@@ -226,7 +285,7 @@ impl App {
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),
             subtitle_login: Mutex::new(None),
-            player_tokens: Mutex::new(player_tokens),
+            players: Default::default(),
             player_failures: Mutex::new((0, 0)),
             player_requests: Mutex::new(Default::default()),
             player_library: Mutex::new(None),
@@ -234,7 +293,9 @@ impl App {
             grabbing: Mutex::new(HashSet::new()),
             waiting_for_space: Mutex::new(HashSet::new()),
             art_fetches: tokio::sync::Semaphore::new(6),
-        })))
+        }));
+        app.reload_players();
+        Ok(app)
     }
 
     pub fn emit(&self, e: Event) {

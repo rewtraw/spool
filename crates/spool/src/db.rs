@@ -338,6 +338,107 @@ const MIGRATIONS: &[&str] = &[
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
     "#,
+    r#"
+    -- The people who play. Each has a name and a password of their own, and what they have
+    -- watched is theirs.
+    CREATE TABLE accounts (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        -- Kept as a hash; empty when the account has none.
+        password TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- A player that is signed in: the token it holds, whose it is, and what it said it was.
+    CREATE TABLE devices (
+        token TEXT PRIMARY KEY,
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL DEFAULT '',
+        client TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL DEFAULT 0,
+        seen_at INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- Each time something was played: who, what, on what, from which machine and for how long.
+    CREATE TABLE plays (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        ref_id INTEGER NOT NULL,
+        title_id INTEGER NOT NULL,
+        -- As it was called then, so that the record outlives the title.
+        title TEXT NOT NULL,
+        device TEXT NOT NULL DEFAULT '',
+        -- The linked machine it came from; empty when it came through this Spool.
+        source TEXT NOT NULL DEFAULT '',
+        started_at INTEGER NOT NULL,
+        ended_at INTEGER NOT NULL,
+        -- Seconds of it watched in this sitting, and where in it the player had got to.
+        seconds REAL NOT NULL DEFAULT 0,
+        position REAL NOT NULL DEFAULT 0,
+        finished INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX plays_account ON plays(account_id, started_at);
+
+    -- The one sign-in there was becomes the first account, and the players signed in with it
+    -- stay signed in. Wherever anything was watched or anyone was signed in there is a first
+    -- account to keep it, under the name there was or the one it went by when none was set.
+    INSERT INTO accounts(id, name, password, created_at)
+        SELECT 1,
+            COALESCE(NULLIF((SELECT json_extract(value, '$.players_username') FROM settings WHERE key = 'general'), ''), 'spool'),
+            COALESCE((SELECT json_extract(value, '$.players_password') FROM settings WHERE key = 'general'), ''),
+            CAST(strftime('%s','now') AS INTEGER)
+        WHERE EXISTS (SELECT 1 FROM settings WHERE key = 'general' AND COALESCE(json_extract(value, '$.players_username'), '') <> '')
+            OR EXISTS (SELECT 1 FROM watched)
+            OR EXISTS (SELECT 1 FROM settings WHERE key = 'player_tokens' AND json_array_length(value) > 0);
+    INSERT OR IGNORE INTO devices(token, account_id, created_at)
+        SELECT j.value, 1, CAST(strftime('%s','now') AS INTEGER) FROM settings s, json_each(s.value) j
+        WHERE s.key = 'player_tokens' AND EXISTS (SELECT 1 FROM accounts WHERE id = 1);
+    DELETE FROM settings WHERE key = 'player_tokens';
+    UPDATE settings SET value = json_remove(value, '$.players_username', '$.players_password') WHERE key = 'general';
+
+    -- What has been watched is one account's, and what was watched before is the first one's.
+    DROP TRIGGER watched_added;
+    DROP TRIGGER watched_changed;
+    DROP TRIGGER watched_removed;
+    ALTER TABLE watched RENAME TO watched_before;
+    CREATE TABLE watched (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        ref_id INTEGER NOT NULL,
+        position REAL NOT NULL DEFAULT 0,
+        played INTEGER NOT NULL DEFAULT 0,
+        play_count INTEGER NOT NULL DEFAULT 0,
+        favorite INTEGER NOT NULL DEFAULT 0,
+        last_played_at INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, kind, ref_id)
+    );
+    INSERT INTO watched SELECT 1, kind, ref_id, position, played, play_count, favorite, last_played_at, updated_at FROM watched_before WHERE EXISTS (SELECT 1 FROM accounts WHERE id = 1);
+    DROP TABLE watched_before;
+
+    CREATE TRIGGER watched_added AFTER INSERT ON watched
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || NEW.kind, NEW.ref_id, CASE NEW.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = NEW.ref_id), 0) ELSE NEW.ref_id END, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+
+    CREATE TRIGGER watched_changed AFTER UPDATE ON watched
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || NEW.kind, NEW.ref_id, CASE NEW.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = NEW.ref_id), 0) ELSE NEW.ref_id END, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+
+    CREATE TRIGGER watched_removed AFTER DELETE ON watched
+    BEGIN
+        UPDATE revision SET n = n + 1;
+        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || OLD.kind, OLD.ref_id, CASE OLD.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = OLD.ref_id), 0) ELSE OLD.ref_id END, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
+    END;
+    "#,
 ];
 
 impl Db {

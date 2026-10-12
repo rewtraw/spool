@@ -385,6 +385,63 @@ pub struct Watched {
     pub updated_at: i64,
 }
 
+/// Someone who plays: a name and a password of their own, and what they have watched.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Account {
+    pub id: i64,
+    pub name: String,
+    /// Kept as a hash; empty when the account has none. Never handed out.
+    #[serde(skip_serializing, default)]
+    pub password: String,
+    /// One that is not may not sign in, and its players are turned away.
+    pub enabled: bool,
+    pub created_at: i64,
+}
+
+/// A player that is signed in.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Device {
+    /// What the player holds to show that it is signed in. Never handed out.
+    #[serde(skip_serializing, default)]
+    pub token: String,
+    pub account_id: i64,
+    /// What it said it was: "Living Room", and the program, "Infuse".
+    pub name: String,
+    pub client: String,
+    pub created_at: i64,
+    pub seen_at: i64,
+}
+
+/// One sitting: someone played something, on something, for a while.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Play {
+    pub id: i64,
+    pub account_id: i64,
+    /// "movie" or "episode", and its id.
+    pub kind: String,
+    pub ref_id: i64,
+    pub title_id: i64,
+    pub title: String,
+    pub device: String,
+    /// The linked machine it came from; empty when it came through this Spool.
+    pub source: String,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub seconds: f64,
+    pub position: f64,
+    pub finished: bool,
+}
+
+/// What one account has played, added up.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlayTotals {
+    pub plays: u32,
+    pub seconds: f64,
+    pub seconds_lately: f64,
+    pub last_at: i64,
+    pub titles: u32,
+}
+
 /// One release as an indexer reported it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

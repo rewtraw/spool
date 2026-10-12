@@ -6,12 +6,12 @@ It is tested with [Infuse](https://firecore.com/infuse) on Apple TV and iPhone. 
 
 ## Turning it on
 
-Under Settings, General, Players:
+Under Settings, Players:
 
 1. Tick **Serve the library to players**.
-2. Choose a **name** and a **password** for players to sign in with. These are separate from the web app's password, and open nothing but playback.
-3. Leave the **port** at 8096 unless something else uses it. It is the one players expect.
-4. Save.
+2. Leave the **port** at 8096 unless something else uses it. It is the one players expect.
+3. Save.
+4. Under **People**, add an account for each person who plays: a **name** and a **password** to sign a player in with. These are separate from the web app's password, and open nothing but playback.
 
 In a container, publish the port as well (`8096:8096`) and give the player the machine's address. Being found without an address relies on a broadcast on the local network, which reaches a container only when it shares the host's network.
 
@@ -19,7 +19,7 @@ In a container, publish the port as well (`8096:8096`) and give the player the m
 
 1. In Infuse, add a share and choose **Jellyfin**.
 2. On the same network, Spool appears in the list by itself as **Spool**. If it does not, enter the address of the machine Spool runs on and port 8096.
-3. Sign in with the name and password from the settings.
+3. Sign in with the name and password of one of the people in the settings.
 
 If an Apple TV says an error occurred on a server it received through iCloud from another device, remove the server on the Apple TV and add it again there.
 
@@ -52,13 +52,29 @@ To play away from home, put the player and the machine Spool runs on in the same
 
 Finding Spool by itself works only on the local network. Over a private network, enter the address by hand.
 
+## People
+
+Each person who plays has an account of their own. What they have watched, where they stopped and what comes next are theirs: one person finishing a film does not mark it watched for another. Accounts are kept under Settings, Players.
+
+- **A password** is the account's own. One with none lets anyone who can reach Spool and knows the name play from the library.
+- **A new password** signs every one of that person's players out, and nobody else's.
+- **Stop sign-in** turns an account away without removing it: its players are signed out, and what it has watched is kept for when it is allowed again.
+- **Removing** an account removes what it watched and played with it. The library is not touched.
+- **Players** signed in to an account are listed under it, each with what it called itself and when it was last seen, and can be signed out one at a time.
+
+The account there was before there were several is the first one, with what had been watched and the players that were signed in.
+
 ## Seeing what players are doing
 
-Settings, General, Players shows whether Spool is listening and how many players are signed in. Changing the name or the password signs every player out.
+- **Now.** What is playing is at the top of Activity, with who is playing it, on what, and whether it comes from a linked machine or through Spool. The same is under each person in Settings, Players.
+- **Lately.** Settings, Players lists each sitting: who played what, on what, from where, for how long and whether to the end.
+- **In all.** Each person has how long they have watched, how much of that in the last week, how many titles, and when they last played anything.
+
+A sitting is counted from what the player reports as it plays. Time it says it was paused is not counted.
 
 ## What is not there
 
 - **Transcoding**, as above.
-- **Several users.** There is one sign-in, and one record of what has been watched.
+- **Limits on an account.** Every account sees the whole library. Which locations a person may see, and how many may play at once, come with sharing between households; see [Ideas](ideas.md).
 - **Live television, music and photos.**
 - **A fast sync for Infuse's Library Mode.** Infuse's default, Direct Mode, is what Spool is tested with. See [Ideas](ideas.md).

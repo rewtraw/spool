@@ -32,9 +32,11 @@ mod upkeep;
 mod collections;
 mod locations;
 mod compact;
+mod players;
 use titles::*;
 use subtitles::*;
 use activity::*;
+use players::*;
 use settings::*;
 use upkeep::*;
 use collections::*;
@@ -228,7 +230,7 @@ async fn players(State(app): State<App>) -> Json<Value> {
         "enabled": g.players_enabled,
         "port": g.players_port,
         "status": *app.player_status.lock(),
-        "signed_in": app.player_tokens.lock().len(),
+        "signed_in": app.players.lock().len(),
         "playing": app.playing_now(),
         "requests": app.player_requests.lock().iter().cloned().collect::<Vec<_>>(),
     }))
@@ -271,6 +273,10 @@ fn api_routes() -> Router<App> {
         .route("/api/busy", get(busy))
         .route("/api/titles", get(list_titles).post(add_title))
         .route("/api/titles/bulk", post(bulk_titles))
+        .route("/api/accounts", get(accounts).post(account_add))
+        .route("/api/accounts/{id}", put(account_change).delete(account_remove))
+        .route("/api/accounts/{id}/devices/{device}", delete(device_remove))
+        .route("/api/accounts/{id}/plays", get(account_plays))
         .route("/api/links", get(links))
         .route("/api/links/pair", post(link_pair))
         .route("/api/links/found", get(links_found))

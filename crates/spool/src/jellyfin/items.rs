@@ -12,9 +12,24 @@ use std::collections::{HashMap, HashSet};
 /// Jellyfin counts time in ticks of 100 nanoseconds.
 pub const TICKS: f64 = 10_000_000.0;
 
-/// Everything a player can be shown, read from the database in one go: the titles that have
-/// files, their files, and what has been watched.
+/// What one account is shown: the library, and what that account has watched of it.
 pub struct Library {
+    data: std::sync::Arc<Data>,
+    watched: HashMap<(String, i64), Watched>,
+    /// Whose it is; zero for nobody's, when only the files are wanted.
+    pub account: i64,
+}
+
+impl std::ops::Deref for Library {
+    type Target = Data;
+    fn deref(&self) -> &Data {
+        &self.data
+    }
+}
+
+/// Everything a player can be shown, read from the database in one go: the titles that have
+/// files, and their files. The same for everyone.
+pub struct Data {
     pub server_id: String,
     pub titles: Vec<Title>,
     index: HashMap<i64, usize>,
@@ -23,7 +38,6 @@ pub struct Library {
     /// Per series, the episodes that have a file, in order.
     episodes: HashMap<i64, Vec<Episode>>,
     episode_title: HashMap<i64, i64>,
-    watched: HashMap<(String, i64), Watched>,
     /// Collections with more than one title here: a film series, or an anime's series and films.
     pub sets: Vec<Collection>,
     /// Per collection, its titles in the order they came out.
@@ -108,21 +122,24 @@ impl Library {
     /// The library as it stands. Reading it takes a moment and a player asks many things at
     /// once, so one reading serves every request until the library or what has been watched changes,
     /// or a location comes or goes.
-    pub fn shared(app: &App) -> Result<std::sync::Arc<Library>> {
+    pub fn shared(app: &App, account: i64) -> Result<Library> {
         // Read the count before the library: a change that lands meanwhile then shows as a
         // newer count next time, and the library is read again.
         let revision = (app.db.revision()?, app.location_changes.load(std::sync::atomic::Ordering::Relaxed));
-        if let Some((at, lib)) = app.player_library.lock().as_ref() {
-            if *at == revision {
-                return Ok(lib.clone());
+        let kept = app.player_library.lock().as_ref().filter(|(at, _)| *at == revision).map(|(_, data)| data.clone());
+        let data = match kept {
+            Some(data) => data,
+            None => {
+                let data = std::sync::Arc::new(Library::load(app)?);
+                *app.player_library.lock() = Some((revision, data.clone()));
+                data
             }
-        }
-        let lib = std::sync::Arc::new(Library::load(app)?);
-        *app.player_library.lock() = Some((revision, lib.clone()));
-        Ok(lib)
+        };
+        let watched = if account == 0 { HashMap::new() } else { app.db.watched_all(account)? };
+        Ok(Library { data, watched, account })
     }
 
-    fn load(app: &App) -> Result<Library> {
+    fn load(app: &App) -> Result<Data> {
         // Only what can be played now: a file on a location that is away is left out until it
         // is back, and so is a title with no file left to play.
         let places = app.placement();
@@ -172,7 +189,7 @@ impl Library {
         let index = titles.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         // A copy kept elsewhere is offered by the name of the place it is on.
         let copy_names = files.values().flatten().filter_map(|f| f.base.clone()).map(|b| (places.of(&b).map(|p| p.0.name.clone()).unwrap_or_default(), b)).map(|(name, b)| (b, name)).collect();
-        Ok(Library { server_id: super::server_id(app), titles, index, files, episodes, episode_title, watched: app.db.watched_all()?, sets, set_members, copy_names })
+        Ok(Data { server_id: super::server_id(app), titles, index, files, episodes, episode_title, sets, set_members, copy_names })
     }
 
     /// The titles whose posters stand for a whole view, Movies or Shows: the five most lately

@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 /// The video itself: a film, an episode, or one named version of a film. A player that can
 /// reach the machine holding the file is sent there with a ticket for it; any other is sent
 /// the file from here.
-pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool, player: Option<std::net::IpAddr>) -> Response {
+pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool, player: Option<std::net::IpAddr>, who: Option<&crate::app::Signed>) -> Response {
     let Some(id) = Id::parse(id) else { return StatusCode::NOT_FOUND.into_response() };
-    let path: Option<PathBuf> = Library::shared(app).ok().and_then(|lib| lib.extra_path(id).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| t.file_path(f))));
+    let path: Option<PathBuf> = Library::shared(app, 0).ok().and_then(|lib| lib.extra_path(id).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| t.file_path(f))));
     let Some(path) = path else { return StatusCode::NOT_FOUND.into_response() };
     // A player on Tailscale is placed by where it is really reached, which is what says
     // whether it can reach the other machine too.
@@ -28,8 +28,8 @@ pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderM
     };
     let known: Vec<std::net::IpAddr> = really.into_iter().chain(player).collect();
     let sent = app.play_direct(&path, &known);
-    if let (Some(ip), false) = (player, head) {
-        app.note_playing(ip, &path, sent.as_ref().map(|s| s.0.as_str()));
+    if let (Some(who), false) = (who, head) {
+        app.note_playing(who, &path, sent.as_ref().map(|s| s.0.as_str()));
     }
     match sent {
         // Followed for this request only: the next one is asked of Spool again, and may be
@@ -50,11 +50,11 @@ pub async fn image(app: &App, id: &str, kind: &str, versioned: bool, head: bool)
     };
     let made = match view.filter(|_| kind.eq_ignore_ascii_case("primary")) {
         Some(of) => {
-            let Some((titles, tag)) = Library::shared(app).ok().map(|lib| lib.view_posters(of)).filter(|p| !p.0.is_empty()) else { return StatusCode::NOT_FOUND.into_response() };
+            let Some((titles, tag)) = Library::shared(app, 0).ok().map(|lib| lib.view_posters(of)).filter(|p| !p.0.is_empty()) else { return StatusCode::NOT_FOUND.into_response() };
             app.art_view(of.as_str(), &titles, &tag).await
         }
         None => {
-            let found = id.and_then(|id| Library::shared(app).ok().and_then(|lib| lib.image(id, kind)));
+            let found = id.and_then(|id| Library::shared(app, 0).ok().and_then(|lib| lib.image(id, kind)));
             let Some((src, name, width)) = found else { return StatusCode::NOT_FOUND.into_response() };
             app.art_any(&name, &src, width).await
         }
@@ -95,7 +95,7 @@ fn to_vtt(srt: &str) -> String {
 pub async fn subtitle(app: &App, id: &str, source: Option<&str>, index: &str, file: &str) -> Response {
     let missing = || StatusCode::NOT_FOUND.into_response();
     let (Some(id), Ok(index)) = (Id::parse(id), index.parse::<usize>()) else { return missing() };
-    let path = Library::shared(app).ok().and_then(|lib| {
+    let path = Library::shared(app, 0).ok().and_then(|lib| {
         let (t, f) = lib.file_for(id, source.and_then(Id::parse))?;
         let inside = super::items::media_streams(&f.media_info.clone().unwrap_or_default()).len();
         let sub = f.subtitles.get(index.checked_sub(inside)?)?;
@@ -124,9 +124,10 @@ fn subject(lib: &Library, id: Id) -> Option<(&'static str, i64, f64)> {
 
 /// Record how far a player has got. Stopping near the end counts as having watched it; stopping
 /// almost at once leaves nothing to resume.
-pub fn report(app: &App, lib: &Library, id: Id, position: f64, stopped: bool) -> Result<()> {
-    let Some((kind, ref_id, runtime)) = subject(lib, id) else { return Ok(()) };
-    let mut w = app.db.watched(kind, ref_id)?;
+/// Returns whether that was the end of it.
+pub fn report(app: &App, lib: &Library, id: Id, position: f64, stopped: bool) -> Result<bool> {
+    let Some((kind, ref_id, runtime)) = subject(lib, id) else { return Ok(false) };
+    let mut w = app.db.watched(lib.account, kind, ref_id)?;
     let now = crate::db::now();
     w.last_played_at = now;
     let finished = runtime > 0.0 && position >= runtime * 0.9;
@@ -141,7 +142,8 @@ pub fn report(app: &App, lib: &Library, id: Id, position: f64, stopped: bool) ->
     } else {
         w.position = position.max(0.0);
     }
-    app.db.save_watched(kind, ref_id, &w)
+    app.db.save_watched(lib.account, kind, ref_id, &w)?;
+    Ok(finished)
 }
 
 /// Mark something watched or not. A series or a season carries its episodes with it.
@@ -155,7 +157,7 @@ pub fn mark(app: &App, lib: &Library, id: Id, played: bool) -> Result<()> {
     };
     let now = crate::db::now();
     for (kind, ref_id) in targets {
-        let mut w = app.db.watched(kind, ref_id)?;
+        let mut w = app.db.watched(lib.account, kind, ref_id)?;
         w.played = played;
         w.position = 0.0;
         if played {
@@ -164,7 +166,7 @@ pub fn mark(app: &App, lib: &Library, id: Id, played: bool) -> Result<()> {
         } else {
             w.play_count = 0;
         }
-        app.db.save_watched(kind, ref_id, &w)?;
+        app.db.save_watched(lib.account, kind, ref_id, &w)?;
     }
     Ok(())
 }
@@ -176,9 +178,9 @@ pub fn favorite(app: &App, lib: &Library, id: Id, on: bool) -> Result<()> {
         Some(Node::Episode(_, e)) => ("episode", e.id),
         _ => return Ok(()),
     };
-    let mut w = app.db.watched(kind, ref_id)?;
+    let mut w = app.db.watched(lib.account, kind, ref_id)?;
     w.favorite = on;
-    app.db.save_watched(kind, ref_id, &w)
+    app.db.save_watched(lib.account, kind, ref_id, &w)
 }
 
 /// Read a file's streams if they were never recorded, and keep them. Leaves alone the summary
@@ -209,7 +211,7 @@ async fn learn_streams(app: &App, title: &Title, file: &MediaFile) -> bool {
 }
 
 /// The library, with the streams of the files behind one item read if they had not been.
-pub async fn with_streams(app: &App, lib: std::sync::Arc<Library>, id: Id) -> Result<std::sync::Arc<Library>, Response> {
+pub async fn with_streams(app: &App, lib: Library, id: Id) -> Result<Library, Response> {
     let files: Vec<(Title, MediaFile)> = match lib.node(id) {
         Some(Node::Movie(t)) => lib.files_of(t.id).iter().map(|f| (t.clone(), f.clone())).collect(),
         Some(Node::Episode(..)) => lib.file_for(id, None).map(|(t, f)| (t.clone(), f.clone())).into_iter().collect(),
@@ -222,7 +224,7 @@ pub async fn with_streams(app: &App, lib: std::sync::Arc<Library>, id: Id) -> Re
     if !learned {
         return Ok(lib);
     }
-    Library::shared(app).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    Library::shared(app, lib.account).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 /// Bring older titles and files up to what players show: cast, scores and artwork for titles

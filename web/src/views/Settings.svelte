@@ -5,6 +5,7 @@
   import './settings/settings.css';
   import General from './settings/General.svelte';
   import Library from './settings/Library.svelte';
+  import Players from './settings/Players.svelte';
   import Usenet from './settings/Usenet.svelte';
   import Indexers from './settings/Indexers.svelte';
   import Profiles from './settings/Profiles.svelte';
@@ -14,7 +15,7 @@
   import Compact from './settings/Compact.svelte';
   import Maintenance from './settings/Maintenance.svelte';
 
-  const tabs = [['general', 'General'], ['library', 'Library'], ['usenet', 'Usenet'], ['indexers', 'Indexers'], ['profiles', 'Profiles'], ['naming', 'Naming'], ['plex', 'Plex'], ['compact', 'Compact versions'], ['space', 'Disk space'], ['maintenance', 'Maintenance']];
+  const tabs = [['general', 'General'], ['library', 'Library'], ['players', 'Players'], ['usenet', 'Usenet'], ['indexers', 'Indexers'], ['profiles', 'Profiles'], ['naming', 'Naming'], ['plex', 'Plex'], ['compact', 'Compact versions'], ['space', 'Disk space'], ['maintenance', 'Maintenance']];
   const tab = $derived(route.arg || 'general');
 </script>
 
@@ -26,6 +27,7 @@
 
   {#if tab === 'general'}<General />
   {:else if tab === 'library'}<Library />
+  {:else if tab === 'players'}<Players />
   {:else if tab === 'usenet'}<Usenet />
   {:else if tab === 'indexers'}<Indexers />
   {:else if tab === 'profiles'}<Profiles />

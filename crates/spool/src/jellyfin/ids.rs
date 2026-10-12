@@ -6,7 +6,8 @@ pub enum Id {
     Root,
     Movies,
     Shows,
-    User,
+    /// Someone who plays, by their account's number.
+    User(i64),
     Movie(i64),
     Series(i64),
     /// Title id and season number.
@@ -28,7 +29,7 @@ impl Id {
             Id::Root => (0x01, 0, 1),
             Id::Movies => (0x02, 0, 1),
             Id::Shows => (0x03, 0, 1),
-            Id::User => (0x04, 0, 1),
+            Id::User(account) => (0x04, 0, account as u64),
             Id::Movie(id) => (0x10, 0, id as u64),
             Id::Series(id) => (0x11, 0, id as u64),
             Id::Season(id, n) => (0x12, n as u64, id as u64),
@@ -54,7 +55,7 @@ impl Id {
             0x01 => Id::Root,
             0x02 => Id::Movies,
             0x03 => Id::Shows,
-            0x04 => Id::User,
+            0x04 => Id::User(b as i64),
             0x10 => Id::Movie(b as i64),
             0x11 => Id::Series(b as i64),
             0x12 => Id::Season(b as i64, a as u32),
@@ -93,7 +94,7 @@ mod tests {
 
     #[test]
     fn ids_survive_the_round_trip() {
-        for id in [Id::Root, Id::Movies, Id::Shows, Id::User, Id::Movie(42), Id::Series(7), Id::Season(7, 3), Id::Episode(9001), Id::File(12), Id::Person(2, 55_123), Id::Collection(10), Id::Genre(Id::named("Drama")), Id::Studio(Id::named("A24"))] {
+        for id in [Id::Root, Id::Movies, Id::Shows, Id::User(1), Id::User(7), Id::Movie(42), Id::Series(7), Id::Season(7, 3), Id::Episode(9001), Id::File(12), Id::Person(2, 55_123), Id::Collection(10), Id::Genre(Id::named("Drama")), Id::Studio(Id::named("A24"))] {
             let text = id.to_string();
             assert_eq!(text.len(), 32);
             assert_eq!(Id::parse(&text), Some(id));

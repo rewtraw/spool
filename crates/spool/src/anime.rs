@@ -767,8 +767,8 @@ impl App {
         let works = if titles.iter().any(|t| !t.anilist.is_empty()) { self.db.anime_all()? } else { vec![] };
         let ids = self.anime_ids();
         // A film that was played through; a series whose every episode on disk was.
-        let seen = self.db.watched_all()?;
-        let played = |kind: &str, id: i64| seen.get(&(kind.to_string(), id)).is_some_and(|w| w.played);
+        let seen = self.db.played_by_anyone()?;
+        let played = |kind: &str, id: i64| seen.contains(&(kind.to_string(), id));
         let mut episodes: HashMap<i64, (u32, u32)> = HashMap::new();
         for e in self.db.all_episodes()?.iter().filter(|e| e.season > 0 && e.file_id.is_some()) {
             let count = episodes.entry(e.title_id).or_default();

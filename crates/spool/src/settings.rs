@@ -109,9 +109,6 @@ pub struct General {
     pub players_enabled: bool,
     /// The port players connect to. Jellyfin's own is 8096.
     pub players_port: u32,
-    /// What a player signs in with. The password is kept as a hash, like the app's.
-    pub players_username: String,
-    pub players_password: String,
     /// Spool stops starting downloads when the downloads disk would drop below this many
     /// gigabytes free once the download has finished.
     pub min_free_gb: u32,
@@ -173,8 +170,6 @@ impl Default for General {
             opensubtitles_url: String::new(),
             players_enabled: false,
             players_port: 8096,
-            players_username: "spool".into(),
-            players_password: String::new(),
             min_free_gb: 20,
             space_wait_gb: 100,
             direct_unpack: true,
@@ -210,10 +205,8 @@ impl Settings {
     /// the clear is replaced by a salted hash on the way in.
     pub fn set_general(&self, g: &General) -> anyhow::Result<()> {
         let mut g = g.clone();
-        for password in [&mut g.password, &mut g.players_password] {
-            if !password.is_empty() && !is_hashed(password) {
-                *password = hash_password(password)?;
-            }
+        if !g.password.is_empty() && !is_hashed(&g.password) {
+            g.password = hash_password(&g.password)?;
         }
         self.db.set_setting("general", &g)
     }

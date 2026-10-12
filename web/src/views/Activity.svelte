@@ -217,6 +217,7 @@
             <div class="row wrap top">
               <a class="t" href="#/title/{p.title_id}">{p.title}</a>
               <span class="chip accent">{p.from ? `From ${p.from}` : 'Through this Spool'}</span>
+              {#if p.account}<span class="chip">{p.account}{p.device ? ` on ${p.device}` : ''}</span>{/if}
             </div>
           </div>
         </div>

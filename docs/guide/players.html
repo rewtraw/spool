@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a class="on" aria-current="page" href="players.html">On a television</a><a class="sub" href="#turning-it-on">Turning it on</a><a class="sub" href="#adding-it-in-infuse">Adding it in Infuse</a><a class="sub" href="#what-the-player-gets">What the player gets</a><a class="sub" href="#nothing-is-converted">Nothing is converted</a><a class="sub" href="#away-from-home">Away from home</a><a class="sub" href="#seeing-what-players-are-doing">Seeing what players are doing</a><a class="sub" href="#what-is-not-there">What is not there</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a class="on" aria-current="page" href="players.html">On a television</a><a class="sub" href="#turning-it-on">Turning it on</a><a class="sub" href="#adding-it-in-infuse">Adding it in Infuse</a><a class="sub" href="#what-the-player-gets">What the player gets</a><a class="sub" href="#nothing-is-converted">Nothing is converted</a><a class="sub" href="#away-from-home">Away from home</a><a class="sub" href="#people">People</a><a class="sub" href="#seeing-what-players-are-doing">Seeing what players are doing</a><a class="sub" href="#what-is-not-there">What is not there</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -114,19 +114,19 @@
 <p>Spool can serve its library to a player on a television, a phone or a tablet. It answers the way a Jellyfin server does, so a player that knows how to talk to Jellyfin opens the library directly: there is no second server to run and no folders to share.</p>
 <p>It is tested with <a href="https://firecore.com/infuse">Infuse</a> on Apple TV and iPhone. Other players that speak to Jellyfin may work.</p>
 <h2 id="turning-it-on"><a href="#turning-it-on">Turning it on</a></h2>
-<p>Under Settings, General, Players:</p>
+<p>Under Settings, Players:</p>
 <ol>
 <li>Tick <strong>Serve the library to players</strong>.</li>
-<li>Choose a <strong>name</strong> and a <strong>password</strong> for players to sign in with. These are separate from the web app&#39;s password, and open nothing but playback.</li>
 <li>Leave the <strong>port</strong> at 8096 unless something else uses it. It is the one players expect.</li>
 <li>Save.</li>
+<li>Under <strong>People</strong>, add an account for each person who plays: a <strong>name</strong> and a <strong>password</strong> to sign a player in with. These are separate from the web app&#39;s password, and open nothing but playback.</li>
 </ol>
 <p>In a container, publish the port as well (<code>8096:8096</code>) and give the player the machine&#39;s address. Being found without an address relies on a broadcast on the local network, which reaches a container only when it shares the host&#39;s network.</p>
 <h2 id="adding-it-in-infuse"><a href="#adding-it-in-infuse">Adding it in Infuse</a></h2>
 <ol>
 <li>In Infuse, add a share and choose <strong>Jellyfin</strong>.</li>
 <li>On the same network, Spool appears in the list by itself as <strong>Spool</strong>. If it does not, enter the address of the machine Spool runs on and port 8096.</li>
-<li>Sign in with the name and password from the settings.</li>
+<li>Sign in with the name and password of one of the people in the settings.</li>
 </ol>
 <p>If an Apple TV says an error occurred on a server it received through iCloud from another device, remove the server on the Apple TV and add it again there.</p>
 <h2 id="what-the-player-gets"><a href="#what-the-player-gets">What the player gets</a></h2>
@@ -151,12 +151,27 @@
 <li><strong>A VPN into your home network</strong>, if your router offers one.</li>
 </ul>
 <p>Finding Spool by itself works only on the local network. Over a private network, enter the address by hand.</p>
+<h2 id="people"><a href="#people">People</a></h2>
+<p>Each person who plays has an account of their own. What they have watched, where they stopped and what comes next are theirs: one person finishing a film does not mark it watched for another. Accounts are kept under Settings, Players.</p>
+<ul>
+<li><strong>A password</strong> is the account&#39;s own. One with none lets anyone who can reach Spool and knows the name play from the library.</li>
+<li><strong>A new password</strong> signs every one of that person&#39;s players out, and nobody else&#39;s.</li>
+<li><strong>Stop sign-in</strong> turns an account away without removing it: its players are signed out, and what it has watched is kept for when it is allowed again.</li>
+<li><strong>Removing</strong> an account removes what it watched and played with it. The library is not touched.</li>
+<li><strong>Players</strong> signed in to an account are listed under it, each with what it called itself and when it was last seen, and can be signed out one at a time.</li>
+</ul>
+<p>The account there was before there were several is the first one, with what had been watched and the players that were signed in.</p>
 <h2 id="seeing-what-players-are-doing"><a href="#seeing-what-players-are-doing">Seeing what players are doing</a></h2>
-<p>Settings, General, Players shows whether Spool is listening and how many players are signed in. Changing the name or the password signs every player out.</p>
+<ul>
+<li><strong>Now.</strong> What is playing is at the top of Activity, with who is playing it, on what, and whether it comes from a linked machine or through Spool. The same is under each person in Settings, Players.</li>
+<li><strong>Lately.</strong> Settings, Players lists each sitting: who played what, on what, from where, for how long and whether to the end.</li>
+<li><strong>In all.</strong> Each person has how long they have watched, how much of that in the last week, how many titles, and when they last played anything.</li>
+</ul>
+<p>A sitting is counted from what the player reports as it plays. Time it says it was paused is not counted.</p>
 <h2 id="what-is-not-there"><a href="#what-is-not-there">What is not there</a></h2>
 <ul>
 <li><strong>Transcoding</strong>, as above.</li>
-<li><strong>Several users.</strong> There is one sign-in, and one record of what has been watched.</li>
+<li><strong>Limits on an account.</strong> Every account sees the whole library. Which locations a person may see, and how many may play at once, come with sharing between households; see <a href="ideas.html">Ideas</a>.</li>
 <li><strong>Live television, music and photos.</strong></li>
 <li><strong>A fast sync for Infuse&#39;s Library Mode.</strong> Infuse&#39;s default, Direct Mode, is what Spool is tested with. See <a href="ideas.html">Ideas</a>.</li>
 </ul>

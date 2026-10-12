@@ -19,7 +19,6 @@ use ids::Id;
 use items::{Fields, Library, Node};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// The Jellyfin release whose API this follows. Players choose how to talk from it.
 const VERSION: &str = "10.10.7";
@@ -72,12 +71,6 @@ pub fn server_id(app: &App) -> String {
     let id = crate::settings::new_key()[..32].to_string();
     let _ = app.db.set_setting("player_server_id", &id);
     id
-}
-
-/// Forget every player's sign-in.
-pub fn sign_out_all(app: &App) {
-    app.player_tokens.lock().clear();
-    let _ = app.db.set_setting("player_tokens", &Vec::<String>::new());
 }
 
 fn page(items: Vec<Value>, total: usize, start: i64) -> Response {
@@ -155,9 +148,19 @@ impl Call {
         ["x-emby-token", "x-mediabrowser-token"].iter().find_map(|h| self.header(h)).or_else(|| self.q.get("api_key")).or_else(|| self.q.get("apikey")).map(str::to_string)
     }
 
-    fn signed_in(&self) -> bool {
-        let Some(token) = self.token() else { return false };
-        self.app.player_tokens.lock().iter().any(|t| t.len() == token.len() && t.bytes().zip(token.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0)
+    /// Who is asking: the account the player's token is signed in to. The token is found
+    /// by what it hashes to, so how long that takes says nothing of how nearly a guess was
+    /// right. That it was seen is written down once in a few minutes.
+    fn signed(&self) -> Option<crate::app::Signed> {
+        let token = self.token()?;
+        let mut players = self.app.players.lock();
+        let who = players.get_mut(&token)?;
+        let now = crate::db::now();
+        if now - who.seen > 300 {
+            who.seen = now;
+            let _ = self.app.db.device_seen(&token);
+        }
+        Some(who.clone())
     }
 
     /// A value a player may put in the query or in the body.
@@ -170,15 +173,14 @@ impl Call {
         })
     }
 
-    fn library(&self) -> Result<Arc<Library>, Response> {
-        Library::shared(&self.app).map_err(|e| {
+    fn library(&self) -> Result<Library, Response> {
+        Library::shared(&self.app, self.signed().map(|w| w.account).unwrap_or(0)).map_err(|e| {
             tracing::warn!(error = %e, "could not read the library for a player");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         })
     }
 
-    fn user(&self) -> Value {
-        let g = self.app.settings.general();
+    fn user(&self, who: &crate::models::Account) -> Value {
         let now = items::iso(crate::db::now());
         let configuration = json!({
             "PlayDefaultAudioTrack": true, "SubtitleLanguagePreference": "", "DisplayMissingEpisodes": false, "GroupedFolders": [], "SubtitleMode": "Default",
@@ -204,8 +206,8 @@ impl Call {
             policy.extend(more);
         }
         json!({
-            "Name": g.players_username, "ServerId": server_id(&self.app), "Id": Id::User.to_string(),
-            "HasPassword": !g.players_password.is_empty(), "HasConfiguredPassword": !g.players_password.is_empty(), "HasConfiguredEasyPassword": false,
+            "Name": who.name, "ServerId": server_id(&self.app), "Id": Id::User(who.id).to_string(),
+            "HasPassword": !who.password.is_empty(), "HasConfiguredPassword": !who.password.is_empty(), "HasConfiguredEasyPassword": false,
             "EnableAutoLogin": false, "LastLoginDate": now, "LastActivityDate": now, "Configuration": configuration, "Policy": policy,
         })
     }
@@ -239,7 +241,6 @@ impl Call {
     async fn sign_in(&self) -> Response {
         const TRIES: u32 = 5;
         const LOCKED_FOR: i64 = 60;
-        let g = self.app.settings.general();
         let now = crate::db::now();
         {
             let mut f = self.app.player_failures.lock();
@@ -252,8 +253,10 @@ impl Call {
         }
         let name = self.given("Username").unwrap_or_default();
         let password = self.given("Pw").or_else(|| self.given("Password")).unwrap_or_default();
-        let known = name.trim().eq_ignore_ascii_case(g.players_username.trim());
-        if !(known && (g.players_password.is_empty() || crate::settings::verify_password(&g.players_password, &password))) {
+        // An account that may not sign in is answered as one that is not there.
+        let who = self.app.db.accounts().unwrap_or_default().into_iter().find(|a| a.enabled && a.name.trim().eq_ignore_ascii_case(name.trim()));
+        let right = who.as_ref().is_some_and(|a| a.password.is_empty() || crate::settings::verify_password(&a.password, &password));
+        let Some(who) = who.filter(|_| right) else {
             {
                 let mut f = self.app.player_failures.lock();
                 *f = (f.0 + 1, now);
@@ -261,25 +264,27 @@ impl Call {
             tracing::warn!(client = %self.client("Client"), device = %self.client("Device"), "a player gave the wrong name or password");
             tokio::time::sleep(std::time::Duration::from_millis(600)).await;
             return (StatusCode::UNAUTHORIZED, "Invalid username or password entered.").into_response();
-        }
+        };
         *self.app.player_failures.lock() = (0, 0);
         let token = crate::settings::new_key()[..32].to_string();
-        let all = {
-            let mut tokens = self.app.player_tokens.lock();
-            // A household has a handful of players; past that, the oldest sign-ins go.
-            if tokens.len() >= 40 {
-                tokens.remove(0);
-            }
-            tokens.push(token.clone());
-            tokens.clone()
-        };
-        let _ = self.app.db.set_setting("player_tokens", &all);
-        tracing::info!(client = %self.client("Client"), device = %self.client("Device"), "a player signed in");
+        let device = crate::models::Device { token: token.clone(), account_id: who.id, name: self.client("Device"), client: self.client("Client"), created_at: now, seen_at: now };
+        if self.app.db.add_device(&device).is_err() {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+        // Its password was right when it was checked. If the account has been changed since,
+        // what was checked no longer stands, and neither does this sign-in.
+        if self.app.db.account(who.id).ok().flatten().is_none_or(|a| !a.enabled || a.password != who.password) {
+            let _ = self.app.db.remove_devices(Some(&token), None);
+            self.app.reload_players();
+            return (StatusCode::UNAUTHORIZED, "Invalid username or password entered.").into_response();
+        }
+        self.app.reload_players();
+        tracing::info!(account = %who.name, client = %self.client("Client"), device = %self.client("Device"), "a player signed in");
         let server = server_id(&self.app);
         Json(json!({
-            "User": self.user(),
+            "User": self.user(&who),
             "SessionInfo": {
-                "Id": crate::settings::new_key()[..32], "UserId": Id::User.to_string(), "UserName": g.players_username, "Client": self.client("Client"),
+                "Id": crate::settings::new_key()[..32], "UserId": Id::User(who.id).to_string(), "UserName": who.name, "Client": self.client("Client"),
                 "DeviceName": self.client("Device"), "DeviceId": self.client("DeviceId"), "ApplicationVersion": self.client("Version"),
                 "RemoteEndPoint": "", "IsActive": true, "SupportsMediaControl": false, "SupportsRemoteControl": false, "HasCustomDeviceName": false,
                 "LastActivityDate": items::iso(now), "LastPlaybackCheckIn": "0001-01-01T00:00:00.0000000Z",
@@ -365,23 +370,18 @@ impl Call {
             (true, ["users", _, "images", ..] | ["userimage"] | ["favicon.ico"] | ["branding", "splashscreen"]) => return missing(),
             _ => {}
         }
-        if !self.signed_in() {
-            return (StatusCode::UNAUTHORIZED, "Sign in first.").into_response();
-        }
+        let Some(who) = self.signed() else { return (StatusCode::UNAUTHORIZED, "Sign in first.").into_response() };
+        let Some(me) = self.app.db.account(who.account).ok().flatten().filter(|a| a.enabled) else { return (StatusCode::UNAUTHORIZED, "Sign in first.").into_response() };
 
         match (reading, path.as_slice()) {
             (true, ["system", "info"]) => Json(self.system_info(true)).into_response(),
             (true, ["system", "endpoint"]) => Json(json!({"IsLocal": true, "IsInNetwork": true})).into_response(),
-            (true, ["users"]) => Json(json!([self.user()])).into_response(),
-            (true, ["users", "me"] | ["users", _]) => Json(self.user()).into_response(),
+            (true, ["users"]) => Json(json!([self.user(&me)])).into_response(),
+            (true, ["users", "me"] | ["users", _]) => Json(self.user(&me)).into_response(),
             (false, ["sessions", "logout"]) => {
                 if let Some(token) = self.token() {
-                    let all = {
-                        let mut tokens = self.app.player_tokens.lock();
-                        tokens.retain(|t| *t != token);
-                        tokens.clone()
-                    };
-                    let _ = self.app.db.set_setting("player_tokens", &all);
+                    let _ = self.app.db.remove_devices(Some(&token), None);
+                    self.app.reload_players();
                 }
                 no_content()
             }
@@ -504,8 +504,8 @@ impl Call {
             },
 
             (_, ["items", id, "playbackinfo"]) => self.playback_info(id).await,
-            (true, ["items", id, "download" | "file"] | ["videos", id, "stream" | "original"]) => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer).await,
-            (true, ["videos", id, file]) if file.starts_with("stream.") || file.starts_with("original.") => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer).await,
+            (true, ["items", id, "download" | "file"] | ["videos", id, "stream" | "original"]) => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer, self.signed().as_ref()).await,
+            (true, ["videos", id, file]) if file.starts_with("stream.") || file.starts_with("original.") => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer, self.signed().as_ref()).await,
             (true, ["videos", id, source, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, Some(source), index, file).await,
             (true, ["videos", id, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, None, index, file).await,
 
@@ -597,11 +597,22 @@ impl Call {
         // Remembered so that Spool can say whether a restart would interrupt someone. A
         // player that has stopped is no longer one.
         self.app.last_playing.store(if stopped { 0 } else { crate::db::now() }, std::sync::atomic::Ordering::Relaxed);
-        self.app.note_progress(self.peer, stopped);
-        let ticks = self.given("PositionTicks").and_then(|t| t.parse::<f64>().ok()).unwrap_or(0.0);
-        if let (Some(id), Ok(lib)) = (Id::parse(id), self.library()) {
-            if let Err(e) = media::report(&self.app, &lib, id, ticks / items::TICKS, stopped) {
+        let position = self.given("PositionTicks").and_then(|t| t.parse::<f64>().ok()).unwrap_or(0.0) / items::TICKS;
+        if let (Some(id), Ok(lib), Some(who)) = (Id::parse(id), self.library(), self.signed()) {
+            let finished = media::report(&self.app, &lib, id, position, stopped).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "could not record a player's progress");
+                false
+            });
+            // The sitting is written down against what was played: a film, or an episode
+            // under its series' name.
+            let subject = match lib.node(id) {
+                Some(Node::Movie(t)) => Some(("movie", t.id, t.id, t.title.clone())),
+                Some(Node::Episode(t, e)) => Some(("episode", e.id, t.id, format!("{} {}x{:02}", t.title, e.season, e.episode))),
+                _ => None,
+            };
+            if let Some((kind, ref_id, title_id, title)) = subject {
+                let paused = self.given("IsPaused").is_some_and(|p| p == "true");
+                self.app.note_sitting(&who, &crate::app::Sitting { kind, ref_id, title_id, title: &title, position, paused, finished, stopped });
             }
         }
         no_content()

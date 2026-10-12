@@ -234,11 +234,12 @@ impl Db {
 
     // ------------------------------------------------------------ watched
 
-    /// Everything watched or part-watched, keyed by kind ("movie", "series", "episode") and id.
-    pub fn watched_all(&self) -> Result<std::collections::HashMap<(String, i64), Watched>> {
+    /// Everything one account has watched or part-watched, keyed by kind ("movie", "series",
+    /// "episode") and id.
+    pub fn watched_all(&self, account: i64) -> Result<std::collections::HashMap<(String, i64), Watched>> {
         self.with(|c| {
-            let mut s = c.prepare("SELECT kind, ref_id, position, played, play_count, favorite, last_played_at, updated_at FROM watched")?;
-            let rows = s.query_map([], |r| {
+            let mut s = c.prepare("SELECT kind, ref_id, position, played, play_count, favorite, last_played_at, updated_at FROM watched WHERE account_id = ?1")?;
+            let rows = s.query_map([account], |r| {
                 Ok((
                     (r.get::<_, String>(0)?, r.get::<_, i64>(1)?),
                     Watched { position: r.get(2)?, played: r.get(3)?, play_count: r.get(4)?, favorite: r.get(5)?, last_played_at: r.get(6)?, updated_at: r.get(7)? },
@@ -248,10 +249,19 @@ impl Db {
         })
     }
 
-    pub fn watched(&self, kind: &str, id: i64) -> Result<Watched> {
+    /// What anybody has played through, by kind and id.
+    pub fn played_by_anyone(&self) -> Result<std::collections::HashSet<(String, i64)>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT DISTINCT kind, ref_id FROM watched WHERE played")?;
+            let rows = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect()
+        })
+    }
+
+    pub fn watched(&self, account: i64, kind: &str, id: i64) -> Result<Watched> {
         Ok(self
             .with(|c| {
-                c.query_row("SELECT position, played, play_count, favorite, last_played_at, updated_at FROM watched WHERE kind = ?1 AND ref_id = ?2", params![kind, id], |r| {
+                c.query_row("SELECT position, played, play_count, favorite, last_played_at, updated_at FROM watched WHERE account_id = ?1 AND kind = ?2 AND ref_id = ?3", params![account, kind, id], |r| {
                     Ok(Watched { position: r.get(0)?, played: r.get(1)?, play_count: r.get(2)?, favorite: r.get(3)?, last_played_at: r.get(4)?, updated_at: r.get(5)? })
                 })
                 .optional()
@@ -259,15 +269,113 @@ impl Db {
             .unwrap_or_default())
     }
 
-    pub fn save_watched(&self, kind: &str, id: i64, w: &Watched) -> Result<()> {
+    pub fn save_watched(&self, account: i64, kind: &str, id: i64, w: &Watched) -> Result<()> {
         self.with(|c| {
             c.execute(
-                "INSERT INTO watched(kind, ref_id, position, played, play_count, favorite, last_played_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
-                 ON CONFLICT(kind, ref_id) DO UPDATE SET position = ?3, played = ?4, play_count = ?5, favorite = ?6, last_played_at = ?7, updated_at = ?8",
-                params![kind, id, w.position, w.played, w.play_count, w.favorite, w.last_played_at, now()],
+                "INSERT INTO watched(account_id, kind, ref_id, position, played, play_count, favorite, last_played_at, updated_at) VALUES (?9,?1,?2,?3,?4,?5,?6,?7,?8)
+                 ON CONFLICT(account_id, kind, ref_id) DO UPDATE SET position = ?3, played = ?4, play_count = ?5, favorite = ?6, last_played_at = ?7, updated_at = ?8",
+                params![kind, id, w.position, w.played, w.play_count, w.favorite, w.last_played_at, now(), account],
             )
         })?;
         Ok(())
+    }
+
+    // ------------------------------------------------------------ accounts
+
+    pub fn accounts(&self) -> Result<Vec<Account>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT id, name, password, enabled, created_at FROM accounts ORDER BY id")?;
+            let rows = s.query_map([], |r| Ok(Account { id: r.get(0)?, name: r.get(1)?, password: r.get(2)?, enabled: r.get(3)?, created_at: r.get(4)? }))?;
+            rows.collect()
+        })
+    }
+
+    pub fn account(&self, id: i64) -> Result<Option<Account>> {
+        Ok(self.accounts()?.into_iter().find(|a| a.id == id))
+    }
+
+    /// Add an account. The password is given already hashed, or empty.
+    pub fn add_account(&self, name: &str, password: &str) -> Result<i64> {
+        self.with(|c| {
+            c.execute("INSERT INTO accounts(name, password, created_at) VALUES (?1, ?2, ?3)", params![name, password, now()])?;
+            Ok(c.last_insert_rowid())
+        })
+    }
+
+    pub fn save_account(&self, a: &Account) -> Result<()> {
+        self.with(|c| c.execute("UPDATE accounts SET name = ?2, password = ?3, enabled = ?4 WHERE id = ?1", params![a.id, a.name, a.password, a.enabled]))?;
+        Ok(())
+    }
+
+    /// Remove an account, and with it its players, what it watched and what it played.
+    pub fn remove_account(&self, id: i64) -> Result<()> {
+        self.with(|c| c.execute("DELETE FROM accounts WHERE id = ?1", [id]))?;
+        Ok(())
+    }
+
+    /// The players signed in, each with the account it is signed in to.
+    pub fn devices(&self) -> Result<Vec<Device>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT token, account_id, name, client, created_at, seen_at FROM devices ORDER BY seen_at DESC, created_at DESC")?;
+            let rows = s.query_map([], |r| Ok(Device { token: r.get(0)?, account_id: r.get(1)?, name: r.get(2)?, client: r.get(3)?, created_at: r.get(4)?, seen_at: r.get(5)? }))?;
+            rows.collect()
+        })
+    }
+
+    pub fn add_device(&self, d: &Device) -> Result<()> {
+        self.with(|c| c.execute("INSERT INTO devices(token, account_id, name, client, created_at, seen_at) VALUES (?1,?2,?3,?4,?5,?5)", params![d.token, d.account_id, d.name, d.client, d.created_at]))?;
+        Ok(())
+    }
+
+    pub fn device_seen(&self, token: &str) -> Result<()> {
+        self.with(|c| c.execute("UPDATE devices SET seen_at = ?2 WHERE token = ?1", params![token, now()]))?;
+        Ok(())
+    }
+
+    /// Sign players out: one by its token, or every player of an account.
+    pub fn remove_devices(&self, token: Option<&str>, account: Option<i64>) -> Result<()> {
+        self.with(|c| c.execute("DELETE FROM devices WHERE token = ?1 OR account_id = ?2", params![token, account]))?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ plays
+
+    /// Begin the record of a sitting. Returns its number.
+    pub fn play_begin(&self, p: &Play) -> Result<i64> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO plays(account_id, kind, ref_id, title_id, title, device, source, started_at, ended_at, position, finished) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10)",
+                params![p.account_id, p.kind, p.ref_id, p.title_id, p.title, p.device, p.source, p.started_at, p.position, p.finished],
+            )?;
+            Ok(c.last_insert_rowid())
+        })
+    }
+
+    /// Carry a sitting on: more seconds watched, where it has got to, and where it comes from now.
+    pub fn play_on(&self, id: i64, seconds: f64, position: f64, source: &str, finished: bool) -> Result<()> {
+        self.with(|c| c.execute("UPDATE plays SET seconds = seconds + ?2, position = ?3, source = ?4, finished = finished OR ?5, ended_at = ?6 WHERE id = ?1", params![id, seconds, position, source, finished, now()]))?;
+        Ok(())
+    }
+
+    /// The latest sittings, newest first: everyone's, or one account's.
+    pub fn plays(&self, account: Option<i64>, limit: u32) -> Result<Vec<Play>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT id, account_id, kind, ref_id, title_id, title, device, source, started_at, ended_at, seconds, position, finished FROM plays WHERE ?1 IS NULL OR account_id = ?1 ORDER BY started_at DESC, id DESC LIMIT ?2")?;
+            let rows = s.query_map(params![account, limit], |r| {
+                Ok(Play { id: r.get(0)?, account_id: r.get(1)?, kind: r.get(2)?, ref_id: r.get(3)?, title_id: r.get(4)?, title: r.get(5)?, device: r.get(6)?, source: r.get(7)?, started_at: r.get(8)?, ended_at: r.get(9)?, seconds: r.get(10)?, position: r.get(11)?, finished: r.get(12)? })
+            })?;
+            rows.collect()
+        })
+    }
+
+    /// For each account: how many sittings, seconds watched in all and since a time, and
+    /// when it last played anything.
+    pub fn play_totals(&self, since: i64) -> Result<std::collections::HashMap<i64, PlayTotals>> {
+        self.with(|c| {
+            let mut s = c.prepare("SELECT account_id, COUNT(*), SUM(seconds), SUM(CASE WHEN started_at >= ?1 THEN seconds ELSE 0 END), MAX(ended_at), COUNT(DISTINCT title_id) FROM plays GROUP BY account_id")?;
+            let rows = s.query_map([since], |r| Ok((r.get(0)?, PlayTotals { plays: r.get(1)?, seconds: r.get(2)?, seconds_lately: r.get(3)?, last_at: r.get(4)?, titles: r.get(5)? })))?;
+            rows.collect()
+        })
     }
 
     // ------------------------------------------------------------ changes

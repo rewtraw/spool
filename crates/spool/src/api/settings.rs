@@ -9,7 +9,6 @@ pub(super) async fn get_general(State(app): State<App>) -> Json<General> {
     g.password = mask(&g.password);
     g.opensubtitles_api_key = mask(&g.opensubtitles_api_key);
     g.opensubtitles_password = mask(&g.opensubtitles_password);
-    g.players_password = mask(&g.players_password);
     for h in &mut g.links {
         h.key = mask(&h.key);
     }
@@ -23,11 +22,6 @@ pub(super) async fn put_general(State(app): State<App>, headers: HeaderMap, Json
     g.password = unmask(g.password, &old.password);
     g.opensubtitles_api_key = unmask(g.opensubtitles_api_key, &old.opensubtitles_api_key);
     g.opensubtitles_password = unmask(g.opensubtitles_password, &old.opensubtitles_password);
-    g.players_password = unmask(g.players_password, &old.players_password);
-    if g.players_password != old.players_password || g.players_username != old.players_username {
-        // New sign-in details: every player has to sign in again.
-        crate::jellyfin::sign_out_all(&app);
-    }
     if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password {
         *app.subtitle_login.lock() = None;
     }
