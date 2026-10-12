@@ -11,11 +11,19 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct Db(Arc<Mutex<Connection>>);
 
+/// The database, as a list of steps. A new database takes them all in order; one that has
+/// taken some takes the rest. A step is never changed once a database has taken it: what
+/// comes next is a new step at the end.
 const MIGRATIONS: &[&str] = &[
     r#"
+    -- The tables.
+
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
     CREATE TABLE profiles (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, data TEXT NOT NULL);
+
     CREATE TABLE indexers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, data TEXT NOT NULL);
+
     CREATE TABLE titles (
         id INTEGER PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -27,8 +35,7 @@ const MIGRATIONS: &[&str] = &[
         tmdb_id INTEGER, tvdb_id INTEGER, tvmaze_id INTEGER, imdb_id TEXT,
         data TEXT NOT NULL
     );
-    CREATE UNIQUE INDEX titles_tmdb ON titles(kind, tmdb_id) WHERE tmdb_id IS NOT NULL;
-    CREATE UNIQUE INDEX titles_tvdb ON titles(kind, tvdb_id) WHERE tvdb_id IS NOT NULL;
+
     CREATE TABLE files (
         id INTEGER PRIMARY KEY,
         title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
@@ -36,7 +43,7 @@ const MIGRATIONS: &[&str] = &[
         size INTEGER NOT NULL DEFAULT 0,
         data TEXT NOT NULL
     );
-    CREATE INDEX files_title ON files(title_id);
+
     CREATE TABLE episodes (
         id INTEGER PRIMARY KEY,
         title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
@@ -48,6 +55,7 @@ const MIGRATIONS: &[&str] = &[
         data TEXT NOT NULL,
         UNIQUE(title_id, season, episode)
     );
+
     CREATE TABLE acquisitions (
         id INTEGER PRIMARY KEY,
         title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
@@ -57,8 +65,7 @@ const MIGRATIONS: &[&str] = &[
         updated_at INTEGER NOT NULL,
         data TEXT NOT NULL
     );
-    CREATE INDEX acquisitions_state ON acquisitions(state);
-    CREATE INDEX acquisitions_job ON acquisitions(job_id);
+
     CREATE TABLE history (
         id INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL,
@@ -66,7 +73,7 @@ const MIGRATIONS: &[&str] = &[
         kind TEXT NOT NULL,
         data TEXT NOT NULL
     );
-    CREATE INDEX history_title ON history(title_id, ts);
+
     CREATE TABLE decisions (
         id INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL,
@@ -75,7 +82,7 @@ const MIGRATIONS: &[&str] = &[
         accepted INTEGER NOT NULL,
         data TEXT NOT NULL
     );
-    CREATE INDEX decisions_title ON decisions(title_id, ts);
+
     CREATE TABLE blocklist (
         id INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL,
@@ -84,7 +91,7 @@ const MIGRATIONS: &[&str] = &[
         release_title TEXT NOT NULL,
         reason TEXT NOT NULL
     );
-    CREATE INDEX blocklist_title ON blocklist(title_id);
+
     CREATE TABLE attention (
         id INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL,
@@ -95,6 +102,7 @@ const MIGRATIONS: &[&str] = &[
         data TEXT NOT NULL,
         resolved_at INTEGER
     );
+
     CREATE TABLE journal (
         id INTEGER PRIMARY KEY,
         ts INTEGER NOT NULL,
@@ -102,10 +110,7 @@ const MIGRATIONS: &[&str] = &[
         state TEXT NOT NULL,
         data TEXT NOT NULL
     );
-    "#,
-    r#"
-    -- Every NZB Spool has fetched, kept so a release can be downloaded again without an indexer.
-    -- Keyed by the film or series, not the library row, so it outlives removing a title.
+
     CREATE TABLE nzbs (
         id INTEGER PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -117,11 +122,7 @@ const MIGRATIONS: &[&str] = &[
         fetched_at INTEGER NOT NULL,
         data TEXT NOT NULL
     );
-    CREATE UNIQUE INDEX nzbs_release ON nzbs(kind, COALESCE(tmdb_id, 0), COALESCE(tvdb_id, 0), release_title);
-    CREATE INDEX nzbs_tmdb ON nzbs(tmdb_id);
-    CREATE INDEX nzbs_tvdb ON nzbs(tvdb_id);
 
-    -- What Plex has, as last read from the server.
     CREATE TABLE plex_items (
         rating_key TEXT PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -130,11 +131,7 @@ const MIGRATIONS: &[&str] = &[
         tmdb_id INTEGER, tvdb_id INTEGER, imdb_id TEXT,
         data TEXT NOT NULL
     );
-    CREATE INDEX plex_tmdb ON plex_items(tmdb_id);
-    CREATE INDEX plex_tvdb ON plex_items(tvdb_id);
-    "#,
-    r#"
-    -- Requests made and NZBs fetched per indexer per local day, to respect daily allowances.
+
     CREATE TABLE indexer_usage (
         day TEXT NOT NULL,
         indexer_id INTEGER NOT NULL,
@@ -142,9 +139,7 @@ const MIGRATIONS: &[&str] = &[
         grabs INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (day, indexer_id)
     );
-    "#,
-    r#"
-    -- What has been watched, and how far: kind is movie, series or episode.
+
     CREATE TABLE watched (
         kind TEXT NOT NULL,
         ref_id INTEGER NOT NULL,
@@ -156,18 +151,9 @@ const MIGRATIONS: &[&str] = &[
         updated_at INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (kind, ref_id)
     );
-    "#,
-    r#"
-    -- What changed in the library, and in what order. Every write to a title, episode or file
-    -- moves the count on by one and notes where that row now stands, so anything that keeps a
-    -- copy of the library can ask for what is new since the count it last saw. The database
-    -- does this itself, whichever part of Spool made the change.
-    --
-    -- kind is title, episode or file; activity for a title whose downloads or profile name
-    -- changed, which alters how it is listed but not what it is; watched_movie, watched_series
-    -- or watched_episode for what a player reported.
+
     CREATE TABLE revision (id INTEGER PRIMARY KEY CHECK (id = 1), n INTEGER NOT NULL);
-    INSERT INTO revision VALUES (1, 0);
+
     CREATE TABLE changes (
         kind TEXT NOT NULL,
         ref_id INTEGER NOT NULL,
@@ -177,36 +163,75 @@ const MIGRATIONS: &[&str] = &[
         at INTEGER NOT NULL,
         PRIMARY KEY (kind, ref_id)
     );
+
+    CREATE TABLE anime (
+        id INTEGER PRIMARY KEY,
+        depth INTEGER NOT NULL,
+        fetched_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+
+    CREATE TABLE film_sets (
+        id INTEGER PRIMARY KEY,
+        fetched_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+
+    INSERT INTO revision VALUES (1, 0);
+
+    -- What they are looked up by.
+
+    CREATE UNIQUE INDEX titles_tmdb ON titles(kind, tmdb_id) WHERE tmdb_id IS NOT NULL;
+
+    CREATE UNIQUE INDEX titles_tvdb ON titles(kind, tvdb_id) WHERE tvdb_id IS NOT NULL;
+
+    CREATE INDEX files_title ON files(title_id);
+
+    CREATE INDEX acquisitions_state ON acquisitions(state);
+
+    CREATE INDEX acquisitions_job ON acquisitions(job_id);
+
+    CREATE INDEX history_title ON history(title_id, ts);
+
+    CREATE INDEX decisions_title ON decisions(title_id, ts);
+
+    CREATE INDEX blocklist_title ON blocklist(title_id);
+
+    CREATE UNIQUE INDEX nzbs_release ON nzbs(kind, COALESCE(tmdb_id, 0), COALESCE(tvdb_id, 0), release_title);
+
+    CREATE INDEX nzbs_tmdb ON nzbs(tmdb_id);
+
+    CREATE INDEX nzbs_tvdb ON nzbs(tvdb_id);
+
+    CREATE INDEX plex_tmdb ON plex_items(tmdb_id);
+
+    CREATE INDEX plex_tvdb ON plex_items(tvdb_id);
+
     CREATE INDEX changes_rev ON changes(rev);
-    -- A title saved with nothing new but the time it was last searched or refreshed has not
-    -- changed, and neither has a file or episode written back as it was. (A title's own id
-    -- inside its data is zero until its first save and means nothing; the column is the id.)
+
+    -- Every change to what a player or another Spool would show is counted, so that either can ask what has changed since it last looked.
+
     CREATE TRIGGER titles_added AFTER INSERT ON titles
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', NEW.id, NEW.id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
-    CREATE TRIGGER titles_changed AFTER UPDATE ON titles
-    WHEN json_remove(OLD.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at') IS NOT json_remove(NEW.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at')
-        OR OLD.monitored IS NOT NEW.monitored OR OLD.profile_id IS NOT NEW.profile_id OR OLD.path IS NOT NEW.path
-    BEGIN
-        UPDATE revision SET n = n + 1;
-        INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', NEW.id, NEW.id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
-            ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
-    END;
+
     CREATE TRIGGER titles_removed AFTER DELETE ON titles
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', OLD.id, OLD.id, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER files_added AFTER INSERT ON files
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('file', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER files_changed AFTER UPDATE ON files
     WHEN OLD.data IS NOT NEW.data OR OLD.rel_path IS NOT NEW.rel_path OR OLD.size IS NOT NEW.size OR OLD.title_id IS NOT NEW.title_id
     BEGIN
@@ -214,18 +239,21 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('file', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER files_removed AFTER DELETE ON files
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('file', OLD.id, OLD.title_id, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER episodes_added AFTER INSERT ON episodes
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('episode', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER episodes_changed AFTER UPDATE ON episodes
     WHEN OLD.data IS NOT NEW.data OR OLD.monitored IS NOT NEW.monitored OR OLD.file_id IS NOT NEW.file_id OR OLD.air_date IS NOT NEW.air_date
     BEGIN
@@ -233,18 +261,21 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('episode', NEW.id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER episodes_removed AFTER DELETE ON episodes
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('episode', OLD.id, OLD.title_id, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER acquisitions_added AFTER INSERT ON acquisitions
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('activity', NEW.title_id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER acquisitions_changed AFTER UPDATE ON acquisitions
     WHEN OLD.state IS NOT NEW.state
     BEGIN
@@ -252,12 +283,14 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('activity', NEW.title_id, NEW.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER acquisitions_removed AFTER DELETE ON acquisitions
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('activity', OLD.title_id, OLD.title_id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER profiles_renamed AFTER UPDATE ON profiles
     WHEN OLD.name IS NOT NEW.name
     BEGIN
@@ -266,6 +299,7 @@ const MIGRATIONS: &[&str] = &[
             SELECT 'activity', id, id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER) FROM titles WHERE profile_id = NEW.id
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER profiles_removed AFTER DELETE ON profiles
     BEGIN
         UPDATE revision SET n = n + 1;
@@ -273,35 +307,28 @@ const MIGRATIONS: &[&str] = &[
             SELECT 'activity', id, id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER) FROM titles WHERE profile_id = OLD.id
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER watched_added AFTER INSERT ON watched
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || NEW.kind, NEW.ref_id, CASE NEW.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = NEW.ref_id), 0) ELSE NEW.ref_id END, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER watched_changed AFTER UPDATE ON watched
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || NEW.kind, NEW.ref_id, CASE NEW.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = NEW.ref_id), 0) ELSE NEW.ref_id END, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
+
     CREATE TRIGGER watched_removed AFTER DELETE ON watched
     BEGIN
         UPDATE revision SET n = n + 1;
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('watched_' || OLD.kind, OLD.ref_id, CASE OLD.kind WHEN 'episode' THEN COALESCE((SELECT title_id FROM episodes WHERE id = OLD.ref_id), 0) ELSE OLD.ref_id END, (SELECT n FROM revision), 1, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
-    "#,
-    // 6: what AniList says of each anime work, and a quieter count: when a title was last
-    // asked about is not a change to it.
-    r#"
-    CREATE TABLE anime (
-        id INTEGER PRIMARY KEY,
-        depth INTEGER NOT NULL,
-        fetched_at INTEGER NOT NULL,
-        data TEXT NOT NULL
-    );
-    DROP TRIGGER titles_changed;
+
     CREATE TRIGGER titles_changed AFTER UPDATE ON titles
     WHEN json_remove(OLD.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at', '$.anime_checked_at', '$.series_checked') IS NOT json_remove(NEW.data, '$.id', '$.last_search_at', '$.last_refresh_at', '$.details_at', '$.anime_checked_at', '$.series_checked')
         OR OLD.monitored IS NOT NEW.monitored OR OLD.profile_id IS NOT NEW.profile_id OR OLD.path IS NOT NEW.path
@@ -310,14 +337,6 @@ const MIGRATIONS: &[&str] = &[
         INSERT INTO changes(kind, ref_id, title_id, rev, removed, at) VALUES ('title', NEW.id, NEW.id, (SELECT n FROM revision), 0, CAST(strftime('%s','now') AS INTEGER))
             ON CONFLICT(kind, ref_id) DO UPDATE SET title_id = excluded.title_id, rev = excluded.rev, removed = excluded.removed, at = excluded.at;
     END;
-    "#,
-    // 7: film collections as TMDB lists them, whole.
-    r#"
-    CREATE TABLE film_sets (
-        id INTEGER PRIMARY KEY,
-        fetched_at INTEGER NOT NULL,
-        data TEXT NOT NULL
-    );
     "#,
 ];
 
