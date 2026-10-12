@@ -751,6 +751,21 @@ impl App {
         r.following.store(false, std::sync::atomic::Ordering::Release);
     }
 
+    /// Listen for Spools that say they are on the network. Not being able to costs
+    /// nothing but that their addresses have to be typed.
+    pub fn listen_for_spools(&self) {
+        match crate::link::find::Heard::listen() {
+            Ok(heard) => drop(self.heard.set(heard)),
+            Err(e) => tracing::warn!(error = %e, "could not listen for Spools on the network"),
+        }
+    }
+
+    /// The Spools heard of that this one is not linked to already.
+    pub fn spools_found(&self) -> Vec<crate::link::find::Found> {
+        let linked: Vec<String> = self.settings.general().links.into_iter().map(|l| l.url).collect();
+        self.heard.get().map(|h| h.found(&linked)).unwrap_or_default()
+    }
+
     /// Keep in step with the helpers in the settings, each on its own.
     pub fn spawn_remotes(&self) {
         self.sync_remotes();

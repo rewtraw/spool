@@ -73,6 +73,8 @@ pub struct Inner {
     pub adoption: Mutex<Option<crate::adopt::Adoption>>,
     /// When a player last reported that it was playing something.
     pub last_playing: std::sync::atomic::AtomicI64,
+    /// The Spools heard of on the network, once this one is listening.
+    pub heard: std::sync::OnceLock<crate::link::find::Heard>,
     /// What each player is playing, by the address it came from.
     pub playing: Mutex<HashMap<std::net::IpAddr, Playing>>,
     /// Titles being moved between locations.
@@ -219,6 +221,7 @@ impl App {
             encodes: Mutex::new(Default::default()),
             last_playing: Default::default(),
             playing: Default::default(),
+            heard: Default::default(),
             sessions: Mutex::new(sessions),
             login_failures: Mutex::new((0, 0)),
             space_blocked: Mutex::new(HashMap::new()),

@@ -2805,6 +2805,7 @@ async fn a_helper_downloads_and_files_on_its_own_disks() {
     let api = spool::api::router(w.app.clone());
 
     // Spool knows the helper, what it serves, and that it can read what the helper downloads.
+    assert_eq!(call(&api, "GET", "/api/helpers", Value::Null).await.0, 404, "nothing answers to a name that is not one");
     let (_, helpers) = call(&api, "GET", "/api/links", Value::Null).await;
     assert_eq!((helpers[0]["name"].as_str(), helpers[0]["serves"].to_string().as_str(), helpers[0]["seen"]["usable"].as_bool(), helpers[0]["seen"]["downloads_seen"].as_bool()), (Some("Nas"), r#"["Shelf","Vault"]"#, Some(true), Some(true)), "{helpers}");
     // Its key is not handed back to the browser.

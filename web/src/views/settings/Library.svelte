@@ -58,8 +58,14 @@
     if (await save()) toast(`Linked with ${h.name}.`);
     else toast(`Linked with ${h.name}, but the settings were not saved. Put right what is wrong and save: the key is kept on this page until you do.`, 'error');
   }
-  function addLink() {
-    (general.links ??= []).push({ id: 0, name: '', url: '', key: '', here: '', there: '', play_url: '', play_near: true, play_from: [] });
+  function addLink(from?: { name: string; url: string }) {
+    (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', here: '', there: '', play_url: '', play_near: true, play_from: [] });
+  }
+  // Spools heard of on the network that are not linked yet: addresses to try, no more.
+  let found = $state<any[]>([]);
+  const notAdded = $derived(found.filter((f) => !(general?.links ?? []).some((h: any) => (h.url ?? '').replace(/\/+$/, '') === f.url)));
+  async function loadFound() {
+    found = await api.get<any[]>('/links/found').catch(() => found);
   }
   // What a linked Spool allows this one, in words.
   const allows = (seen: any) => {
@@ -68,7 +74,8 @@
   };
   $effect(() => {
     loadLinks();
-    linkTimer = setInterval(loadLinks, 5000);
+    loadFound();
+    linkTimer = setInterval(() => (loadLinks(), loadFound()), 5000);
     return () => clearInterval(linkTimer);
   });
   // A location is on the machine whose disks its folders are mounted under.
@@ -317,7 +324,24 @@
           <div><button class="btn" type="button" disabled={!h.here} onclick={() => addPlace(h)}>Add a location on {h.name || 'it'}</button></div>
         </div>
       {/each}
-      <div><button class="btn" type="button" onclick={addLink}>Link another Spool</button></div>
+      {#if notAdded.length}
+        <div class="machine">
+          <div class="row wrap"><b>Found on this network</b><span class="small faint">not linked; each says it is a Spool, and its code or key is what shows that it is yours</span></div>
+          {#each notAdded as f (f.url)}
+            <div class="place">
+              <div class="row wrap">
+                <b>{f.name}</b>
+                <span class="small mono faint">{f.url}</span>
+                <span class="small">{f.open ? 'waiting to be linked with a code' : 'linked to a Spool already'}</span>
+                <span class="grow"></span>
+                <button class="btn small" type="button" onclick={() => addLink(f)}>Link it</button>
+              </div>
+            </div>
+          {/each}
+          <div></div>
+        </div>
+      {/if}
+      <div><button class="btn" type="button" onclick={() => addLink()}>Link another Spool</button></div>
       <p class="hint">A linked Spool is, today, a helper: a small Spool on a machine that holds some of the disks, such as a NAS. It downloads, unpacks and files onto its own disks, moves titles between them, looks through its own folders and can hand a film to a player itself, so that nothing crosses the network to this machine and back. Without one, or while one cannot be reached, a location on another machine works across the share. See the <a href="https://rewtraw.github.io/spool/guide/helper.html" target="_blank" rel="noreferrer">guide</a>.</p>
       <p class="hint">Titles already in the library stay where they are. When the place chosen for new titles cannot be reached, they go to this machine's main location. A title being added can be put somewhere else from its own box.</p>
     </fieldset>

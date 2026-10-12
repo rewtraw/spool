@@ -17,8 +17,11 @@ services:
     user: "568:568"
     ports:
       - "7978:7979"
+    # To be found by Spool without its address being typed, share the host's network: remove
+    # `ports:` above, add `network_mode: host`, and say where to answer with SPOOL_BIND below.
     environment:
       TZ: Etc/UTC
+      # SPOOL_BIND: "0.0.0.0:7978"
       # At least 16 characters; Spool is given the same one. `openssl rand -hex 24` makes one.
       # Leave it out to link the two with a code instead: the helper prints one in its log,
       # or takes the one given as SPOOL_LINK_CODE (eight digits or more).

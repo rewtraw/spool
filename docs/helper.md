@@ -113,6 +113,16 @@ midclt call -job app.create '{"custom_app": true, "app_name": "spool-helper", "c
 
 Run it as the apps user (568), which is the user a share from TrueNAS usually maps everyone to, so that what the helper writes and what Spool writes across the share belong to the same owner. Share the helper's downloads folder over NFS, read-only, to the network Spool's machine is on.
 
+## Being found
+
+A helper says on the home network that it is there, as printers and players do, and Spool lists the ones it hears under Settings, Library, as **Found on this network**, each with its address and whether it is waiting to be linked. **Link it** starts a link with the name and address filled in; the code or the key is still yours to give.
+
+- **Hearing of one links nothing.** Anything on a network can say it is a Spool. What is heard is an address to try, and what shows that the machine at it is yours is that it holds the code it gave you, or the key you gave it. With a code, a machine that is not the one you meant learns nothing from the attempt. A key, typed in, is sent to whatever is at the address, so with something found prefer its code.
+- **What it says** is its name, its port and whether it is waiting to be linked. No code, no key, no folders, nothing of the library.
+- **Its name** is the machine's own, or `SPOOL_NAME` if the helper is given one.
+- **In a container** the helper is heard only if it shares the host's network (`network_mode: host`): a container on its container system's own network neither hears nor is heard. Without that it works as before, and its address is typed.
+- **On a Mac,** Spool needs the Local Network permission to listen, the same one it needs to reach a helper at all.
+
 ## Linking with a code
 
 A helper can be started without a key. It then does nothing for anybody until it has been linked, and says in its log how:

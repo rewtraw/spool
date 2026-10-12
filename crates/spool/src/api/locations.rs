@@ -12,6 +12,12 @@ pub(super) async fn links(State(app): State<App>) -> Json<Value> {
     Json(json!(app.link_report()))
 }
 
+/// The Spools heard of on the network that this one is not linked to. Each is an address
+/// to try and no more: nothing is linked without its code or its key.
+pub(super) async fn links_found(State(app): State<App>) -> Json<Value> {
+    Json(json!(app.spools_found()))
+}
+
 /// Link with the Spool at an address by the code it gave. The key the two agree is handed
 /// back for the link's settings, which are saved as any others are.
 pub(super) async fn link_pair(Json(b): Json<Value>) -> R<Value> {

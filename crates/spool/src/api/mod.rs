@@ -246,6 +246,10 @@ async fn events(State(app): State<App>) -> Sse<impl Stream<Item = Result<SseEven
 async fn assets(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
+    // An address under the API that nothing answers is not a page of the app.
+    if path == "api" || path.starts_with("api/") {
+        return ApiError(StatusCode::NOT_FOUND, format!("there is nothing at /{path}")).into_response();
+    }
     match Assets::get(path).or_else(|| if path.contains('.') { None } else { Assets::get("index.html") }) {
         Some(file) => {
             let served = if Assets::get(path).is_some() { path } else { "index.html" };
@@ -269,6 +273,7 @@ fn api_routes() -> Router<App> {
         .route("/api/titles/bulk", post(bulk_titles))
         .route("/api/links", get(links))
         .route("/api/links/pair", post(link_pair))
+        .route("/api/links/found", get(links_found))
         .route("/api/titles/move", post(move_titles))
         .route("/api/titles/move/cancel", post(cancel_moves))
         .route("/api/blocklist/clear", post(clear_blocklist))

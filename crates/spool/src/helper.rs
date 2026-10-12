@@ -154,6 +154,8 @@ struct Inner {
     /// until it has been linked: until then it does nothing for anybody.
     linked: parking_lot::RwLock<Option<Arc<Linked>>>,
     pairing: Mutex<Pairing>,
+    /// Its saying on the network that it is here, once it is.
+    announced: Mutex<Option<crate::link::find::Announced>>,
     /// The disk each shared folder was on when the helper started. A folder found on
     /// another since is one whose disk has gone from under it.
     disks: Vec<Option<u64>>,
@@ -284,6 +286,7 @@ impl Helper {
             shares,
             linked: parking_lot::RwLock::new(key.map(Linked::new)),
             pairing: Mutex::new(pairing),
+            announced: Mutex::new(None),
             disks,
             mounts,
             streams: Arc::new(tokio::sync::Semaphore::new(STREAMS)),
@@ -434,6 +437,15 @@ impl Helper {
             .layer(axum::middleware::from_fn_with_state(self.clone(), allowed_to_work))
             .layer(axum::middleware::from_fn_with_state(self.clone(), guard))
             .with_state(self.clone())
+    }
+
+    /// Say on the network that it is here, under a name and at a port, so that a Spool
+    /// can list it and its address need not be typed. Not being able to costs nothing but that.
+    pub fn announce(&self, name: &str, port: u16) {
+        match crate::link::find::Announced::begin(name, port, self.linked().is_none()) {
+            Ok(said) => *self.0.announced.lock() = Some(said),
+            Err(e) => tracing::warn!(error = %e, "could not say on the network that this helper is here; give Spool its address instead"),
+        }
     }
 
     fn linked(&self) -> Option<Arc<Linked>> {
@@ -720,6 +732,9 @@ async fn pair_finish(State(h): State<Helper>, Json(b): Json<PairFinish>) -> R {
     (p.failures, p.rests, p.resting_until, p.done) = (0, 0, 0, Some((b.session, giving)));
     p.tries.clear();
     let _ = h.keep_tries(&code, &p);
+    if let Some(said) = h.0.announced.lock().as_ref() {
+        let _ = said.say(false);
+    }
     tracing::info!("this helper is linked to a Spool");
     Ok(Json(json!({"linked": true})))
 }
@@ -1058,7 +1073,9 @@ pub async fn serve(bind: &str, data_dir: &Path, conf: Conf) -> Result<()> {
     }
     let helper = Helper::start(data_dir, conf.clone()).await?;
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("binding {bind}"))?;
-    tracing::info!(%bind, downloads = %conf.downloads.display(), files_into = ?conf.roots, only_reads = ?conf.read_roots, "Spool's helper is running");
+    let name = std::env::var("SPOOL_NAME").ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(crate::link::find::host_name);
+    helper.announce(&name, listener.local_addr()?.port());
+    tracing::info!(%bind, %name, downloads = %conf.downloads.display(), files_into = ?conf.roots, only_reads = ?conf.read_roots, "Spool's helper is running");
     let engine = helper.engine().clone();
     axum::serve(listener, helper.router())
         .with_graceful_shutdown(async move {
