@@ -48,6 +48,12 @@ pub(super) async fn put_general(State(app): State<App>, headers: HeaderMap, Json
         }
         tracing::warn!("Spool is now active: it will download and write to the library");
     }
+    // The disk each pair of folders needs is Spool's to work out, whatever was sent.
+    g.required_volume = crate::app::disk_needed([&g.movie_root, &g.series_root], &old.required_volume);
+    for l in &mut g.locations {
+        let known = old.locations.iter().find(|o| o.id == l.id && l.id != 0).map(|o| o.volume.as_str()).unwrap_or("");
+        l.volume = crate::app::disk_needed([&l.movie_root, &l.series_root], known);
+    }
     let moved = g.locations != old.locations || g.movie_root != old.movie_root || g.series_root != old.series_root || g.required_volume != old.required_volume;
     if g.locations != old.locations {
         g.locations = app.tidy_locations(std::mem::take(&mut g.locations)).map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;

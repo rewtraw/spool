@@ -137,7 +137,7 @@ cargo run --release -p spool -- serve            # http://localhost:7979
 <p>Open the web app and go to Settings. Three tabs need filling in before Spool can do anything.</p>
 <ol>
 <li><strong>General.</strong><ul>
-<li><em>Folders</em>: where movies and series live and where to download to. Name the disk that must be mounted, if the library is on one that can be unplugged.</li>
+<li><em>Folders</em>: where movies and series live and where to download to. If the library is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.</li>
 <li><em>Connections</em>: a free <a href="https://www.themoviedb.org/settings/api">TMDB API key</a>, which Spool needs to look up movies. Set a password for the app if anyone else can reach the address.</li>
 </ul>
 </li>

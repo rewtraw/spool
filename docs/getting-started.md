@@ -41,7 +41,7 @@ Debian's and Ubuntu's `7zip` cannot open RAR archives. Spool unpacks the common 
 Open the web app and go to Settings. Three tabs need filling in before Spool can do anything.
 
 1. **General.**
-   - *Folders*: where movies and series live and where to download to. Name the disk that must be mounted, if the library is on one that can be unplugged.
+   - *Folders*: where movies and series live and where to download to. If the library is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.
    - *Connections*: a free [TMDB API key](https://www.themoviedb.org/settings/api), which Spool needs to look up movies. Set a password for the app if anyone else can reach the address.
 2. **Usenet.** One or more providers. Priority 0 is asked first; higher numbers only fill in missing articles. The Test button signs in and reports what it found.
 3. **Indexers.** One or more Newznab indexers, each with its address and API key.

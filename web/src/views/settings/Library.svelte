@@ -60,7 +60,10 @@
   }
   function addLink(from?: { name: string; url: string }) {
     (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', here: '', there: '', play_near: true });
+    if (from) quick.add(general.links.at(-1));
   }
+  // Links begun from one that was found: its name and address are known, so the code is all there is to ask.
+  const quick = new WeakSet<object>();
   // Spools heard of on the network that are not linked yet: addresses to try, no more.
   let found = $state<any[]>([]);
   const notAdded = $derived(found.filter((f) => !(general?.links ?? []).some((h: any) => (h.url ?? '').replace(/\/+$/, '') === f.url)));
@@ -144,7 +147,7 @@
       <label class="field">Movies<input class="input mono" bind:value={general.movie_root} placeholder="/Volumes/Media/Movies" /></label>
       <label class="field">Series<input class="input mono" bind:value={general.series_root} placeholder="/Volumes/Media/TV Shows" /></label>
     </div>
-    <label class="field">Disk that must be mounted<input class="input mono" bind:value={general.required_volume} placeholder="/Volumes/Media" /><span class="hint">If this disk is not mounted, Spool pauses instead of writing somewhere else. Leave empty to skip the check.</span></label>
+    <span class="hint">{general.required_volume ? `These are on the disk at ${general.required_volume}. While it is not mounted, Spool pauses instead of writing somewhere else.` : 'Spool works out which disk these are on, and pauses while a disk that can be unplugged is not there.'}</span>
     <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
     </details>
     {#if main}{@render checked(0)}{/if}
@@ -163,10 +166,7 @@
       {#if l.movie_root || l.series_root}<div class="mono small faint where">{[l.movie_root, l.series_root].filter(Boolean).join(' · ')}</div>{/if}
       <details open={!l.id}>
       <summary class="small">Folders, and what Spool may do here</summary>
-      <div class="cols">
-        <label class="field">Name<input class="input" bind:value={l.name} placeholder="Goliath" /></label>
-        <label class="field">Disk or share that must be mounted<input class="input mono" bind:value={l.volume} placeholder="/Volumes/Goliath" /><span class="hint">Leave empty if the folders below only have to be readable.</span></label>
-      </div>
+      <label class="field">Name<input class="input" bind:value={l.name} placeholder="Goliath" /></label>
       <div class="cols">
         <label class="field">Movies<input class="input mono" bind:value={l.movie_root} list={sharedBy(l)} placeholder="/Volumes/Goliath/movies" /></label>
         <label class="field">Series<input class="input mono" bind:value={l.series_root} list={sharedBy(l)} placeholder="/Volumes/Goliath/tv" /></label>
@@ -246,7 +246,13 @@
       {#if now?.seen.problem}<p class="small warn">{now.seen.problem}</p>{/if}
       <label class="check"><input type="checkbox" bind:checked={h.play_near} /> Send players on the same network straight to it</label>
       <span class="hint">A player on the same network as {h.name || 'this machine'} takes a film that is on its disks from it directly, with a ticket for that one film, and the film no longer passes through here. A device that reaches this Spool over Tailscale counts as on the network when it is at home. Away from home it is sent to {h.name || 'the machine'} over Tailscale, if {h.name || 'the machine'} is on your Tailscale under this name; if not, and for every other player, the film comes through this Spool.</span>
-      <details open={!h.id}>
+      {#if !h.id && quick.has(h)}
+        <label class="field">The code {h.name} gave
+          <div class="row"><input class="input mono grow" inputmode="numeric" autocomplete="off" bind:value={codes[i]} placeholder="1234 5678" /><button class="btn primary" type="button" disabled={!(codes[i] ?? '').trim() || linking === i} onclick={() => linkWithCode(h, i)}>{linking === i ? 'Linking…' : 'Link'}</button></div>
+          <span class="hint">It is in the helper's log, or is the one it was started with. Nothing else is needed: Spool finds its folders once the two are linked.</span>
+        </label>
+      {/if}
+      <details open={!h.id && !quick.has(h)}>
       <summary class="small">How it is reached</summary>
       <div class="cols">
         <label class="field">Name<input class="input" bind:value={h.name} placeholder="The NAS's name" /></label>

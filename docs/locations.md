@@ -28,7 +28,6 @@ Only read is the right choice for a library that something else looks after, or 
    | --- | --- |
    | Name | What to call it, such as the NAS's name. |
    | Movies, Series | The folders that hold them. Either may be left empty. |
-   | Disk or share that must be mounted | The mount point, such as `/Volumes/Goliath`. Leave it empty if the folders only have to be readable. |
    | Let Spool change files here | Off for only read. |
 
 3. **Save.** The location now shows whether it can be reached, how many titles are on it and how much room is free.

@@ -428,6 +428,50 @@ pub fn network_mounts() -> Vec<(String, PathBuf)> {
     }
 }
 
+/// The disk a folder is on, by where it is mounted, when that is a disk that can be taken
+/// away: not the one the system starts from, and not a share from another machine, which
+/// is there or not by whether it can be read.
+pub fn disk_of(folder: &Path) -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let (mounted_at, shared) = {
+        use std::os::unix::ffi::OsStrExt;
+        let text = |chars: &[libc::c_char]| unsafe { std::ffi::CStr::from_ptr(chars.as_ptr()) }.to_string_lossy().to_string();
+        let path = std::ffi::CString::new(folder.as_os_str().as_bytes()).ok()?;
+        let mut fs: libc::statfs = unsafe { std::mem::zeroed() };
+        // SAFETY: the path is ended with a zero and the result is ours to fill in.
+        if unsafe { libc::statfs(path.as_ptr(), &mut fs) } != 0 {
+            return None;
+        }
+        (PathBuf::from(text(&fs.f_mntonname)), ["nfs", "smbfs", "afpfs", "autofs", "webdav"].contains(&text(&fs.f_fstypename).as_str()))
+    };
+    #[cfg(not(target_os = "macos"))]
+    let (mounted_at, shared) = {
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(folder).ok()?.dev();
+        let top = folder.ancestors().take_while(|a| std::fs::metadata(a).is_ok_and(|m| m.dev() == dev)).last()?.to_path_buf();
+        let shared = network_mounts().iter().any(|(_, on)| *on == top);
+        (top, shared)
+    };
+    let boot = [Path::new("/"), Path::new("/System/Volumes/Data")].contains(&mounted_at.as_path());
+    (!boot && !shared).then_some(mounted_at)
+}
+
+/// The disk that has to be mounted for a pair of library folders to be there: the one
+/// both are on, when it is one that can be taken away. Worked out from the folders, so
+/// that it is never a thing to be got wrong. When neither folder can be seen just now,
+/// what was known before stands.
+pub fn disk_needed(folders: [&str; 2], known: &str) -> String {
+    let there: Vec<&Path> = folders.iter().filter(|f| !f.is_empty()).map(Path::new).filter(|f| f.is_dir()).collect();
+    if there.is_empty() {
+        return known.to_string();
+    }
+    let disks: Vec<Option<PathBuf>> = there.iter().map(|f| disk_of(f)).collect();
+    match &disks[0] {
+        Some(disk) if disks.iter().all(|d| d.as_ref() == Some(disk)) => disk.to_string_lossy().to_string(),
+        _ => String::new(),
+    }
+}
+
 pub fn is_mount_point(p: &Path) -> bool {
     use std::os::unix::fs::MetadataExt;
     let (Ok(me), Some(parent)) = (std::fs::metadata(p), p.parent()) else { return false };
@@ -449,5 +493,24 @@ pub fn engine_config(settings: &Settings, data_dir: &Path) -> EngineConfig {
         speed_limit: settings.speed_limit(),
         direct_unpack: g.direct_unpack,
         post_parallel: g.post_parallel as usize,
+    }
+}
+
+#[cfg(test)]
+mod disk_tests {
+    use super::*;
+
+    #[test]
+    fn the_disk_a_library_needs_is_worked_out_from_its_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let (films, series) = (dir.path().join("Films"), dir.path().join("Series"));
+        std::fs::create_dir_all(&films).unwrap();
+        let text = |p: &Path| p.to_string_lossy().to_string();
+        // Folders on the disk the system starts from need no disk mounted.
+        assert_eq!(disk_of(&films), None);
+        assert_eq!(disk_needed([&text(&films), ""], "/Volumes/Old"), "", "seen, and found to need none");
+        // Folders that cannot be seen just now say nothing, and what was known stands.
+        assert_eq!(disk_needed([&text(&series), ""], "/Volumes/Old"), "/Volumes/Old");
+        assert_eq!(disk_needed(["", ""], "/Volumes/Old"), "/Volumes/Old");
     }
 }
