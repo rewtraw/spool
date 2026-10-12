@@ -18,6 +18,13 @@ pub(super) async fn links_found(State(app): State<App>) -> Json<Value> {
     Json(json!(app.spools_found()))
 }
 
+/// Look again, now, for a linked machine's folders among those on this one.
+pub(super) async fn link_find(State(app): State<App>, Path(id): Path<u32>) -> R<Value> {
+    let link = app.remotes().into_iter().find(|r| r.conf.id == id).ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such link".into()))?;
+    app.settle_folders(&link, true).await;
+    Ok(Json(json!(app.link_report())))
+}
+
 /// Link with the Spool at an address by the code it gave. The key the two agree is handed
 /// back for the link's settings, which are saved as any others are.
 pub(super) async fn link_pair(Json(b): Json<Value>) -> R<Value> {

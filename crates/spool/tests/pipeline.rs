@@ -2789,7 +2789,7 @@ async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, Path
     let api = spool::api::router(w.app.clone());
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["locations"] = json!([{"name": "Shelf", "movie_root": mnt.join("films"), "manage": true}, {"name": "Vault", "movie_root": mnt.join("vault"), "manage": false}]);
-    g["links"] = json!([{"name": "Nas", "url": url, "key": key, "here": mnt, "there": nas}]);
+    g["links"] = json!([{"name": "Nas", "url": url, "key": key, "folders": [{"here": mnt, "there": nas}]}]);
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
@@ -3039,7 +3039,7 @@ async fn a_helper_is_linked_with_a_code_and_not_without() {
 
     // Spool uses the key as it would one that was typed in.
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
-    g["links"] = json!([{"name": "Nas", "url": url, "key": key, "here": nas, "there": nas}]);
+    g["links"] = json!([{"name": "Nas", "url": url, "key": key, "folders": [{"here": nas, "there": nas}]}]);
     assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
     w.app.ask_remotes().await;
     assert!(w.app.remotes()[0].seen().usable, "{:?}", w.app.remotes()[0].seen());
@@ -3254,24 +3254,53 @@ async fn a_linked_machine_looks_through_its_own_folders() {
     }
     assert_eq!(ask("folders", KEY, json!({"share": share("vault"), "kind": "movie"})).await, 200, "an empty library folder is only empty");
 
-    // A link that is given no folders finds them: where the other machine's shares lie
-    // there, and where they are mounted here, checked against what is in them.
+    // A link finds its own folders. The same folders go by other names on this machine,
+    // and nothing is taken from the names: the other machine marks each of its folders,
+    // and the folder here with the mark in it is the one.
     std::fs::remove_file(&mnt).unwrap();
-    std::os::unix::fs::symlink(&nas, &mnt).unwrap();
+    std::fs::write(nas.join("vault/Kept (1999).mkv"), b"a film kept").unwrap();
+    let shares = w.root.join("shares");
+    std::fs::create_dir_all(&shares).unwrap();
+    for (here, there) in [("Movies", "films"), ("Old films", "vault"), ("dl", "downloads")] {
+        std::os::unix::fs::symlink(nas.join(there), shares.join(here)).unwrap();
+    }
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    (g["links"][0]["here"], g["links"][0]["there"], g["links"][0]["key"]) = (json!(""), json!(""), json!(KEY));
+    (g["links"][0]["folders"], g["links"][0]["key"]) = (json!([]), json!(KEY));
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
     let link = w.app.remotes()[0].clone();
-    assert!(link.seen().problem.contains("have not been found on this machine yet"), "{}", link.seen().problem);
-    let host = url.trim_start_matches("http://").split(':').next().unwrap().to_string();
-    let mounts = |at: &Path| vec![(format!("{host}:/export/films"), at.join("films")), (format!("{host}:/export/vault"), at.join("vault")), ("elsewhere:/export/films".to_string(), w.root.join("other/films"))];
-    assert_eq!(w.app.find_folders(&link, mounts(&mnt)).await, Some((mnt.to_string_lossy().to_string(), nas.to_string_lossy().to_string())));
-    // Shares mounted here that are not that machine's, or do not hold what it holds, are not it.
-    assert_eq!(w.app.find_folders(&link, vec![("elsewhere:/export/films".to_string(), mnt.join("films"))]).await, None);
-    assert_eq!(w.app.find_folders(&link, mounts(&w.root.join("other"))).await, None, "another machine's films under the same names");
-    assert_eq!(w.app.find_folders(&link, vec![]).await, None);
+    assert!(link.seen().problem.contains("has not been found among the shares mounted on this machine"), "{}", link.seen().problem);
+    assert_eq!(link.unfound().len(), 2, "neither folder it shares has a place here yet");
+    let text = |p: PathBuf| p.to_string_lossy().to_string();
+    let mut found = w.app.find_folders(&link, vec![shares.join("Movies"), shares.join("Old films"), shares.join("dl"), w.root.join("other/films")]).await;
+    found.sort_by(|a, b| a.there.cmp(&b.there));
+    assert_eq!(found.iter().map(|f| (f.there.clone(), f.here.clone())).collect::<Vec<_>>(), [
+        (text(nas.join("downloads")), text(shares.join("dl"))),
+        (text(nas.join("films")), text(shares.join("Movies"))),
+        // One it may only read is not written in, and is known by a file it holds.
+        (text(nas.join("vault")), text(shares.join("Old films"))),
+    ]);
+    // Looked for from the folder above, they are found inside it.
+    assert_eq!(w.app.find_folders(&link, vec![shares.clone()]).await.len(), 3);
+    // Nothing is left behind in the folders that were marked.
+    for folder in ["films", "downloads"] {
+        assert!(std::fs::read_dir(nas.join(folder)).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().starts_with(".spool-here-")), "{folder}");
+    }
+    // Two folders here that answer to one there settle nothing, and neither is taken.
+    std::os::unix::fs::symlink(nas.join("films"), shares.join("Movies again")).unwrap();
+    let found = w.app.find_folders(&link, vec![shares.clone()]).await;
+    assert!(found.iter().all(|f| f.there != text(nas.join("films"))) && found.len() == 2, "{found:?}");
+    // Folders that are not that machine's are not found, whatever they are called.
+    assert!(w.app.find_folders(&link, vec![w.root.join("other")]).await.is_empty());
+    assert!(w.app.find_folders(&link, vec![]).await.is_empty());
+
+    // Found, they are kept, and a path is turned by the folder it is in.
+    std::fs::remove_file(shares.join("Movies again")).unwrap();
+    let (status, said) = call(&api, "POST", "/api/links/1/find", Value::Null).await;
+    assert_eq!(status, 200, "{said}");
+    let link = w.app.remotes()[0].clone();
+    assert_eq!(link.conf.folders.len(), 0, "nothing is mounted on a machine that only runs tests, so nothing was found to keep");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -3456,7 +3485,7 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     let api = spool::api::router(w.app.clone());
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
     g["locations"] = json!([{"name": "Worker", "movie_root": root.join("films"), "manage": true}]);
-    g["links"] = json!([{"name": "Worker", "url": url, "key": KEY, "here": root, "there": root, "play_near": true}]);
+    g["links"] = json!([{"name": "Worker", "url": url, "key": KEY, "folders": [{"here": root, "there": root}], "play_near": true}]);
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
@@ -3467,7 +3496,7 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     // Two links are never given the same folder, and a number once given is not given again.
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
     let mut second = g["links"][0].clone();
-    (second["id"], second["name"], second["key"], second["here"]) = (json!(0), json!("Twin"), json!(KEY), json!(root.join("films")));
+    (second["id"], second["name"], second["key"], second["folders"]) = (json!(0), json!("Twin"), json!(KEY), json!([{"here": root.join("films"), "there": root.join("films")}]));
     g["links"].as_array_mut().unwrap().push(second);
     let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
     assert!(status == 400 && said["error"].as_str().unwrap().contains("each folder is one helper's"), "{status} {said}");
@@ -3519,7 +3548,7 @@ async fn a_report_that_cannot_be_read_and_an_answer_that_is_lost_cost_nothing() 
     tokio::spawn(async move { axum::serve(listener, stand_in).await.unwrap() });
     let api = spool::api::router(w.app.clone());
     let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    g["links"] = json!([{"name": "Nas", "url": url, "key": "a-key-of-sufficient-length", "here": root, "there": root}]);
+    g["links"] = json!([{"name": "Nas", "url": url, "key": "a-key-of-sufficient-length", "folders": [{"here": root, "there": root}]}]);
     assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
     w.app.ask_remotes().await;
     assert!(matches!(w.app.job_lookup("@1:j1"), spool::remote::Found::Job(_)));

@@ -36,6 +36,14 @@ pub struct Location {
 }
 
 /// A helper on the machine that holds some of the disks. See [`crate::remote`].
+/// One folder on a linked machine: where it is there, and where the same folder is here.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Folder {
+    pub here: String,
+    pub there: String,
+}
+
 /// Another Spool this one is linked to: a helper on the machine that holds some of the
 /// disks. See [`crate::link`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -47,12 +55,10 @@ pub struct LinkConf {
     /// Where it answers this Spool, such as `http://nas:7978`.
     pub url: String,
     pub key: String,
-    /// The folder this machine sees the other machine's disks under, and the folder the
-    /// other machine sees the same thing under. A path is turned from one to the other by
-    /// swapping these at its start. Left empty, Spool finds the two for itself from the
-    /// folders the other machine shares and the shares mounted here.
-    pub here: String,
-    pub there: String,
+    /// Each folder the other machine works in, as it knows it and as this machine sees
+    /// it. Found by Spool, which keeps them here so that it knows whose a path is before
+    /// it has looked again; never typed in.
+    pub folders: Vec<Folder>,
     /// Players on the same network as it are sent to it for a file it holds, and players
     /// away from home to its Tailscale address when it has one.
     pub play_near: bool,

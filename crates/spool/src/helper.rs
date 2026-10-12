@@ -423,6 +423,8 @@ impl Helper {
             .route("/link/work/v1/jobs/{id}/{action}", post(job_action))
             .route("/link/work/v1/queue/{action}", post(queue_action))
             .route("/link/work/v1/availability", post(availability))
+            .route("/link/work/v1/marks", post(marks))
+            .route("/link/work/v1/marks/clear", post(marks_clear))
             .route("/link/work/v1/fs/stat", post(stat))
             .route("/link/work/v1/fs/move", post(file_move))
             .route("/link/work/v1/fs/remove", post(output_remove))
@@ -908,6 +910,72 @@ async fn stat(State(h): State<Helper>, Json(b): Json<OnePath>) -> R {
     Ok(Json(json!({"exists": m.is_some(), "dir": m.as_ref().is_some_and(|m| m.is_dir()), "size": m.as_ref().map(|m| m.len())})))
 }
 
+/// What a marker's name begins with. See [`marks`].
+const MARK: &str = ".spool-here-";
+/// How long a marker is left if nobody says to clear it, in seconds.
+const MARK_FOR: u64 = 30;
+
+/// The first file in a folder, by name, as its place inside and its size: something to
+/// know a folder by when nothing may be written in it.
+fn sample(root: &Path, depth: usize) -> Option<(PathBuf, u64)> {
+    let mut entries: Vec<_> = std::fs::read_dir(root).ok()?.flatten().filter(|e| !e.file_name().to_string_lossy().starts_with('.')).collect();
+    entries.sort_by_key(|e| e.file_name());
+    entries.iter().find_map(|e| match e.metadata().ok()? {
+        m if m.is_file() => Some((PathBuf::from(e.file_name()), m.len())),
+        m if m.is_dir() && depth > 0 => sample(&e.path(), depth - 1).map(|(rel, size)| (Path::new(&e.file_name()).join(rel), size)),
+        _ => None,
+    })
+}
+
+impl Helper {
+    /// Take away any marker left in the folders it works in.
+    fn clear_marks(&self) {
+        let c = &self.0.conf;
+        for folder in c.roots.iter().chain([&c.downloads]) {
+            for e in std::fs::read_dir(folder).into_iter().flatten().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(MARK)) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+}
+
+/// Mark each folder it works in, so that the Spool it is linked to can find the same
+/// folder among the shares mounted on its own machine: an empty file with a name nobody
+/// could guess is put in each, and the Spool looks for that name. The same files are
+/// under different names on the two machines, and this is how one name is matched to the
+/// other without anybody typing either. A folder it may only read is not written in, and
+/// is known by a file it holds instead. The markers are taken away when the Spool says it
+/// is done, and after half a minute if it never does.
+async fn marks(State(h): State<Helper>) -> R {
+    h.clear_marks();
+    let c = &h.0.conf;
+    let mut folders = vec![];
+    for folder in c.roots.iter().chain([&c.downloads]) {
+        // A name of its own for each, so that one folder is never taken for another.
+        let name = format!("{MARK}{}", pair::session());
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(folder.join(&name)) {
+            Ok(_) => folders.push(json!({"there": folder, "name": name})),
+            Err(e) => tracing::warn!(folder = %folder.display(), error = %e, "could not mark the folder so that Spool can find it"),
+        }
+    }
+    for folder in &c.read_roots {
+        if let Some((rel, size)) = sample(folder, 3) {
+            folders.push(json!({"there": folder, "sample": rel, "size": size}));
+        }
+    }
+    let later = h.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(MARK_FOR)).await;
+        later.clear_marks();
+    });
+    Ok(Json(json!({"folders": folders})))
+}
+
+async fn marks_clear(State(h): State<Helper>) -> R {
+    h.clear_marks();
+    Ok(Json(json!({"ok": true})))
+}
+
 #[derive(Deserialize)]
 struct FromTo {
     from: String,
@@ -1066,6 +1134,7 @@ pub async fn serve(bind: &str, data_dir: &Path, conf: Conf) -> Result<()> {
         }
     }
     let helper = Helper::start(data_dir, conf.clone()).await?;
+    helper.clear_marks();
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("binding {bind}"))?;
     let name = std::env::var("SPOOL_NAME").ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(crate::link::find::host_name);
     helper.announce(&name, listener.local_addr()?.port());

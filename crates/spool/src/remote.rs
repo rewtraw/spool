@@ -24,7 +24,7 @@ use crate::link::ticket::{plain, Signer};
 use crate::local::{Blocked, FolderSummary, Survey};
 use crate::link::{agreed, Grants, Hello, Net, Share};
 use crate::models::*;
-use crate::settings::LinkConf;
+use crate::settings::{Folder, LinkConf};
 use anyhow::{anyhow, bail, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -275,23 +275,29 @@ impl Remote {
 
     /// Whether a path on this machine is on the helper's disks.
     pub fn covers(&self, here: &Path) -> bool {
-        !self.conf.here.is_empty() && here.starts_with(&self.conf.here)
+        self.conf.folders.iter().any(|f| here.starts_with(&f.here))
+    }
+
+    /// Turn a path from one machine's name for it to the other's, by the folder it is in:
+    /// the innermost, where one folder lies inside another.
+    fn turned(&self, path: &Path, from: impl Fn(&Folder) -> &str, to: impl Fn(&Folder) -> &str) -> Option<PathBuf> {
+        let folder = self.conf.folders.iter().filter(|f| path.starts_with(from(f))).max_by_key(|f| from(f).len())?;
+        Some(Path::new(to(folder)).join(path.strip_prefix(from(folder)).ok()?))
     }
 
     /// A path on this machine, as the helper knows it.
     pub fn there(&self, here: &Path) -> Option<PathBuf> {
-        if self.conf.here.is_empty() {
-            return None;
-        }
-        here.strip_prefix(&self.conf.here).ok().map(|rest| Path::new(&self.conf.there).join(rest))
+        self.turned(here, |f| &f.here, |f| &f.there)
     }
 
     /// A path on the helper, as this machine sees it.
     pub fn here(&self, there: &Path) -> Option<PathBuf> {
-        if self.conf.there.is_empty() {
-            return None;
-        }
-        there.strip_prefix(&self.conf.there).ok().map(|rest| Path::new(&self.conf.here).join(rest))
+        self.turned(there, |f| &f.there, |f| &f.here)
+    }
+
+    /// The folders it shares that have not been found on this machine.
+    pub fn unfound(&self) -> Vec<PathBuf> {
+        self.seen.lock().shares.iter().map(|s| s.path.clone()).filter(|p| self.here(p).is_none()).collect()
     }
 
     async fn send(&self, req: reqwest::RequestBuilder, patience: Duration) -> Asked<Value> {
@@ -523,8 +529,7 @@ impl Remote {
                     next.problem = format!("{name}'s helper downloads into {}, which this machine should see at {} and cannot; share that folder and mount it, and until then downloads run here", complete.display(), here.display());
                 }
             }
-            None if self.conf.there.is_empty() => next.problem = format!("{name}'s shares have not been found on this machine yet. Mount them here and Spool finds them by itself; until then nothing is done on {name}"),
-            None => next.problem = format!("{name}'s helper downloads into {}, which is outside {}; until its downloads folder is inside, downloads run here", complete.display(), self.conf.there),
+            None => next.problem = format!("{name}'s helper downloads into {}, which has not been found among the shares mounted on this machine. Share that folder and mount it here, and Spool finds it by itself; until then downloads run here", complete.display()),
         }
     }
 
@@ -627,7 +632,9 @@ pub fn tidy_links(list: Vec<LinkConf>, old: &[LinkConf], seq: u32) -> std::resul
     let mut out: Vec<LinkConf> = vec![];
     for mut h in list {
         (h.name, h.url, h.key) = (h.name.trim().to_string(), clean(&h.url), h.key.trim().to_string());
-        (h.here, h.there) = (clean(&h.here), clean(&h.there));
+        for f in &mut h.folders {
+            (f.here, f.there) = (clean(&f.here), clean(&f.there));
+        }
         if h.name.is_empty() {
             return Err("every helper needs a name".into());
         }
@@ -637,13 +644,12 @@ pub fn tidy_links(list: Vec<LinkConf>, old: &[LinkConf], seq: u32) -> std::resul
         if h.key.is_empty() {
             return Err(format!("{}'s helper needs its key", h.name));
         }
-        // Both, or neither: left empty, the two are found once it has been met.
-        let unset = h.here.is_empty() && h.there.is_empty();
-        if !unset && (!h.here.starts_with('/') || !h.there.starts_with('/')) {
-            return Err(format!("the two folders of {}'s helper must both be full paths, starting with /, or both be left for Spool to find", h.name));
+        if h.folders.iter().any(|f| !f.here.starts_with('/') || !f.there.starts_with('/')) {
+            return Err(format!("the folders of {}'s helper must be full paths, starting with /", h.name));
         }
         // A folder is one helper's to work in, never two's.
-        if let Some(other) = out.iter().filter(|o| !unset && !o.here.is_empty()).find(|o| Path::new(&o.here).starts_with(&h.here) || Path::new(&h.here).starts_with(&o.here)) {
+        let shared = |a: &LinkConf, b: &LinkConf| a.folders.iter().any(|x| b.folders.iter().any(|y| Path::new(&x.here).starts_with(&y.here) || Path::new(&y.here).starts_with(&x.here)));
+        if let Some(other) = out.iter().find(|o| shared(o, &h)) {
             return Err(format!("{} and {} are given the same folder on this machine; each folder is one helper's", other.name, h.name));
         }
         // A number is kept only by the link that already has it. Whatever else is sent, a
@@ -701,7 +707,7 @@ impl App {
         for job in changed {
             self.on_job(job);
         }
-        self.settle_folders(r).await;
+        self.settle_folders(r, false).await;
         let problems: Vec<String> = self.remotes().iter().map(|r| r.seen().problem).filter(|p| !p.is_empty()).collect();
         let message = (!problems.is_empty()).then(|| problems.join(" "));
         if self.db.set_standing_attention("helper", message.as_deref(), json!({})).unwrap_or(false) {
@@ -709,54 +715,95 @@ impl App {
         }
     }
 
-    /// Work out the two folders a link turns paths between, for a link that was given none:
-    /// the folder the other machine's shares lie under there, and the folder they are
-    /// mounted under here. Nothing is taken on trust. Every share must be where the pair
-    /// says it is, and something this machine sees in it must be there for the other
-    /// machine too, or the pair is not it.
+    /// Find each folder a linked machine works in among the folders on this one. The
+    /// same files are under different names on the two machines, and nothing is taken from
+    /// the names: the other machine marks each of its folders with a file nobody could
+    /// guess the name of, and the folder here that has that file in it is the same folder.
+    /// One it may not write in is known by a file it holds, of the same size, and only if
+    /// one folder here has it.
     ///
-    /// `mounts` is the shares mounted on this machine: what each is a share of, and where.
-    pub async fn find_folders(&self, r: &Arc<Remote>, mounts: Vec<(String, PathBuf)>) -> Option<(String, String)> {
-        fn shared<'a>(paths: impl Iterator<Item = &'a Path>) -> Option<PathBuf> {
-            paths.map(Path::to_path_buf).reduce(|a, b| a.components().zip(b.components()).take_while(|(x, y)| x == y).map(|(x, _)| x).collect())
-        }
-        let (shares, at) = (r.seen().shares, (*r.at.lock())?);
-        // Shares of that machine's, by its address or by the name in the link's own.
-        let host = reqwest::Url::parse(&r.conf.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
-        let of_it = |from: &str| [at.to_string(), host.clone()].iter().any(|h| !h.is_empty() && (from.starts_with(&format!("{h}:")) || from.contains(&format!("@{h}/")) || from.starts_with(&format!("//{h}/"))));
-        let mounted: Vec<PathBuf> = mounts.into_iter().filter(|(from, _)| of_it(from)).map(|(_, on)| on).collect();
-        let there = shared(shares.iter().map(|s| s.path.as_path())).and_then(|p| if shares.len() == 1 { p.parent().map(Path::to_path_buf) } else { Some(p) })?;
-        let here = shared(mounted.iter().map(PathBuf::as_path)).and_then(|p| if mounted.len() == 1 { p.parent().map(Path::to_path_buf) } else { Some(p) })?;
-        if here.parent().is_none() || there.as_os_str().is_empty() {
-            return None;
-        }
-        let mut proved = 0;
-        for share in &shares {
-            let local = here.join(share.path.strip_prefix(&there).ok()?);
-            let looked = local.clone();
-            let first = tokio::task::spawn_blocking(move || crate::upkeep::within(Duration::from_secs(8), move || std::fs::read_dir(&looked).ok().map(|d| d.flatten().map(|e| e.file_name()).find(|n| !n.to_string_lossy().starts_with('.')))).flatten()).await.ok()??;
-            // An empty share proves nothing either way; one with something in it must match.
-            if let Some(name) = first {
-                if r.stat(&share.path.join(&name)).await.ok()?["exists"].as_bool() != Some(true) {
-                    return None;
+    /// `places` is where to look: the shares mounted on this machine, and the folders
+    /// already in use. Each is looked in, and the folders inside it two deep.
+    pub async fn find_folders(&self, r: &Arc<Remote>, places: Vec<PathBuf>) -> Vec<Folder> {
+        let Ok(said) = r.post("/link/work/v1/marks", json!({}), Duration::from_secs(20)).await else { return vec![] };
+        let marks: Vec<Value> = said["folders"].as_array().cloned().unwrap_or_default();
+        let found = tokio::task::spawn_blocking(move || {
+            // What tells a folder here for the one a mark is of.
+            let is = |dir: &Path, mark: &Value| match (mark["name"].as_str(), mark["sample"].as_str(), mark["size"].as_u64()) {
+                (Some(name), _, _) if plain(name) && !name.contains('/') => dir.join(name).symlink_metadata().is_ok(),
+                (None, Some(rel), Some(size)) if plain(rel) => std::fs::metadata(dir.join(rel)).is_ok_and(|m| m.is_file() && m.len() == size),
+                _ => false,
+            };
+            let mut hits: Vec<Vec<PathBuf>> = vec![vec![]; marks.len()];
+            let (mut level, mut looked) = (places, 0usize);
+            for depth in 0..3 {
+                let mut inside = vec![];
+                for dir in &level {
+                    looked += 1;
+                    for (hit, mark) in hits.iter_mut().zip(&marks) {
+                        if is(dir, mark) && !hit.contains(dir) {
+                            hit.push(dir.clone());
+                        }
+                    }
+                    // No deeper once every marked folder has been found, or after a great many.
+                    if depth < 2 && looked < 5000 && hits.iter().zip(&marks).any(|(h, m)| h.is_empty() && m["name"].is_string()) {
+                        inside.extend(std::fs::read_dir(dir).into_iter().flatten().flatten().filter(|e| !e.file_name().to_string_lossy().starts_with('.')).map(|e| e.path()).filter(|p| p.is_dir()));
+                    }
                 }
-                proved += 1;
+                level = inside;
             }
-        }
-        (proved > 0).then(|| (here.to_string_lossy().to_string(), there.to_string_lossy().to_string()))
+            // A folder is found when exactly one here answers to it: two that do settle nothing.
+            marks.iter().zip(hits).filter_map(|(mark, hit)| match hit.as_slice() {
+                [here] => Some(Folder { here: here.to_string_lossy().to_string(), there: mark["there"].as_str()?.to_string() }),
+                _ => None,
+            }).collect::<Vec<Folder>>()
+        })
+        .await
+        .unwrap_or_default();
+        let _ = r.post("/link/work/v1/marks/clear", json!({}), Duration::from_secs(10)).await;
+        found
     }
 
-    /// Give a link that has no folders the ones found for it, and take it up afresh with them.
-    async fn settle_folders(&self, r: &Arc<Remote>) {
-        if !(r.conf.here.is_empty() && r.conf.there.is_empty()) || !r.seen().reachable || r.sought.lock().replace(Instant::now()).is_some_and(|last| last.elapsed() < Duration::from_secs(30)) {
+    /// Whether a link's folders want finding: it has none, or one of the other machine's
+    /// folders has no place here.
+    fn folders_wanted(r: &Remote) -> bool {
+        r.conf.folders.is_empty() || !r.unfound().is_empty() || r.seen().problem.contains("has not been found among the shares")
+    }
+
+    /// Find a link's folders when they want finding, keep them, and take the link up afresh
+    /// with them. Looked for no more than twice a minute, unless `now`.
+    pub async fn settle_folders(&self, r: &Arc<Remote>, now: bool) {
+        let seen = r.seen();
+        if !(seen.reachable && seen.grants.work) || !(now || Self::folders_wanted(r)) {
             return;
         }
-        let mounts = tokio::task::spawn_blocking(crate::app::network_mounts).await.unwrap_or_default();
-        let Some((here, there)) = self.find_folders(r, mounts).await else { return };
+        {
+            let mut sought = r.sought.lock();
+            if !now && sought.is_some_and(|last| last.elapsed() < Duration::from_secs(30)) {
+                return;
+            }
+            *sought = Some(Instant::now());
+        }
+        // Where to look: every share mounted here, the folders of every further location
+        // (asking after one mounts a share that is mounted when wanted), and where its
+        // folders were.
+        let mut places: Vec<PathBuf> = tokio::task::spawn_blocking(crate::app::network_mounts).await.unwrap_or_default().into_iter().map(|(_, on)| on).collect();
+        places.extend(self.settings.general().locations.iter().flat_map(|l| [l.movie_root.clone(), l.series_root.clone()]).filter(|p| !p.is_empty()).map(PathBuf::from));
+        places.extend(r.conf.folders.iter().map(|f| PathBuf::from(&f.here)));
+        places.sort();
+        places.dedup();
+        // What was known of a folder that was not found this time stands: its share may
+        // only be away for now.
+        let mut found = self.find_folders(r, places).await;
+        found.extend(r.conf.folders.iter().filter(|old| !found.iter().any(|f| f.there == old.there)).cloned().collect::<Vec<_>>());
+        found.sort_by(|a, b| a.there.cmp(&b.there));
+        if found == r.conf.folders {
+            return;
+        }
         let mut g = self.settings.general();
-        let Some(link) = g.links.iter_mut().find(|l| l.id == r.conf.id && l.here.is_empty() && l.there.is_empty()) else { return };
-        tracing::info!(helper = %r.conf.name, %here, %there, "found where its shares are mounted on this machine");
-        (link.here, link.there) = (here, there);
+        let Some(link) = g.links.iter_mut().find(|l| l.id == r.conf.id) else { return };
+        tracing::info!(helper = %r.conf.name, folders = found.len(), "found its folders among those on this machine");
+        link.folders = found;
         if self.settings.set_general(&g).is_ok() {
             self.sync_remotes();
             self.emit(Event::Locations);
@@ -1032,7 +1079,7 @@ impl App {
                 let seen = r.seen();
                 let serves: Vec<String> = places.0.iter().filter(|p| [&p.0.movie_root, &p.0.series_root].into_iter().any(|root| !root.is_empty() && r.covers(Path::new(root)))).map(|p| p.0.name.clone()).collect();
                 let running = r.jobs().iter().filter(|j| !j.state.is_terminal() && j.state != JobState::Paused).count();
-                json!({"id": r.conf.id, "name": r.conf.name, "url": r.conf.url, "serves": serves, "downloads": running, "seen": seen, "at": *r.at.lock(), "tailnet": *r.tailnet.lock()})
+                json!({"id": r.conf.id, "name": r.conf.name, "url": r.conf.url, "serves": serves, "downloads": running, "seen": seen, "at": *r.at.lock(), "tailnet": *r.tailnet.lock(), "folders": r.conf.folders, "unfound": r.unfound()})
             })
             .collect()
     }

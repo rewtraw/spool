@@ -59,7 +59,7 @@
     else toast(`Linked with ${h.name}, but the settings were not saved. Put right what is wrong and save: the key is kept on this page until you do.`, 'error');
   }
   function addLink(from?: { name: string; url: string }) {
-    (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', here: '', there: '', play_near: true });
+    (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', folders: [], play_near: true });
     if (from) quick.add(general.links.at(-1));
   }
   // Links begun from one that was found: its name and address are known, so the code is all there is to ask.
@@ -69,6 +69,10 @@
   const notAdded = $derived(found.filter((f) => !(general?.links ?? []).some((h: any) => (h.url ?? '').replace(/\/+$/, '') === f.url)));
   async function loadFound() {
     found = await api.get<any[]>('/links/found').catch(() => found);
+  }
+  async function lookAgain(h: any) {
+    const got = await act(() => api.post<any[]>(`/links/${h.id}/find`), 'Looked');
+    if (got) (links = got), load();
   }
   // What a linked Spool allows this one, in words.
   const allows = (seen: any) => {
@@ -83,16 +87,19 @@
   });
   // A location is on the machine whose disks its folders are mounted under.
   const under = (folder: string, root: string) => !!root && !!folder && (folder === root || folder.startsWith(root.replace(/\/+$/, '') + '/'));
-  const linkFor = (l: any) => (general.links ?? []).find((h: any) => under(l.movie_root, h.here) || under(l.series_root, h.here));
+  const linkFor = (l: any) => (general.links ?? []).find((h: any) => (h.folders ?? []).some((f: any) => under(l.movie_root, f.here) || under(l.series_root, f.here)));
   // The folders a linked Spool shares, as this machine sees them, to choose a location's from.
-  const sharedHere = (h: any): string[] => (linkOf(h.id)?.seen.shares ?? []).map((s: any) => s.path).filter((path: string) => under(path, h.there)).map((path: string) => h.here.replace(/\/+$/, '') + path.slice(h.there.replace(/\/+$/, '').length));
+  const sharedHere = (h: any): string[] => (linkOf(h.id)?.seen.shares ?? []).map((sh: any) => (h.folders ?? []).find((f: any) => f.there === sh.path)?.here).filter(Boolean);
   const sharedBy = (l: any) => {
     const at = (general.links ?? []).indexOf(linkFor(l));
     return at < 0 ? undefined : `shared-${at}`;
   };
-  function addPlace(on?: any) {
-    const start = on ? on.here.replace(/\/+$/, '') + '/' : '';
-    general.locations.push({ id: 0, name: '', movie_root: start, series_root: '', volume: '', manage: false });
+  // A location on a linked machine starts from the first folder that machine shares, so that it is listed under it.
+  function addPlaceOn(h: any) {
+    general.locations.push({ id: 0, name: '', movie_root: sharedHere(h)[0] ?? '', series_root: '', volume: '', manage: false });
+  }
+  function addPlace() {
+    general.locations.push({ id: 0, name: '', movie_root: '', series_root: '', volume: '', manage: false });
   }
   async function watchFound(id: number) {
     clearTimeout(foundTimer);
@@ -265,11 +272,16 @@
         </label>
         <label class="field">Or its key<input class="input mono" type="password" autocomplete="off" bind:value={h.key} /><span class="hint">The key the helper was started with, if it was given one.</span></label>
       </div>
-      <div class="cols">
-        <label class="field">Its disks, as this machine sees them<input class="input mono" bind:value={h.here} placeholder="Found by Spool" /></label>
-        <label class="field">The same folder, as it sees it<input class="input mono" bind:value={h.there} placeholder="Found by Spool" /></label>
-      </div>
-      <span class="hint">Leave these empty: once its shares are mounted on this machine, Spool finds the two by itself and checks them against what is in the shares. They are here to be looked at, and to set by hand where the shares are laid out differently on the two machines. Every location whose folders lie under the first is on this machine, and is listed under it.</span>
+      {#if now}
+        <div class="field">Its folders, and where each is on this machine
+          <div class="list">
+            {#each now.folders ?? [] as f}<div class="small mono">{f.there} <span class="faint">is</span> {f.here}</div>{/each}
+            {#each now.unfound ?? [] as there}<div class="small mono warn">{there} <span class="faint">has not been found here</span></div>{/each}
+          </div>
+          <span class="hint">Spool finds these by itself: {h.name || 'the machine'} marks each of its folders, and the folder here with the same mark is the same folder. A folder is found once its share is mounted on this machine. Nothing is typed, so nothing can be typed wrong.</span>
+          <div><button class="btn small" type="button" onclick={() => lookAgain(h)}>Look again</button></div>
+        </div>
+      {/if}
       <div><button class="btn small ghost danger" type="button" onclick={() => general.links.splice(i, 1)}>Unlink {h.name || 'it'}</button></div>
       </details>
     </div>
@@ -320,7 +332,7 @@
           {@render linkCard(h, hi)}
           {#each general.locations as l, i (i)}{#if linkFor(l) === h}{@render placeCard(l, i)}{/if}{/each}
           <datalist id={`shared-${hi}`}>{#each sharedHere(h) as folder}<option value={folder}></option>{/each}</datalist>
-          <div><button class="btn" type="button" disabled={!h.here} onclick={() => addPlace(h)}>Add a location on {h.name || 'it'}</button></div>
+          <div><button class="btn" type="button" disabled={!(h.folders ?? []).length} onclick={() => addPlaceOn(h)}>Add a location on {h.name || 'it'}</button></div>
         </div>
       {/each}
       {#if notAdded.length}

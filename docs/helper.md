@@ -70,7 +70,7 @@ volumes:
   spool-helper-data:
 ```
 
-**Name the folders in the container as Spool's machine names them.** Spool turns a path on its own machine into a path on the helper by swapping the start of it, and everything after the start has to match. If Spool's machine mounts the NAS's shares as `/Volumes/nas/movies`, `/Volumes/nas/tv` and `/Volumes/nas/archive-movies`, mount them in the container as `/nas/movies`, `/nas/tv` and `/nas/archive-movies`, wherever the NAS itself keeps them.
+**The folders may be named as you like in the container.** Spool does not go by their names: it finds which of its own mounted shares each one is. See [Where its disks are](#3-tell-spool-about-the-helper).
 
 Put the downloads folder on the same dataset as the library if you can: a finished download is then filed by renaming it. On another dataset it is copied, inside the NAS.
 
@@ -91,11 +91,13 @@ Under Settings, Library, choose **Link another Spool**:
 
 A key that was typed in is not shown again once saved, and is not handed back to the browser.
 
-**Where its disks are.** Spool and the helper see the same files under different names: a film is `/Volumes/nas/movies/Heat (1995)` to one and `/nas/movies/Heat (1995)` to the other, and Spool turns one into the other by swapping the start. It finds the two starts by itself. Once the helper is linked and its shares are mounted on Spool's machine, Spool takes the folders the helper says it shares, finds the shares of that machine mounted here, and checks that something it sees in each is there for the helper too. Until it has, the link says that the shares have not been found yet.
+**Where its disks are.** Spool and the helper see the same files under different names: a film is `/Volumes/nas/movies/Heat (1995)` to one and `/media/films/Heat (1995)` to the other. Spool finds which folder here is which folder there, and nothing is typed. The helper puts an empty file with a name nobody could guess in each folder it works in; Spool looks for those names among the shares mounted on its machine, and the folder with the mark in it is the same folder. The marks are taken away at once, and after half a minute if anything goes wrong. A folder the helper may only read is not written in, and is known by a file it holds.
 
-The two are shown under **How it is reached**, and can be set by hand there. That is only needed when the shares are not laid out the same way on the two machines, which the advice above about naming the folders avoids.
+- **A folder is found once its share is mounted on Spool's machine.** Until then the link says which folder has not been found, and Spool looks again twice a minute. **Look again** under the link looks at once.
+- **Two folders here that answer to one there settle nothing,** and neither is taken: mount a share once.
+- **What was found** is listed under the link, each folder with where it is on this machine. It is there to be read, not set.
 
-Every location whose folders lie under the first of them is served by the helper, and the settings page lists it under the helper.
+Every location whose folders lie in one of them is served by the helper, and the settings page lists it under the helper.
 
 ### 4. Check
 
@@ -191,7 +193,7 @@ The helper looks through four folders at a time; more wait their turn.
 
 **"Downloads into a folder this machine should see and cannot".** The helper is usable for moves, and downloads run on Spool's machine until the helper's downloads folder is shared and mounted there under the name it has in the container. Spool looks again by itself every half minute.
 
-**"It does not see the folder where this machine does".** The two folders given for the helper do not name the same place, or a share is mounted on Spool's machine under a different name than in the container.
+**"It does not see the folder where this machine does".** What Spool found for this folder no longer holds: a share has been mounted somewhere else, or another one put in its place. Choose **Look again** under the link.
 
 **The key is refused.** The key in Spool's settings is not the one the helper was started with. A helper answers nothing, not even what version it is, without its key.
 

@@ -274,6 +274,7 @@ fn api_routes() -> Router<App> {
         .route("/api/links", get(links))
         .route("/api/links/pair", post(link_pair))
         .route("/api/links/found", get(links_found))
+        .route("/api/links/{id}/find", post(link_find))
         .route("/api/titles/move", post(move_titles))
         .route("/api/titles/move/cancel", post(cancel_moves))
         .route("/api/blocklist/clear", post(clear_blocklist))

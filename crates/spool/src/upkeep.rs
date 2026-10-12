@@ -225,7 +225,7 @@ impl App {
             let same = match first.as_ref().and_then(|p| r.there(p)) {
                 Some(there) => match r.stat(&there).await {
                     Ok(said) if said["exists"].as_bool() == Some(true) => Ok(format!("it sees the same folder, as {}", r.there(Path::new(root)).unwrap_or_default().display())),
-                    Ok(_) => Err(format!("it does not see {} where this machine does; the two folders given for the helper do not match", there.display())),
+                    Ok(_) => Err(format!("it does not see {} where this machine does; what was found for this folder no longer holds; look again for its folders, under the link", there.display())),
                     Err(e) => Err(format!("{e:#}")),
                 },
                 None => Ok("it answers; the folder is empty, so there is nothing to compare".into()),
