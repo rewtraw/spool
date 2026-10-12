@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Downloading: Spool</title>
-<meta name="description" content="How Spool chooses a release, checks it before fetching it, unpacks it as it arrives, and keeps what it would need to get a title back.">
-<meta property="og:title" content="Downloading: Spool">
-<meta property="og:description" content="How Spool chooses a release, checks it before fetching it, unpacks it as it arrives, and keeps what it would need to get a title back.">
-<meta property="og:image" content="assets/archive.png">
+<title>Spool: downloading</title>
+<meta name="description" content="Every release gets a verdict and a reason. What Spool takes is checked first, unpacked as it arrives, and remembered after it has gone.">
+<meta property="og:title" content="Spool: downloading">
+<meta property="og:description" content="Every release gets a verdict and a reason. What Spool takes is checked first, unpacked as it arrives, and remembered after it has gone.">
+<meta property="og:image" content="assets/library.png">
 <link rel="icon" href="assets/mark.svg">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -26,40 +26,44 @@
   </header>
   <div class="hero page">
     <h1>It downloads on purpose.</h1>
-    <p class="lede">Every release Spool sees gets a verdict and a reason. What it takes is checked before it is fetched, repaired and unpacked as it arrives, and remembered after it has gone.</p>
+    <p class="lede">Every release gets a verdict and a reason. What Spool takes is checked first, unpacked as it arrives, and remembered after it has gone.</p>
   </div>
 
   <section>
-    <p class="eyebrow">What it does</p>
-    <h2>Careful about what it downloads, and about your disk.</h2>
+    <p class="eyebrow">Choosing</p>
+    <h2>Knows why it took one and not another.</h2>
     <div class="grid">
-      <div><h3>Explains every choice</h3><p>Each release it sees gets a recorded verdict: accepted, or rejected with the reason. "Why didn't it take that one" always has an answer.</p></div>
-      <div><h3>Looks before it downloads</h3><p>A release is sampled on your Usenet servers first. Posts that have expired are skipped in seconds, not after an hour.</p></div>
-      <div><h3>Unpacks as it downloads</h3><p>Uncompressed RAR posts are unpacked volume by volume while they arrive, so they need about half the room and no extraction step.</p></div>
-      <div><h3>Whole seasons, one source</h3><p>For series it prefers a pack or one group's complete run over a scatter of episodes, and searches by name when an indexer's ids fall short.</p></div>
-      <div><h3>Sizes you choose</h3><p>Profiles carry a size target. Oversized releases are a last resort, and a file that is too big can be swapped for a smaller copy.</p></div>
-      <div><h3>More than one version</h3><p>Keep a 4K copy beside a small one, or two cuts of the same film. Upgrades replace the main file and leave the others alone.</p></div>
-      <div><h3>Original language first</h3><p>It knows what language a title was made in, ranks dubs last, and follows anime's own episode numbering.</p></div>
-      <div><h3>Reads awkward names</h3><p>Releases named without a year, never linked to an id, or handed over with garbled non-Latin text are still recognised for what they are.</p></div>
-      <div><h3>Cautious by default</h3><p>It starts in a mode that changes nothing, journals every import, recycles replaced files and will not write when the media disk is missing.</p></div>
+      <div><h3>A reason for every release</h3><p>Accepted, or rejected and why. "Why not that one" always has an answer.</p></div>
+      <div><h3>Whole seasons, one source</h3><p>A pack or one group's full run comes before a scatter of episodes.</p></div>
+      <div><h3>Sizes you choose</h3><p>Profiles carry a size target. Oversized releases are the last resort.</p></div>
+      <div><h3>Original language first</h3><p>Dubs rank last, and anime keeps its own episode numbering.</p></div>
+      <div><h3>Reads awkward names</h3><p>No year, no id, or garbled non-Latin text: still recognised.</p></div>
+      <div><h3>More than one version</h3><p>Keep a 4K copy beside a small one. Upgrades leave the others alone.</p></div>
     </div>
   </section>
 
-  <section class="show">
-    <div class="copy">
-      <p class="eyebrow">The archive</p>
-      <h2>Delete to make room. Get it back later.</h2>
-      <p class="sub">Spool keeps the small file that describes every release it downloads, and the next-best options beside it.</p>
-      <ul>
-        <li><b>Re-download without an indexer</b>, even after the title has left your library.</li>
-        <li><b>Still searchable when an indexer is down.</b> Saved releases join every search.</li>
-        <li><b>Honest about availability.</b> It checks whether a saved release is still on Usenet before offering it.</li>
-      </ul>
+  <section>
+    <p class="eyebrow">Fetching</p>
+    <h2>Careful with your time and your disk.</h2>
+    <div class="grid">
+      <div><h3>Looks before it downloads</h3><p>A release is sampled on your servers first. Expired posts are skipped in seconds.</p></div>
+      <div><h3>Unpacks as it arrives</h3><p>Uncompressed posts are unpacked volume by volume, in about half the room.</p></div>
+      <div><h3>Cautious by default</h3><p>It starts in a mode that changes nothing, and will not write when the disk is missing.</p></div>
     </div>
-    <div class="window"><div class="bar"><i></i><i></i><i></i></div><img src="assets/archive.png" alt="The archive, listing saved releases per title with whether each is still on Usenet" width="1440" height="960"></div>
   </section>
 
-  <div class="next"><span></span><span>Next: <a href="library.html">Looking after the library</a></span></div>
+  <section>
+    <p class="eyebrow">The archive</p>
+    <h2>Delete to make room. Get it back later.</h2>
+    <div class="grid">
+      <div><h3>Kept after it has gone</h3><p>Spool keeps the small file that describes each release it downloads.</p></div>
+      <div><h3>No indexer needed</h3><p>Saved releases join every search, even when an indexer is down.</p></div>
+      <div><h3>Honest about what is left</h3><p>It checks a saved release is still on Usenet before offering it.</p></div>
+    </div>
+    <div class="window shot"><div class="bar"><i></i><i></i><i></i></div><img src="assets/archive.png" alt="The archive: releases Spool has kept, each marked with whether it can still be had" width="1440" height="960" loading="lazy"></div>
+  </section>
+
+  <div class="next"><span><a href="./">Home</a></span><span>Next: <a href="library.html">The library</a></span></div>
 
   <footer>
     <div>Spool is free software under the <a href="https://github.com/rewtraw/spool/blob/main/LICENSE">GNU GPL v3</a>. Its release-name parsers are ported from Radarr and Sonarr.</div>

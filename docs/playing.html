@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Playing: Spool</title>
-<meta name="description" content="Spool serves the library to Infuse and other players that speak to Jellyfin, at home and away, from whichever machine holds the film.">
-<meta property="og:title" content="Playing: Spool">
-<meta property="og:description" content="Spool serves the library to Infuse and other players that speak to Jellyfin, at home and away, from whichever machine holds the film.">
-<meta property="og:image" content="assets/phone.png">
+<title>Spool: playing</title>
+<meta name="description" content="Infuse and other players that speak to Jellyfin open the library as Spool knows it. No second server, and no folders to share.">
+<meta property="og:title" content="Spool: playing">
+<meta property="og:description" content="Infuse and other players that speak to Jellyfin open the library as Spool knows it. No second server, and no folders to share.">
+<meta property="og:image" content="assets/library.png">
 <link rel="icon" href="assets/mark.svg">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -26,40 +26,51 @@
   </header>
   <div class="hero page">
     <h1>On the television, at home and away.</h1>
-    <p class="lede">Players that speak to Jellyfin, Infuse among them, see the library as Spool knows it. A film comes from the machine that holds it, and a small version is there for a slow line.</p>
+    <p class="lede">Infuse and other players that speak to Jellyfin open the library as Spool knows it. No second server, and no folders to share.</p>
   </div>
 
   <section>
     <p class="eyebrow">On the television</p>
     <h2>Plays what it files.</h2>
-    <p class="sub">Spool can answer as a Jellyfin server, so a player such as Infuse on Apple TV opens the library directly. There is no second server to run and no folders to share. <a class="more" href="guide/players.html">Playing on a television</a></p>
     <div class="grid">
-      <div><h3>Found by itself</h3><p>Players on the same network see Spool without being given an address. It has its own port and its own sign-in, which opens nothing but playback.</p></div>
-      <div><h3>The library as Spool knows it</h3><p>Posters, cast, scores, collections, seasons and episodes, with search, recently added, continue watching and next up.</p></div>
-      <div><h3>Every file as it is</h3><p>Nothing is transcoded. Each version of a film is offered, with its subtitles, and where you stopped is remembered for next time.</p></div>
+      <div><h3>Found by itself</h3><p>Players on the same network see Spool without being given an address.</p></div>
+      <div><h3>The library as Spool knows it</h3><p>Posters, cast, collections, continue watching and next up.</p></div>
+      <div><h3>Every file as it is</h3><p>Nothing is transcoded. Each version is offered, with its subtitles.</p></div>
     </div>
+    <a class="more" href="guide/players.html">Playing on a television →</a>
+  </section>
+
+  <section>
+    <p class="eyebrow">People</p>
+    <h2>An account for everyone who watches.</h2>
+    <div class="grid">
+      <div><h3>Their own place in everything</h3><p>What each has watched and where they stopped is theirs alone.</p></div>
+      <div><h3>They ask, you answer</h3><p>A page for asking for a film or a series, and seeing when it is ready.</p></div>
+      <div><h3>Who is watching what</h3><p>Now, lately and in all, with the machine each film came from.</p></div>
+    </div>
+    <a class="more" href="guide/players.html#people">People and asking →</a>
   </section>
 
   <section>
     <p class="eyebrow">Where a film comes from</p>
     <h2>From the machine that holds it.</h2>
-    <p class="sub">A player knows one server, Spool. When a film is on another machine, such as a NAS, Spool hands the player a ticket for that one film and the player takes it from there. Nothing passes through a machine it did not need to. <a class="more" href="guide/helper.html#playing-from-the-helper">Playing from the helper</a></p>
     <div class="grid">
-      <div><h3>At home</h3><p>A player on the same network as the NAS takes the film from the NAS. Seeking is as quick as the disk, and where you stopped is still kept by Spool.</p></div>
-      <div><h3>Away</h3><p>Over Tailscale a phone is sent to the NAS's Tailscale address, and at home to its home one. Spool tells which by where the phone really is, not by how it connected.</p></div>
-      <div><h3>One switch</h3><p>There are no addresses to list. One switch says whether players are sent to a machine, and a player that cannot reach it gets the film through Spool, as before.</p></div>
+      <div><h3>At home</h3><p>A player near the NAS takes the film from the NAS. Seeking is as quick as the disk.</p></div>
+      <div><h3>Away</h3><p>Over Tailscale a phone is sent to wherever it can really reach.</p></div>
+      <div><h3>One switch</h3><p>No addresses to list. A player that cannot reach the NAS gets the film through Spool.</p></div>
     </div>
+    <a class="more" href="guide/helper.html#playing-from-the-helper">Playing from the machine that has the film →</a>
   </section>
 
   <section>
     <p class="eyebrow">Compact versions</p>
     <h2>The whole film at home, a small one for the road.</h2>
-    <p class="sub">Spool can make a smaller copy of a film or an episode and keep it beside the original, as a version a player can choose. The original is never touched. <a class="more" href="guide/compact.html">Compact versions</a></p>
     <div class="grid">
-      <div><h3>Made on the video hardware</h3><p>On an Apple silicon Mac a 47 GB film on disc becomes 5 GB at 1080p in about ten minutes, with the processor left nearly idle.</p></div>
-      <div><h3>Kept as a version</h3><p>HDR, every sound track, subtitles and chapters are carried over. Players are offered both; searches and upgrades go on looking at the original.</p></div>
-      <div><h3>One, some or all</h3><p>Make one from a film's page, several from the library, everything that would gain from one, or each download as it arrives. Progress is in Activity.</p></div>
+      <div><h3>Made on the video hardware</h3><p>On Apple silicon, a 47 GB disc becomes 5 GB at 1080p in about ten minutes.</p></div>
+      <div><h3>Kept as a version</h3><p>HDR, every sound track and subtitles carried over. The original is never touched.</p></div>
+      <div><h3>One, some or all</h3><p>From a film's page, a selection, or each download as it arrives.</p></div>
     </div>
+    <a class="more" href="guide/compact.html">Compact versions →</a>
   </section>
 
   <div class="next"><span>Before: <a href="library.html">The library</a></span><span>Next: <a href="machines.html">More than one machine</a></span></div>

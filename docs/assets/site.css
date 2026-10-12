@@ -107,3 +107,52 @@ nav a[aria-current] { color: var(--text); }
 @media (max-width: 860px) {
   .grid.two { grid-template-columns: 1fr; }
 }
+
+/* The first page: an opening, the figure, and what each part of it stands for. */
+.hero.home { padding: 72px 0 0; max-width: 860px; }
+.hero.home .eyebrow { margin-bottom: 18px; }
+.btn.quiet { background: none; border-color: transparent; color: var(--muted); padding: 0 8px; }
+.btn.quiet:hover { color: var(--text); border-color: transparent; }
+.shot { margin-top: 32px; }
+section > a.more { margin-top: 18px; }
+
+.bench-card { margin-top: 52px; }
+.bench-card .iso-figure { margin: 0; }
+.bench-card .iso-plate { border-radius: 16px 16px 0 0; box-shadow: none; border: 1px solid var(--line); border-bottom: 0; padding: 44px 28px 48px; background: radial-gradient(120% 90% at 50% 0%, var(--raised), var(--surface) 62%); }
+.bench-card .iso-plate-corners { inset: 20px 24px; }
+.bench-card .iso-plate-corner { font-size: 11.5px; }
+/* The figure takes the page's colours, and its one lit part the page's blue. */
+.bench-card .iso-plate {
+  --anatomy-card: var(--surface); --anatomy-paper: #17171b; --anatomy-face: #212127; --anatomy-top: #25252c;
+  --anatomy-shade-0: #111114; --anatomy-shade-1: #151519; --anatomy-shade-2: #19191e; --anatomy-shade-3: #1d1d23;
+  --anatomy-lit-top: #2c3a78; --anatomy-lit-shade: #212b5a;
+  --anatomy-hi: #e9e3d6; --anatomy-mid: #948e82; --anatomy-lo: #5f5b54; --anatomy-faint: #3b3936; --anatomy-lit: #8ea6ff;
+  --anatomy-text: var(--muted); --anatomy-muted: var(--faint); --anatomy-mono: var(--mono); --anatomy-dot: #efe9dc;
+  --anatomy-weight: .7px;
+}
+.bench-card .iso-solid[data-lit] > .iso-fill { fill: var(--anatomy-lit-shade); }
+@media (prefers-color-scheme: light) {
+  .bench-card .iso-plate {
+    --anatomy-paper: #fbf8f0; --anatomy-face: #fffdf8; --anatomy-top: #fffdf8;
+    --anatomy-shade-0: #e2d9c7; --anatomy-shade-1: #e9e2d2; --anatomy-shade-2: #f0eadd; --anatomy-shade-3: #f6f1e6;
+    --anatomy-lit-top: #dbe4ff; --anatomy-lit-shade: #c3d1fb;
+    --anatomy-hi: #2a2824; --anatomy-mid: #827c70; --anatomy-lo: #aea797; --anatomy-faint: #d3cbb9; --anatomy-lit: #1f4fd6;
+    --anatomy-halo: #8a8170; --anatomy-dot: #3a3833;
+  }
+}
+.stations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 0 0 16px 16px; overflow: hidden; }
+.stations a { background: var(--bg); padding: 22px 22px 24px; }
+.stations a:hover { background: var(--surface); }
+.stations span { font: 11.5px/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+.stations h3 { font: 600 19px/1.25 var(--serif); margin: 10px 0 6px; }
+.stations p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+.why .chip { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.why .chip b { display: inline; }
+@media (max-width: 860px) {
+  .hero.home { padding-top: 40px; }
+  .bench-card { margin: 36px -24px 0; }
+  .bench-card .iso-plate { border-radius: 0; border-left: 0; border-right: 0; padding: 46px 6px 64px; }
+  .bench-card .iso-plate-corners { inset: 16px 18px; }
+  .stations { grid-template-columns: 1fr 1fr; border-radius: 0 0 14px 14px; margin: 0 -24px; border-left: 0; border-right: 0; border-radius: 0; }
+}
+@media (max-width: 480px) { .stations { grid-template-columns: 1fr; } }
