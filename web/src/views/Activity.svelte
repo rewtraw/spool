@@ -157,13 +157,25 @@
     adopted: 'Brought in where it lay',
     moved: 'Moved to another location',
     compact_made: 'Compact version made',
+    compact_failed: 'Compact version failed',
     compact_removed: 'Compact version removed',
     compact_kept: 'Original let go; compact version kept',
     not_the_film: 'Recognised as an extra, not the film',
     was_film: 'Switched from a film to a series',
     in_episodes: 'Found to be posted in episodes',
   };
-  const tone = (k: string) => (k === 'download_failed' || k === 'file_missing' ? 'bad' : k === 'imported' || k === 'upgraded' ? 'ok' : k === 'would_grab' ? 'warn' : '');
+  /** What a finished piece of work came to, in a line: sizes, how long it took and with what. */
+  function outcome(h: any): string {
+    const d = h.data ?? {};
+    if (h.kind === 'compact_made') return [`${bytes(d.from_bytes ?? 0)} to ${bytes(d.bytes ?? 0)}`, d.seconds ? `in ${duration(d.seconds)}` : '', d.how === 'hardware' ? 'on the video hardware' : d.how === 'software' ? 'on the processor' : ''].filter(Boolean).join(' · ');
+    if (h.kind === 'moved') return [d.bytes ? bytes(d.bytes) : '', d.kept_original ? 'the original stays where it was' : ''].filter(Boolean).join(' · ');
+    return '';
+  }
+  // Downloads that finished and other work that did, together, newest first.
+  const finished = $derived(
+    [...recent.map((i: any) => ({ at: i.acquisition.updated_at, item: i })), ...(data.done ?? []).map((h: any) => ({ at: h.ts, work: h }))].sort((a, b) => b.at - a.at).slice(0, 30),
+  );
+  const tone = (k: string) => (k === 'download_failed' || k === 'file_missing' || k === 'compact_failed' ? 'bad' : k === 'compact_made' ? 'ok' : k === 'imported' || k === 'upgraded' ? 'ok' : k === 'would_grab' ? 'warn' : '');
 </script>
 
 <header class="head">
@@ -329,18 +341,27 @@
     {/each}
   </div>
 
-  {#if recent.length}
+  {#if finished.length}
     <div class="section-title" style="margin:28px 0 10px">Recently finished</div>
     <div class="card scroll-x">
       <table class="table">
         <tbody>
-          {#each recent as i (i.acquisition.id)}
-            {@const a = i.acquisition}
-            <tr>
-              <td style="white-space:nowrap"><span class="chip {a.state === 'imported' ? 'ok' : a.state === 'failed' ? 'bad' : ''}">{STATE_LABEL[a.state]}</span></td>
-              <td><a href="#/title/{a.title_id}"><b>{i.title}</b></a><div class="mono faint break">{a.release.title}</div>{#if a.error}<div class="err">{a.error}</div>{/if}</td>
-              <td class="muted" style="white-space:nowrap">{ago(a.updated_at)}</td>
-            </tr>
+          {#each finished as f (f.item ? `a${f.item.acquisition.id}` : `h${f.work.id}`)}
+            {#if f.item}
+              {@const a = f.item.acquisition}
+              <tr>
+                <td style="white-space:nowrap"><span class="chip {a.state === 'imported' ? 'ok' : a.state === 'failed' ? 'bad' : ''}">{STATE_LABEL[a.state]}</span></td>
+                <td><a href="#/title/{a.title_id}"><b>{f.item.title}</b></a><div class="mono faint break">{a.release.title}</div>{#if a.error}<div class="err">{a.error}</div>{/if}</td>
+                <td class="muted" style="white-space:nowrap">{ago(a.updated_at)}</td>
+              </tr>
+            {:else}
+              {@const h = f.work}
+              <tr>
+                <td style="white-space:nowrap"><span class="chip {tone(h.kind)}">{HISTORY[h.kind] ?? h.kind}</span></td>
+                <td>{#if h.title_id}<a href="#/title/{h.title_id}"><b>{h.title ?? 'Removed title'}</b></a>{/if}{#if outcome(h)}<div class="muted small">{outcome(h)}</div>{/if}{#if h.data.reason}<div class="err">{h.data.reason}</div>{/if}</td>
+                <td class="muted" style="white-space:nowrap">{ago(h.ts)}</td>
+              </tr>
+            {/if}
           {/each}
         </tbody>
       </table>
@@ -357,7 +378,8 @@
               <td>
                 {#if h.title_id}<a href="#/title/{h.title_id}"><b>{h.title ?? 'Removed title'}</b></a>{/if}
                 {#if h.data.covers}<span class="muted"> {h.data.covers}</span>{/if}
-                <div class="mono faint break">{h.data.release ?? h.data.path ?? ''}</div>
+                <div class="mono faint break">{h.data.release ?? h.data.path ?? h.data.to ?? ''}</div>
+                {#if outcome(h)}<div class="muted small">{outcome(h)}</div>{/if}
                 {#if h.data.reason}<div class="muted small">{h.data.reason}</div>{/if}
               </td>
               <td class="muted" style="white-space:nowrap">{ago(h.ts)}</td>

@@ -446,6 +446,7 @@ impl App {
                         Err(e) if e.to_string() == CALLED_OFF => tracing::info!(title = %name, "a compact version was cancelled"),
                         Err(e) => {
                             tracing::warn!(title = %name, error = %format!("{e:#}"), "could not make a compact version");
+                            let _ = app.db.add_history(Some(title_id).filter(|t| *t != 0), "compact_failed", json!({"reason": format!("{e:#}")}));
                             let _ = app.db.add_attention("config", Some(title_id).filter(|t| *t != 0), None, &format!("A compact version of {name} could not be made: {e:#}. The original is untouched."), json!({}));
                             app.emit(Event::Attention);
                         }

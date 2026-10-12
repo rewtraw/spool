@@ -37,9 +37,18 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
             })
         })
         .collect();
+    // Work Spool finished that was not a download: compact versions made and titles moved.
+    let done: Vec<Value> = app
+        .db
+        .history(None, 400)?
+        .into_iter()
+        .filter(|h| matches!(h.kind.as_str(), "compact_made" | "compact_failed" | "moved"))
+        .take(25)
+        .map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "title_id": h.title_id, "title": h.title_id.and_then(|id| titles.get(&id)).map(|t| t.title.clone()), "data": h.data}))
+        .collect();
     let known: Vec<&str> = recent.iter().filter_map(|a| a.job_id.as_deref()).collect();
     let orphans: Vec<&spool_nntp::JobStatus> = jobs.iter().filter(|j| !known.contains(&j.id.as_str())).collect();
-    Ok(Json(json!({"items": rows, "orphan_jobs": orphans, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}, "moves": app.moves_shown(), "compact": app.compacts_shown()})))
+    Ok(Json(json!({"items": rows, "orphan_jobs": orphans, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}, "moves": app.moves_shown(), "compact": app.compacts_shown(), "done": done})))
 }
 
 pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): Path<(i64, String)>, body: Option<Json<Value>>) -> R<Value> {

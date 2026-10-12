@@ -3026,6 +3026,10 @@ async fn a_compact_version_is_made_beside_the_original_and_kept_as_a_version_of_
     assert!(info.height == 120 && info.video_codec.to_lowercase().contains("265") && compact.size > 0, "{}x{} {} {} bytes", info.width, info.height, info.video_codec, compact.size);
     assert_eq!(std::fs::read(home.join("Heat (1995) [Bluray-1080p].mkv")).unwrap(), video, "the original is untouched");
     assert!(w.app.db.history(Some(heat.id), 10).unwrap().iter().any(|h| h.kind == "compact_made"));
+    // And Activity lists it among what has finished, with what it came to.
+    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    let done = activity["done"].as_array().unwrap().iter().find(|d| d["kind"] == "compact_made" && d["title"] == "Heat").cloned().unwrap_or_else(|| panic!("{}", activity["done"]));
+    assert!(done["data"]["bytes"].as_u64() > Some(0) && done["data"]["from_bytes"].as_u64() == Some(video.len() as u64), "{done}");
     assert!(w.app.db.get_setting::<Vec<i64>>("compact_waiting").is_empty(), "nothing is left written down once the line is done");
 
     // An episode's compact version is a version of its file; the episode's file is still the original.
