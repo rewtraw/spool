@@ -322,6 +322,14 @@ pub fn verify_password(stored: &str, given: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_saved_before_plex_could_be_turned_off_have_it_on() {
+        let g: super::General = serde_json::from_str(r#"{"plex_url":"http://plex:32400","plex_token":"t"}"#).unwrap();
+        assert!(g.plex_on && g.plex_ready());
+        let off: super::General = serde_json::from_str(r#"{"plex_url":"http://plex:32400","plex_token":"t","plex_on":false}"#).unwrap();
+        assert!(!off.plex_ready() && !off.plex_token.is_empty());
+    }
+
     use super::*;
 
     #[test]

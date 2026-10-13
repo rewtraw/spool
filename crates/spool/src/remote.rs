@@ -1091,7 +1091,8 @@ impl App {
         } else {
             self.engine.resume_all();
         }
-        for r in self.remotes() {
+        // Only a machine that downloads has downloads to pause.
+        for r in self.remotes().into_iter().filter(|r| r.seen().grants.work) {
             tokio::spawn(async move {
                 if let Err(e) = r.post(&format!("/link/work/v1/queue/{}", if pause { "pause" } else { "resume" }), json!({}), Duration::from_secs(15)).await {
                     tracing::warn!(helper = %r.conf.name, error = %format!("{e:#}"), "could not pause or resume the helper's downloads");

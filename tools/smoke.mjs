@@ -130,7 +130,7 @@ const pages = [
   ['settings-indexers', '#/settings/indexers', [/Add an indexer/], false],
   ['settings-profiles', '#/settings/profiles', ['Hard size limits'], true],
   ['settings-naming', '#/settings/naming', ['Renaming'], true],
-  ['settings-plex', '#/settings/plex', [/Library match|Plex is not set up/], true],
+  ['settings-plex', '#/settings/plex', [/Library match|Plex is not set up|Plex is turned off/], true],
   ['settings-compact', '#/settings/compact', ['How they are made', 'The library'], true],
   ['settings-space', '#/settings/space', ['Free'], true],
   ['settings-maintenance', '#/settings/maintenance', ['Read indexer feeds', 'Recycled files'], true],
