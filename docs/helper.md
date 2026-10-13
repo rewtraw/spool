@@ -36,7 +36,7 @@ A helper is started with a list of folders and works only inside them. Every pat
 | `SPOOL_HELPER_ROOTS` | Folders it may file into and move titles within, separated by colons. |
 | `SPOOL_HELPER_READ_ROOTS` | Folders it may read and copy from. It never writes to them, moves anything out of them or removes anything from them. |
 | `SPOOL_HELPER_DOWNLOADS` | The folder it downloads into. It clears away only finished downloads of its own there. |
-| `SPOOL_HELPER_GRANTS` | What it does for whoever holds the key: any of `see`, `play` and `work`, separated by commas. Left out, all three. Without `work` it downloads, files and moves nothing; without `play` it hands no file to a player. |
+| `SPOOL_HELPER_GRANTS` | What it does for whoever holds the key: any of `see`, `play`, `work` and `make`, separated by commas. Left out, all four. Without `work` it downloads, files and moves nothing; without `play` it hands no file to a player. `make` is making compact versions on video hardware, which a NAS has none of; a machine started with `make` alone needs no folders at all. See [More machines to make them](compact.md#more-machines-to-make-them). |
 
 Mount a folder it should only read as read-only in the container as well, so that the system refuses a write whatever is asked.
 

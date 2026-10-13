@@ -459,6 +459,11 @@ pub fn rank(mut list: Vec<Candidate>, scene_name: &str, group: Option<&str>) -> 
     list
 }
 
+/// Where ffmpeg is on this machine, wherever it is usually put.
+pub fn ffmpeg_installed() -> Option<PathBuf> {
+    ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].iter().map(PathBuf::from).find(|p| p.is_file()).or_else(|| std::env::var("PATH").ok().and_then(|p| p.split(':').map(|d| Path::new(d).join("ffmpeg")).find(|p| p.is_file())))
+}
+
 impl App {
     pub fn ffmpeg_path(&self) -> Option<PathBuf> {
         let configured = self.settings.general().ffprobe_path;
@@ -468,7 +473,7 @@ impl App {
                 return Some(beside);
             }
         }
-        ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].iter().map(PathBuf::from).find(|p| p.is_file()).or_else(|| std::env::var("PATH").ok().and_then(|p| p.split(':').map(|d| Path::new(d).join("ffmpeg")).find(|p| p.is_file())))
+        ffmpeg_installed()
     }
 
     /// Listen to a video's first soundtrack and return the shape of its speech.

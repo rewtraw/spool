@@ -51,6 +51,10 @@ pub struct Seen {
     pub play: bool,
     /// It looks through its own folders when asked, and says what is in them.
     pub see: bool,
+    /// It makes compact versions on its video hardware, and hands them back.
+    pub make: bool,
+    /// What it would make them with: "hardware", "software" or "none".
+    pub make_means: String,
     /// What it allows this Spool.
     pub grants: Grants,
     /// The folders it shares.
@@ -100,6 +104,10 @@ impl std::error::Error for Fail {}
 
 type Asked<T> = std::result::Result<T, Fail>;
 
+/// The name tickets to read a film for a compact version are made out in, where a share's
+/// name would be.
+const SOURCE: &str = "make";
+
 /// How long a helper is left to answer when it has nothing new to say, in seconds.
 const HOLD: u64 = 25;
 
@@ -122,7 +130,12 @@ pub struct Remote {
     /// have in it yet.
     fresh: Mutex<HashMap<String, (Instant, JobStatus)>>,
     seen: Mutex<Seen>,
+    /// It lately could not make a compact version it was given, and is given no more until then.
+    make_rest: Mutex<Option<Instant>>,
 }
+
+/// How long a machine that could not make a compact version is given no more of them.
+const MAKE_REST: Duration = Duration::from_secs(600);
 
 /// Link with the Spool at an address by the code it gave: the two agree a key, which is
 /// returned once the other side has taken it. Nothing is kept here; whoever asked puts the
@@ -226,7 +239,7 @@ impl Remote {
     fn new(conf: LinkConf) -> Remote {
         let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(4)).build().expect("http client");
         let signer = Signer::new(&conf.key);
-        Remote { conf, http, signer, at: Mutex::new(None), tailnet: Mutex::new(None), following: Default::default(), sought: Mutex::new(None), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()) }
+        Remote { conf, http, signer, at: Mutex::new(None), tailnet: Mutex::new(None), following: Default::default(), sought: Mutex::new(None), jobs: Mutex::new(vec![]), fresh: Mutex::new(HashMap::new()), seen: Mutex::new(Seen::default()), make_rest: Mutex::new(None) }
     }
 
     /// Where a player at this address can take a file from the linked machine itself: an
@@ -266,6 +279,74 @@ impl Remote {
 
     pub fn seen(&self) -> Seen {
         self.seen.lock().clone()
+    }
+
+    /// Whether any of the library is its to hold or work on. One that only makes compact
+    /// versions holds none: its being away is no trouble, and nobody is told of it.
+    pub fn holds_library(&self) -> bool {
+        let g = self.seen.lock().grants;
+        !self.conf.folders.is_empty() || g.work || g.play || g.see
+    }
+
+    /// Whether it is to be given a compact version to make now: it offers to, its settings
+    /// say now is a time for it, and it has not just failed at one.
+    pub fn makes(&self) -> bool {
+        let seen = self.seen.lock();
+        seen.reachable && seen.make && self.conf.make.now() && self.make_rest.lock().is_none_or(|until| Instant::now() >= until)
+    }
+
+    /// Give it no more compact versions to make for a while.
+    pub fn rest_from_making(&self) {
+        *self.make_rest.lock() = Some(Instant::now() + MAKE_REST);
+    }
+
+    /// A ticket on which it may read one file from this Spool, to make a compact version of.
+    pub fn source_ticket(&self, file_id: i64) -> String {
+        self.signer.issue(SOURCE, &file_id.to_string(), crate::db::now().max(0) as u64)
+    }
+
+    /// The file a ticket of ours lets it read, if the ticket is good.
+    pub fn source_of(&self, token: &str) -> Option<i64> {
+        let t = self.signer.verify(token, crate::db::now().max(0) as u64).ok()?;
+        (t.share == SOURCE).then(|| t.rel.parse().ok()).flatten()
+    }
+
+    /// Ask it to make a compact version. See [`crate::helper::make`].
+    pub async fn make_start(&self, ask: Value) -> std::result::Result<(), Fail> {
+        self.post("/link/make/v1/jobs", ask, Duration::from_secs(20)).await.map(|_| ())
+    }
+
+    pub async fn make_state(&self, id: &str) -> std::result::Result<Value, Fail> {
+        self.get(&format!("/link/make/v1/jobs/{id}")).await
+    }
+
+    /// Have it stop making one, or let go of one that has been taken.
+    pub async fn make_end(&self, id: &str) {
+        let url = format!("{}/link/make/v1/jobs/{id}", self.conf.url.trim_end_matches('/'));
+        let _ = self.send(self.http.delete(url), Duration::from_secs(8)).await;
+    }
+
+    /// Bring what it made to a file here, counting the bytes as they come.
+    pub async fn make_fetch(&self, id: &str, to: &Path, got: &std::sync::atomic::AtomicU64, stop: &std::sync::atomic::AtomicBool) -> Result<u64> {
+        use tokio::io::AsyncWriteExt;
+        let url = format!("{}/link/make/v1/jobs/{id}/file", self.conf.url.trim_end_matches('/'));
+        let mut resp = tokio::time::timeout(Duration::from_secs(30), self.http.get(url).bearer_auth(&self.conf.key).send()).await.map_err(|_| anyhow!("it did not begin to send"))?.map_err(|e| anyhow!("{}", e.without_url()))?;
+        if !resp.status().is_success() {
+            bail!("it would not hand it over: {}", resp.status());
+        }
+        let mut file = tokio::fs::File::create(to).await?;
+        let mut all = 0u64;
+        // A machine that stops sending is not waited on for ever.
+        while let Some(chunk) = tokio::time::timeout(Duration::from_secs(60), resp.chunk()).await.map_err(|_| anyhow!("it stopped sending"))?.map_err(|e| anyhow!("{}", e.without_url()))? {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                bail!("it was called off");
+            }
+            file.write_all(&chunk).await?;
+            all += chunk.len() as u64;
+            got.store(all, std::sync::atomic::Ordering::Relaxed);
+        }
+        file.sync_all().await?;
+        Ok(all)
     }
 
     /// What marks a download as this helper's among all of Spool's.
@@ -450,7 +531,7 @@ impl Remote {
     /// What is known of the helper when it does not answer.
     fn away(&self, why: String) {
         let mut seen = self.seen.lock();
-        (seen.asked, seen.reachable, seen.usable, seen.play, seen.see, seen.problem, seen.again) = (true, false, false, false, false, why, None);
+        (seen.asked, seen.reachable, seen.usable, seen.play, seen.see, seen.make, seen.problem, seen.again) = (true, false, false, false, false, false, why, None);
     }
 
     /// Find out what the helper is: what it speaks, what it allows, and what it shares.
@@ -464,12 +545,18 @@ impl Remote {
                     let work = hello.grants.work && agreed(crate::link::WORK, &hello.protocols.work).is_some();
                     next.play = hello.grants.play && agreed(crate::link::PLAY, &hello.protocols.play).is_some();
                     next.see = hello.grants.see && agreed(crate::link::SEE, &hello.protocols.see).is_some();
+                    let make = hello.grants.make && agreed(crate::link::MAKE, &hello.protocols.make).is_some();
                     (next.boot, next.version, next.grants, next.shares) = (hello.boot, hello.version, hello.grants, hello.shares);
+                    if make {
+                        // Only video hardware is worth sending a film across the network to.
+                        next.make_means = self.get("/link/make/v1/info").await.ok().and_then(|i| i["means"].as_str().map(str::to_string)).unwrap_or_default();
+                        next.make = next.make_means == "hardware";
+                    }
                     if work {
                         self.meet_work(&mut next).await;
                     } else if hello.grants.work {
                         next.problem = format!("{name}'s helper is version {} and does not speak of work as this Spool does; update the two", next.version);
-                    } else if !(next.play || next.see) {
+                    } else if !(next.play || next.see || make) {
                         next.problem = format!("{name}'s helper allows this Spool nothing it can use");
                     }
                 }
@@ -699,8 +786,11 @@ impl App {
         if was.asked && was.reachable != now.reachable {
             if now.reachable {
                 tracing::info!(helper = %r.conf.name, "the helper is back");
-            } else {
+            } else if r.holds_library() {
                 tracing::warn!(helper = %r.conf.name, problem = %now.problem, "the helper cannot be reached; downloads for its part of the library run here until it is back");
+            } else {
+                // A machine that only makes compact versions may be asleep, and nothing waits on it.
+                tracing::info!(machine = %r.conf.name, "a linked machine that makes compact versions cannot be reached; it is given none until it is back");
             }
             self.emit(Event::Locations);
         }
@@ -708,7 +798,9 @@ impl App {
             self.on_job(job);
         }
         self.settle_folders(r, false).await;
-        let problems: Vec<String> = self.remotes().iter().map(|r| r.seen().problem).filter(|p| !p.is_empty()).collect();
+        // A machine that has come back, or whose hours have come, takes up the line.
+        self.compact_start();
+        let problems: Vec<String> = self.remotes().iter().filter(|r| r.holds_library()).map(|r| r.seen().problem).filter(|p| !p.is_empty()).collect();
         let message = (!problems.is_empty()).then(|| problems.join(" "));
         if self.db.set_standing_attention("helper", message.as_deref(), json!({})).unwrap_or(false) {
             self.emit(Event::Attention);
@@ -817,7 +909,7 @@ impl App {
     }
 
     /// Whether a helper is still one of those in the settings, as it was when it was made.
-    fn listed(&self, r: &Arc<Remote>) -> bool {
+    pub(crate) fn listed(&self, r: &Arc<Remote>) -> bool {
         self.remotes.lock().iter().any(|x| Arc::ptr_eq(x, r))
     }
 

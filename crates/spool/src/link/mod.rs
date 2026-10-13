@@ -2,7 +2,8 @@
 //!
 //! A Spool may be linked to another: a helper on a NAS today (see [`crate::helper`]), another
 //! household's Spool later. What a link allows is the only difference between them, and it
-//! is set by the side that gives it: [`Grants`]. This holds what both ends of a link share:
+//! is set by the side that gives it: [`Grants`]. A machine with no disks of the library's at
+//! all may be linked only to make compact versions (see [`crate::helper::make`]). This holds what both ends of a link share:
 //! the grants, how each says what it speaks, the folders one shares with the other, and the
 //! ticket a file is played on (see [`ticket`]).
 //!
@@ -23,6 +24,7 @@ use std::path::{Path, PathBuf};
 pub const WORK: &[u32] = &[1];
 pub const PLAY: &[u32] = &[1];
 pub const SEE: &[u32] = &[1];
+pub const MAKE: &[u32] = &[1];
 
 /// What one side of a link lets the other do. Nothing, unless it says so.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,10 +36,12 @@ pub struct Grants {
     pub play: bool,
     /// Download, file, move and convert on this machine's disks, as directed.
     pub work: bool,
+    /// Make a compact version of a film it is sent, and hand it back.
+    pub make: bool,
 }
 
 impl Grants {
-    pub const ALL: Grants = Grants { see: true, play: true, work: true };
+    pub const ALL: Grants = Grants { see: true, play: true, work: true, make: true };
 
     /// From a list such as `see,play`, which is how a container is told.
     pub fn parse(list: &str) -> Result<Grants, String> {
@@ -47,14 +51,15 @@ impl Grants {
                 "see" => g.see = true,
                 "play" => g.play = true,
                 "work" => g.work = true,
-                other => return Err(format!("{other} is not something a link can allow; the three are see, play and work")),
+                "make" => g.make = true,
+                other => return Err(format!("{other} is not something a link can allow; the four are see, play, work and make")),
             }
         }
         Ok(g)
     }
 
     pub fn words(&self) -> Vec<&'static str> {
-        [(self.see, "see"), (self.play, "play"), (self.work, "work")].into_iter().filter(|g| g.0).map(|g| g.1).collect()
+        [(self.see, "see"), (self.play, "play"), (self.work, "work"), (self.make, "make")].into_iter().filter(|g| g.0).map(|g| g.1).collect()
     }
 }
 
@@ -65,13 +70,14 @@ pub struct Protocols {
     pub work: Vec<u32>,
     pub play: Vec<u32>,
     pub see: Vec<u32>,
+    pub make: Vec<u32>,
 }
 
 impl Protocols {
     /// What this Spool speaks, of the things it allows the other side.
     pub fn allowed(g: Grants) -> Protocols {
         let of = |granted: bool, versions: &[u32]| if granted { versions.to_vec() } else { vec![] };
-        Protocols { work: of(g.work, WORK), play: of(g.play, PLAY), see: of(g.see, SEE) }
+        Protocols { work: of(g.work, WORK), play: of(g.play, PLAY), see: of(g.see, SEE), make: of(g.make, MAKE) }
     }
 }
 
@@ -173,10 +179,11 @@ mod tests {
 
     #[test]
     fn grants_are_read_from_a_list_and_nothing_is_allowed_unasked() {
-        assert_eq!(Grants::parse("see, Play").unwrap(), Grants { see: true, play: true, work: false });
+        assert_eq!(Grants::parse("see, Play").unwrap(), Grants { see: true, play: true, ..Default::default() });
+        assert_eq!(Grants::parse("make").unwrap(), Grants { make: true, ..Default::default() });
         assert_eq!(Grants::parse("").unwrap(), Grants::default());
         assert!(Grants::parse("see,everything").is_err());
-        assert_eq!(Grants::ALL.words(), ["see", "play", "work"]);
+        assert_eq!(Grants::ALL.words(), ["see", "play", "work", "make"]);
         assert_eq!(serde_json::from_str::<Grants>(r#"{"play":true,"later":true}"#).unwrap(), Grants { play: true, ..Default::default() });
     }
 

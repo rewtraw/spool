@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a class="on" aria-current="page" href="compact.html">Compact versions</a><a class="sub" href="#what-one-is">What one is</a><a class="sub" href="#making-them">Making them</a><a class="sub" href="#how-long-and-with-what">How long, and with what</a><a class="sub" href="#the-settings">The settings</a><a class="sub" href="#where-they-are-kept">Where they are kept</a><a class="sub" href="#playing-one">Playing one</a><a class="sub" href="#keeping-only-the-compact-version">Keeping only the compact version</a><a class="sub" href="#what-happens-when-things-change">What happens when things change</a><a class="sub" href="#limits">Limits</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a class="on" aria-current="page" href="compact.html">Compact versions</a><a class="sub" href="#what-one-is">What one is</a><a class="sub" href="#making-them">Making them</a><a class="sub" href="#how-long-and-with-what">How long, and with what</a><a class="sub" href="#more-machines-to-make-them">More machines to make them</a><a class="sub" href="#the-settings">The settings</a><a class="sub" href="#where-they-are-kept">Where they are kept</a><a class="sub" href="#playing-one">Playing one</a><a class="sub" href="#keeping-only-the-compact-version">Keeping only the compact version</a><a class="sub" href="#what-happens-when-things-change">What happens when things change</a><a class="sub" href="#limits">Limits</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -190,7 +190,17 @@
 </tbody></table></div>
 <p>Measured on a Mac mini with an M4. The video hardware does the reading, the resizing and the writing, and the processor is left nearly idle; when it cannot read a file, Spool falls back to the processor for the reading, and then, if you allow it, for everything.</p>
 <p>On Linux Spool encodes on the processor.</p>
-<p>A <a href="helper.html">helper</a> does not make compact versions. They are made on the machine Spool runs on, which reads the original across the share and writes the result back.</p>
+<h2 id="more-machines-to-make-them"><a href="#more-machines-to-make-them">More machines to make them</a></h2>
+<p>Making compact versions is the one job that goes faster with more computers. Any Mac in the house with Apple silicon can make them alongside the machine Spool runs on, and each one added makes about as many again.</p>
+<p>Such a machine holds none of the library and needs no shared folder. Spool gives it one film at a time. It reads the film from Spool over the network, makes the compact version on its video hardware, and Spool brings the result back, checks it and files it as it would one made at home. Spool&#39;s own machine goes on making its own meanwhile. Activity shows each film with the machine making it.</p>
+<p><strong>To add one</strong>, from a checkout of Spool on any Mac:</p>
+<pre><code>deploy/maker.sh the-other-mac     # an SSH host, or &quot;local&quot; for the Mac you are sitting at
+</code></pre>
+<p>It installs Spool there to start with the machine, allowed only to make, and prints a code. In Spool, under Settings, Library, the machine appears as found on the network: type the code and the two are linked. The machine needs ffmpeg (<code>brew install ffmpeg</code>) and room for one compact version at a time, a few gigabytes.</p>
+<p><strong>When it is given work</strong> is set on its card in Settings, Library: whenever there is any, overnight only (eleven until seven), or never. Overnight suits a machine somebody works at.</p>
+<p>What it is trusted with is small. It is started allowing <code>make</code> and nothing else, so it downloads nothing, files nothing and is shown nothing of the library. It reads only the one film it has been given, on a ticket made out for that film, and only from the machine that asked. It keeps what it makes in a folder of its own until Spool has taken it.</p>
+<p>If it is switched off, asleep or restarted part-way, the film goes back in the line and another machine takes it; the machine is left alone for ten minutes and then offered work again. A film it finds it cannot make is reported as it would be at home.</p>
+<p>Only video hardware is used this way. A linked machine without it is given nothing, since sending a film across the network to be made slowly gains nothing. That includes a <a href="helper.html">helper</a> on a NAS, which is why turning this on changes nothing there.</p>
 <h2 id="the-settings"><a href="#the-settings">The settings</a></h2>
 <p>Under Settings, Compact versions.</p>
 <div class="scroll"><table>
@@ -248,6 +258,7 @@
 <ul>
 <li>Films and episodes only, one compact version of each file.</li>
 <li>A film that has several cuts gets a compact version of its main file.</li>
+<li>Other machines make them only on a Mac&#39;s video hardware. A Linux or Windows machine with a graphics card cannot yet be used.</li>
 <li>Nothing is converted while it is played. A player asking for a smaller stream of a file that has no compact version gets the original.</li>
 </ul>
 <nav class="around" aria-label="Other guides"><a class="prev" href="collections.html"><span>Before</span>Collections and anime</a><a class="next" href="local-files.html"><span>Next</span>Files Spool recognises in a title's folder</a></nav>

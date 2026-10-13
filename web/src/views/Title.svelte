@@ -124,8 +124,8 @@
       return;
     }
     const look = async () => {
-      making = (await api.get<any>('/activity').catch(() => null))?.compact?.now ?? null;
-      if (making?.title_id !== id) load();
+      making = ((await api.get<any>('/activity').catch(() => null))?.compact?.now ?? []).find((n: any) => n.title_id === id) ?? null;
+      if (!making) load();
     };
     look();
     const timer = setInterval(look, 3000);

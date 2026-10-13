@@ -11,7 +11,7 @@
   const c = $derived(general?.compact);
   const managed = $derived(places.filter((p) => p.id && p.manage));
   const readOnly = $derived(places.filter((p) => p.id && !p.manage));
-  const making = $derived(report?.making?.now || report?.making?.waiting_count > 0);
+  const making = $derived(report?.making?.now?.length > 0 || report?.making?.waiting_count > 0);
   // A film of two hours at these settings, to give the numbers some meaning.
   const twoHours = $derived(c ? ((c.video_kbps + c.audio_kbps) * 1000 * 7200) / 8 : 0);
 
@@ -111,7 +111,7 @@
     {:else}
       <p><b>{report.made.files}</b> compact {report.made.files === 1 ? 'version' : 'versions'}{#if report.made.files}, {bytes(report.made.bytes)} beside {bytes(report.made.original_bytes)} of originals{/if}.</p>
       {#if making}
-        <p class="muted">{report.making.now ? `Making one of ${report.making.now.title}${report.making.now.episode ? ` ${report.making.now.episode}` : ''}` : 'Starting'}{report.making.waiting_count ? `, with ${report.making.waiting_count} waiting` : ''}. <a class="link" href="#/activity">Progress is in Activity</a>.</p>
+        <p class="muted">{report.making.now.length ? `Making ${report.making.now.map((n: any) => `${n.title}${n.episode ? ` ${n.episode}` : ''}${n.by ? ` on ${n.by}` : ''}`).join(', ')}` : 'Starting'}{report.making.waiting_count ? `, with ${report.making.waiting_count} waiting` : ''}. <a class="link" href="#/activity">Progress is in Activity</a>.</p>
         {#if report.making.waiting_count}<div><button class="btn small ghost" type="button" onclick={cancelAll}>Cancel all waiting</button></div>{/if}
       {/if}
       {#if report.would.files}

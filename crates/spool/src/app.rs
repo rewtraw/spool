@@ -130,6 +130,9 @@ pub struct Inner {
     /// Titles being moved between locations.
     pub moves: Mutex<crate::relocate::Moves>,
     pub encodes: Mutex<crate::compact::Encodes>,
+    /// The port this Spool answers on, once it is listening: where a linked machine reads
+    /// a film it is to make a compact version of.
+    pub port: std::sync::OnceLock<u16>,
     /// The anime id list, once read.
     pub anime_list: Mutex<Option<Arc<crate::anime::Ids>>>,
     pub sessions: Mutex<HashSet<String>>,
@@ -313,6 +316,7 @@ impl App {
             anime_list: Mutex::new(None),
             moves: Mutex::new(Default::default()),
             encodes: Mutex::new(Default::default()),
+            port: Default::default(),
             last_playing: Default::default(),
             playing: Default::default(),
             opened: Default::default(),

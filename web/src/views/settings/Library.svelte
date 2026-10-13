@@ -59,7 +59,7 @@
     else toast(`Linked with ${h.name}, but the settings were not saved. Put right what is wrong and save: the key is kept on this page until you do.`, 'error');
   }
   function addLink(from?: { name: string; url: string }) {
-    (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', folders: [], play_near: true });
+    (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', folders: [], play_near: true, make: 'always' });
     if (from) quick.add(general.links.at(-1));
   }
   // Links begun from one that was found: its name and address are known, so the code is all there is to ask.
@@ -76,7 +76,7 @@
   }
   // What a linked Spool allows this one, in words.
   const allows = (seen: any) => {
-    const words = ['see', 'play', 'work'].filter((g) => seen.grants?.[g]);
+    const words = ['see', 'play', 'work', 'make'].filter((g) => seen.grants?.[g]);
     return words.length ? `allows ${words.length > 1 ? `${words.slice(0, -1).join(', ')} and ${words.at(-1)}` : words[0]}` : '';
   };
   $effect(() => {
@@ -253,6 +253,16 @@
       {#if now?.seen.problem}<p class="small warn">{now.seen.problem}</p>{/if}
       <label class="check"><input type="checkbox" bind:checked={h.play_near} /> Send players on the same network straight to it</label>
       <span class="hint">A player on the same network as {h.name || 'this machine'} takes a film that is on its disks from it directly, with a ticket for that one film, and the film no longer passes through here. A device that reaches this Spool over Tailscale counts as on the network when it is at home. Away from home it is sent to {h.name || 'the machine'} over Tailscale, if {h.name || 'the machine'} is on your Tailscale under this name; if not, and for every other player, the film comes through this Spool.</span>
+      {#if now?.seen.grants?.make}
+        <label class="field">Give it compact versions to make
+          <select class="input" bind:value={h.make}>
+            <option value="always">Whenever there are any</option>
+            <option value="night">Overnight, from eleven until seven</option>
+            <option value="never">Never</option>
+          </select>
+          <span class="hint">{now.seen.make ? `${h.name || 'It'} makes them on its video hardware. It reads each film from this machine, makes the compact version and hands it back; this machine goes on making its own meanwhile. One begun before seven in the morning is finished.` : `${h.name || 'It'} offers to make them but has ${now.seen.make_means === 'software' ? 'no video hardware, and a film is not sent across the network to be made slowly' : 'no ffmpeg installed'}, so it is given none.`}</span>
+        </label>
+      {/if}
       {#if !h.id && quick.has(h)}
         <label class="field">The code {h.name} gave
           <div class="row"><input class="input mono grow" inputmode="numeric" autocomplete="off" bind:value={codes[i]} placeholder="1234 5678" /><button class="btn primary" type="button" disabled={!(codes[i] ?? '').trim() || linking === i} onclick={() => linkWithCode(h, i)}>{linking === i ? 'Linking…' : 'Link'}</button></div>
@@ -318,8 +328,8 @@
           <div class="row wrap">
             <b>{h.name || 'A linked Spool'}</b>
             {#if now}
-              <span class="small" class:warn={!now.seen.usable || !now.seen.downloads_seen}>
-                {[!now.seen.asked ? 'Not asked yet' : !now.seen.reachable ? 'Cannot be reached' : !now.seen.usable && !now.seen.play ? 'Cannot be used' : 'Answering',
+              <span class="small" class:warn={now.seen.grants?.work ? !now.seen.usable || !now.seen.downloads_seen : !now.seen.reachable}>
+                {[!now.seen.asked ? 'Not asked yet' : !now.seen.reachable ? 'Cannot be reached' : !now.seen.usable && !now.seen.play && !now.seen.make ? 'Cannot be used' : 'Answering',
                   now.seen.reachable ? allows(now.seen) : '',
                   now.tailnet ? 'also on Tailscale' : '',
                   now.seen.usable && now.downloads ? `${now.downloads} ${now.downloads === 1 ? 'download' : 'downloads'} running` : '',

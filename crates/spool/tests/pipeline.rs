@@ -3687,7 +3687,7 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     // The two have settled what the helper allows and what it shares.
     let (_, links) = call(&api, "GET", "/api/links", Value::Null).await;
     let seen = &links[0]["seen"];
-    assert_eq!((seen["usable"].as_bool(), seen["play"].as_bool(), seen["grants"].to_string().as_str()), (Some(true), Some(true), r#"{"play":true,"see":true,"work":true}"#), "{links}");
+    assert_eq!((seen["usable"].as_bool(), seen["play"].as_bool(), seen["grants"].to_string().as_str()), (Some(true), Some(true), r#"{"make":true,"play":true,"see":true,"work":true}"#), "{links}");
     let share = |name: &str| seen["shares"].as_array().unwrap().iter().find(|s| s["path"].as_str().unwrap().ends_with(name)).unwrap()["id"].as_str().unwrap().to_string();
 
     // Players reach Spool on a socket, and are known by the address they come from.
@@ -3848,12 +3848,12 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     let ticket_for = |hello: &Value| spool::link::ticket::Signer::new(KEY).issue(hello["shares"][0]["id"].as_str().unwrap_or("none"), "Alpha (2001)/Alpha (2001).mkv", now);
 
     // One that may be seen and played from, and does no work: it says so, and holds to it.
-    let (helper, listener, url, root) = start("friend", Grants { see: true, play: true, work: false }).await;
+    let (helper, listener, url, root) = start("friend", Grants { see: true, play: true, ..Default::default() }).await;
     let router = helper.router();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     assert_eq!(http.get(format!("{url}/link")).send().await.unwrap().status().as_u16(), 401, "it says nothing of itself without the key");
     let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
-    assert_eq!((hello["grants"].to_string().as_str(), hello["protocols"].to_string().as_str()), (r#"{"play":true,"see":true,"work":false}"#, r#"{"play":[1],"see":[1],"work":[]}"#), "{hello}");
+    assert_eq!((hello["grants"].to_string().as_str(), hello["protocols"].to_string().as_str()), (r#"{"make":false,"play":true,"see":true,"work":false}"#, r#"{"make":[],"play":[1],"see":[1],"work":[]}"#), "{hello}");
     for (method, path) in [("GET", "/link/work/v1/info"), ("GET", "/link/work/v1/jobs"), ("POST", "/link/work/v1/fs/remove"), ("POST", "/link/work/v1/moves"), ("PUT", "/link/work/v1/config")] {
         let resp = http.request(method.parse().unwrap(), format!("{url}{path}")).bearer_auth(KEY).json(&json!({"path": root.join("films/Alpha (2001)")})).send().await.unwrap();
         assert_eq!(resp.status().as_u16(), 403, "{method} {path}");
@@ -3862,11 +3862,11 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     assert_eq!(http.get(format!("{url}/link/play/v1/file?ticket={}", ticket_for(&hello))).send().await.unwrap().text().await.unwrap(), "a film");
 
     // One that works and hands nothing to players.
-    let (helper, listener, url, _) = start("worker", Grants { see: false, play: false, work: true }).await;
+    let (helper, listener, url, _) = start("worker", Grants { work: true, ..Default::default() }).await;
     let router = helper.router();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
-    assert_eq!(hello["protocols"].to_string(), r#"{"play":[],"see":[],"work":[1]}"#);
+    assert_eq!(hello["protocols"].to_string(), r#"{"make":[],"play":[],"see":[],"work":[1]}"#);
     let asked = http.post(format!("{url}/link/see/v1/survey")).bearer_auth(KEY).json(&json!({"share": hello["shares"][0]["id"], "rel": "Alpha (2001)", "kind": "movie"})).send().await.unwrap();
     assert_eq!(asked.status().as_u16(), 403, "it was not started to say what is in its folders");
     assert_eq!(http.get(format!("{url}/link/work/v1/info")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 200);
@@ -3995,6 +3995,112 @@ async fn a_report_that_cannot_be_read_and_an_answer_that_is_lost_cost_nothing() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
+    use serde_json::{json, Value};
+    use spool::link::Grants;
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let http = reqwest::Client::new();
+    const KEY: &str = "a-key-of-sufficient-length";
+
+    // Spool answers on the network, since the other machine reads each film from it.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let here = format!("http://{}", listener.local_addr().unwrap());
+    w.app.port.set(listener.local_addr().unwrap().port()).unwrap();
+    let served = api.clone();
+    tokio::spawn(async move { axum::serve(listener, served).await.unwrap() });
+
+    // A machine with none of the library on it, started with no folders at all.
+    assert!(spool::helper::Conf { key: KEY.into(), roots: vec![], read_roots: vec![], downloads: Default::default(), code: None, grants: Grants { make: true, see: true, ..Default::default() } }.checked().is_err(), "folders are needed to show what is in them");
+    let conf = spool::helper::Conf { key: KEY.into(), roots: vec![], read_roots: vec![], downloads: Default::default(), code: None, grants: Grants { make: true, ..Default::default() } }.checked().unwrap();
+    let helper = spool::helper::Helper::start(&w.root.join("maker-data"), conf).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let router = helper.router();
+    tokio::spawn(async move { axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap() });
+    let hello: Value = http.get(format!("{url}/link")).bearer_auth(KEY).send().await.unwrap().json().await.unwrap();
+    assert_eq!((hello["protocols"].to_string().as_str(), hello["shares"].to_string().as_str()), (r#"{"make":[1],"play":[],"see":[],"work":[]}"#, "[]"), "{hello}");
+    assert_eq!(http.get(format!("{url}/link/work/v1/info")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 403);
+    assert_eq!(http.get(format!("{url}/link/make/v1/info")).send().await.unwrap().status().as_u16(), 401, "nothing is said without the key");
+    // It reads a film only from where the app says films are read, on the machine that asked.
+    for path in ["/api/settings/general", "/link/source/1?ticket=x y", "http://elsewhere/link/source/1"] {
+        let asked = http.post(format!("{url}/link/make/v1/jobs")).bearer_auth(KEY).json(&json!({"id": "one", "port": 1, "path": path, "compact": {}, "info": {}, "bytes": 0})).send().await.unwrap();
+        assert_eq!(asked.status().as_u16(), 400, "{path}");
+    }
+    assert_eq!(http.post(format!("{url}/link/make/v1/jobs")).bearer_auth(KEY).json(&json!({"id": "../one", "port": 1, "path": "/link/source/1?ticket=x", "compact": {}, "info": {}, "bytes": 0})).send().await.unwrap().status().as_u16(), 400);
+
+    // Two films, as they would lie in a library.
+    let mut films = vec![];
+    for (name, year, imdb) in [("Heat", 1995, "tt0113277"), ("Ronin", 1998, "tt0122690")] {
+        let home = w.root.join(format!("Movies/{name} ({year})"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(format!("{name} ({year}) [Bluray-1080p].mkv")), &video).unwrap();
+        let mut t = w.movie(name, year, imdb);
+        t.path = home.to_string_lossy().to_string();
+        w.app.db.save_title(&mut t).unwrap();
+        films.push(t);
+    }
+    w.app.scan_all().await.unwrap();
+    let rate = w.app.db.files(films[0].id).unwrap()[0].media_info.as_ref().unwrap().bit_rate;
+    let mut g = w.app.settings.general();
+    g.compact = spool::compact::Compact { height: 120, video_kbps: (rate / 4000).max(10) as u32, audio_kbps: 0, ..Default::default() };
+    w.app.settings.set_general(&g).unwrap();
+
+    // Linked, it is known for what it is: it works on nothing and holds nothing, and makes
+    // compact versions if it has video hardware to make them on.
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["links"] = json!([{"name": "Maker", "url": url, "key": KEY, "folders": [], "play_near": false, "make": "never"}]);
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert_eq!(status, 200, "{said}");
+    w.app.ask_remotes().await;
+    let r = w.app.remotes()[0].clone();
+    let seen = r.seen();
+    assert_eq!((seen.reachable, seen.usable, seen.play, seen.see, seen.problem.as_str()), (true, false, false, false, ""), "{seen:?}");
+    assert!(!r.makes(), "it is given none while its settings say never");
+    let source = format!("{here}/link/source/{}?ticket=", r.conf.id);
+    let file = w.app.db.files(films[0].id).unwrap()[0].id;
+    assert_eq!(http.get(format!("{source}{}", r.source_ticket(file))).send().await.unwrap().status().as_u16(), 410, "a film is handed over only while that machine is making it");
+    assert_eq!(http.get(format!("{source}not-a-ticket")).send().await.unwrap().status().as_u16(), 401);
+    if !seen.make {
+        assert_ne!(seen.make_means, "hardware");
+        eprintln!("no video hardware here, so a linked machine is given nothing to make; the rest is skipped");
+        return;
+    }
+
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["links"][0]["make"] = json!("always");
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    w.app.ask_remotes().await;
+    assert!(w.app.remotes()[0].makes());
+    let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [films[0].id, films[1].id]})).await;
+    assert_eq!((status, said["queued"].as_u64()), (200, Some(2)), "{said}");
+    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    let by: Vec<&str> = activity["compact"]["now"].as_array().unwrap().iter().filter_map(|n| n["by"].as_str()).collect();
+    assert!(by.contains(&"Maker") && by.contains(&""), "one is made there and one here, at once: {}", activity["compact"]);
+    for _ in 0..1200 {
+        if films.iter().all(|t| w.app.db.files(t.id).unwrap().iter().any(|f| f.compact_of.is_some())) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let mut made_by = vec![];
+    for t in &films {
+        let files = w.app.db.files(t.id).unwrap();
+        let compact = files.iter().find(|f| f.compact_of.is_some()).unwrap_or_else(|| panic!("{} has no compact version: {:?}", t.title, w.app.db.history(Some(t.id), 10).unwrap().iter().map(|h| h.data.to_string()).collect::<Vec<_>>()));
+        let on_disk = std::path::Path::new(&t.path).join(&compact.rel_path);
+        assert!(on_disk.exists() && compact.size == std::fs::metadata(&on_disk).unwrap().len() && compact.media_info.as_ref().is_some_and(|m| m.height <= 120), "{compact:?}");
+        let history = w.app.db.history(Some(t.id), 10).unwrap();
+        made_by.push(history.iter().find(|h| h.kind == "compact_made").unwrap().data["by"].as_str().unwrap().to_string());
+    }
+    made_by.sort();
+    assert_eq!(made_by, ["", "Maker"]);
+    // Nothing is left on the machine that made it, nor in the film's folder but the two files.
+    assert_eq!(std::fs::read_dir(w.root.join("maker-data/making")).map(|d| d.count()).unwrap_or(0), 0);
+    assert!(films.iter().all(|t| std::fs::read_dir(&t.path).unwrap().count() == 2));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_compact_version_is_made_beside_the_original_and_kept_as_a_version_of_it() {
     use serde_json::{json, Value};
     let video = video_or_skip!();
@@ -4043,7 +4149,7 @@ async fn a_compact_version_is_made_beside_the_original_and_kept_as_a_version_of_
     let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [heat.id, show.id]})).await;
     assert_eq!((status, said["queued"].as_u64()), (200, Some(2)), "{said}");
     let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
-    assert!(activity["compact"]["now"].is_object() || activity["compact"]["waiting_count"].as_u64() > Some(0), "Activity shows what is being made: {}", activity["compact"]);
+    assert!(activity["compact"]["now"].as_array().is_some_and(|now| !now.is_empty()) || activity["compact"]["waiting_count"].as_u64() > Some(0), "Activity shows what is being made: {}", activity["compact"]);
     made(film.id).await;
     let episode_file = w.app.db.episodes(show.id).unwrap()[0].file_id.unwrap();
     made(episode_file).await;

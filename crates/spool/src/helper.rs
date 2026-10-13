@@ -13,6 +13,11 @@
 //! It is one end of a link (see [`crate::link`]) and holds itself to what it was started
 //! allowing: the work above, and playing, which is handing one file to a player who comes
 //! with a ticket from the Spool that drives it.
+//!
+//! A machine that holds none of the library can run one too, with no folders at all, to
+//! make compact versions on its video hardware (see [`make`]).
+
+pub mod make;
 
 use crate::local::{Blocked, FolderSummary, Survey};
 use crate::link::pair;
@@ -93,13 +98,15 @@ impl Conf {
         if self.code.as_ref().is_some_and(|c| c.len() < pair::DIGITS) {
             bail!("SPOOL_LINK_CODE must have at least {} digits", pair::DIGITS);
         }
-        if self.roots.is_empty() {
-            bail!("SPOOL_HELPER_ROOTS must name at least one folder the helper may file into, separated by colons");
+        // One that only makes compact versions needs no folders: it keeps what it makes itself.
+        let g = self.grants;
+        if self.roots.is_empty() && (g.work || g.see || g.play) {
+            bail!("SPOOL_HELPER_ROOTS must name at least one folder the helper may file into, separated by colons. A machine that is only to make compact versions is started with SPOOL_HELPER_GRANTS=make and needs none");
         }
-        if self.downloads.as_os_str().is_empty() {
+        if self.downloads.as_os_str().is_empty() && g.work {
             bail!("SPOOL_HELPER_DOWNLOADS must name the folder to download into");
         }
-        for p in self.roots.iter().chain(&self.read_roots).chain([&self.downloads]) {
+        for p in self.roots.iter().chain(&self.read_roots).chain([&self.downloads]).filter(|p| !p.as_os_str().is_empty()) {
             if !p.is_absolute() {
                 bail!("{} must be a full path, starting with /", p.display());
             }
@@ -172,6 +179,7 @@ struct Inner {
     /// How many files it has filed and titles it has moved since it started.
     filed: AtomicUsize,
     moved: AtomicUsize,
+    making: make::Making,
 }
 
 /// The link's key, and what signs and checks tickets with it.
@@ -234,8 +242,12 @@ fn under(p: &Path, root: &Path) -> bool {
 }
 
 impl Helper {
-    pub async fn start(data_dir: &Path, conf: Conf) -> Result<Helper> {
+    pub async fn start(data_dir: &Path, mut conf: Conf) -> Result<Helper> {
         std::fs::create_dir_all(data_dir)?;
+        // One that downloads nothing is given no folder to download into, and has one of its own.
+        if conf.downloads.as_os_str().is_empty() {
+            conf.downloads = data_dir.join("downloads");
+        }
         let pushed: Pushed = match std::fs::read(data_dir.join("helper.json")) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "the settings Spool gave last time cannot be read; waiting to be given them again");
@@ -293,6 +305,7 @@ impl Helper {
             filing: AtomicUsize::new(0),
             filed: AtomicUsize::new(0),
             moved: AtomicUsize::new(0),
+            making: make::Making::new(data_dir),
         })))
     }
 
@@ -358,6 +371,9 @@ impl Helper {
         if moving > 0 {
             reasons.push(format!("{moving} {} being moved", if moving == 1 { "title is" } else { "titles are" }));
         }
+        if self.0.making.running() {
+            reasons.push("a compact version is being made".into());
+        }
         reasons
     }
 
@@ -366,7 +382,19 @@ impl Helper {
     pub fn router(&self) -> Router {
         let play = Router::new().route("/link/play/v1/file", get(play)).route("/link/pair/v1/start", post(pair_start)).route("/link/pair/v1/finish", post(pair_finish)).with_state(self.clone());
         let hello = Router::new().route("/link", get(hello)).layer(axum::middleware::from_fn_with_state(self.clone(), guard)).with_state(self.clone());
-        play.merge(hello).merge(self.see()).merge(self.work())
+        play.merge(hello).merge(self.see()).merge(self.work()).merge(self.make())
+    }
+
+    /// Version 1 of the make protocol: compact versions, made here and handed back.
+    fn make(&self) -> Router {
+        Router::new()
+            .route("/link/make/v1/info", get(make::info))
+            .route("/link/make/v1/jobs", post(make::start))
+            .route("/link/make/v1/jobs/{id}", get(make::state).delete(make::end))
+            .route("/link/make/v1/jobs/{id}/file", get(make::file))
+            .layer(axum::middleware::from_fn_with_state(self.clone(), allowed_to_make))
+            .layer(axum::middleware::from_fn_with_state(self.clone(), guard))
+            .with_state(self.clone())
     }
 
     /// Version 1 of the see protocol: what is in the folders that are shared.
@@ -560,6 +588,14 @@ fn now() -> u64 {
 async fn allowed_to_work(State(h): State<Helper>, req: Request, next: Next) -> Response {
     if !h.0.conf.grants.work {
         return Refused(StatusCode::FORBIDDEN, "this machine was not started to do work for another".into()).into_response();
+    }
+    next.run(req).await
+}
+
+/// Compact versions are made only where that was allowed.
+async fn allowed_to_make(State(h): State<Helper>, req: Request, next: Next) -> Response {
+    if !h.0.conf.grants.make {
+        return Refused(StatusCode::FORBIDDEN, "this machine was not started to make compact versions for another".into()).into_response();
     }
     next.run(req).await
 }
@@ -1129,7 +1165,10 @@ async fn move_finish(State(h): State<Helper>, UrlPath(id): UrlPath<String>, Json
 }
 
 /// Run a helper until it is told to stop.
-pub async fn serve(bind: &str, data_dir: &Path, conf: Conf) -> Result<()> {
+pub async fn serve(bind: &str, data_dir: &Path, mut conf: Conf) -> Result<()> {
+    if conf.downloads.as_os_str().is_empty() {
+        conf.downloads = data_dir.join("downloads");
+    }
     for dir in [conf.downloads.join("incomplete"), conf.downloads.join("complete")] {
         std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     }
@@ -1147,9 +1186,9 @@ pub async fn serve(bind: &str, data_dir: &Path, conf: Conf) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("binding {bind}"))?;
     let name = std::env::var("SPOOL_NAME").ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(crate::link::find::host_name);
     helper.announce(&name, listener.local_addr()?.port());
-    tracing::info!(%bind, %name, downloads = %conf.downloads.display(), files_into = ?conf.roots, only_reads = ?conf.read_roots, "Spool's helper is running");
+    tracing::info!(%bind, %name, allows = ?conf.grants.words(), downloads = %conf.downloads.display(), files_into = ?conf.roots, only_reads = ?conf.read_roots, "Spool's helper is running");
     let engine = helper.engine().clone();
-    axum::serve(listener, helper.router())
+    axum::serve(listener, helper.router().into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async move {
             let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signal handler");
             tokio::select! {

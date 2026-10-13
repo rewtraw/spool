@@ -165,6 +165,7 @@ async fn main() -> Result<()> {
                 app.spawn_scheduler();
             }
             let listener = tokio::net::TcpListener::bind(&bind).await.with_context(|| format!("binding {bind}"))?;
+            let _ = app.port.set(listener.local_addr()?.port());
             // Players get their own port, on the same interface as the web app.
             spool::jellyfin::spawn(app.clone(), bind.rsplit_once(':').map(|(host, _)| host.trim_matches(['[', ']']).to_string()).unwrap_or_else(|| "0.0.0.0".into()));
             tracing::info!(%bind, mode = ?app.mode(), data = %dir.display(), "Spool is running");

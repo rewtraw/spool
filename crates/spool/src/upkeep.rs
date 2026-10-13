@@ -200,7 +200,7 @@ impl App {
             reasons.push(format!("a player was playing {played} seconds ago"));
         }
         // A compact version under way is started again after a restart, like a download.
-        let encoding = self.encodes.lock().now.is_some() as usize;
+        let encoding = self.encodes.lock().now.len();
         Busy { busy: !reasons.is_empty(), reasons, resumable: encoding + jobs.iter().filter(|j| matches!(j.state, JobState::Downloading | JobState::Queued)).count() }
     }
 

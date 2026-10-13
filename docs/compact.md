@@ -50,7 +50,27 @@ Measured on a Mac mini with an M4. The video hardware does the reading, the resi
 
 On Linux Spool encodes on the processor.
 
-A [helper](helper.md) does not make compact versions. They are made on the machine Spool runs on, which reads the original across the share and writes the result back.
+## More machines to make them
+
+Making compact versions is the one job that goes faster with more computers. Any Mac in the house with Apple silicon can make them alongside the machine Spool runs on, and each one added makes about as many again.
+
+Such a machine holds none of the library and needs no shared folder. Spool gives it one film at a time. It reads the film from Spool over the network, makes the compact version on its video hardware, and Spool brings the result back, checks it and files it as it would one made at home. Spool's own machine goes on making its own meanwhile. Activity shows each film with the machine making it.
+
+**To add one**, from a checkout of Spool on any Mac:
+
+```
+deploy/maker.sh the-other-mac     # an SSH host, or "local" for the Mac you are sitting at
+```
+
+It installs Spool there to start with the machine, allowed only to make, and prints a code. In Spool, under Settings, Library, the machine appears as found on the network: type the code and the two are linked. The machine needs ffmpeg (`brew install ffmpeg`) and room for one compact version at a time, a few gigabytes.
+
+**When it is given work** is set on its card in Settings, Library: whenever there is any, overnight only (eleven until seven), or never. Overnight suits a machine somebody works at.
+
+What it is trusted with is small. It is started allowing `make` and nothing else, so it downloads nothing, files nothing and is shown nothing of the library. It reads only the one film it has been given, on a ticket made out for that film, and only from the machine that asked. It keeps what it makes in a folder of its own until Spool has taken it.
+
+If it is switched off, asleep or restarted part-way, the film goes back in the line and another machine takes it; the machine is left alone for ten minutes and then offered work again. A film it finds it cannot make is reported as it would be at home.
+
+Only video hardware is used this way. A linked machine without it is given nothing, since sending a film across the network to be made slowly gains nothing. That includes a [helper](helper.md) on a NAS, which is why turning this on changes nothing there.
 
 ## The settings
 
@@ -99,4 +119,5 @@ This is the way to make room without losing a title. Because the compact version
 
 - Films and episodes only, one compact version of each file.
 - A film that has several cuts gets a compact version of its main file.
+- Other machines make them only on a Mac's video hardware. A Linux or Windows machine with a graphics card cannot yet be used.
 - Nothing is converted while it is played. A player asking for a smaller stream of a file that has no compact version gets the original.

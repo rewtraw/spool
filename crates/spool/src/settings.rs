@@ -62,6 +62,30 @@ pub struct LinkConf {
     /// Players on the same network as it are sent to it for a file it holds, and players
     /// away from home to its Tailscale address when it has one.
     pub play_near: bool,
+    /// When it is given films to make compact versions of, if it offers to make them.
+    pub make: MakeWhen,
+}
+
+/// When a linked machine is given compact versions to make.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MakeWhen {
+    #[default]
+    Always,
+    /// From eleven at night until seven in the morning. One begun before seven is finished.
+    Night,
+    Never,
+}
+
+impl MakeWhen {
+    pub fn now(self) -> bool {
+        use chrono::Timelike;
+        match self {
+            MakeWhen::Always => true,
+            MakeWhen::Night => !(7..23).contains(&chrono::Local::now().hour()),
+            MakeWhen::Never => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

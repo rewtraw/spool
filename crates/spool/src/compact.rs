@@ -15,6 +15,7 @@
 
 use crate::app::{App, Event};
 use crate::models::*;
+use crate::remote::Remote;
 use anyhow::{anyhow, bail, Context, Result};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -50,12 +51,17 @@ impl Default for Compact {
     }
 }
 
-/// The files waiting for a compact version, and the one being made.
+/// The files waiting for a compact version, and those being made: one on this machine,
+/// and one on each linked machine that makes them.
 #[derive(Default)]
 pub struct Encodes {
     pub queue: VecDeque<i64>,
-    pub now: Option<Encoding>,
-    pub working: bool,
+    pub now: Vec<Encoding>,
+    /// The machines taking files from the line: a link's number, or nought for this one.
+    pub runners: std::collections::HashSet<u32>,
+    /// Files a linked machine was given and did not make. They are made here, so that
+    /// none goes from machine to machine for ever.
+    pub here_only: std::collections::HashSet<i64>,
 }
 
 #[derive(Clone)]
@@ -70,7 +76,26 @@ pub struct Encoding {
     pub stop: Arc<AtomicBool>,
     /// "hardware" or "software", once it is known.
     pub how: Arc<Mutex<String>>,
+    /// The linked machine making it; empty when it is this one.
+    pub by: String,
+    /// That machine's link, or nought for this one.
+    pub link: u32,
+    /// Bytes of it brought back from the machine that made it, once that has begun.
+    pub back: Arc<AtomicU64>,
 }
+
+/// A linked machine did not make what it was given, for a reason that is its own and not
+/// the film's: it went away, was restarted, has no room. The film goes back in the line.
+#[derive(Debug)]
+struct Lost(String);
+
+impl std::fmt::Display for Lost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Lost {}
 
 /// What came of asking for compact versions.
 #[derive(Default, Serialize)]
@@ -100,12 +125,12 @@ struct Plan {
 }
 
 const LINE: &str = "compact_waiting";
-const CALLED_OFF: &str = "the compact version was cancelled";
+pub(crate) const CALLED_OFF: &str = "the compact version was cancelled";
 /// A file must be at least this many times the size it would become to be worth doing.
 const WORTH_IT: f64 = 1.5;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum How {
+pub(crate) enum How {
     /// Read, resized and written by the video hardware, never leaving it.
     Hardware,
     /// Read and resized by the processor, written by the video hardware.
@@ -159,14 +184,46 @@ fn bits_a_second(info: &MediaInfo, size: u64) -> f64 {
     }
 }
 
-/// What to hand ffmpeg to make a compact version of a file one way.
-fn arguments(c: &Compact, info: &MediaInfo, src: &Path, out: &Path, how: How) -> Vec<String> {
+impl How {
+    /// "hardware" or "software", which is all anyone is told of it.
+    pub(crate) fn word(self) -> &'static str {
+        if self == How::Software { "software" } else { "hardware" }
+    }
+}
+
+/// Which ways of encoding the ffmpeg on this machine offers, best first. `software` is
+/// whether the processor may be used when the video hardware cannot do a file.
+pub(crate) fn ways(tool: Option<&Path>, software: bool) -> Vec<How> {
+    static HARDWARE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let Some(tool) = tool else { return vec![] };
+    let hardware = *HARDWARE.get_or_init(|| std::process::Command::new(tool).args(["-hide_banner", "-encoders"]).output().ok().is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("hevc_videotoolbox")));
+    let mut ways = if hardware { vec![How::Hardware, How::HardwareWrite] } else { vec![] };
+    if software || !hardware {
+        ways.push(How::Software);
+    }
+    ways
+}
+
+/// The frames a second of a file's picture, or nothing when that is not on record.
+pub(crate) fn frames_a_second(info: &MediaInfo) -> f64 {
+    info.streams.iter().find(|s| s.kind == "video").map_or(0.0, |s| s.frame_rate)
+}
+
+/// What to hand ffmpeg to make a compact version of a file one way. `src` is the file, or
+/// an address it is read from.
+pub(crate) fn arguments(c: &Compact, info: &MediaInfo, src: &str, out: &Path, how: How) -> Vec<String> {
     let mut a: Vec<String> = ["-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y"].iter().map(|s| s.to_string()).collect();
     let mut add = |items: &[&str]| a.extend(items.iter().map(|s| s.to_string()));
     if how == How::Hardware {
         add(&["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]);
     }
-    add(&["-i", &src.to_string_lossy()]);
+    // Read from another machine, a moment's break in the line is not the end of the film.
+    // It is read as a film over plain http and as nothing else: not as a list of other
+    // things to fetch, and not from a file on the machine reading it.
+    if src.starts_with("http://") {
+        add(&["-protocol_whitelist", "http,tcp", "-format_whitelist", "matroska,webm,mov,mp4,m4a,3gp,3g2,mj2,mpegts,avi", "-reconnect", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "10"]);
+    }
+    add(&["-i", src]);
     add(&["-map", "0:v:0"]);
 
     // Sound and subtitles are taken stream by stream when the file's streams are on record,
@@ -238,15 +295,7 @@ fn arguments(c: &Compact, info: &MediaInfo, src: &Path, out: &Path, how: How) ->
 impl App {
     /// Which ways of encoding this machine's ffmpeg offers, best first.
     fn compact_ways(&self) -> Vec<How> {
-        static HARDWARE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let hardware = *HARDWARE.get_or_init(|| {
-            self.ffmpeg_path().and_then(|tool| std::process::Command::new(tool).args(["-hide_banner", "-encoders"]).output().ok()).is_some_and(|o| String::from_utf8_lossy(&o.stdout).contains("hevc_videotoolbox"))
-        });
-        let mut ways = if hardware { vec![How::Hardware, How::HardwareWrite] } else { vec![] };
-        if self.settings.general().compact.software || !hardware {
-            ways.push(How::Software);
-        }
-        ways
+        ways(self.ffmpeg_path().as_deref(), self.settings.general().compact.software)
     }
 
     /// What this machine makes compact versions with, in words.
@@ -366,7 +415,7 @@ impl App {
     /// had written.
     pub fn resume_compacts(&self) -> usize {
         let line: Vec<i64> = self.db.get_setting(LINE);
-        if line.is_empty() || self.encodes.lock().working {
+        if line.is_empty() || !self.encodes.lock().runners.is_empty() {
             return 0;
         }
         let asked = self.compact_files(&line, false);
@@ -403,17 +452,17 @@ impl App {
         for id in ids {
             let Ok(Some(file)) = self.db.file(*id) else { continue };
             let Ok(Some(title)) = self.db.title(file.title_id) else { continue };
-            let (waiting, making) = {
-                let e = self.encodes.lock();
-                (e.queue.contains(id), e.now.as_ref().is_some_and(|n| n.file_id == *id))
-            };
-            if waiting || making {
+            if self.compacting(*id) {
                 continue;
             }
             match self.compact_plan(&title, &file) {
                 Ok(_) => {
-                    self.encodes.lock().queue.push_back(*id);
-                    asked.queued += 1;
+                    // Looked for again as it is put in, so that two asking at once put it in once.
+                    let mut e = self.encodes.lock();
+                    if !(e.queue.contains(id) || e.now.iter().any(|n| n.file_id == *id)) {
+                        e.queue.push_back(*id);
+                        asked.queued += 1;
+                    }
                 }
                 Err(e) => {
                     let why = format!("{e:#}");
@@ -424,58 +473,110 @@ impl App {
             }
         }
         self.keep_compact_line();
-        let start = !std::mem::replace(&mut self.encodes.lock().working, true);
-        if start {
-            let app = self.clone();
-            tokio::spawn(async move {
-                loop {
-                    let id = {
-                        let mut e = app.encodes.lock();
-                        match e.queue.pop_front() {
-                            Some(id) => {
-                                e.now = Some(Encoding { file_id: id, title_id: 0, done_ms: Default::default(), total_ms: 0, speed: Default::default(), stop: Default::default(), how: Default::default() });
-                                id
-                            }
-                            None => {
-                                e.working = false;
-                                break;
-                            }
-                        }
-                    };
-                    let (title_id, name) = app.db.file(id).ok().flatten().and_then(|f| app.db.title(f.title_id).ok().flatten()).map(|t| (t.id, t.title)).unwrap_or_default();
-                    match app.compact_one(id).await {
-                        Ok(said) => {
-                            tracing::info!(title = %name, "{said}");
-                            app.emit(Event::Task { name: "compact".into(), running: false, message: said });
-                        }
-                        Err(e) if e.to_string() == CALLED_OFF => tracing::info!(title = %name, "a compact version was cancelled"),
-                        Err(e) => {
-                            tracing::warn!(title = %name, error = %format!("{e:#}"), "could not make a compact version");
-                            let _ = app.db.add_history(Some(title_id).filter(|t| *t != 0), "compact_failed", json!({"reason": format!("{e:#}")}));
-                            let _ = app.db.add_attention("config", Some(title_id).filter(|t| *t != 0), None, &format!("A compact version of {name} could not be made: {e:#}. The original is untouched."), json!({}));
-                            app.emit(Event::Attention);
-                        }
-                    }
-                    app.encodes.lock().now = None;
-                    app.keep_compact_line();
-                    app.emit(Event::Title { id: title_id });
-                }
-            });
-        }
+        self.compact_start();
         asked
     }
 
+    /// Have every machine that makes compact versions and is not at one take from the
+    /// line: this one, and each linked machine that offers to and is to be given them now.
+    pub fn compact_start(&self) {
+        if self.encodes.lock().queue.is_empty() {
+            return;
+        }
+        let mut makers: Vec<Option<Arc<Remote>>> = self.remotes().into_iter().filter(|r| r.makes()).map(Some).collect();
+        if !self.compact_ways().is_empty() {
+            makers.push(None);
+        }
+        for maker in makers {
+            let key = maker.as_ref().map_or(0, |r| r.conf.id);
+            if self.encodes.lock().runners.insert(key) {
+                tokio::spawn(self.clone().compact_run(key, maker));
+            }
+        }
+    }
+
+    /// Take files from the line one at a time and have one machine make each, until the
+    /// line is empty or the machine is no longer to be given them.
+    async fn compact_run(self, key: u32, maker: Option<Arc<Remote>>) {
+        let by = maker.as_ref().map(|r| r.conf.name.clone()).unwrap_or_default();
+        loop {
+            let id = {
+                let mut e = self.encodes.lock();
+                // A link whose settings were changed is another link from then on, and takes the line up afresh.
+                let next = match &maker {
+                    None => e.queue.pop_front(),
+                    Some(r) if self.listed(r) && r.makes() => e.queue.iter().position(|id| !e.here_only.contains(id)).and_then(|at| e.queue.remove(at)),
+                    Some(_) => None,
+                };
+                match next {
+                    Some(id) => {
+                        e.now.push(Encoding { file_id: id, title_id: 0, done_ms: Default::default(), total_ms: 0, speed: Default::default(), stop: Default::default(), how: Default::default(), by: by.clone(), link: key, back: Default::default() });
+                        id
+                    }
+                    None => {
+                        e.runners.remove(&key);
+                        break;
+                    }
+                }
+            };
+            let (title_id, name) = self.db.file(id).ok().flatten().and_then(|f| self.db.title(f.title_id).ok().flatten()).map(|t| (t.id, t.title)).unwrap_or_default();
+            let made = self.compact_one(id, maker.as_ref()).await;
+            let mut again = false;
+            match made {
+                Ok(said) => {
+                    tracing::info!(title = %name, "{said}");
+                    self.emit(Event::Task { name: "compact".into(), running: false, message: said });
+                }
+                Err(e) if e.to_string() == CALLED_OFF => tracing::info!(title = %name, "a compact version was cancelled"),
+                // Whatever went wrong on a linked machine, the film is made here: its trouble
+                // may be the machine's and not the film's, and here it is told apart.
+                Err(e) if maker.is_some() => {
+                    tracing::warn!(title = %name, machine = %by, why = %format!("{e:#}"), "a linked machine did not make the compact version it was given; it will be made here");
+                    if let Some(r) = maker.as_ref().filter(|_| e.downcast_ref::<Lost>().is_some()) {
+                        r.rest_from_making();
+                    }
+                    again = true;
+                }
+                Err(e) => {
+                    tracing::warn!(title = %name, error = %format!("{e:#}"), "could not make a compact version");
+                    let _ = self.db.add_history(Some(title_id).filter(|t| *t != 0), "compact_failed", json!({"reason": format!("{e:#}")}));
+                    let _ = self.db.add_attention("config", Some(title_id).filter(|t| *t != 0), None, &format!("A compact version of {name} could not be made: {e:#}. The original is untouched."), json!({}));
+                    self.emit(Event::Attention);
+                }
+            }
+            {
+                let mut e = self.encodes.lock();
+                // One that was called off while the machine was losing it stays called off.
+                let wanted = again && !e.now.iter().any(|n| n.file_id == id && n.stop.load(Ordering::Relaxed));
+                e.now.retain(|n| n.file_id != id);
+                if wanted {
+                    e.here_only.insert(id);
+                    e.queue.push_front(id);
+                } else {
+                    e.here_only.remove(&id);
+                }
+            }
+            self.keep_compact_line();
+            self.emit(Event::Title { id: title_id });
+            if again {
+                // Whoever else makes them takes it up.
+                self.compact_start();
+            }
+        }
+    }
+
     /// Call compact versions off: the files named, waiting or being made; or with none
-    /// named, all that wait. Says how many were taken out of the line, and whether the one
+    /// named, all that wait. Says how many were taken out of the line, and whether one
     /// being made was told to stop.
     pub fn cancel_compacts(&self, ids: &[i64]) -> (usize, bool) {
         let (taken, stopping) = {
             let mut e = self.encodes.lock();
             let before = e.queue.len();
             e.queue.retain(|id| !(ids.is_empty() || ids.contains(id)));
-            let stopping = e.now.as_ref().is_some_and(|n| ids.contains(&n.file_id));
-            if let Some(n) = e.now.as_ref().filter(|_| stopping) {
+            let mut stopping = false;
+            for n in e.now.iter().filter(|n| ids.contains(&n.file_id)) {
                 n.stop.store(true, Ordering::Relaxed);
+                stopping = true;
             }
             (before - e.queue.len(), stopping)
         };
@@ -487,17 +588,17 @@ impl App {
     /// Whether a compact version of this file is being made or waiting to be.
     pub fn compacting(&self, file_id: i64) -> bool {
         let e = self.encodes.lock();
-        e.queue.contains(&file_id) || e.now.as_ref().is_some_and(|n| n.file_id == file_id)
+        e.queue.contains(&file_id) || e.now.iter().any(|n| n.file_id == file_id)
     }
 
-    /// The one being made and those waiting, as Activity shows them.
+    /// Those being made and those waiting, as Activity shows them.
     pub fn compacts_shown(&self) -> serde_json::Value {
         let (now, waiting) = {
             let e = self.encodes.lock();
             (e.now.clone(), e.queue.iter().copied().collect::<Vec<_>>())
         };
-        if now.is_none() && waiting.is_empty() {
-            return json!({"now": null, "waiting": [], "waiting_count": 0});
+        if now.is_empty() && waiting.is_empty() {
+            return json!({"now": [], "waiting": [], "waiting_count": 0});
         }
         let shown = |file_id: i64| {
             let file = self.db.file(file_id).ok().flatten();
@@ -515,75 +616,80 @@ impl App {
                 "size": file.as_ref().map(|f| f.size),
             })
         };
-        let now = now.map(|n| {
+        let now: Vec<serde_json::Value> = now.into_iter().map(|n| {
             let mut v = shown(n.file_id);
             v["done_ms"] = n.done_ms.load(Ordering::Relaxed).min(n.total_ms).into();
             v["total_ms"] = n.total_ms.into();
             v["speed"] = (n.speed.load(Ordering::Relaxed) as f64 / 100.0).into();
             v["how"] = n.how.lock().clone().into();
             v["stopping"] = n.stop.load(Ordering::Relaxed).into();
+            v["by"] = n.by.into();
+            v["back"] = n.back.load(Ordering::Relaxed).into();
             v
-        });
+        }).collect();
         // A whole library in line is hundreds of files; the first of them say enough.
         let listed: Vec<serde_json::Value> = waiting.iter().take(50).map(|id| shown(*id)).collect();
         json!({"now": now, "waiting": listed, "waiting_count": waiting.len()})
     }
 
-    async fn compact_one(&self, file_id: i64) -> Result<String> {
+    /// Make a compact version of one file, here or on a linked machine, check it and file it.
+    async fn compact_one(&self, file_id: i64, maker: Option<&Arc<Remote>>) -> Result<String> {
         let file = self.db.file(file_id)?.ok_or_else(|| anyhow!("the file is no longer in the library"))?;
         let title = self.db.title(file.title_id)?.ok_or_else(|| anyhow!("the title was removed"))?;
         let plan = self.compact_plan(&title, &file)?;
         let c = self.settings.general().compact;
         let tool = self.ffmpeg_path().ok_or_else(|| anyhow!("ffmpeg is not installed"))?;
-        let (done, speed, stop, how) = {
+        let now = {
             let mut e = self.encodes.lock();
-            let was = e.now.clone();
-            let now = Encoding {
-                file_id,
-                title_id: title.id,
-                done_ms: Default::default(),
-                total_ms: (plan.secs * 1000.0) as u64,
-                speed: Default::default(),
-                stop: was.map(|w| w.stop).unwrap_or_default(),
-                how: Default::default(),
-            };
-            let parts = (now.done_ms.clone(), now.speed.clone(), now.stop.clone(), now.how.clone());
-            e.now = Some(now);
-            parts
+            let Some(n) = e.now.iter_mut().find(|n| n.file_id == file_id) else { bail!(CALLED_OFF) };
+            (n.title_id, n.total_ms) = (title.id, (plan.secs * 1000.0) as u64);
+            n.clone()
         };
         self.emit(Event::Title { id: title.id });
         tokio::fs::create_dir_all(plan.folder.join(Path::new(&plan.rel_path).parent().unwrap_or(Path::new("")))).await.with_context(|| format!("creating {}", plan.folder.display()))?;
         // Under a hidden name until it is whole, so that nothing takes a half-made file for a film.
         let working = plan.folder.join(Path::new(&plan.rel_path).parent().unwrap_or(Path::new(""))).join(format!(".spool-compact-{file_id}.mkv"));
         let started = std::time::Instant::now();
-        let mut last_error = String::new();
-        let mut made = None;
-        for way in self.compact_ways() {
-            if stop.load(Ordering::Relaxed) {
-                bail!(CALLED_OFF);
-            }
-            *how.lock() = if way == How::Software { "software" } else { "hardware" }.into();
-            done.store(0, Ordering::Relaxed);
-            let fps = plan.info.streams.iter().find(|s| s.kind == "video").map_or(0.0, |s| s.frame_rate);
-            match run(&tool, &arguments(&c, &plan.info, &plan.src, &working, way), fps, &done, &speed, &stop).await {
-                Ok(()) => {
-                    made = Some(way);
-                    break;
-                }
+        let how = match maker {
+            Some(r) => match self.compact_there(r, &plan, &c, &working, &now).await {
+                Ok(how) => how,
                 Err(e) => {
                     let _ = tokio::fs::remove_file(&working).await;
-                    if e.to_string() == CALLED_OFF {
-                        return Err(e);
-                    }
-                    tracing::info!(title = %title.title, way = ?way, error = %format!("{e:#}"), "that way of making a compact version did not work; trying the next");
-                    last_error = format!("{e:#}");
+                    return Err(e);
                 }
+            },
+            None => {
+                let mut last_error = String::new();
+                let mut made = None;
+                for way in self.compact_ways() {
+                    if now.stop.load(Ordering::Relaxed) {
+                        bail!(CALLED_OFF);
+                    }
+                    *now.how.lock() = way.word().into();
+                    now.done_ms.store(0, Ordering::Relaxed);
+                    match run(&tool, &arguments(&c, &plan.info, &plan.src.to_string_lossy(), &working, way), frames_a_second(&plan.info), &now.done_ms, &now.speed, &now.stop).await {
+                        Ok(()) => {
+                            made = Some(way);
+                            break;
+                        }
+                        Err(e) => {
+                            let _ = tokio::fs::remove_file(&working).await;
+                            if e.to_string() == CALLED_OFF {
+                                return Err(e);
+                            }
+                            tracing::info!(title = %title.title, way = ?way, error = %format!("{e:#}"), "that way of making a compact version did not work; trying the next");
+                            last_error = format!("{e:#}");
+                        }
+                    }
+                }
+                let Some(way) = made else { bail!("ffmpeg could not do it: {last_error}") };
+                way.word().to_string()
             }
-        }
-        let Some(way) = made else { bail!("ffmpeg could not do it: {last_error}") };
+        };
 
         // Read it back before it is given its name: it has to be video, and as long as the original.
         let checked = match self.probe(&working, "").await {
+            _ if now.stop.load(Ordering::Relaxed) => Err(anyhow!(CALLED_OFF)),
             Ok(Some(info)) if (info.runtime_secs - plan.secs).abs() <= (plan.secs * 0.01).max(3.0) => Ok(info),
             Ok(Some(info)) => Err(anyhow!("it came out {:.0} minutes long where the original runs {:.0}", info.runtime_secs / 60.0, plan.secs / 60.0)),
             Ok(None) => Err(anyhow!("it could not be read back to be checked")),
@@ -630,13 +736,71 @@ impl App {
             }
         }
         let took = started.elapsed().as_secs();
-        self.db.add_history(Some(title.id), "compact_made", json!({"path": target, "from_bytes": file.size, "bytes": size, "seconds": took, "how": if way == How::Software { "software" } else { "hardware" }}))?;
+        self.db.add_history(Some(title.id), "compact_made", json!({"path": target, "from_bytes": file.size, "bytes": size, "seconds": took, "how": how, "by": now.by}))?;
         let folder = plan.folder.to_string_lossy().to_string();
         let app = self.clone();
         tokio::spawn(async move {
             let _ = app.plex_refresh(&folder).await;
         });
-        Ok(format!("A compact version of {} was made in {} min: {:.1} GB from {:.1} GB", title.title, (took + 30) / 60, size as f64 / 1e9, file.size as f64 / 1e9))
+        let by = if now.by.is_empty() { String::new() } else { format!(" on {}", now.by) };
+        Ok(format!("A compact version of {} was made{by} in {} min: {:.1} GB from {:.1} GB", title.title, (took + 30) / 60, size as f64 / 1e9, file.size as f64 / 1e9))
+    }
+
+    /// Have a linked machine make the compact version and bring it back to `working`. Says
+    /// how it was made. The machine reads the film from this Spool, on a ticket for that
+    /// one file.
+    async fn compact_there(&self, r: &Arc<Remote>, plan: &Plan, c: &Compact, working: &Path, now: &Encoding) -> Result<String> {
+        let lost = |why: String| anyhow::Error::new(Lost(why));
+        let port = *self.port.get().ok_or_else(|| lost("this Spool is not listening yet".into()))?;
+        let job = format!("{}-{:x}", now.file_id, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+        let path = format!("/link/source/{}?ticket={}", r.conf.id, r.source_ticket(now.file_id));
+        r.make_start(json!({"id": job, "port": port, "path": path, "compact": c, "info": plan.info, "bytes": plan.bytes})).await.map_err(|e| lost(e.to_string()))?;
+        let mut unanswered = 0;
+        let (how, size) = loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if now.stop.load(Ordering::Relaxed) {
+                r.make_end(&job).await;
+                bail!(CALLED_OFF);
+            }
+            let said = match r.make_state(&job).await {
+                Ok(said) => said,
+                // A moment's silence loses nothing; a long one, and it has gone.
+                Err(crate::remote::Fail::Away { why, .. }) => {
+                    unanswered += 1;
+                    if unanswered > 20 {
+                        return Err(lost(why));
+                    }
+                    continue;
+                }
+                Err(e) => return Err(lost(format!("{e}; it may have been restarted"))),
+            };
+            unanswered = 0;
+            now.done_ms.store(said["done_ms"].as_u64().unwrap_or(0), Ordering::Relaxed);
+            now.speed.store((said["speed"].as_f64().unwrap_or(0.0) * 100.0) as u64, Ordering::Relaxed);
+            *now.how.lock() = said["how"].as_str().unwrap_or_default().to_string();
+            match said["state"].as_str().unwrap_or_default() {
+                "running" => {}
+                "done" => break (said["how"].as_str().unwrap_or_default().to_string(), said["size"].as_u64().unwrap_or(0)),
+                "cancelled" => return Err(lost("it stopped making it".into())),
+                // Its ffmpeg could not do the film, which is the film's trouble.
+                why => {
+                    r.make_end(&job).await;
+                    bail!("{} could not make it: {why}", r.conf.name);
+                }
+            }
+        };
+        now.done_ms.store(now.total_ms, Ordering::Relaxed);
+        now.back.store(1, Ordering::Relaxed);
+        let brought = r.make_fetch(&job, working, &now.back, &now.stop).await;
+        r.make_end(&job).await;
+        if now.stop.load(Ordering::Relaxed) {
+            bail!(CALLED_OFF);
+        }
+        match brought {
+            Ok(got) if got == size && size > 0 => Ok(how),
+            Ok(got) => Err(lost(format!("{got} bytes of {size} came back"))),
+            Err(e) => Err(lost(format!("it could not be brought back: {e:#}"))),
+        }
     }
 
     /// Take a compact version away: the file and its record.
@@ -789,7 +953,7 @@ impl App {
 /// ffmpeg gives no time while a track it is copying has yet to have anything in it, which for
 /// subtitles that say little can be the whole film. Then the time is worked out from the
 /// frames made, at `fps` frames a second.
-async fn run(tool: &Path, args: &[String], fps: f64, done: &AtomicU64, speed: &AtomicU64, stop: &AtomicBool) -> Result<()> {
+pub(crate) async fn run(tool: &Path, args: &[String], fps: f64, done: &AtomicU64, speed: &AtomicU64, stop: &AtomicBool) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
     let mut child = tokio::process::Command::new(tool).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn().context("starting ffmpeg")?;
     let mut lines = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("no output from ffmpeg"))?).lines();
@@ -889,12 +1053,12 @@ mod tests {
             streams: vec![stream(0, "video", "hevc", 0), stream(1, "audio", "truehd", 8), stream(2, "audio", "ac3", 6), stream(3, "audio", "dts", 2), stream(4, "subtitle", "hdmv_pgs_subtitle", 0), stream(5, "subtitle", "eia_608", 0), stream(6, "subtitle", "mov_text", 0)],
             ..Default::default()
         };
-        let said = arguments(&Compact::default(), &info, Path::new("/in.mkv"), Path::new("/out.mkv"), How::Hardware).join(" ");
+        let said = arguments(&Compact::default(), &info, "/in.mkv", Path::new("/out.mkv"), How::Hardware).join(" ");
         assert!(said.contains("-hwaccel videotoolbox") && said.contains("scale_vt=w=1920:h=-2") && said.contains("-profile:v main10 -b:v 8000k"), "{said}");
         assert!(said.contains("-c:a:0 eac3 -b:a:0 640k -ac:a:0 6") && said.contains("-c:a:1 copy") && said.contains("-c:a:2 eac3 -b:a:2 224k"), "{said}");
         // Subtitles a Matroska file can hold are kept, in order; the kind it cannot is left out.
         assert!(said.contains("-map 0:4") && !said.contains("-map 0:5") && said.contains("-map 0:6") && said.contains("-c:s:0 copy") && said.contains("-c:s:1 srt"), "{said}");
-        let soft = arguments(&Compact::default(), &info, Path::new("/in.mkv"), Path::new("/out.mkv"), How::Software).join(" ");
+        let soft = arguments(&Compact::default(), &info, "/in.mkv", Path::new("/out.mkv"), How::Software).join(" ");
         assert!(!soft.contains("hwaccel") && soft.contains("-vf scale=1920:-2") && soft.contains("libx265") && soft.contains("yuv420p10le"), "{soft}");
     }
 }

@@ -372,6 +372,23 @@ async fn busy(State(app): State<App>) -> Json<Value> {
     Json(json!(app.busy()))
 }
 
+/// The one file a linked machine has been given to make a compact version of, to whoever
+/// holds the ticket made out for it. The ticket is the whole of the request.
+async fn link_source(State(app): State<App>, Path(link): Path<u32>, req: axum::extract::Request) -> Response {
+    let mut given = req.uri().query().unwrap_or("").split('&').filter_map(|pair| pair.strip_prefix("ticket="));
+    let (Some(token), None) = (given.next(), given.next()) else { return StatusCode::BAD_REQUEST.into_response() };
+    let Some(file_id) = app.remotes().iter().find(|r| r.conf.id == link).and_then(|r| r.source_of(token)) else { return StatusCode::UNAUTHORIZED.into_response() };
+    // Only while that machine is making it: a ticket outlives the making, and one linked
+    // machine has no business with what another was given.
+    if !app.encodes.lock().now.iter().any(|n| n.file_id == file_id && n.link == link) {
+        return StatusCode::GONE.into_response();
+    }
+    let path = app.db.file(file_id).ok().flatten().and_then(|f| Some(app.db.title(f.title_id).ok()??.file_path(&f)));
+    let Some(path) = path else { return StatusCode::NOT_FOUND.into_response() };
+    let head = req.method() == axum::http::Method::HEAD;
+    ([(header::CACHE_CONTROL, "private, no-store")], crate::serve::send_file(&path, req.headers(), head).await).into_response()
+}
+
 pub fn router(app: App) -> Router {
     // The MCP endpoint checks its own key, then calls the API in-process.
     let mcp = crate::mcp::routes(app.clone(), api_routes().with_state(app.clone()));
@@ -379,7 +396,9 @@ pub fn router(app: App) -> Router {
         .fallback(assets)
         .layer(axum::extract::DefaultBodyLimit::max(64 << 20))
         .layer(axum::middleware::from_fn_with_state(app.clone(), guard))
-        .with_state(app)
+        .with_state(app.clone())
         .merge(mcp)
         .layer(tower_http::compression::CompressionLayer::new())
+        // A linked machine comes with a ticket, not the key to the app, and a film is sent as it is.
+        .merge(Router::new().route("/link/source/{link}", get(link_source)).with_state(app))
 }
