@@ -65,6 +65,11 @@
     if ((await act(() => api.del(`/accounts/${a.id}/devices/${device}`), 'Signed out')) !== undefined) loadPeople();
   }
 
+  // What an account held to compact versions would not see while away.
+  const lacking = $derived.by(() => {
+    const w = people.without_compact ?? { films: 0, episodes: 0 };
+    return [w.films ? `${w.films} ${w.films === 1 ? 'film' : 'films'}` : '', w.episodes ? `${w.episodes} ${w.episodes === 1 ? 'episode' : 'episodes'}` : ''].filter(Boolean).join(' and ');
+  });
   const summed = (a: any) =>
     a.totals.plays
       ? [`${duration(a.totals.seconds)} watched`, a.totals.seconds_lately > 0 ? `${duration(a.totals.seconds_lately)} this week` : '', `${a.totals.titles} ${a.totals.titles === 1 ? 'title' : 'titles'}`, `last played ${ago(a.totals.last_at)}`].filter(Boolean).join(' · ')
@@ -116,6 +121,8 @@
               <button class="btn small ghost danger" type="button" onclick={() => remove(a)}>Remove {a.name}</button>
             </div>
             <label class="check small"><input type="checkbox" checked={a.adds} onchange={(e) => change(a, { adds: e.currentTarget.checked }, e.currentTarget.checked ? `What ${a.name} asks for is added at once` : `What ${a.name} asks for waits for you`)} /> Add what {a.name} asks for at once, without waiting for an answer</label>
+            <label class="check small"><input type="checkbox" checked={a.compact_away} onchange={(e) => change(a, { compact_away: e.currentTarget.checked }, e.currentTarget.checked ? `Away from home, ${a.name} gets compact versions only` : `${a.name} gets everything, at home and away`)} /> Away from home, give {a.name} compact versions only</label>
+            {#if a.compact_away}<p class="hint">{lacking ? `${lacking} have no compact version, and are hidden from ${a.name} while away.` : 'Everything has a compact version, so nothing is hidden.'} <a href="#/settings/compact">Compact versions</a></p>{/if}
             {#if a.devices.length}
               <div class="list">
                 {#each a.devices as d (d.id)}

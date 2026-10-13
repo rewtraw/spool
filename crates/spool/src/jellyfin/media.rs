@@ -15,10 +15,17 @@ use std::path::{Path, PathBuf};
 /// The video itself: a film, an episode, or one named version of a film. A player that can
 /// reach the machine holding the file is sent there with a ticket for it; any other is sent
 /// the file from here.
-pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool, player: Option<std::net::IpAddr>, who: Option<&crate::app::Signed>) -> Response {
+/// With `compact`, only a compact version is sent: an original asked for by its id is not there.
+/// `held` says the account is one held to compact versions when away, wherever it is now.
+#[allow(clippy::too_many_arguments)]
+pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderMap, head: bool, player: Option<std::net::IpAddr>, who: Option<&crate::app::Signed>, compact: bool, held: bool) -> Response {
     let Some(id) = Id::parse(id) else { return StatusCode::NOT_FOUND.into_response() };
-    let path: Option<PathBuf> = Library::shared(app, 0).ok().and_then(|lib| lib.extra_path(id).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| t.file_path(f))));
-    let Some(path) = path else { return StatusCode::NOT_FOUND.into_response() };
+    // What goes with a film, its trailers and extras, has no compact version, so it is not
+    // there for someone held to them. Whether the file found is one says where it may come from.
+    let found: Option<(PathBuf, bool)> = Library::shared(app, 0, compact).ok().and_then(|lib| {
+        lib.extra_path(id).filter(|_| !compact).map(|p| (p, false)).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| (t.file_path(f), f.compact_of.is_some())))
+    });
+    let Some((path, is_compact)) = found else { return StatusCode::NOT_FOUND.into_response() };
     // A player on Tailscale is placed by where it is really reached, which is what says
     // whether it can reach the other machine too.
     // It is known by both addresses: one named by its Tailscale address is sent wherever it is.
@@ -29,7 +36,10 @@ pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderM
     let known: Vec<std::net::IpAddr> = really.into_iter().chain(player).collect();
     // Sent there only if the file opens there now: a disk asleep or a share gone would
     // otherwise leave the player with nothing, when it could have had the file from here.
-    let sent = match app.play_direct(&path, &known) {
+    // An account held to compact versions away from home is never sent to another machine
+    // for an original, at home either: what it would be handed there is good for hours, and
+    // would go on opening the original after it had left.
+    let sent = match app.play_direct(&path, &known).filter(|_| !held || is_compact) {
         Some((name, there)) if app.opens_there(&path, &there).await => Some((name, there)),
         _ => None,
     };
@@ -55,11 +65,11 @@ pub async fn image(app: &App, id: &str, kind: &str, versioned: bool, head: bool)
     };
     let made = match view.filter(|_| kind.eq_ignore_ascii_case("primary")) {
         Some(of) => {
-            let Some((titles, tag)) = Library::shared(app, 0).ok().map(|lib| lib.view_posters(of)).filter(|p| !p.0.is_empty()) else { return StatusCode::NOT_FOUND.into_response() };
+            let Some((titles, tag)) = Library::shared(app, 0, false).ok().map(|lib| lib.view_posters(of)).filter(|p| !p.0.is_empty()) else { return StatusCode::NOT_FOUND.into_response() };
             app.art_view(of.as_str(), &titles, &tag).await
         }
         None => {
-            let found = id.and_then(|id| Library::shared(app, 0).ok().and_then(|lib| lib.image(id, kind)));
+            let found = id.and_then(|id| Library::shared(app, 0, false).ok().and_then(|lib| lib.image(id, kind)));
             let Some((src, name, width)) = found else { return StatusCode::NOT_FOUND.into_response() };
             app.art_any(&name, &src, width).await
         }
@@ -97,10 +107,10 @@ fn to_vtt(srt: &str) -> String {
 }
 
 /// A subtitle file kept beside the video. Tracks inside the video are the player's to read.
-pub async fn subtitle(app: &App, id: &str, source: Option<&str>, index: &str, file: &str) -> Response {
+pub async fn subtitle(app: &App, id: &str, source: Option<&str>, index: &str, file: &str, compact: bool) -> Response {
     let missing = || StatusCode::NOT_FOUND.into_response();
     let (Some(id), Ok(index)) = (Id::parse(id), index.parse::<usize>()) else { return missing() };
-    let path = Library::shared(app, 0).ok().and_then(|lib| {
+    let path = Library::shared(app, 0, compact).ok().and_then(|lib| {
         let (t, f) = lib.file_for(id, source.and_then(Id::parse))?;
         let inside = super::items::media_streams(&f.media_info.clone().unwrap_or_default()).len();
         let sub = f.subtitles.get(index.checked_sub(inside)?)?;
@@ -229,7 +239,7 @@ pub async fn with_streams(app: &App, lib: Library, id: Id) -> Result<Library, Re
     if !learned {
         return Ok(lib);
     }
-    Library::shared(app, lib.account).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    Library::shared(app, lib.account, lib.compact).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 /// Bring older titles and files up to what players show: cast, scores and artwork for titles

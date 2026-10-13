@@ -23,14 +23,17 @@ pub(super) async fn accounts(State(app): State<App>) -> R<Value> {
         .map(|a| {
             let on: Vec<Value> = devices.iter().filter(|d| d.account_id == a.id).map(|d| json!({"id": device_name(&d.token), "name": d.name, "client": d.client, "created_at": d.created_at, "seen_at": d.seen_at})).collect();
             json!({
-                "id": a.id, "name": a.name, "enabled": a.enabled, "adds": a.adds, "has_password": !a.password.is_empty(), "created_at": a.created_at,
+                "id": a.id, "name": a.name, "enabled": a.enabled, "adds": a.adds, "compact_away": a.compact_away, "has_password": !a.password.is_empty(), "created_at": a.created_at,
                 "devices": on, "playing": playing.iter().filter(|p| p.account.eq_ignore_ascii_case(&a.name)).collect::<Vec<_>>(),
                 "totals": totals.get(&a.id).cloned().unwrap_or_default(),
             })
         })
         .collect();
     let recent: Vec<Value> = app.db.plays(None, 50)?.into_iter().map(|p| json!({"account": names.get(&p.account_id).copied().unwrap_or_default(), "play": p})).collect();
-    Ok(Json(json!({"accounts": list, "recent": recent})))
+    // What an account held to compact versions would not see away from home: the films and
+    // episodes that have none made.
+    let (films, episodes) = app.db.without_compact()?;
+    Ok(Json(json!({"accounts": list, "recent": recent, "without_compact": {"films": films, "episodes": episodes}})))
 }
 
 #[derive(Deserialize)]
@@ -42,6 +45,8 @@ pub(super) struct AccountChange {
     enabled: Option<bool>,
     /// Whether what the account asks for is added without waiting.
     adds: Option<bool>,
+    /// Whether, away from home, the account is given compact versions and nothing else.
+    compact_away: Option<bool>,
 }
 
 fn named(name: &str) -> Result<String, ApiError> {
@@ -91,6 +96,9 @@ pub(super) async fn account_change(State(app): State<App>, Path(id): Path<i64>, 
     }
     if let Some(adds) = b.adds {
         a.adds = adds;
+    }
+    if let Some(compact) = b.compact_away {
+        a.compact_away = compact;
     }
     app.db.save_account(&a)?;
     if out {

@@ -397,6 +397,8 @@ pub struct Account {
     pub enabled: bool,
     /// What it asks for is added at once, without waiting for anyone to say so.
     pub adds: bool,
+    /// Away from home it is shown only what has a compact version, and given that version.
+    pub compact_away: bool,
     pub created_at: i64,
 }
 

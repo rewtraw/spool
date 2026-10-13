@@ -65,6 +65,15 @@ Each person who plays has an account of their own. What they have watched, where
 
 The account there was before there were several is the first one, with what had been watched and the players that were signed in.
 
+## Compact versions only, away from home
+
+Each account has **Away from home, give them compact versions only**. On, a player signed in to that account away from home is shown only the films and episodes that have a [compact version](compact.md), and is sent that version. At home it has everything.
+
+- **What has no compact version is hidden** while away: not listed, not found by searching, and not played by asking for it by name. The settings page says how many films and episodes that is. Making compact versions of everything, under Settings, Compact versions, leaves nothing hidden.
+- **The original is never sent.** A player that learned of the original at home and asks for it away is given the compact version.
+- **At home** means on a network the machine running Spool is on. A player on Tailscale is placed by where it is really reached, so a phone on the home Wi-Fi is at home though it came by its Tailscale address, and one reached through a relay is away.
+- **A player that comes through something else on Spool's machine**, such as a reverse proxy, looks as though it is at home.
+
 ## Bringing what was watched in Plex
 
 With Plex set up under Settings, Plex, each account has **Bring watched from Plex**. Films and episodes Plex has as watched are marked watched for that account, and ones stopped part-way are given the place to carry on from.
@@ -96,6 +105,6 @@ A sitting is counted from what the player reports as it plays. Time it says it w
 ## What is not there
 
 - **Transcoding**, as above.
-- **Limits on an account.** Every account sees the whole library. Which locations a person may see, and how many may play at once, come with sharing between households; see [Ideas](ideas.md).
+- **Other limits on an account.** Apart from compact versions away from home, every account sees the whole library. Which locations a person may see, and how many may play at once, come with sharing between households; see [Ideas](ideas.md).
 - **Live television, music and photos.**
 - **A fast sync for Infuse's Library Mode.** Infuse's default, Direct Mode, is what Spool is tested with. See [Ideas](ideas.md).

@@ -232,6 +232,27 @@ impl Db {
         Ok(())
     }
 
+    /// How many films with a file have no compact version of any of them, and how many
+    /// episodes with a file have none of theirs: what is hidden from someone held to them.
+    pub fn without_compact(&self) -> Result<(u32, u32)> {
+        self.with(|c| {
+            let films = c.query_row(
+                "SELECT COUNT(*) FROM titles t WHERE t.kind = 'movie'
+                   AND EXISTS (SELECT 1 FROM files f WHERE f.title_id = t.id AND COALESCE(json_extract(f.data, '$.extra'), 0) = 0)
+                   AND NOT EXISTS (SELECT 1 FROM files f WHERE f.title_id = t.id AND json_extract(f.data, '$.compact_of') IS NOT NULL)",
+                [],
+                |r| r.get(0),
+            )?;
+            let episodes = c.query_row(
+                "SELECT COUNT(*) FROM episodes e WHERE e.file_id IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM files f WHERE json_extract(f.data, '$.compact_of') = e.file_id)",
+                [],
+                |r| r.get(0),
+            )?;
+            Ok((films, episodes))
+        })
+    }
+
     // ------------------------------------------------------------ watched
 
     /// Everything one account has watched or part-watched, keyed by kind ("movie", "series",
@@ -284,8 +305,8 @@ impl Db {
 
     pub fn accounts(&self) -> Result<Vec<Account>> {
         self.with(|c| {
-            let mut s = c.prepare("SELECT id, name, password, enabled, created_at, adds FROM accounts ORDER BY id")?;
-            let rows = s.query_map([], |r| Ok(Account { id: r.get(0)?, name: r.get(1)?, password: r.get(2)?, enabled: r.get(3)?, created_at: r.get(4)?, adds: r.get(5)? }))?;
+            let mut s = c.prepare("SELECT id, name, password, enabled, created_at, adds, compact_away FROM accounts ORDER BY id")?;
+            let rows = s.query_map([], |r| Ok(Account { id: r.get(0)?, name: r.get(1)?, password: r.get(2)?, enabled: r.get(3)?, created_at: r.get(4)?, adds: r.get(5)?, compact_away: r.get(6)? }))?;
             rows.collect()
         })
     }
@@ -303,7 +324,7 @@ impl Db {
     }
 
     pub fn save_account(&self, a: &Account) -> Result<()> {
-        self.with(|c| c.execute("UPDATE accounts SET name = ?2, password = ?3, enabled = ?4, adds = ?5 WHERE id = ?1", params![a.id, a.name, a.password, a.enabled, a.adds]))?;
+        self.with(|c| c.execute("UPDATE accounts SET name = ?2, password = ?3, enabled = ?4, adds = ?5, compact_away = ?6 WHERE id = ?1", params![a.id, a.name, a.password, a.enabled, a.adds, a.compact_away]))?;
         Ok(())
     }
 

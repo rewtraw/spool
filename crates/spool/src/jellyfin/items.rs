@@ -18,6 +18,8 @@ pub struct Library {
     watched: HashMap<(String, i64), Watched>,
     /// Whose it is; zero for nobody's, when only the files are wanted.
     pub account: i64,
+    /// Whether it is the library of compact versions only.
+    pub compact: bool,
 }
 
 impl std::ops::Deref for Library {
@@ -122,24 +124,28 @@ impl Library {
     /// The library as it stands. Reading it takes a moment and a player asks many things at
     /// once, so one reading serves every request until the library or what has been watched changes,
     /// or a location comes or goes.
-    pub fn shared(app: &App, account: i64) -> Result<Library> {
+    ///
+    /// With `compact`, it is the library as someone held to compact versions sees it: the
+    /// films and episodes that have one, each with that version as its only file.
+    pub fn shared(app: &App, account: i64, compact: bool) -> Result<Library> {
         // Read the count before the library: a change that lands meanwhile then shows as a
         // newer count next time, and the library is read again.
         let revision = (app.db.revision()?, app.location_changes.load(std::sync::atomic::Ordering::Relaxed));
-        let kept = app.player_library.lock().as_ref().filter(|(at, _)| *at == revision).map(|(_, data)| data.clone());
+        let slot = if compact { &app.player_library_compact } else { &app.player_library };
+        let kept = slot.lock().as_ref().filter(|(at, _)| *at == revision).map(|(_, data)| data.clone());
         let data = match kept {
             Some(data) => data,
             None => {
-                let data = std::sync::Arc::new(Library::load(app)?);
-                *app.player_library.lock() = Some((revision, data.clone()));
+                let data = std::sync::Arc::new(Library::load(app, compact)?);
+                *slot.lock() = Some((revision, data.clone()));
                 data
             }
         };
         let watched = if account == 0 { HashMap::new() } else { app.db.watched_all(account)? };
-        Ok(Library { data, watched, account })
+        Ok(Library { data, watched, account, compact })
     }
 
-    fn load(app: &App) -> Result<Data> {
+    fn load(app: &App, compact: bool) -> Result<Data> {
         // Only what can be played now: a file on a location that is away is left out until it
         // is back, and so is a title with no file left to play.
         let places = app.placement();
@@ -152,11 +158,22 @@ impl Library {
             }
         }
         for list in files.values_mut() {
-            list.sort_by_key(|f| f.extra);
+            // An original before the compact version made of it, whatever they are called.
+            list.sort_by_key(|f| (f.extra, f.compact_of.is_some()));
+        }
+        // Held to compact versions, each original gives way to the version made of it, and
+        // what has none is not there. An episode is then played from its compact version.
+        let stands_for: HashMap<i64, i64> = if compact { files.values().flatten().filter_map(|f| Some((f.compact_of?, f.id))).collect() } else { HashMap::new() };
+        if compact {
+            files.values_mut().for_each(|list| list.retain(|f| f.compact_of.is_some()));
+            files.retain(|_, list| !list.is_empty());
         }
         let mut episodes: HashMap<i64, Vec<Episode>> = HashMap::new();
         let mut episode_title = HashMap::new();
-        for e in app.db.all_episodes()? {
+        for mut e in app.db.all_episodes()? {
+            if compact {
+                e.file_id = e.file_id.and_then(|id| stands_for.get(&id).copied());
+            }
             if e.file_id.is_some_and(|id| files.get(&e.title_id).is_some_and(|l| l.iter().any(|f| f.id == id))) {
                 episode_title.insert(e.id, e.title_id);
                 episodes.entry(e.title_id).or_default().push(e);

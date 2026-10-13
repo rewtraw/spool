@@ -464,6 +464,11 @@ const MIGRATIONS: &[&str] = &[
     -- Whether what an account asks for is added without waiting for anyone to say so.
     ALTER TABLE accounts ADD COLUMN adds INTEGER NOT NULL DEFAULT 0;
     "#,
+    r#"
+    -- Whether an account, away from home, is shown only what has a compact version, and
+    -- given that version of it.
+    ALTER TABLE accounts ADD COLUMN compact_away INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 impl Db {

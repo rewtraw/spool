@@ -973,6 +973,107 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
     assert!(all.as_array().unwrap().iter().all(|a| a["account"] == "spool"), "{all}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_held_to_compact_versions_is_given_only_those_while_away() {
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    // Two films and a series of two episodes. One film and one episode have a compact version.
+    let lay = |t: &mut Title, folder: &str| {
+        t.path = w.root.join(folder).to_string_lossy().to_string();
+        std::fs::create_dir_all(&t.path).unwrap();
+        w.app.db.save_title(t).unwrap();
+    };
+    let file = |t: &Title, name: &str, bytes: &[u8], of: Option<i64>| -> i64 {
+        std::fs::write(Path::new(&t.path).join(name), bytes).unwrap();
+        let data = json!({"title_id": t.id, "rel_path": name, "size": bytes.len(), "quality": QualityModel::new(Quality::Bluray1080p), "compact_of": of}).to_string();
+        w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, ?2, ?3, ?4)", rusqlite::params![t.id, name, bytes.len() as i64, data]).map(|_| c.last_insert_rowid())).unwrap()
+    };
+    let (mut both, mut whole) = (w.movie("Both Sizes", 2001, "tt0000001"), w.movie("Whole Only", 2002, "tt0000002"));
+    lay(&mut both, "Movies/Both Sizes (2001)");
+    lay(&mut whole, "Movies/Whole Only (2002)");
+    let original = file(&both, "Both Sizes.mkv", b"the original, which is large", None);
+    file(&both, "Both Sizes.compact.mkv", b"the compact one", Some(original));
+    file(&whole, "Whole Only.mkv", b"only ever whole", None);
+    let (mut show, eps) = w.series("Example World", 296762, &[(1, 1, "The Original"), (1, 2, "Chestnut")]);
+    lay(&mut show, "TV Shows/Example World");
+    let first = file(&show, "S01E01.mkv", b"episode one, large", None);
+    file(&show, "S01E01.compact.mkv", b"episode one, small", Some(first));
+    let second = file(&show, "S01E02.mkv", b"episode two, large", None);
+    for (episode, of) in [(eps[0], first), (eps[1], second)] {
+        w.app.db.with(|c| c.execute("UPDATE episodes SET file_id = ?2 WHERE id = ?1", [episode, of])).unwrap();
+    }
+    w.app.db.add_account("Ada", "").unwrap();
+
+    let mut g = w.app.settings.general();
+    g.players_enabled = true;
+    w.app.settings.set_general(&g).unwrap();
+    let door = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", door.local_addr().unwrap());
+    let jf = spool::jellyfin::router(w.app.clone());
+    tokio::spawn(async move { axum::serve(door, jf.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap() });
+    let http = reqwest::Client::new();
+    const WHO: &str = r#"MediaBrowser Client="Infuse-Direct", Device="Phone", DeviceId="test-device", Version="8.5""#;
+    let mut auths = vec![];
+    for name in ["spool", "Ada"] {
+        let signed = http.post(format!("{url}/Users/AuthenticateByName")).header("x-emby-authorization", WHO).json(&json!({"Username": name, "Pw": ""})).send().await.unwrap().json::<Value>().await.unwrap();
+        auths.push(format!(r#"{WHO}, Token="{}""#, signed["AccessToken"].as_str().unwrap()));
+    }
+    let (me, ada) = (auths[0].clone(), auths[1].clone());
+    let ask = |auth: String, path: String| {
+        let (http, url) = (http.clone(), url.clone());
+        async move {
+            let r = http.get(format!("{url}{path}")).header("x-emby-authorization", auth).send().await.unwrap();
+            (r.status().as_u16(), r.bytes().await.unwrap().to_vec())
+        }
+    };
+    let names = |auth: &str, kind: &'static str| {
+        let (ask, auth) = (ask.clone(), auth.to_string());
+        async move {
+            let listed: Value = serde_json::from_slice(&ask(auth, format!("/Items?Recursive=true&IncludeItemTypes={kind}&Fields=MediaSources")).await.1).unwrap();
+            let mut items: Vec<(String, String, usize)> = listed["Items"].as_array().unwrap().iter().map(|i| (i["Name"].as_str().unwrap().to_string(), i["Id"].as_str().unwrap().to_string(), i["MediaSources"].as_array().map(Vec::len).unwrap_or(0))).collect();
+            items.sort();
+            items
+        }
+    };
+    let played = |auth: &str, id: String| {
+        let (ask, auth) = (ask.clone(), auth.to_string());
+        async move { ask(auth, format!("/Videos/{id}/stream?static=true")).await }
+    };
+
+    // At home, and before the account is held to anything, it has everything.
+    assert_eq!(call(&api, "PUT", "/api/accounts/1", json!({"compact_away": true})).await.0, 200);
+    let films = names(&me, "Movie").await;
+    assert_eq!(films.iter().map(|f| (f.0.as_str(), f.2)).collect::<Vec<_>>(), [("Both Sizes", 2), ("Whole Only", 1)], "at home both versions are offered");
+    let (both_id, whole_id) = (films[0].1.clone(), films[1].1.clone());
+    assert_eq!(played(&me, both_id.clone()).await.1, b"the original, which is large");
+
+    // Away, it is shown only what has a compact version, and given that version: by the
+    // film's name, and by the original's own.
+    *w.app.home.lock() = Some(vec![]);
+    let films = names(&me, "Movie").await;
+    assert_eq!(films.iter().map(|f| (f.0.as_str(), f.2)).collect::<Vec<_>>(), [("Both Sizes", 1)]);
+    assert_eq!(played(&me, both_id.clone()).await.1, b"the compact one");
+    let by_source = ask(me.clone(), format!("/Videos/{both_id}/stream?static=true&MediaSourceId={}", spool::jellyfin::ids::Id::File(original))).await;
+    assert_eq!(by_source.1, b"the compact one", "the original is not had by naming it");
+    assert_eq!(played(&me, whole_id.clone()).await.0, 404, "nor is a film that has no compact version");
+    assert_eq!(ask(me.clone(), format!("/Items/{whole_id}")).await.0, 404);
+    let episodes = names(&me, "Episode").await;
+    assert_eq!(episodes.iter().map(|e| (e.0.as_str(), e.2)).collect::<Vec<_>>(), [("The Original", 1)]);
+    assert_eq!(played(&me, episodes[0].1.clone()).await.1, b"episode one, small");
+    // Someone not held to them has everything, away as at home.
+    assert_eq!(names(&ada, "Movie").await.len(), 2);
+    assert_eq!(played(&ada, both_id.clone()).await.1, b"the original, which is large");
+    assert_eq!(names(&ada, "Episode").await.len(), 2);
+    // Home again, so has the first account.
+    *w.app.home.lock() = None;
+    assert_eq!(names(&me, "Movie").await.len(), 2);
+
+    // The settings page is told how much has no compact version, which is what would be hidden.
+    let (_, people) = call(&api, "GET", "/api/accounts", Value::Null).await;
+    assert_eq!((people["accounts"][0]["compact_away"].as_bool(), people["accounts"][1]["compact_away"].as_bool(), people["without_compact"].to_string().as_str()), (Some(true), Some(false), r#"{"episodes":1,"films":1}"#), "{people}");
+}
+
 async fn mcp(router: &axum::Router, key: Option<&str>, method: &str, params: serde_json::Value) -> (u16, serde_json::Value) {
     use tower::ServiceExt;
     let mut req = axum::http::Request::builder().method("POST").uri("/mcp").header("content-type", "application/json");

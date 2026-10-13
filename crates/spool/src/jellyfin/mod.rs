@@ -124,6 +124,9 @@ struct Call {
     body: Value,
     /// The address the request came from, when it is known.
     peer: Option<std::net::IpAddr>,
+    /// Whether whoever is asking is held to compact versions just now: their account is,
+    /// and they are away from home. Settled once they are known to be signed in.
+    compact: std::sync::atomic::AtomicBool,
 }
 
 impl Call {
@@ -182,10 +185,14 @@ impl Call {
     }
 
     fn library(&self) -> Result<Library, Response> {
-        Library::shared(&self.app, self.signed().map(|w| w.account).unwrap_or(0)).map_err(|e| {
+        Library::shared(&self.app, self.signed().map(|w| w.account).unwrap_or(0), self.compact()).map_err(|e| {
             tracing::warn!(error = %e, "could not read the library for a player");
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         })
+    }
+
+    fn compact(&self) -> bool {
+        self.compact.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn user(&self, who: &crate::models::Account) -> Value {
@@ -322,7 +329,7 @@ impl Call {
             Err(r) => return r,
         };
         if let Id::Extra(..) = id {
-            return lib.extra_json(id).map(|v| Json(v).into_response()).unwrap_or_else(missing);
+            return lib.extra_json(id).filter(|_| !lib.compact).map(|v| Json(v).into_response()).unwrap_or_else(missing);
         }
         if let Id::Person(..) = id {
             return match lib.people().into_iter().find(|(i, _)| *i == id) {
@@ -347,7 +354,7 @@ impl Call {
             Err(r) => return r,
         };
         if let Id::Extra(..) = id {
-            let Some(item) = lib.extra_json(id) else { return missing() };
+            let Some(item) = lib.extra_json(id).filter(|_| !lib.compact) else { return missing() };
             return Json(json!({"MediaSources": item["MediaSources"], "PlaySessionId": crate::settings::new_key()[..32]})).into_response();
         }
         let lib = match media::with_streams(&self.app, lib, id).await {
@@ -382,6 +389,9 @@ impl Call {
         }
         let Some(who) = self.signed() else { return (StatusCode::UNAUTHORIZED, "Sign in first.").into_response() };
         let Some(me) = self.app.db.account(who.account).ok().flatten().filter(|a| a.enabled) else { return (StatusCode::UNAUTHORIZED, "Sign in first.").into_response() };
+        if me.compact_away && !self.app.at_home(self.peer).await {
+            self.compact.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
 
         match (reading, path.as_slice()) {
             (true, ["system", "info"]) => Json(self.system_info(true)).into_response(),
@@ -521,10 +531,10 @@ impl Call {
             },
 
             (_, ["items", id, "playbackinfo"]) => self.playback_info(id).await,
-            (true, ["items", id, "download" | "file"] | ["videos", id, "stream" | "original"]) => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer, self.signed().as_ref()).await,
-            (true, ["videos", id, file]) if file.starts_with("stream.") || file.starts_with("original.") => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer, self.signed().as_ref()).await,
-            (true, ["videos", id, source, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, Some(source), index, file).await,
-            (true, ["videos", id, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, None, index, file).await,
+            (true, ["items", id, "download" | "file"] | ["videos", id, "stream" | "original"]) => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer, self.signed().as_ref(), self.compact(), me.compact_away).await,
+            (true, ["videos", id, file]) if file.starts_with("stream.") || file.starts_with("original.") => media::stream(&self.app, id, self.q.get("mediasourceid"), &self.headers, head, self.peer, self.signed().as_ref(), self.compact(), me.compact_away).await,
+            (true, ["videos", id, source, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, Some(source), index, file, self.compact()).await,
+            (true, ["videos", id, "subtitles", index, .., file]) if file.starts_with("stream.") => media::subtitle(&self.app, id, None, index, file, self.compact()).await,
 
             (false, ["sessions", "playing"]) => self.progress(false),
             (false, ["sessions", "playing", "progress"]) => self.progress(false),
@@ -572,7 +582,7 @@ impl Call {
             }
             // Trailers and other extras kept in the title's folder.
             (true, ["items", id, which @ ("specialfeatures" | "localtrailers")] | ["users", _, "items", id, which @ ("specialfeatures" | "localtrailers")]) => match (Id::parse(id), self.library()) {
-                (Some(id), Ok(lib)) => Json(json!(lib.extras_of(id, *which == "localtrailers"))).into_response(),
+                (Some(id), Ok(lib)) if !lib.compact => Json(json!(lib.extras_of(id, *which == "localtrailers"))).into_response(),
                 (_, Err(r)) => r,
                 _ => Json(json!([])).into_response(),
             },
@@ -689,7 +699,7 @@ async fn handle(State(app): State<App>, req: Request) -> Response {
         Method::GET | Method::HEAD => Value::Null,
         _ => axum::body::to_bytes(body, 1 << 20).await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null),
     };
-    let call = Call { app, method: parts.method, path, q: Params::parse(parts.uri.query()), headers: parts.headers, body, peer };
+    let call = Call { app, method: parts.method, path, q: Params::parse(parts.uri.query()), headers: parts.headers, body, peer, compact: Default::default() };
     let response = call.route().await;
     let line = format!(
         "{} {} {}{} -> {}  [{}]",

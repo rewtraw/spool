@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a class="on" aria-current="page" href="players.html">On a television</a><a class="sub" href="#turning-it-on">Turning it on</a><a class="sub" href="#adding-it-in-infuse">Adding it in Infuse</a><a class="sub" href="#what-the-player-gets">What the player gets</a><a class="sub" href="#nothing-is-converted">Nothing is converted</a><a class="sub" href="#away-from-home">Away from home</a><a class="sub" href="#people">People</a><a class="sub" href="#bringing-what-was-watched-in-plex">Bringing what was watched in Plex</a><a class="sub" href="#asking-for-something">Asking for something</a><a class="sub" href="#seeing-what-players-are-doing">Seeing what players are doing</a><a class="sub" href="#what-is-not-there">What is not there</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a class="on" aria-current="page" href="players.html">On a television</a><a class="sub" href="#turning-it-on">Turning it on</a><a class="sub" href="#adding-it-in-infuse">Adding it in Infuse</a><a class="sub" href="#what-the-player-gets">What the player gets</a><a class="sub" href="#nothing-is-converted">Nothing is converted</a><a class="sub" href="#away-from-home">Away from home</a><a class="sub" href="#people">People</a><a class="sub" href="#compact-versions-only-away-from-home">Compact versions only, away from home</a><a class="sub" href="#bringing-what-was-watched-in-plex">Bringing what was watched in Plex</a><a class="sub" href="#asking-for-something">Asking for something</a><a class="sub" href="#seeing-what-players-are-doing">Seeing what players are doing</a><a class="sub" href="#what-is-not-there">What is not there</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -162,6 +162,14 @@
 <li><strong>Choosing who.</strong> A player that shows a list of people to sign in as is given the names of the accounts that may sign in. Whether a player shows one is the player&#39;s doing; one that does not asks for the name.</li>
 </ul>
 <p>The account there was before there were several is the first one, with what had been watched and the players that were signed in.</p>
+<h2 id="compact-versions-only-away-from-home"><a href="#compact-versions-only-away-from-home">Compact versions only, away from home</a></h2>
+<p>Each account has <strong>Away from home, give them compact versions only</strong>. On, a player signed in to that account away from home is shown only the films and episodes that have a <a href="compact.html">compact version</a>, and is sent that version. At home it has everything.</p>
+<ul>
+<li><strong>What has no compact version is hidden</strong> while away: not listed, not found by searching, and not played by asking for it by name. The settings page says how many films and episodes that is. Making compact versions of everything, under Settings, Compact versions, leaves nothing hidden.</li>
+<li><strong>The original is never sent.</strong> A player that learned of the original at home and asks for it away is given the compact version.</li>
+<li><strong>At home</strong> means on a network the machine running Spool is on. A player on Tailscale is placed by where it is really reached, so a phone on the home Wi-Fi is at home though it came by its Tailscale address, and one reached through a relay is away.</li>
+<li><strong>A player that comes through something else on Spool&#39;s machine</strong>, such as a reverse proxy, looks as though it is at home.</li>
+</ul>
 <h2 id="bringing-what-was-watched-in-plex"><a href="#bringing-what-was-watched-in-plex">Bringing what was watched in Plex</a></h2>
 <p>With Plex set up under Settings, Plex, each account has <strong>Bring watched from Plex</strong>. Films and episodes Plex has as watched are marked watched for that account, and ones stopped part-way are given the place to carry on from.</p>
 <ul>
@@ -189,7 +197,7 @@
 <h2 id="what-is-not-there"><a href="#what-is-not-there">What is not there</a></h2>
 <ul>
 <li><strong>Transcoding</strong>, as above.</li>
-<li><strong>Limits on an account.</strong> Every account sees the whole library. Which locations a person may see, and how many may play at once, come with sharing between households; see <a href="ideas.html">Ideas</a>.</li>
+<li><strong>Other limits on an account.</strong> Apart from compact versions away from home, every account sees the whole library. Which locations a person may see, and how many may play at once, come with sharing between households; see <a href="ideas.html">Ideas</a>.</li>
 <li><strong>Live television, music and photos.</strong></li>
 <li><strong>A fast sync for Infuse&#39;s Library Mode.</strong> Infuse&#39;s default, Direct Mode, is what Spool is tested with. See <a href="ideas.html">Ideas</a>.</li>
 </ul>

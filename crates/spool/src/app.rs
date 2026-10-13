@@ -149,6 +149,10 @@ pub struct Inner {
     /// The library as last read for players, with the database's change count and the count of
     /// locations coming and going at the time.
     pub player_library: Mutex<Option<((i64, u64), Arc<crate::jellyfin::items::Data>)>>,
+    /// The same, as it is shown to an account held to compact versions while it is away.
+    pub player_library_compact: Mutex<Option<((i64, u64), Arc<crate::jellyfin::items::Data>)>>,
+    /// The networks that count as home, when they are not to be read from this machine's own.
+    pub home: Mutex<Option<Vec<crate::link::Net>>>,
     /// Where players are being served, or why they are not.
     pub player_status: Mutex<String>,
     /// Releases being sent to the downloader right now, keyed by title and release name.
@@ -233,6 +237,27 @@ impl App {
         *players = self.db.devices().unwrap_or_default().into_iter().filter_map(|d| Some((d.token.clone(), Signed { token: d.token, account: d.account_id, account_name: accounts.get(&d.account_id)?.clone(), device: d.name, seen: d.seen_at }))).collect();
     }
 
+    /// Whether a player is at home: on one of the networks this machine is on. One that
+    /// comes over Tailscale is placed by where it is really reached, and one reached
+    /// through a relay is away. A request with no address to judge by is taken as at home.
+    pub async fn at_home(&self, player: Option<std::net::IpAddr>) -> bool {
+        // An address of the old kind that arrived dressed as the new kind is the old kind.
+        let Some(player) = player.map(|p| p.to_canonical()) else { return true };
+        let Some(really) = crate::link::tailnet::really(player).await else { return false };
+        if let Some(nets) = self.home.lock().as_ref() {
+            return nets.iter().any(|n| n.holds(really));
+        }
+        // Each network as wide as this machine has it, not a guess at its width.
+        let mine = if_addrs::get_if_addrs().into_iter().flatten().filter(|i| !i.is_loopback() && !crate::link::tailnet::ours(i.ip())).filter_map(|i| {
+            let bits = match &i.addr {
+                if_addrs::IfAddr::V4(a) => a.prefixlen,
+                if_addrs::IfAddr::V6(a) => a.prefixlen,
+            };
+            crate::link::Net::parse(&format!("{}/{bits}", i.ip())).ok()
+        });
+        really.is_loopback() || mine.into_iter().any(|n| n.holds(really))
+    }
+
     /// What is being played now, the longest-running first.
     pub fn playing_now(&self) -> Vec<Playing> {
         let now = crate::db::now();
@@ -302,6 +327,8 @@ impl App {
             player_failures: Mutex::new((0, 0)),
             player_requests: Mutex::new(Default::default()),
             player_library: Mutex::new(None),
+            player_library_compact: Mutex::new(None),
+            home: Mutex::new(None),
             player_status: Mutex::new(String::new()),
             grabbing: Mutex::new(HashSet::new()),
             waiting_for_space: Mutex::new(HashSet::new()),
