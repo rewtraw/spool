@@ -303,6 +303,7 @@ fn api_routes() -> Router<App> {
         .route("/api/files/{id}/keep-compact", post(compact_keep))
         .route("/api/compact", get(compact_state).post(compact_make))
         .route("/api/compact/cancel", post(compact_cancel))
+        .route("/api/compact/hold", post(compact_hold))
         .route("/api/compact/everything", post(compact_everything))
         .route("/api/files/{id}/subtitles", get(file_subtitles).delete(delete_file_subtitle))
         .route("/api/files/{id}/subtitles/search", post(search_file_subtitles))

@@ -28,6 +28,14 @@ pub(super) async fn compact_cancel(State(app): State<App>, body: Option<Json<Val
     Ok(Json(json!({"cancelled": cancelled, "stopping": stopping})))
 }
 
+/// Begin no more compact versions, or go on: `{"hold": true}` lets those being made finish
+/// and keeps the rest waiting, which is how Spool is restarted without throwing work away.
+pub(super) async fn compact_hold(State(app): State<App>, Json(b): Json<Value>) -> R<Value> {
+    let hold = b["hold"].as_bool().unwrap_or(true);
+    app.hold_compacts(hold);
+    Ok(Json(json!({"held": hold})))
+}
+
 /// What has a compact version, what would gain from one, and what is being made.
 pub(super) async fn compact_state(State(app): State<App>) -> R<Value> {
     let mut report = tokio::task::spawn_blocking({

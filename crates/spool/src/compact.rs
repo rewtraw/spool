@@ -62,6 +62,9 @@ pub struct Encodes {
     /// Files a linked machine was given and did not make. They are made here, so that
     /// none goes from machine to machine for ever.
     pub here_only: std::collections::HashSet<i64>,
+    /// No more are begun: those being made are finished and the rest wait. Set before
+    /// Spool is restarted, so that nothing half made is thrown away, and forgotten by the restart.
+    pub held: bool,
 }
 
 #[derive(Clone)]
@@ -480,7 +483,10 @@ impl App {
     /// Have every machine that makes compact versions and is not at one take from the
     /// line: this one, and each linked machine that offers to and is to be given them now.
     pub fn compact_start(&self) {
-        if self.encodes.lock().queue.is_empty() {
+        if {
+            let e = self.encodes.lock();
+            e.queue.is_empty() || e.held
+        } {
             return;
         }
         let mut makers: Vec<Option<Arc<Remote>>> = self.remotes().into_iter().filter(|r| r.makes()).map(Some).collect();
@@ -504,6 +510,7 @@ impl App {
                 let mut e = self.encodes.lock();
                 // A link whose settings were changed is another link from then on, and takes the line up afresh.
                 let next = match &maker {
+                    _ if e.held => None,
                     None => e.queue.pop_front(),
                     Some(r) if self.listed(r) && r.makes() => e.queue.iter().position(|id| !e.here_only.contains(id)).and_then(|at| e.queue.remove(at)),
                     Some(_) => None,
@@ -591,14 +598,26 @@ impl App {
         e.queue.contains(&file_id) || e.now.iter().any(|n| n.file_id == file_id)
     }
 
+    /// Begin no more compact versions, or go on beginning them. Those being made are finished.
+    pub fn hold_compacts(&self, hold: bool) {
+        self.encodes.lock().held = hold;
+        if !hold {
+            self.compact_start();
+        }
+        self.emit(Event::Title { id: 0 });
+    }
+
     /// Those being made and those waiting, as Activity shows them.
     pub fn compacts_shown(&self) -> serde_json::Value {
-        let (now, waiting) = {
+        let (now, waiting, held) = {
             let e = self.encodes.lock();
-            (e.now.clone(), e.queue.iter().copied().collect::<Vec<_>>())
+            (e.now.clone(), e.queue.iter().copied().collect::<Vec<_>>(), e.held)
         };
+        let here = crate::link::find::host_name();
+        let places = self.placement();
+        let remotes = self.remotes();
         if now.is_empty() && waiting.is_empty() {
-            return json!({"now": [], "waiting": [], "waiting_count": 0});
+            return json!({"now": [], "waiting": [], "waiting_count": 0, "here": here, "held": held});
         }
         let shown = |file_id: i64| {
             let file = self.db.file(file_id).ok().flatten();
@@ -614,6 +633,9 @@ impl App {
                 "title": t.as_ref().map(|t| t.title.clone()),
                 "episode": episode,
                 "size": file.as_ref().map(|f| f.size),
+                // Where the original is kept: the location, and the machine whose disks that is.
+                "kept": file.as_ref().zip(t.as_ref()).and_then(|(f, t)| places.of(t.folder_of(f))).map(|p| p.0.name.clone()),
+                "kept_on": file.as_ref().zip(t.as_ref()).map(|(f, t)| remotes.iter().find(|r| r.covers(Path::new(t.folder_of(f)))).map_or(here.clone(), |r| r.conf.name.clone())),
             })
         };
         let now: Vec<serde_json::Value> = now.into_iter().map(|n| {
@@ -629,7 +651,7 @@ impl App {
         }).collect();
         // A whole library in line is hundreds of files; the first of them say enough.
         let listed: Vec<serde_json::Value> = waiting.iter().take(50).map(|id| shown(*id)).collect();
-        json!({"now": now, "waiting": listed, "waiting_count": waiting.len()})
+        json!({"now": now, "waiting": listed, "waiting_count": waiting.len(), "here": here, "held": held})
     }
 
     /// Make a compact version of one file, here or on a linked machine, check it and file it.

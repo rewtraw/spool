@@ -38,7 +38,7 @@
     load();
   }
   // ---- compact versions being made
-  const compact = $derived(data.compact ?? { now: [], waiting: [], waiting_count: 0 });
+  const compact = $derived(data.compact ?? { now: [], waiting: [], waiting_count: 0, here: '', held: false });
   const encoding = $derived(compact.now.length > 0 || compact.waiting_count > 0);
   $effect(() => {
     if (tab !== 'queue' || !encoding || moving) return;
@@ -277,8 +277,8 @@
           <div class="grow">
             <div class="row wrap top">
               <a class="t" href="#/title/{c.title_id}">{named(c)}</a>
-              <span class="chip {c.stopping ? 'warn' : 'accent'}">{c.stopping ? 'Stopping' : !c.total_ms ? 'Getting ready' : c.done_ms < c.total_ms ? 'Encoding' : c.by && c.back ? 'Coming back' : 'Checking'}</span>
-              {#if c.by}<span class="chip" title="Made on {c.by}, a linked machine, and brought back here">{c.by}</span>{/if}
+              <span class="chip {c.stopping ? 'warn' : 'accent'}">{c.stopping ? 'Stopping' : !c.total_ms ? 'Getting ready' : c.done_ms < c.total_ms ? `Encoding on ${c.by || compact.here}` : c.by && c.back ? `Coming back from ${c.by}` : 'Checking'}</span>
+              {#if c.kept}<span class="chip" title="The original is kept on {c.kept}, a location on {c.kept_on}">From {c.kept} on {c.kept_on}</span>{/if}
               {#if c.how}<span class="chip" title={c.how === 'hardware' ? `On ${c.by || 'this machine'}'s video hardware` : 'On the processor, which is slower'}>{c.how === 'hardware' ? 'Hardware' : 'Software'}</span>{/if}
             </div>
             {#if c.total_ms}
@@ -298,7 +298,7 @@
       {#if compact.waiting_count}
         <div class="card waiting">
           <div class="row">
-            <span class="muted grow">{compact.waiting_count} waiting {compact.waiting_count === 1 ? 'its' : 'their'} turn</span>
+            <span class="muted grow">{compact.waiting_count} waiting {compact.held ? 'until Spool has been restarted' : compact.waiting_count === 1 ? 'its turn' : 'their turn'}</span>
             {#if compact.waiting_count > 1}<button class="btn small ghost" onclick={() => cancelCompact()}>Cancel all waiting</button>{/if}
           </div>
           {#each compact.waiting.slice(0, 8) as c (c.file_id)}

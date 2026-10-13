@@ -9,11 +9,12 @@
 #   SPOOL_BIND           address to listen on (default: 0.0.0.0:7979)
 #   SPOOL_API_KEY        Spool's key, if the app has a password, so the script may ask it things
 #   SPOOL_FORCE          set to restart even though Spool says it is in the middle of something
+#   SPOOL_WAIT_MINUTES   how long to wait for compact versions being made to finish (default: 90)
 #   SPOOL_HELPER_HOST    if set, the helper on that machine is updated afterwards; see deploy/helper.sh
 #
 # A Spool that is already running is asked first whether a restart would interrupt anything:
 # a download being unpacked, an import, a title being moved, someone playing. If so the
-# script stops and says what. Downloads still coming down are paused, and resumed afterwards.
+# script stops and says what. Compact versions being made are waited for. Downloads still coming down are paused, and resumed afterwards.
 #
 # Signing with a stable identity matters when the library is on a removable disk: macOS ties
 # the permission to read it to the program's signature, and an ad hoc build is a new program
@@ -44,6 +45,23 @@ if STATE=$(ask "$URL/api/busy" 2>/dev/null); then
       fi
       ;;
   esac
+  # A compact version cut short is begun again from nothing. No more are begun, those
+  # being made are waited for, and the line is taken up again by the Spool that starts.
+  making() { ask "$URL/api/busy" 2>/dev/null | sed -n 's/.*"making":\([0-9]*\).*/\1/p'; }
+  if [ "$(making)" -gt 0 ] 2>/dev/null && [ -z "${SPOOL_FORCE:-}" ]; then
+    ask -X POST -H 'Content-Type: application/json' -d '{"hold":true}' "$URL/api/compact/hold" >/dev/null
+    echo "Waiting for $(making) compact version(s) being made to finish; no more are begun until Spool has restarted."
+    LEFT=$(( ${SPOOL_WAIT_MINUTES:-90} * 4 ))
+    while [ "$(making)" -gt 0 ] 2>/dev/null; do
+      LEFT=$((LEFT - 1))
+      if [ "$LEFT" -le 0 ]; then
+        ask -X POST -H 'Content-Type: application/json' -d '{"hold":false}' "$URL/api/compact/hold" >/dev/null
+        echo "They are still being made. Not restarting; the line carries on. Try again later, or set SPOOL_FORCE=1."
+        exit 1
+      fi
+      sleep 15
+    done
+  fi
   # Downloads resume from where they stopped; pausing first lets them stop at a clean point.
   case "$(ask "$URL/api/status" 2>/dev/null)" in
     *'"queue_paused":false'*) ask -X POST "$URL/api/queue/pause" >/dev/null 2>&1 && RESUME=1 ;;

@@ -22,6 +22,8 @@ pub struct Busy {
     pub reasons: Vec<String>,
     /// Downloads that would pause and pick up where they left off.
     pub resumable: usize,
+    /// Compact versions being made, each of which would be begun again.
+    pub making: usize,
 }
 
 /// One thing looked at on a location, and how it went.
@@ -201,7 +203,7 @@ impl App {
         }
         // A compact version under way is started again after a restart, like a download.
         let encoding = self.encodes.lock().now.len();
-        Busy { busy: !reasons.is_empty(), reasons, resumable: encoding + jobs.iter().filter(|j| matches!(j.state, JobState::Downloading | JobState::Queued)).count() }
+        Busy { busy: !reasons.is_empty(), reasons, making: encoding, resumable: encoding + jobs.iter().filter(|j| matches!(j.state, JobState::Downloading | JobState::Queued)).count() }
     }
 
     /// Try a location out: is each folder there, can it be listed and read, can it be written

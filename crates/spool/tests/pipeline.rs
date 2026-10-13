@@ -4078,6 +4078,8 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
     let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
     let by: Vec<&str> = activity["compact"]["now"].as_array().unwrap().iter().filter_map(|n| n["by"].as_str()).collect();
     assert!(by.contains(&"Maker") && by.contains(&""), "one is made there and one here, at once: {}", activity["compact"]);
+    let here = activity["compact"]["here"].as_str().unwrap();
+    assert!(!here.is_empty() && activity["compact"]["now"].as_array().unwrap().iter().all(|n| n["kept_on"].as_str() == Some(here) && n["kept"].is_string()), "each says where its original is kept: {}", activity["compact"]);
     for _ in 0..1200 {
         if films.iter().all(|t| w.app.db.files(t.id).unwrap().iter().any(|f| f.compact_of.is_some())) {
             break;
@@ -4095,9 +4097,35 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
     }
     made_by.sort();
     assert_eq!(made_by, ["", "Maker"]);
+    // Held, the line is left where it is; let go, it is taken up.
+    assert_eq!(call(&api, "POST", "/api/compact/hold", json!({"hold": true})).await.0, 200);
+    for t in &films {
+        let compact = w.app.db.files(t.id).unwrap().into_iter().find(|f| f.compact_of.is_some()).unwrap();
+        w.app.delete_compact(compact.id).unwrap();
+    }
+    let (_, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [films[0].id]})).await;
+    assert_eq!(said["queued"].as_u64(), Some(1), "{said}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    let (_, busy) = call(&api, "GET", "/api/busy", Value::Null).await;
+    assert_eq!((activity["compact"]["now"].as_array().map(Vec::len), activity["compact"]["waiting_count"].as_u64(), activity["compact"]["held"].as_bool(), busy["making"].as_u64()), (Some(0), Some(1), Some(true), Some(0)), "{}", activity["compact"]);
+    assert_eq!(call(&api, "POST", "/api/compact/hold", json!({"hold": false})).await.0, 200);
+    for _ in 0..1200 {
+        if w.app.db.files(films[0].id).unwrap().iter().any(|f| f.compact_of.is_some()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(w.app.db.files(films[0].id).unwrap().iter().any(|f| f.compact_of.is_some()), "let go, the line is taken up");
+    for _ in 0..100 {
+        if !w.app.compacting(w.app.db.files(films[0].id).unwrap()[0].id) && std::fs::read_dir(w.root.join("maker-data/making")).map(|d| d.count()).unwrap_or(0) == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     // Nothing is left on the machine that made it, nor in the film's folder but the two files.
     assert_eq!(std::fs::read_dir(w.root.join("maker-data/making")).map(|d| d.count()).unwrap_or(0), 0);
-    assert!(films.iter().all(|t| std::fs::read_dir(&t.path).unwrap().count() == 2));
+    assert_eq!(films.iter().map(|t| std::fs::read_dir(&t.path).unwrap().count()).collect::<Vec<_>>(), [2, 1]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
