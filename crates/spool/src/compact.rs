@@ -144,6 +144,11 @@ fn fit(width: u32, height: u32, target: u32) -> Option<(i64, i64)> {
     }
 }
 
+/// The screen a picture is made for, as a label has it: a wide film at 1920 by 1038 is 1080p.
+fn screen(width: u32, height: u32) -> u32 {
+    [480, 720, 1080].into_iter().find(|&h| height <= h && width as u64 * 9 <= h as u64 * 16).unwrap_or(2160)
+}
+
 fn bits_a_second(info: &MediaInfo, size: u64) -> f64 {
     if info.bit_rate > 0 {
         info.bit_rate as f64
@@ -602,7 +607,7 @@ impl App {
             title_id: title.id,
             rel_path: plan.rel_path.clone(),
             size,
-            quality: spool_core::quality::parse_quality(&format!("Compact.{}p.{from}.x265", info.height.max(1).min(c.height)), flavor),
+            quality: spool_core::quality::parse_quality(&format!("Compact.{}p.{from}.x265", screen(info.width, info.height)), flavor),
             release_group: None,
             edition: file.edition.clone(),
             media_info: Some(info),
@@ -833,6 +838,16 @@ mod tests {
         assert_eq!(compact_source_stem(&format!("Show - S01E02 - Pilot{}", compact_suffix(720))), Some("Show - S01E02 - Pilot"));
         assert_eq!(compact_source_stem("Compact Disc - The Film (2001)"), None);
         assert_eq!(compact_source_stem("Heat (1995) - Compact Edition"), None);
+    }
+
+    #[test]
+    fn a_wide_picture_is_labelled_by_the_screen_it_fits() {
+        assert_eq!(screen(1920, 1038), 1080);
+        assert_eq!(screen(1920, 800), 1080);
+        assert_eq!(screen(1440, 1080), 1080);
+        assert_eq!(screen(1280, 534), 720);
+        assert_eq!(screen(720, 480), 480);
+        assert_eq!(screen(3840, 1600), 2160);
     }
 
     #[test]

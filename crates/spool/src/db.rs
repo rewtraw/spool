@@ -469,6 +469,20 @@ const MIGRATIONS: &[&str] = &[
     -- given that version of it.
     ALTER TABLE accounts ADD COLUMN compact_away INTEGER NOT NULL DEFAULT 0;
     "#,
+    r#"
+    -- A compact version of a wide film was labelled by its height alone, so 1920 by 1038 read
+    -- as 480p. Label those by the screen the picture is made for.
+
+    UPDATE files SET data = json_set(data, '$.quality.quality', replace(json_extract(data, '$.quality.quality'), '-480p', '-2160p'))
+        WHERE json_extract(data, '$.compact_of') IS NOT NULL AND json_extract(data, '$.quality.quality') LIKE '%-480p'
+        AND (json_extract(data, '$.media_info.width') > 1920 OR json_extract(data, '$.media_info.height') > 1080);
+    UPDATE files SET data = json_set(data, '$.quality.quality', replace(json_extract(data, '$.quality.quality'), '-480p', '-1080p'))
+        WHERE json_extract(data, '$.compact_of') IS NOT NULL AND json_extract(data, '$.quality.quality') LIKE '%-480p'
+        AND (json_extract(data, '$.media_info.width') > 1280 OR json_extract(data, '$.media_info.height') > 720);
+    UPDATE files SET data = json_set(data, '$.quality.quality', replace(json_extract(data, '$.quality.quality'), '-480p', '-720p'))
+        WHERE json_extract(data, '$.compact_of') IS NOT NULL AND json_extract(data, '$.quality.quality') LIKE '%-480p'
+        AND (json_extract(data, '$.media_info.width') > 854 OR json_extract(data, '$.media_info.height') > 480);
+    "#,
 ];
 
 impl Db {
