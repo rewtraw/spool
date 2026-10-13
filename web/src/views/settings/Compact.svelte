@@ -40,6 +40,17 @@
     await act(() => api.put('/settings/general', general), 'Saved');
     load();
   }
+  // How many to make at a go, when not all of them.
+  let some = $state(10);
+  async function batch() {
+    const n = Math.min(Math.max(1, Math.floor(Number(some)) || 0), report?.would?.files ?? 0);
+    if (!n) return;
+    asking = true;
+    const r = await act(() => api.post<any>('/compact/everything', { count: n }));
+    asking = false;
+    if (r) toast(`${r.queued} in line. Progress is in Activity.`);
+    loadReport();
+  }
   async function everything() {
     const w = report?.would;
     if (!w?.files) return;
@@ -116,7 +127,13 @@
       {/if}
       {#if report.would.files}
         <p style="margin-top:12px"><b>{report.would.files}</b> more {report.would.files === 1 ? 'file' : 'files'} would gain from one at the saved settings: about {bytes(report.would.bytes)} from {bytes(report.would.original_bytes)}, and {duration(report.would.running_secs)} of film to get through.</p>
-        <div><button class="btn" type="button" disabled={asking} onclick={everything}>{asking ? 'Putting them in line…' : `Make all ${report.would.files}`}</button></div>
+        <div class="row wrap">
+          {#if report.would.files > 1}
+            <input class="input some" type="number" min="1" max={report.would.files} step="1" aria-label="How many to make" bind:value={some} />
+            <button class="btn" type="button" disabled={asking} onclick={batch}>Make that many, biggest first</button>
+          {/if}
+          <button class="btn" class:ghost={report.would.files > 1} type="button" disabled={asking} onclick={everything}>{asking ? 'Putting them in line…' : `Make all ${report.would.files}`}</button>
+        </div>
       {:else if !making}
         <p class="muted" style="margin-top:12px">Nothing else in the library would gain from one at the saved settings.</p>
       {/if}
@@ -132,3 +149,9 @@
   </fieldset>
   </div>
 {/if}
+
+<style>
+  .some {
+    width: 5.5em;
+  }
+</style>

@@ -447,6 +447,23 @@ impl App {
         Ok(all)
     }
 
+    /// Put what in the library would gain from a compact version in line: all of it, or
+    /// the biggest `count` files, which are the ones that gain most.
+    pub fn compact_library(&self, count: Option<usize>) -> Result<Asked> {
+        let mut files = vec![];
+        for t in &self.db.titles(None)? {
+            for f in self.compact_sources(t)? {
+                if !self.compacting(f.id) && self.compact_plan(t, &f).is_ok() {
+                    files.push((f.size, f.id));
+                }
+            }
+        }
+        files.sort_unstable_by(|a, b| b.cmp(a));
+        files.truncate(count.unwrap_or(usize::MAX));
+        let ids: Vec<i64> = files.into_iter().map(|(_, id)| id).collect();
+        Ok(self.compact_files(&ids, false))
+    }
+
     /// Put files in line for a compact version, and start on them if none is being made.
     /// Each is checked first. `say_small` is whether to report the files that are small
     /// already, which for a whole library is most of them and not worth the saying.
@@ -941,7 +958,8 @@ impl App {
         let mut why_not: std::collections::BTreeMap<String, usize> = Default::default();
         for t in &titles {
             for f in self.compact_sources(t).unwrap_or_default() {
-                if all.iter().any(|x| x.compact_of == Some(f.id)) {
+                // What is in line or being made is on its way, and not counted as more to do.
+                if all.iter().any(|x| x.compact_of == Some(f.id)) || self.compacting(f.id) {
                     continue;
                 }
                 match self.compact_plan(t, &f) {

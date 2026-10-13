@@ -47,10 +47,11 @@ pub(super) async fn compact_state(State(app): State<App>) -> R<Value> {
     Ok(Json(report))
 }
 
-/// Make a compact version of everything in the library that would gain from one.
-pub(super) async fn compact_everything(State(app): State<App>) -> R<Value> {
-    let all: Vec<i64> = app.db.titles(None)?.iter().map(|t| t.id).collect();
-    let asked = tokio::task::spawn_blocking(move || app.compact_titles(&all)).await??;
+/// Make a compact version of everything in the library that would gain from one, or with
+/// `{"count": n}` of the biggest `n` files that would.
+pub(super) async fn compact_everything(State(app): State<App>, body: Option<Json<Value>>) -> R<Value> {
+    let count = body.and_then(|b| b.0["count"].as_u64()).map(|n| n as usize);
+    let asked = tokio::task::spawn_blocking(move || app.compact_library(count)).await??;
     Ok(Json(json!({"queued": asked.queued, "refused": asked.refused.len()})))
 }
 

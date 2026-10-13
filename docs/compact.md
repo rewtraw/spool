@@ -28,7 +28,7 @@ Not carried over:
 
 **Several titles.** In the library, select them and choose **Make compact versions** in the bar.
 
-**The whole library.** Settings, Compact versions shows how many files would gain from one, how much room they would take and how much film that is to get through, with a button to put them all in line.
+**The whole library.** Settings, Compact versions shows how many files would gain from one, how much room they would take and how much film that is to get through, with a button to put them all in line. Beside it you can give a number and make only that many: the biggest files are taken first, since they gain the most, and asking again takes the next ones.
 
 **Whatever arrives.** The same tab has "Make one of whatever arrives". Each download that is filed is then put in line, if it would gain from one.
 

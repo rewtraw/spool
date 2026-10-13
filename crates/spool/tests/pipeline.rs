@@ -4126,6 +4126,17 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
         let compact = w.app.db.files(t.id).unwrap().into_iter().find(|f| f.compact_of.is_some()).unwrap();
         w.app.delete_compact(compact.id).unwrap();
     }
+    // Some of the library can be asked for instead of all of it, and what is in line is
+    // not counted again as more to do.
+    let would = |report: Value| report["would"]["files"].as_u64();
+    assert_eq!(would(call(&api, "GET", "/api/compact", Value::Null).await.1), Some(2));
+    let (_, said) = call(&api, "POST", "/api/compact/everything", json!({"count": 1})).await;
+    assert_eq!(said["queued"].as_u64(), Some(1), "{said}");
+    assert_eq!(would(call(&api, "GET", "/api/compact", Value::Null).await.1), Some(1));
+    let (_, said) = call(&api, "POST", "/api/compact/everything", json!({"count": 5})).await;
+    assert_eq!(said["queued"].as_u64(), Some(1), "asking again takes the next: {said}");
+    let (_, said) = call(&api, "POST", "/api/compact/cancel", json!({})).await;
+    assert_eq!(said["cancelled"].as_u64(), Some(2), "{said}");
     let (_, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [films[0].id]})).await;
     assert_eq!(said["queued"].as_u64(), Some(1), "{said}");
     tokio::time::sleep(Duration::from_millis(300)).await;
