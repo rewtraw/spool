@@ -383,6 +383,12 @@ impl Call {
             (true, ["branding", "css" | "css.css"]) => return ([(header::CONTENT_TYPE, "text/css")], "").into_response(),
             (true, ["quickconnect", "enabled"]) => return Json(json!(false)).into_response(),
             (false, ["users", "authenticatebyname"]) => return self.sign_in().await,
+            // One file, to whoever holds a ticket the app made out for it.
+            (true, ["spool", "play", _]) => {
+                let file = self.q.get("ticket").and_then(|t| self.app.played_on(t)).and_then(|id| self.app.db.file(id).ok().flatten());
+                let Some(path) = file.and_then(|f| Some(self.app.db.title(f.title_id).ok()??.file_path(&f))) else { return (StatusCode::UNAUTHORIZED, "The link has run out. Open the film's page again.").into_response() };
+                return crate::serve::send_file(&path, &self.headers, head).await;
+            }
             (true, ["items", id, "images", kind, ..]) => return media::image(&self.app, id, kind, self.q.get("tag").is_some(), head).await,
             (true, ["users", _, "images", ..] | ["userimage"] | ["favicon.ico"] | ["branding", "splashscreen"]) => return missing(),
             _ => {}

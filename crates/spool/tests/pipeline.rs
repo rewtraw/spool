@@ -4097,6 +4097,18 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
     }
     made_by.sort();
     assert_eq!(made_by, ["", "Maker"]);
+    // A film's page carries where it can be played from without signing in, on a ticket for that file.
+    let (_, page) = call(&api, "GET", &format!("/api/titles/{}", films[0].id), Value::Null).await;
+    let play = page["play"]["path"].as_str().unwrap_or_else(|| panic!("{}", page["play"])).to_string();
+    let jf = spool::jellyfin::router(w.app.clone());
+    let door = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let door_url = format!("http://{}", door.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(door, jf.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap() });
+    let got = http.get(format!("{door_url}{play}")).header("Range", "bytes=0-99").send().await.unwrap();
+    assert_eq!((got.status().as_u16(), got.bytes().await.unwrap().as_ref()), (206, &video[..100]));
+    assert_eq!(http.get(format!("{door_url}/spool/play/x.mkv?ticket=nothing")).send().await.unwrap().status().as_u16(), 401);
+    assert_eq!(http.get(format!("{door_url}/spool/play/x.mkv?ticket={}", w.app.remotes()[0].source_ticket(file))).send().await.unwrap().status().as_u16(), 401, "a ticket for one thing is not a ticket for another");
+
     // Held, the line is left where it is; let go, it is taken up.
     assert_eq!(call(&api, "POST", "/api/compact/hold", json!({"hold": true})).await.0, 200);
     for t in &films {

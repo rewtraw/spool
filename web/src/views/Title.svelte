@@ -8,7 +8,7 @@
 
   let { id }: { id: number } = $props();
 
-  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string }; local?: { extras: any[]; art: any[]; themes: string[]; notes: any } };
+  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string }; play?: { port: number; path: string }; local?: { extras: any[]; art: any[]; themes: string[]; notes: any } };
   let t = $state<Detail | null>(null);
   let missing = $state(false);
   let searching = $state('');
@@ -117,6 +117,10 @@
   const compactCount = $derived((t?.files ?? []).filter((f) => f.compact_of).length);
   const compacting = $derived((t?.files ?? []).some((f) => f.compacting));
   let making = $state<any>(null);
+  // Infuse is on Apple devices only, and takes a film by its address. The film comes from
+  // the players' door of whatever name this app was reached by.
+  const apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+  const infuse = $derived(apple && t?.play ? `infuse://x-callback-url/play?url=${encodeURIComponent(`http://${location.hostname}:${t.play.port}${t.play.path}`)}` : '');
   // An encode sends no events as it goes, so the page asks while one of this title's is in line.
   $effect(() => {
     if (!compacting) {
@@ -344,8 +348,9 @@
           {#if t.read_only && !t.offline && !t.moving}To get a different copy of it, use <b>Move to…</b> above to put it on a location Spool manages, or turn on "Let Spool change files here" for {t.location} under <a class="link" href="#/settings/general">Settings</a>.{/if}
         </div>
       {/if}
-      {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url}
+      {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url || infuse}
         <div class="links">
+          {#if infuse}<a href={infuse} title="Plays the film in Infuse on this device, straight from Spool. Played this way it is not marked as watched.">Play in Infuse <span aria-hidden="true">↗</span></a>{/if}
           {#if t.plex?.url}<a href={t.plex.url} target="_blank" rel="noopener noreferrer">Open in Plex <span aria-hidden="true">↗</span></a>{/if}
           {#if t.kind === 'movie' && (t.tmdb_id || t.imdb_id)}<a href={t.tmdb_id ? `https://letterboxd.com/tmdb/${t.tmdb_id}` : `https://letterboxd.com/imdb/${t.imdb_id}`} target="_blank" rel="noopener noreferrer">Letterboxd <span aria-hidden="true">↗</span></a>{/if}
         </div>

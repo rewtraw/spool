@@ -108,6 +108,9 @@ type Asked<T> = std::result::Result<T, Fail>;
 /// name would be.
 const SOURCE: &str = "make";
 
+/// The name tickets to play a file from this Spool's own door are made out in.
+const PLAY_HERE: &str = "here";
+
 /// How long a helper is left to answer when it has nothing new to say, in seconds.
 const HOLD: u64 = 25;
 
@@ -1191,6 +1194,21 @@ impl App {
         opened.retain(|_, (at, _)| now - *at < STANDS);
         opened.insert(key, (now, ok));
         ok
+    }
+
+    /// Where one file can be played from the players' door without signing in: a path
+    /// there with a ticket for that file, good for as long as a ticket is. It is how the
+    /// app hands a film to a player on the device the app is open on.
+    pub fn play_path(&self, file: &MediaFile) -> String {
+        let ticket = Signer::new(&self.settings.general().api_key).issue(PLAY_HERE, &file.id.to_string(), crate::db::now().max(0) as u64);
+        let name = Path::new(&file.rel_path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        format!("/spool/play/{}?ticket={ticket}", urlencoding::encode(&name))
+    }
+
+    /// The file a ticket from [`App::play_path`] is for, if the ticket is good.
+    pub fn played_on(&self, token: &str) -> Option<i64> {
+        let t = Signer::new(&self.settings.general().api_key).verify(token, crate::db::now().max(0) as u64).ok()?;
+        (t.share == PLAY_HERE).then(|| t.rel.parse().ok()).flatten()
     }
 
     /// What the settings page and the check-up show of each link.

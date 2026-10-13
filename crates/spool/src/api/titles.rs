@@ -155,6 +155,12 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
             v["plex"] = json!({"rating_key": item.rating_key, "url": idx.url(item), "section": item.section});
         }
     }
+    // A film can be handed to a player on the device the app is open on.
+    if t.kind == Kind::Movie && v["offline"].as_bool() != Some(true) {
+        if let Some(file) = app.compact_sources(&t)?.first() {
+            v["play"] = json!({"port": app.settings.general().players_port, "path": app.play_path(file)});
+        }
+    }
     Ok(Json(v))
 }
 
