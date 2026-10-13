@@ -26,8 +26,10 @@
     <true/>
     <key>ThrottleInterval</key>
     <integer>10</integer>
+    <!-- Not Background: macOS holds a background program to its slow cores and thin
+         network, and a film is then made at a quarter of the speed. -->
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Standard</string>
     <key>StandardOutPath</key>
     <string>@HOME@/Library/Logs/spool-maker.log</string>
     <key>StandardErrorPath</key>

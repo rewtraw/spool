@@ -57,6 +57,10 @@ on "
   if [ -f \"\$HOME/Library/Application Support/Spool Maker/link.json\" ]; then
     echo 'It is linked already, and carries on.'
   else
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      grep -q 'not linked yet' ~/Library/Logs/spool-maker.log 2>/dev/null && break
+      sleep 1
+    done
     grep 'not linked yet' ~/Library/Logs/spool-maker.log | tail -n 1 | perl -pe 's/\e\[[0-9;]*m//g; s/.*code=/Its code: /'
   fi
 "
