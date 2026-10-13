@@ -564,7 +564,8 @@ impl App {
             }
             *how.lock() = if way == How::Software { "software" } else { "hardware" }.into();
             done.store(0, Ordering::Relaxed);
-            match run(&tool, &arguments(&c, &plan.info, &plan.src, &working, way), &done, &speed, &stop).await {
+            let fps = plan.info.streams.iter().find(|s| s.kind == "video").map_or(0.0, |s| s.frame_rate);
+            match run(&tool, &arguments(&c, &plan.info, &plan.src, &working, way), fps, &done, &speed, &stop).await {
                 Ok(()) => {
                     made = Some(way);
                     break;
@@ -784,7 +785,11 @@ impl App {
 }
 
 /// Run ffmpeg to the end, passing on how far it has got, and stopping it when told to.
-async fn run(tool: &Path, args: &[String], done: &AtomicU64, speed: &AtomicU64, stop: &AtomicBool) -> Result<()> {
+///
+/// ffmpeg gives no time while a track it is copying has yet to have anything in it, which for
+/// subtitles that say little can be the whole film. Then the time is worked out from the
+/// frames made, at `fps` frames a second.
+async fn run(tool: &Path, args: &[String], fps: f64, done: &AtomicU64, speed: &AtomicU64, stop: &AtomicBool) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
     let mut child = tokio::process::Command::new(tool).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true).spawn().context("starting ffmpeg")?;
     let mut lines = BufReader::new(child.stdout.take().ok_or_else(|| anyhow!("no output from ffmpeg"))?).lines();
@@ -795,14 +800,27 @@ async fn run(tool: &Path, args: &[String], done: &AtomicU64, speed: &AtomicU64, 
         text
     });
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
+    let began = std::time::Instant::now();
+    let (mut frames, mut timed) = (0u64, false);
     loop {
         tokio::select! {
             line = lines.next_line() => match line {
                 Ok(Some(line)) => {
                     if let Some(us) = line.strip_prefix("out_time_us=").or_else(|| line.strip_prefix("out_time_ms=")).and_then(|v| v.trim().parse::<i64>().ok()) {
                         done.store((us.max(0) / 1000) as u64, Ordering::Relaxed);
+                        timed = true;
                     } else if let Some(x) = line.strip_prefix("speed=").and_then(|v| v.trim().trim_end_matches('x').parse::<f64>().ok()) {
                         speed.store((x * 100.0) as u64, Ordering::Relaxed);
+                    } else if let Some(n) = line.strip_prefix("frame=").and_then(|v| v.trim().parse::<u64>().ok()) {
+                        frames = n;
+                    } else if line.starts_with("progress=") {
+                        // The end of one report.
+                        if !timed && fps > 0.0 {
+                            let ms = frames as f64 / fps * 1000.0;
+                            done.store(ms as u64, Ordering::Relaxed);
+                            speed.store((ms / began.elapsed().as_millis().max(1) as f64 * 100.0) as u64, Ordering::Relaxed);
+                        }
+                        timed = false;
                     }
                 }
                 _ => break,
