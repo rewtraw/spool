@@ -236,16 +236,18 @@ impl Db {
     /// episodes with a file have none of theirs: what is hidden from someone held to them.
     pub fn without_compact(&self) -> Result<(u32, u32)> {
         self.with(|c| {
+            // Each inner list is made once and looked into, so this stays quick however
+            // large the library: asked row by row it took many seconds on a real one.
             let films = c.query_row(
                 "SELECT COUNT(*) FROM titles t WHERE t.kind = 'movie'
-                   AND EXISTS (SELECT 1 FROM files f WHERE f.title_id = t.id AND COALESCE(json_extract(f.data, '$.extra'), 0) = 0)
-                   AND NOT EXISTS (SELECT 1 FROM files f WHERE f.title_id = t.id AND json_extract(f.data, '$.compact_of') IS NOT NULL)",
+                   AND t.id IN (SELECT title_id FROM files WHERE COALESCE(json_extract(data, '$.extra'), 0) = 0)
+                   AND t.id NOT IN (SELECT title_id FROM files WHERE json_extract(data, '$.compact_of') IS NOT NULL)",
                 [],
                 |r| r.get(0),
             )?;
             let episodes = c.query_row(
                 "SELECT COUNT(*) FROM episodes e WHERE e.file_id IS NOT NULL
-                   AND NOT EXISTS (SELECT 1 FROM files f WHERE json_extract(f.data, '$.compact_of') = e.file_id)",
+                   AND e.file_id NOT IN (SELECT json_extract(data, '$.compact_of') FROM files WHERE json_extract(data, '$.compact_of') IS NOT NULL)",
                 [],
                 |r| r.get(0),
             )?;
