@@ -50,18 +50,19 @@
 
   <section class="why">
     <p class="eyebrow">Why</p>
-    <h2>One app where there used to be three.</h2>
-    <p class="sub">Most people do this with a separate program for movies, another for shows and a third to download. Spool is all of it, so there is one place to look when you wonder where something is.</p>
+    <h2>One app where there used to be four.</h2>
+    <p class="sub">Most people do this with one program for movies, another for shows, a third to download and a fourth to play it all. Spool is all of it, so there is one place to look when you wonder where something is.</p>
     <div class="merge">
       <div class="stack">
         <div class="chip"><b>Radarr</b><span>Movies</span></div>
         <div class="chip"><b>Sonarr</b><span>Series</span></div>
         <div class="chip"><b>SABnzbd</b><span>Downloads</span></div>
+        <div class="chip"><b>Plex, Jellyfin or Emby</b><span>Playing</span></div>
       </div>
       <div class="arrow" aria-hidden="true">→</div>
       <div class="one">
         <div class="brand"><span class="mark"></span>Spool</div>
-        <p>One library, one list of downloads, and a plain answer to "why isn't it here yet?"</p>
+        <p>One library, one list of downloads, one place your television plays from, and a plain answer to "why isn't it here yet?"</p>
       </div>
     </div>
   </section>
@@ -99,7 +100,7 @@ docker compose up -d --build            <span class="c"># http://localhost:7979<
 <span class="c"># or from source: Rust, Bun, and par2, 7zz and ffmpeg on the PATH</span>
 (cd web && bun install && bun run build)
 cargo run --release -p spool -- serve</pre>
-    <p class="note">Spool runs on a Mac, a Linux machine or a NAS. It downloads from Usenet, so you need an account with a Usenet provider and an indexer. It starts in a practice mode that changes nothing until you say so. Already using Radarr, Sonarr and SABnzbd? <code>spool migrate</code> brings your library and settings across, and Spool works beside Plex. <a href="guide/getting-started.html">Getting started</a> has every step.</p>
+    <p class="note">Spool runs on a Mac, a Linux machine or a NAS. It downloads from Usenet, so you need an account with a Usenet provider and an indexer. It starts in a practice mode that changes nothing until you say so. Already using Radarr, Sonarr and SABnzbd? <code>spool migrate</code> brings your library and settings across, and Spool works beside Plex if you would rather keep it. To watch, you use a player app such as Infuse on your television or phone, pointed at Spool. <a href="guide/getting-started.html">Getting started</a> has every step.</p>
   </section>
 
   <footer>
