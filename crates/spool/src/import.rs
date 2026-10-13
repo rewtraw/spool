@@ -734,7 +734,7 @@ impl App {
     /// Tell Plex that a folder changed.
     pub async fn plex_refresh(&self, folder: &str) -> Result<()> {
         let g = self.settings.general();
-        if g.plex_url.is_empty() || g.plex_token.is_empty() {
+        if !g.plex_ready() {
             return Ok(());
         }
         let base = g.plex_url.trim_end_matches('/');

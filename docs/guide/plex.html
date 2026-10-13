@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a class="on" aria-current="page" href="plex.html">Beside Plex</a><a class="sub" href="#connecting">Connecting</a><a class="sub" href="#what-spool-does-with-plex">What Spool does with Plex</a><a class="sub" href="#the-plex-tab">The Plex tab</a><a class="sub" href="#what-plex-leaves-in-a-folder">What Plex leaves in a folder</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a class="on" aria-current="page" href="plex.html">Beside Plex</a><a class="sub" href="#connecting">Connecting</a><a class="sub" href="#turning-it-off">Turning it off</a><a class="sub" href="#what-spool-does-with-plex">What Spool does with Plex</a><a class="sub" href="#the-plex-tab">The Plex tab</a><a class="sub" href="#what-plex-leaves-in-a-folder">What Plex leaves in a folder</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -114,6 +114,8 @@
 <p>Spool can <a href="players.html">serve a television by itself</a>, and it also works beside a Plex server you already run. The two can be used together. Plex only reads the library, so it and Spool never compete over files.</p>
 <h2 id="connecting"><a href="#connecting">Connecting</a></h2>
 <p>Under Settings, General, Connections, enter Plex&#39;s address, such as <code>http://127.0.0.1:32400</code>, and a Plex token. <code>spool migrate</code> brings the token over from Radarr if it had one.</p>
+<h2 id="turning-it-off"><a href="#turning-it-off">Turning it off</a></h2>
+<p><strong>Use Plex</strong>, under Settings, General, turns all of this off without forgetting the address and token. Off, Spool asks nothing of Plex and shows nothing from it: no refresh when a folder changes, no hourly read, no Open in Plex links, no Plex tab. Turn it back on and it carries on from where it was. Plex itself is not touched either way.</p>
 <h2 id="what-spool-does-with-plex"><a href="#what-spool-does-with-plex">What Spool does with Plex</a></h2>
 <ul>
 <li><strong>Matches titles.</strong> Once an hour Spool reads Plex&#39;s films and shows and matches them to its own titles. A matched title has an Open in Plex link on its page.</li>

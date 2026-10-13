@@ -828,6 +828,17 @@ async fn what_was_watched_in_plex_is_brought_to_an_account_and_nothing_is_unmark
     let api = spool::api::router(w.app.clone());
 
     // Spool had not read Plex's library; bringing the history over reads it first.
+    // Turned off, nothing is asked of Plex, though its address and token are still there.
+    let mut g = w.app.settings.general();
+    g.plex_on = false;
+    w.app.settings.set_general(&g).unwrap();
+    let (status, said) = call(&api, "POST", "/api/accounts/1/plex", Value::Null).await;
+    assert!(status >= 400 && said.to_string().contains("turned off"), "{status} {said}");
+    let (_, report) = call(&api, "GET", "/api/plex", Value::Null).await;
+    assert_eq!((report["configured"].as_bool(), report["off"].as_bool()), (Some(false), Some(true)), "{report}");
+    assert!(!w.app.settings.general().plex_token.is_empty());
+    g.plex_on = true;
+    w.app.settings.set_general(&g).unwrap();
     let (status, brought) = call(&api, "POST", "/api/accounts/1/plex", Value::Null).await;
     assert_eq!((status, brought.to_string().as_str()), (200, r#"{"episodes":1,"films":1,"resumed":1}"#));
     let of = |account: i64, kind: &str, id: i64| w.app.db.watched(account, kind, id).unwrap();

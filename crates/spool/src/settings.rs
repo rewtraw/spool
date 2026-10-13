@@ -66,6 +66,13 @@ pub struct LinkConf {
     pub make: MakeWhen,
 }
 
+impl General {
+    /// Whether Plex is to be used: it is turned on, and there is an address and a token for it.
+    pub fn plex_ready(&self) -> bool {
+        self.plex_on && !self.plex_url.is_empty() && !self.plex_token.is_empty()
+    }
+}
+
 /// When a linked machine is given compact versions to make.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -110,6 +117,9 @@ pub struct General {
     pub tmdb_api_key: String,
     pub plex_url: String,
     pub plex_token: String,
+    /// Whether Plex is used at all. Off, its address and token are kept and nothing is
+    /// asked of it or shown from it.
+    pub plex_on: bool,
     /// Whether Spool writes its collections into Plex, as collection tags on the items.
     pub plex_collections: bool,
     pub ffprobe_path: String,
@@ -180,6 +190,7 @@ impl Default for General {
             tmdb_api_key: String::new(),
             plex_url: String::new(),
             plex_token: String::new(),
+            plex_on: true,
             plex_collections: false,
             ffprobe_path: String::new(),
             password: String::new(),

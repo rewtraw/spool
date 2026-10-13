@@ -150,7 +150,7 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
     v["history"] = json!(app.db.history(Some(id), 100)?);
     v["acquisitions"] = json!(app.db.title_acquisitions(id)?);
     v["saved"] = json!(app.archive_for(t.kind, t.tmdb_id, t.tvdb_id)?);
-    if let Ok(idx) = app.plex_index() {
+    if let Some(idx) = app.settings.general().plex_ready().then(|| app.plex_index().ok()).flatten() {
         if let Some(item) = idx.find(&t) {
             v["plex"] = json!({"rating_key": item.rating_key, "url": idx.url(item), "section": item.section});
         }

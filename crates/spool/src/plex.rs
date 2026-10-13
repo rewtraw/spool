@@ -85,6 +85,8 @@ impl PlexIndex {
 #[derive(Serialize)]
 pub struct PlexReport {
     pub configured: bool,
+    /// It is turned off in the settings, whatever else is filled in.
+    pub off: bool,
     pub synced_at: i64,
     pub plex_items: usize,
     pub matched: usize,
@@ -97,8 +99,8 @@ pub struct PlexReport {
 impl App {
     async fn plex_get(&self, path: &str) -> Result<Value> {
         let g = self.settings.general();
-        if g.plex_url.is_empty() || g.plex_token.is_empty() {
-            bail!("Plex is not set up in Settings");
+        if !g.plex_ready() {
+            bail!("{}", if g.plex_on { "Plex is not set up in Settings" } else { "Plex is turned off in Settings" });
         }
         let url = format!("{}{}", g.plex_url.trim_end_matches('/'), path);
         let r = self
@@ -381,7 +383,7 @@ impl App {
             })
             .collect();
         plex_only.sort_by(|a, b| a["title"].as_str().cmp(&b["title"].as_str()));
-        Ok(PlexReport { configured: !g.plex_url.is_empty() && !g.plex_token.is_empty(), synced_at: state["synced_at"].as_i64().unwrap_or(0), plex_items: idx.items.len(), matched, plex_only, spool_only })
+        Ok(PlexReport { configured: g.plex_ready(), off: !g.plex_on, synced_at: state["synced_at"].as_i64().unwrap_or(0), plex_items: idx.items.len(), matched, plex_only, spool_only })
     }
 
     /// Start tracking something Plex already has. The title is added unmonitored, pointed at the

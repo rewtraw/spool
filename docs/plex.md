@@ -6,6 +6,10 @@ Spool can [serve a television by itself](players.md), and it also works beside a
 
 Under Settings, General, Connections, enter Plex's address, such as `http://127.0.0.1:32400`, and a Plex token. `spool migrate` brings the token over from Radarr if it had one.
 
+## Turning it off
+
+**Use Plex**, under Settings, General, turns all of this off without forgetting the address and token. Off, Spool asks nothing of Plex and shows nothing from it: no refresh when a folder changes, no hourly read, no Open in Plex links, no Plex tab. Turn it back on and it carries on from where it was. Plex itself is not touched either way.
+
 ## What Spool does with Plex
 
 - **Matches titles.** Once an hour Spool reads Plex's films and shows and matches them to its own titles. A matched title has an Open in Plex link on its page.

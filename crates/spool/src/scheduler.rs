@@ -28,7 +28,7 @@ impl App {
             "smaller" => self.smaller_copies().await,
             "subtitles" => self.subtitle_sweep().await,
             "anime" => self.anime_sweep().await,
-            "plex" if self.settings.general().plex_token.is_empty() => Ok("skipped: Plex is not set up".into()),
+            "plex" if !self.settings.general().plex_ready() => Ok("skipped: Plex is not set up, or is turned off".into()),
             "plex" => self.plex_sync().await,
             other => Err(anyhow::anyhow!("unknown task {other}")),
         };

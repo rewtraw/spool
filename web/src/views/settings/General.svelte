@@ -103,11 +103,13 @@
     <fieldset class="card">
       <legend>Connections</legend>
       <label class="field">TMDB API key<input class="input mono" bind:value={general.tmdb_api_key} autocomplete="off" /><span class="hint">Needed to look up and add movies. Free from themoviedb.org.</span></label>
+      <label class="check"><input type="checkbox" bind:checked={general.plex_on} /> Use Plex</label>
+      <span class="hint">{general.plex_on ? 'Spool tells Plex when a folder changes, reads what Plex holds once an hour, and links each title to its page there.' : 'Off: nothing is asked of Plex and nothing from it is shown. Its address and token are kept for when you turn it back on.'}</span>
       <div class="cols">
-        <label class="field">Plex address<input class="input mono" bind:value={general.plex_url} placeholder="http://127.0.0.1:32400" /></label>
-        <label class="field">Plex token<input class="input mono" bind:value={general.plex_token} autocomplete="off" /></label>
+        <label class="field">Plex address<input class="input mono" bind:value={general.plex_url} placeholder="http://127.0.0.1:32400" disabled={!general.plex_on} /></label>
+        <label class="field">Plex token<input class="input mono" bind:value={general.plex_token} autocomplete="off" disabled={!general.plex_on} /></label>
       </div>
-      {#if general.plex_token}
+      {#if general.plex_token && general.plex_on}
         <label class="check"><input type="checkbox" bind:checked={general.plex_collections} /> Write Spool's collections into Plex</label>
         <span class="hint">Each title in a collection gets the collection's name as a collection tag in Plex, beside any it already has. Plex keeps collections per library, so one that holds films and series appears in both. Removing a tag in Plex later is respected.</span>
       {/if}

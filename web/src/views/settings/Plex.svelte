@@ -31,7 +31,7 @@
 
   <div class="stack form">
     {#if plex && !plex.configured}
-      <div class="card empty">Plex is not set up. Add its address and token under <a class="link" href="#/settings/general">General</a>.</div>
+      <div class="card empty">{plex.off ? 'Plex is turned off. Turn it on' : 'Plex is not set up. Add its address and token'} under <a class="link" href="#/settings/general">General</a>.</div>
     {:else if plex}
       <fieldset class="card">
         <legend>Library match</legend>

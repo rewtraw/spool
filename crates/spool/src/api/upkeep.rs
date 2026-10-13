@@ -94,7 +94,7 @@ pub(super) async fn space(State(app): State<App>) -> R<Value> {
     let g = app.settings.general();
     let titles = app.db.titles(None)?;
     let files = app.db.file_counts()?;
-    let plex = app.plex_index().ok();
+    let plex = app.settings.general().plex_ready().then(|| app.plex_index().ok()).flatten();
     let profiles = app.db.profiles()?;
     let saved = app.archive_all()?;
     let (recycled_files, recycled_bytes) = app.recycle_usage();

@@ -116,7 +116,7 @@
               <button class="btn small" type="button" disabled={!edits[a.id].password} onclick={() => change(a, { password: edits[a.id].password }, 'Password changed')}>Set password</button>
               {#if a.has_password}<button class="btn small ghost" type="button" onclick={() => confirm(`Let ${a.name} sign in with no password?\n\nAnyone who can reach Spool and knows the name could then play from the library.`) && change(a, { password: '' }, 'Password removed')}>Remove password</button>{/if}
               <button class="btn small ghost" type="button" onclick={() => change(a, { enabled: !a.enabled }, a.enabled ? `${a.name} may no longer sign in` : `${a.name} may sign in again`)}>{a.enabled ? 'Stop sign-in' : 'Allow sign-in'}</button>
-              {#if general.plex_token}<button class="btn small ghost" type="button" onclick={() => fromPlex(a)}>Bring watched from Plex</button>{/if}
+              {#if general.plex_token && general.plex_on}<button class="btn small ghost" type="button" onclick={() => fromPlex(a)}>Bring watched from Plex</button>{/if}
               <span class="grow"></span>
               <button class="btn small ghost danger" type="button" onclick={() => remove(a)}>Remove {a.name}</button>
             </div>
