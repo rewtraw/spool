@@ -394,6 +394,22 @@ async fn upgrade_replaces_the_old_file_and_keeps_it_in_the_recycle_folder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_search_lists_what_it_found_best_first_and_says_which_can_be_heard() {
+    let mut w = World::new(Mode::Active).await;
+    let mut film = w.movie("Spirit Away", 2001, "tt3333333");
+    film.original_language = Some("ja".into());
+    w.app.db.save_title(&mut film).unwrap();
+    w.release("Spirit.Away.2001.1080p.BluRay.x264-SUB", &[("a.mkv", b"a")]);
+    w.release("Spirit.Away.2001.1080p.WEB-DL.DUAL.x264-DUB", &[("b.mkv", b"b")]);
+    w.release("Spirit.Away.2001.720p.WEB-DL.x264-WEB", &[("c.mkv", b"c")]);
+
+    let outcome = w.app.search(film.id, Scope::Movie, true, false).await.unwrap();
+    let order: Vec<(&str, bool, bool)> = outcome.decisions.iter().map(|d| (d.release.title.as_str(), d.accepted, d.speaks_wanted)).collect();
+    assert_eq!(&order[..2], &[("Spirit.Away.2001.1080p.WEB-DL.DUAL.x264-DUB", true, true), ("Spirit.Away.2001.1080p.BluRay.x264-SUB", true, false)], "{order:?}");
+    assert!(outcome.decisions.iter().all(|d| d.id > 0), "each can be grabbed by its id");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn shadow_mode_decides_but_touches_nothing() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Shadow).await;

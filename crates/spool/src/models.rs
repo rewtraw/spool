@@ -570,6 +570,9 @@ pub struct DecisionRecord {
     pub quality: QualityModel,
     #[serde(default)]
     pub languages: Vec<String>,
+    /// Whether it can be heard in the household language (or the title's own is that language).
+    #[serde(default)]
+    pub speaks_wanted: bool,
     #[serde(default)]
     pub release_group: Option<String>,
     /// What the release covers, for display: "S01E02", "Season 1", "".

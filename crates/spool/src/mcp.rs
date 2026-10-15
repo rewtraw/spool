@@ -156,8 +156,8 @@ const TOOLS: &[Tool] = &[
         name: "search_releases",
         read: false,
         destructive: false,
-        description: "Ask the indexers (and the archive) for releases of a title and judge them. With grab=false it only reports; with grab=true the best acceptable release starts downloading. For a series give season, or season and episode; neither means everything missing. Uses indexer request allowance.",
-        schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "grab": {"type": "boolean", "description": "Default false."}, "smaller": {"type": "boolean", "description": "Look for smaller copies of files that are over the profile's size target, accepting equal or lower quality that fits it. With grab=true the chosen copy replaces the file on disk once imported."}}), &["title_id"]),
+        description: "Ask the indexers (and the archive) for releases of a title and judge them. Acceptable releases are listed best first, in the order Spool would choose them: a release that can be heard in the household language (in_household_language) goes before a better one that cannot. With grab=false it only reports; with grab=true the best acceptable release starts downloading. For a series give season, or season and episode; neither means everything missing. Uses indexer request allowance.",
+        schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "grab": {"type": "boolean", "description": "Default false."}, "smaller": {"type": "boolean", "description": "Look for smaller copies of files that are over the profile's size target, accepting equal or lower quality that fits it. With grab=true the chosen copy replaces the file on disk once imported."}, "contains": {"type": "string", "description": "Only list releases whose name contains this, ignoring case (a group, \"remux\", \"dual\"). Does not narrow what is asked or grabbed."}, "limit": {"type": "integer", "description": "How many acceptable and how many rejected releases to list (default 15, at most 100)."}}), &["title_id"]),
     },
     Tool {
         name: "download_release",
@@ -266,6 +266,7 @@ fn quality(q: &Value) -> Value {
 fn release_row(d: &Value) -> Value {
     json!({
         "release_id": d["id"], "name": d["release"]["title"], "indexer": d["release"]["indexer"], "quality": quality(&d["quality"]), "size_gb": gb(&d["release"]["size"]),
+        "languages": d["languages"], "in_household_language": d["speaks_wanted"], "group": d["release_group"],
         "covers": d["covers"], "accepted": d["accepted"],
         "rejected_because": d["rejections"].as_array().map(|r| r.iter().filter_map(|x| x["message"].as_str()).collect::<Vec<_>>()).unwrap_or_default(),
     })
@@ -749,13 +750,17 @@ impl Mcp {
                     _ => {}
                 }
                 let r = self.post(&format!("/api/titles/{id}/search"), body).await?;
-                let decisions: Vec<&Value> = r["decisions"].as_array().into_iter().flatten().collect();
+                let limit = a["limit"].as_u64().unwrap_or(15).clamp(1, 100) as usize;
+                let contains = a["contains"].as_str().unwrap_or("").to_lowercase();
+                let decisions: Vec<&Value> = r["decisions"].as_array().into_iter().flatten().filter(|d| d["release"]["title"].as_str().is_some_and(|n| n.to_lowercase().contains(&contains))).collect();
+                let (acceptable, rejected): (Vec<&Value>, Vec<&Value>) = decisions.into_iter().partition(|d| d["accepted"] == true);
                 Ok(json!({
                     "result": r["message"], "indexer_errors": r["errors"],
                     "started": r["grabbed"].as_array().into_iter().flatten().map(|x| acquisition_row(x, &Value::Null, &Value::Null)).collect::<Vec<_>>(),
-                    "acceptable": decisions.iter().filter(|d| d["accepted"] == true).take(15).map(|d| release_row(d)).collect::<Vec<_>>(),
-                    "rejected": decisions.iter().filter(|d| d["accepted"] != true).take(15).map(|d| release_row(d)).collect::<Vec<_>>(),
-                    "rejected_total": decisions.iter().filter(|d| d["accepted"] != true).count(),
+                    "acceptable": acceptable.iter().take(limit).map(|d| release_row(d)).collect::<Vec<_>>(),
+                    "acceptable_total": acceptable.len(),
+                    "rejected": rejected.iter().take(limit).map(|d| release_row(d)).collect::<Vec<_>>(),
+                    "rejected_total": rejected.len(),
                 }))
             }
             "download_release" => {

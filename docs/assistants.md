@@ -38,6 +38,8 @@ The same settings can make a second, read-only key. A session using it can use t
 
 `diagnose` answers "why has this not downloaded" in one call: whether the title is monitored, the releases that were rejected and why, downloads that failed, and the log lines that mention it.
 
+`search_releases` lists what a search found best first, in the order Spool would choose. Each release shows its quality, size, group, the languages its name gives and whether it can be heard in your language, so an assistant can pick, say, the best dubbed copy of an anime season and start it with `download_release`. It can narrow the list to names containing a word, such as a group or "remux", and list more than the usual fifteen.
+
 ## Deleting needs a yes
 
 Any tool that deletes files refuses unless it is called with an explicit confirmation, and the tools tell the assistant to use it only when you asked for that deletion. Deleted files go to the [recycle folder](your-library.md#getting-something-back) like any others.
@@ -47,4 +49,5 @@ Any tool that deletes files refuses unless it is called with an explicit confirm
 - "Why hasn't the new season arrived?"
 - "What is using the most disk space that I have already watched?"
 - "Add this film and tell me which release you would pick."
+- "Get the best copy of the new season with English audio."
 - "Something failed last night. What happened?"

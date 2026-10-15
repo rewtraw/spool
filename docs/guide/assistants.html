@@ -182,6 +182,7 @@
 </tbody></table></div>
 <p><code>restart_check</code> says whether Spool can be restarted without interrupting a download being unpacked, an import, a move or someone playing; an assistant should ask it before restarting the service.</p>
 <p><code>diagnose</code> answers &quot;why has this not downloaded&quot; in one call: whether the title is monitored, the releases that were rejected and why, downloads that failed, and the log lines that mention it.</p>
+<p><code>search_releases</code> lists what a search found best first, in the order Spool would choose. Each release shows its quality, size, group, the languages its name gives and whether it can be heard in your language, so an assistant can pick, say, the best dubbed copy of an anime season and start it with <code>download_release</code>. It can narrow the list to names containing a word, such as a group or &quot;remux&quot;, and list more than the usual fifteen.</p>
 <h2 id="deleting-needs-a-yes"><a href="#deleting-needs-a-yes">Deleting needs a yes</a></h2>
 <p>Any tool that deletes files refuses unless it is called with an explicit confirmation, and the tools tell the assistant to use it only when you asked for that deletion. Deleted files go to the <a href="your-library.html#getting-something-back">recycle folder</a> like any others.</p>
 <h2 id="things-to-ask"><a href="#things-to-ask">Things to ask</a></h2>
@@ -189,6 +190,7 @@
 <li>&quot;Why hasn&#39;t the new season arrived?&quot;</li>
 <li>&quot;What is using the most disk space that I have already watched?&quot;</li>
 <li>&quot;Add this film and tell me which release you would pick.&quot;</li>
+<li>&quot;Get the best copy of the new season with English audio.&quot;</li>
 <li>&quot;Something failed last night. What happened?&quot;</li>
 </ul>
 <nav class="around" aria-label="Other guides"><a class="prev" href="local-files.html"><span>Before</span>Files Spool recognises in a title's folder</a><a class="next" href="api.html"><span>Next</span>The HTTP API</a></nav>

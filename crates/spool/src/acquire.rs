@@ -6,7 +6,7 @@ use crate::names::plain;
 use crate::newznab::{self, Query};
 use crate::settings::Mode;
 use anyhow::{anyhow, bail, Result};
-use spool_core::decision::{self, Candidate, Context, ExistingFile, Rejection};
+use spool_core::decision::{self, Candidate, Context, ExistingFile, ProperPolicy, Rejection};
 use spool_core::matching;
 use spool_core::profile::QualityProfile;
 use spool_core::{Quality, QualityModel};
@@ -58,6 +58,19 @@ impl std::error::Error for NoSpace {}
 struct Judged {
     record: DecisionRecord,
     candidate: Candidate,
+}
+
+/// Acceptable releases first, in the order Spool would choose them; then the rest, newest first.
+fn rank(judged: &mut [Judged], profile: &QualityProfile, policy: ProperPolicy) {
+    judged.sort_by(|a, b| {
+        b.record.accepted.cmp(&a.record.accepted).then_with(|| {
+            if a.record.accepted {
+                decision::compare(&a.candidate, &b.candidate, profile, policy)
+            } else {
+                b.record.ts.cmp(&a.record.ts)
+            }
+        })
+    });
 }
 
 /// The episode numbers a release's name gives for this film, when it names any: a number
@@ -330,7 +343,7 @@ fn rej(code: &str, message: impl Into<String>) -> Rejection {
 }
 
 fn rejected(title_id: i64, release: &Release, source: &str, quality: QualityModel, r: Rejection) -> DecisionRecord {
-    DecisionRecord { id: 0, ts: 0, title_id, release: release.clone(), quality, languages: vec![], release_group: None, covers: String::new(), episode_ids: vec![], accepted: false, rejections: vec![r], source: source.into() }
+    DecisionRecord { id: 0, ts: 0, title_id, release: release.clone(), quality, languages: vec![], speaks_wanted: false, release_group: None, covers: String::new(), episode_ids: vec![], accepted: false, rejections: vec![r], source: source.into() }
 }
 
 /// Everything about one title that judging a release needs, loaded once per batch.
@@ -476,7 +489,7 @@ impl App {
             efficient_codec: playback.hevc || playback.av1,
             playback,
         };
-        let mut record = DecisionRecord { id: 0, ts: 0, title_id: t.id, release: release.clone(), quality, languages, release_group: group, covers, episode_ids: covered_ids.clone(), accepted: false, rejections: vec![], source: source.into() };
+        let mut record = DecisionRecord { id: 0, ts: 0, title_id: t.id, release: release.clone(), quality, languages, speaks_wanted: candidate.speaks_wanted, release_group: group, covers, episode_ids: covered_ids.clone(), accepted: false, rejections: vec![], source: source.into() };
 
         if let Some(r) = wrong.or_else(|| ruled_out(tc, scope, &covered)) {
             record.rejections.push(r);
@@ -522,16 +535,7 @@ impl App {
                 fresh
             })
             .collect();
-        // Acceptable releases first, in the order Spool would choose them; then the rest, newest first.
-        judged.sort_by(|a, b| {
-            b.record.accepted.cmp(&a.record.accepted).then_with(|| {
-                if a.record.accepted {
-                    decision::compare(&a.candidate, &b.candidate, &tc.profile, policy)
-                } else {
-                    b.record.ts.cmp(&a.record.ts)
-                }
-            })
-        });
+        rank(&mut judged, &tc.profile, policy);
         judged.into_iter().map(|j| j.record).collect()
     }
 
@@ -853,7 +857,7 @@ impl App {
         let t = &tc.title;
         // Nothing found could be put with the rest of the title, so the indexers are not asked.
         if let Some(why) = &tc.locked {
-            return Ok(SearchOutcome { decisions: self.db.decisions(title_id)?, grabbed: vec![], errors: vec![], message: format!("Not searched: {why}") });
+            return Ok(SearchOutcome { decisions: vec![], grabbed: vec![], errors: vec![], message: format!("Not searched: {why}") });
         }
         if tc.smaller && oversize.is_empty() {
             let message = match tc.profile.target_size_gb {
@@ -861,7 +865,7 @@ impl App {
                 Some((_, hi)) => format!("Nothing to make smaller: every file is within the {hi:.0} GB target of profile \"{}\"", tc.profile.name),
                 None => format!("Profile \"{}\" has no size target to bring files down to", tc.profile.name),
             };
-            return Ok(SearchOutcome { decisions: self.db.decisions(title_id)?, grabbed: vec![], errors: vec![], message });
+            return Ok(SearchOutcome { decisions: vec![], grabbed: vec![], errors: vec![], message });
         }
         let queries: Vec<Query> = match (t.kind, scope) {
             (Kind::Movie, _) => vec![Query::Movie { imdb_id: t.imdb_id.clone(), title: t.title.clone(), year: t.year }],
@@ -963,7 +967,17 @@ impl App {
         } else {
             format!("{} results, {} acceptable{}", releases.len(), accepted, if grabbed.is_empty() { String::new() } else { format!(", {} sent to download", grabbed.len()) })
         };
-        Ok(SearchOutcome { decisions: self.db.decisions(title_id)?, grabbed, errors, message })
+        // What this search found, in the order Spool would choose, under the ids they were kept as.
+        let ids: HashMap<String, i64> = self.db.decisions(title_id)?.into_iter().map(|d| (d.release.title, d.id)).collect();
+        rank(&mut judged, &tc.profile, self.settings.general().proper_policy);
+        let decisions = judged
+            .into_iter()
+            .map(|mut j| {
+                j.record.id = ids.get(&j.record.release.title).copied().unwrap_or_default();
+                j.record
+            })
+            .collect();
+        Ok(SearchOutcome { decisions, grabbed, errors, message })
     }
 
     /// Read every indexer's recent-release feed and act on anything the library wants.
