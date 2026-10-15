@@ -38,7 +38,7 @@ The same settings can make a second, read-only key. A session using it can use t
 
 `diagnose` answers "why has this not downloaded" in one call: whether the title is monitored, the releases that were rejected and why, downloads that failed, and the log lines that mention it.
 
-`search_releases` lists what a search found best first, in the order Spool would choose. Each release shows its quality, size, group, the languages its name gives and whether it can be heard in your language, so an assistant can pick, say, the best dubbed copy of an anime season and start it with `download_release`. It can narrow the list to names containing a word, such as a group or "remux", and list more than the usual fifteen.
+`search_releases` lists what a search found best first, in the order Spool would choose, and the releases it turned down in the same order, so the best of those can still be taken by hand. The files a title already has show which languages they can be heard in. Each release shows its quality, size, group, the languages its name gives and whether it can be heard in your language, so an assistant can pick, say, the best dubbed copy of an anime season and start it with `download_release`. It can narrow the list to names containing a word, such as a group or "remux", and list more than the usual fifteen.
 
 ## Deleting needs a yes
 

@@ -60,17 +60,10 @@ struct Judged {
     candidate: Candidate,
 }
 
-/// Acceptable releases first, in the order Spool would choose them; then the rest, newest first.
+/// Acceptable releases first, then the rest, each in the order Spool would choose them, so
+/// the best of what was turned down is easy to find and take by hand.
 fn rank(judged: &mut [Judged], profile: &QualityProfile, policy: ProperPolicy) {
-    judged.sort_by(|a, b| {
-        b.record.accepted.cmp(&a.record.accepted).then_with(|| {
-            if a.record.accepted {
-                decision::compare(&a.candidate, &b.candidate, profile, policy)
-            } else {
-                b.record.ts.cmp(&a.record.ts)
-            }
-        })
-    });
+    judged.sort_by(|a, b| b.record.accepted.cmp(&a.record.accepted).then_with(|| decision::compare(&a.candidate, &b.candidate, profile, policy)));
 }
 
 /// The episode numbers a release's name gives for this film, when it names any: a number
@@ -970,6 +963,9 @@ impl App {
         // What this search found, in the order Spool would choose, under the ids they were kept as.
         let ids: HashMap<String, i64> = self.db.decisions(title_id)?.into_iter().map(|d| (d.release.title, d.id)).collect();
         rank(&mut judged, &tc.profile, self.settings.general().proper_policy);
+        // A release found by more than one query was judged each time; it is listed once.
+        let mut seen = HashSet::new();
+        judged.retain(|j| seen.insert(j.record.release.title.clone()));
         let decisions = judged
             .into_iter()
             .map(|mut j| {

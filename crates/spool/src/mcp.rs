@@ -482,7 +482,7 @@ impl Mcp {
                     "title_id": t["id"], "title": t["title"], "year": t["year"], "kind": t["kind"], "monitored": t["monitored"], "profile": t["profile"], "path": t["path"],
                     "tmdb_id": t["tmdb_id"], "tvdb_id": t["tvdb_id"], "imdb_id": t["imdb_id"], "status": t["status"], "released": t["available"], "last_searched": when(&t["last_search_at"]),
                     "plex": t["plex"]["url"],
-                    "files": t["files"].as_array().into_iter().flatten().map(|f| json!({"file_id": f["id"], "path": f["rel_path"], "quality": quality(&f["quality"]), "size_gb": gb(&f["size"]), "video": f["media_info"]["video_codec"], "audio": f["media_info"]["audio_codec"], "height": f["media_info"]["height"]})).collect::<Vec<_>>(),
+                    "files": t["files"].as_array().into_iter().flatten().map(|f| json!({"file_id": f["id"], "path": f["rel_path"], "quality": quality(&f["quality"]), "size_gb": gb(&f["size"]), "video": f["media_info"]["video_codec"], "audio": f["media_info"]["audio_codec"], "audio_languages": f["media_info"]["audio_languages"], "height": f["media_info"]["height"]})).collect::<Vec<_>>(),
                     "seasons": seasons.iter().map(|(n, (aired, have, missing))| json!({"season": n, "aired": aired, "have": have, "missing_monitored": missing})).collect::<Vec<_>>(),
                     "downloads": t["acquisitions"].as_array().into_iter().flatten().take(12).map(|x| acquisition_row(x, &Value::Null, &Value::Null)).collect::<Vec<_>>(),
                     "releases_accepted": decisions.iter().filter(|d| d["accepted"] == true).take(20).map(|d| release_row(d)).collect::<Vec<_>>(),

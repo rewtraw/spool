@@ -402,10 +402,13 @@ async fn a_search_lists_what_it_found_best_first_and_says_which_can_be_heard() {
     w.release("Spirit.Away.2001.1080p.BluRay.x264-SUB", &[("a.mkv", b"a")]);
     w.release("Spirit.Away.2001.1080p.WEB-DL.DUAL.x264-DUB", &[("b.mkv", b"b")]);
     w.release("Spirit.Away.2001.720p.WEB-DL.x264-WEB", &[("c.mkv", b"c")]);
+    w.release("Spirit.Away.2001.DVDRip.DUAL.x264-OLD", &[("d.mkv", b"d")]);
 
     let outcome = w.app.search(film.id, Scope::Movie, true, false).await.unwrap();
     let order: Vec<(&str, bool, bool)> = outcome.decisions.iter().map(|d| (d.release.title.as_str(), d.accepted, d.speaks_wanted)).collect();
     assert_eq!(&order[..2], &[("Spirit.Away.2001.1080p.WEB-DL.DUAL.x264-DUB", true, true), ("Spirit.Away.2001.1080p.BluRay.x264-SUB", true, false)], "{order:?}");
+    // What was turned down is ranked the same way, so the best of it can be taken by hand.
+    assert_eq!(&order[2..], &[("Spirit.Away.2001.DVDRip.DUAL.x264-OLD", false, true), ("Spirit.Away.2001.720p.WEB-DL.x264-WEB", false, false)], "{order:?}");
     assert!(outcome.decisions.iter().all(|d| d.id > 0), "each can be grabbed by its id");
 }
 
