@@ -12,7 +12,9 @@
   let upcoming = $state<any[]>([]);
   let activity = $state<any[]>([]);
   let moves = $state<any>({ now: null, waiting: [] });
-  let compact = $state<any>({ now: null, waiting: [], waiting_count: 0 });
+  let compact = $state<any>({ now: [], waiting: [], waiting_count: 0 });
+  // Several machines may each be making one.
+  const making = $derived<any[]>(compact.now ?? []);
   let loaded = $state(false);
 
   // Room on each place the library lives, not only where downloads land.
@@ -37,12 +39,12 @@
   }
   // A move sends no events as it goes, so its line is asked for again while one is under way.
   $effect(() => {
-    if (!moves.now && !moves.waiting.length && !compact.now && !compact.waiting_count) return;
+    if (!moves.now && !moves.waiting.length && !making.length && !compact.waiting_count) return;
     const timer = setInterval(async () => {
       const a = await api.get('/activity').catch(() => null);
       if (a) {
         moves = a.moves ?? { now: null, waiting: [] };
-        compact = a.compact ?? { now: null, waiting: [], waiting_count: 0 };
+        compact = a.compact ?? { now: [], waiting: [], waiting_count: 0 };
       }
     }, 5000);
     return () => clearInterval(timer);
@@ -158,7 +160,7 @@
   </section>
 {/if}
 
-{#if activity.length || moves.now || moves.waiting.length || compact.now || compact.waiting_count}
+{#if activity.length || moves.now || moves.waiting.length || making.length || compact.waiting_count}
   <section>
     <div class="row"><div class="section-title grow">In progress</div><a class="more" href="#/activity">All activity</a></div>
     <div class="card list">
@@ -177,12 +179,12 @@
           </div>
         </a>
       {/if}
-      {#if compact.now || compact.waiting_count}
-        {@const c = compact.now}
+      {#if making.length || compact.waiting_count}
+        {@const c = making[0]}
         <a class="line" href="#/activity">
           <div class="grow">
             <div class="truncate">
-              {#if c}<b>{c.title}{c.episode ? ` ${c.episode}` : ''}</b> <span class="muted">compact version being made</span>{:else}<b>Compact versions waiting to be made</b>{/if}
+              {#if c}<b>{c.title}{c.episode ? ` ${c.episode}` : ''}</b> <span class="muted">compact version being made</span>{#if making.length > 1}<span class="muted"> · {making.length - 1} more being made</span>{/if}{:else}<b>Compact versions waiting to be made</b>{/if}
               {#if compact.waiting_count}<span class="muted"> · {compact.waiting_count} more waiting</span>{/if}
             </div>
             {#if c?.total_ms}
