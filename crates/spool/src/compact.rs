@@ -476,21 +476,38 @@ impl App {
     /// Each is checked first. `say_small` is whether to report the files that are small
     /// already, which for a whole library is most of them and not worth the saying.
     pub fn compact_files(&self, ids: &[i64], say_small: bool) -> Asked {
+        self.put_in_line(ids, say_small, false)
+    }
+
+    /// As [`compact_files`](Self::compact_files). `automatic` files are put in only while
+    /// making them of what arrives is on, as it is seen under the line's lock, and are marked
+    /// so that turning it off takes them out; one already in line keeps its mark.
+    fn put_in_line(&self, ids: &[i64], say_small: bool, automatic: bool) -> Asked {
         let mut asked = Asked::default();
         for id in ids {
             let Ok(Some(file)) = self.db.file(*id) else { continue };
             let Ok(Some(title)) = self.db.title(file.title_id) else { continue };
             if self.compacting(*id) {
                 // Asked for again, it is wanted for itself.
-                self.encodes.lock().automatic.remove(id);
+                if !automatic {
+                    self.encodes.lock().automatic.remove(id);
+                }
                 continue;
             }
             match self.compact_plan(&title, &file) {
                 Ok(_) => {
                     // Looked for again as it is put in, so that two asking at once put it in once.
                     let mut e = self.encodes.lock();
-                    e.automatic.remove(id);
-                    if !(e.queue.contains(id) || e.now.iter().any(|n| n.file_id == *id)) {
+                    let there = e.queue.contains(id) || e.now.iter().any(|n| n.file_id == *id);
+                    if automatic {
+                        if there || !self.settings.general().compact.auto {
+                            continue;
+                        }
+                        e.automatic.insert(*id);
+                    } else {
+                        e.automatic.remove(id);
+                    }
+                    if !there {
                         e.queue.push_back(*id);
                         asked.queued += 1;
                     }
@@ -870,7 +887,15 @@ impl App {
             if let Err(e) = &brought {
                 tracing::info!(machine = %r.conf.name, why = %format!("{e:#}"), "a compact version could not be brought back yet; asking again");
             }
-            tokio::time::sleep(std::time::Duration::from_secs(pause)).await;
+            for _ in 0..pause {
+                if now.stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            if now.stop.load(Ordering::Relaxed) {
+                break;
+            }
             now.back.store(1, Ordering::Relaxed);
             brought = r.make_fetch(&job, working, &now.back, &now.stop).await;
         }
@@ -985,10 +1010,7 @@ impl App {
         if !self.settings.general().compact.auto || files.is_empty() {
             return;
         }
-        let asked = self.compact_files(files, false);
-        let mut e = self.encodes.lock();
-        let queued: Vec<i64> = files.iter().copied().filter(|id| e.queue.contains(id) || e.now.iter().any(|n| n.file_id == *id)).collect();
-        e.automatic.extend(queued);
+        let asked = self.put_in_line(files, false, true);
         if asked.queued > 0 {
             tracing::info!(title = title_id, files = asked.queued, "making compact versions of what arrived");
         }

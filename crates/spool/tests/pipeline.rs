@@ -4259,6 +4259,8 @@ async fn only_what_arrives_is_put_in_line_and_turning_that_off_takes_it_out() {
     w.app.compact_arrivals(films[0].id, &[file(0)]);
     assert_eq!(waiting().await, [file(0)], "only what arrived");
     assert_eq!(call(&api, "POST", "/api/compact", json!({"file_ids": [file(1)]})).await.0, 200);
+    // Asked for by hand and then arriving, it is still the one asked for.
+    w.app.compact_arrivals(films[1].id, &[file(1)]);
 
     // Turned off, what it put in line leaves, and what was asked for stays.
     g["compact"]["auto"] = json!(false);
