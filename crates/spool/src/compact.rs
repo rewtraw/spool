@@ -854,7 +854,20 @@ impl App {
         };
         now.done_ms.store(now.total_ms, Ordering::Relaxed);
         now.back.store(1, Ordering::Relaxed);
-        let brought = r.make_fetch(&job, working, &now.back, &now.stop).await;
+        // Where the original is kept may be too busy to take it for a while, as a NAS taking in
+        // downloads; what was made is asked for again before it is made again here.
+        let mut brought = r.make_fetch(&job, working, &now.back, &now.stop).await;
+        for pause in [15, 60] {
+            if brought.is_ok() || now.stop.load(Ordering::Relaxed) {
+                break;
+            }
+            if let Err(e) = &brought {
+                tracing::info!(machine = %r.conf.name, why = %format!("{e:#}"), "a compact version could not be brought back yet; asking again");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(pause)).await;
+            now.back.store(1, Ordering::Relaxed);
+            brought = r.make_fetch(&job, working, &now.back, &now.stop).await;
+        }
         r.make_end(&job).await;
         if now.stop.load(Ordering::Relaxed) {
             bail!(CALLED_OFF);
