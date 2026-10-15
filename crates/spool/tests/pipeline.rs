@@ -4160,6 +4160,29 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
     // Nothing is left on the machine that made it, nor in the film's folder but the two files.
     assert_eq!(std::fs::read_dir(w.root.join("maker-data/making")).map(|d| d.count()).unwrap_or(0), 0);
     assert_eq!(films.iter().map(|t| std::fs::read_dir(&t.path).unwrap().count()).collect::<Vec<_>>(), [2, 1]);
+
+    // Films kept on a linked machine's disks are read from them one at a time, however many
+    // machines there are to make them: two at once keep a NAS too busy to answer anyone else.
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["links"][0]["folders"] = json!([{"here": w.root.join("Movies").to_string_lossy(), "there": "/mnt/movies"}]);
+    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    assert_eq!(status, 200, "{said}");
+    w.app.ask_remotes().await;
+    let compact = w.app.db.files(films[0].id).unwrap().into_iter().find(|f| f.compact_of.is_some()).unwrap();
+    w.app.delete_compact(compact.id).unwrap();
+    let (_, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [films[0].id, films[1].id]})).await;
+    assert_eq!(said["queued"].as_u64(), Some(2), "{said}");
+    let mut most = 0;
+    for _ in 0..2400 {
+        let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+        most = most.max(activity["compact"]["now"].as_array().map_or(0, Vec::len));
+        if films.iter().all(|t| w.app.db.files(t.id).unwrap().iter().any(|f| f.compact_of.is_some())) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(films.iter().all(|t| w.app.db.files(t.id).unwrap().iter().any(|f| f.compact_of.is_some())), "both are made in the end");
+    assert_eq!(most, 1, "one at a time from the one machine's disks");
 }
 
 #[tokio::test(flavor = "multi_thread")]

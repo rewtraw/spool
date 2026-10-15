@@ -107,7 +107,7 @@ A NAS that is switched off, or a disk that is unplugged, takes its titles offlin
 
 When the location comes back, its titles come back with it. Nothing needs doing.
 
-Spool checks each location on a thread of its own with a short wait, because a network share that has gone can otherwise keep a program waiting for minutes.
+Spool checks each location on a thread of its own with a short wait, because a network share that has gone can otherwise keep a program waiting for minutes. A location that was there and is slow to answer is taken to be busy, as a NAS is while it reads and writes large files, and stays online. It goes offline when it says it is gone, or after a minute and a half without an answer.
 
 ## Where new titles go
 

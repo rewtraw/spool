@@ -85,6 +85,10 @@ pub struct Encoding {
     pub link: u32,
     /// Bytes of it brought back from the machine that made it, once that has begun.
     pub back: Arc<AtomicU64>,
+    /// The link whose machine keeps the original, or nought for this one. Only one is made
+    /// at a time from each linked machine's disks, which reading and writing a film at
+    /// the speed of the video hardware otherwise keeps too busy to answer anyone else.
+    pub from: u32,
 }
 
 /// A linked machine did not make what it was given, for a reason that is its own and not
@@ -522,27 +526,7 @@ impl App {
     /// line is empty or the machine is no longer to be given them.
     async fn compact_run(self, key: u32, maker: Option<Arc<Remote>>) {
         let by = maker.as_ref().map(|r| r.conf.name.clone()).unwrap_or_default();
-        loop {
-            let id = {
-                let mut e = self.encodes.lock();
-                // A link whose settings were changed is another link from then on, and takes the line up afresh.
-                let next = match &maker {
-                    _ if e.held => None,
-                    None => e.queue.pop_front(),
-                    Some(r) if self.listed(r) && r.makes() => e.queue.iter().position(|id| !e.here_only.contains(id)).and_then(|at| e.queue.remove(at)),
-                    Some(_) => None,
-                };
-                match next {
-                    Some(id) => {
-                        e.now.push(Encoding { file_id: id, title_id: 0, done_ms: Default::default(), total_ms: 0, speed: Default::default(), stop: Default::default(), how: Default::default(), by: by.clone(), link: key, back: Default::default() });
-                        id
-                    }
-                    None => {
-                        e.runners.remove(&key);
-                        break;
-                    }
-                }
-            };
+        while let Some(id) = self.compact_next(key, maker.as_ref(), &by) {
             let (title_id, name) = self.db.file(id).ok().flatten().and_then(|f| self.db.title(f.title_id).ok().flatten()).map(|t| (t.id, t.title)).unwrap_or_default();
             let made = self.compact_one(id, maker.as_ref()).await;
             let mut again = false;
@@ -582,10 +566,52 @@ impl App {
             }
             self.keep_compact_line();
             self.emit(Event::Title { id: title_id });
-            if again {
-                // Whoever else makes them takes it up.
-                self.compact_start();
+            // Whoever else makes them takes up what this one was given back, or what was
+            // waiting for the disks this one has finished with.
+            self.compact_start();
+        }
+    }
+
+    /// Take the next file for one machine out of the line, passing over those kept on a linked
+    /// machine that another is reading from already. With none to take, the machine stops
+    /// taking from the line, and is started again when one is finished.
+    fn compact_next(&self, key: u32, maker: Option<&Arc<Remote>>, by: &str) -> Option<i64> {
+        let remotes = self.remotes();
+        let kept_by = |id: i64| {
+            let folder = self.db.file(id).ok().flatten().and_then(|f| self.db.title(f.title_id).ok().flatten().map(|t| t.folder_of(&f).to_string()));
+            folder.and_then(|f| remotes.iter().find(|r| r.covers(Path::new(&f))).map(|r| r.conf.id)).unwrap_or(0)
+        };
+        loop {
+            let (line, reading) = {
+                let mut e = self.encodes.lock();
+                // A link whose settings were changed is another link from then on, and takes the line up afresh.
+                if e.held || maker.is_some_and(|r| !(self.listed(r) && r.makes())) {
+                    e.runners.remove(&key);
+                    return None;
+                }
+                let line: Vec<i64> = e.queue.iter().copied().filter(|id| maker.is_none() || !e.here_only.contains(id)).collect();
+                (line, e.now.iter().map(|n| n.from).filter(|f| *f != 0).collect::<std::collections::HashSet<u32>>())
+            };
+            // Worked out with the line let go of, since it asks the database.
+            let pick = line.into_iter().map(|id| (id, kept_by(id))).find(|(_, from)| *from == 0 || !reading.contains(from));
+            let mut e = self.encodes.lock();
+            let Some((id, from)) = pick else {
+                // A machine that finished while this one was looking may have freed disks
+                // it passed over, and started no one, seeing this one still taking.
+                if e.now.iter().map(|n| n.from).filter(|f| *f != 0).collect::<std::collections::HashSet<u32>>() != reading {
+                    continue;
+                }
+                e.runners.remove(&key);
+                return None;
+            };
+            // Taken by another machine meanwhile: look again.
+            let Some(at) = e.queue.iter().position(|x| *x == id) else { continue };
+            if e.now.iter().any(|n| from != 0 && n.from == from) {
+                continue;
             }
+            e.queue.remove(at);
+            e.now.push(Encoding { file_id: id, title_id: 0, done_ms: Default::default(), total_ms: 0, speed: Default::default(), stop: Default::default(), how: Default::default(), by: by.to_string(), link: key, back: Default::default(), from });
+            return Some(id);
         }
     }
 

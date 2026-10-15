@@ -259,7 +259,7 @@
 <li>Status shows a notice naming the location.</li>
 </ul>
 <p>When the location comes back, its titles come back with it. Nothing needs doing.</p>
-<p>Spool checks each location on a thread of its own with a short wait, because a network share that has gone can otherwise keep a program waiting for minutes.</p>
+<p>Spool checks each location on a thread of its own with a short wait, because a network share that has gone can otherwise keep a program waiting for minutes. A location that was there and is slow to answer is taken to be busy, as a NAS is while it reads and writes large files, and stays online. It goes offline when it says it is gone, or after a minute and a half without an answer.</p>
 <h2 id="where-new-titles-go"><a href="#where-new-titles-go">Where new titles go</a></h2>
 <p>Once there is a managed location beside the main one, &quot;Put new titles on&quot; chooses which receives titles you add, and the box for adding a title under Discover offers the same choice for that one title. Titles already in the library stay where they are. If the chosen location cannot be reached when a title is added, the title goes to the main library.</p>
 <p>The downloads folder is one folder, under Settings, General, Downloads. A download filed onto a different disk is copied there and checked instead of moved, which takes longer for a large file.</p>

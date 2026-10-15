@@ -28,15 +28,48 @@ impl Location {
     }
 }
 
+/// How long a location that was there may take to answer before it counts as gone.
+const SILENT_IS_GONE: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// What a location said when it was looked at.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Answer {
+    There,
+    Gone,
+    /// It did not say in time: a share that is busy, or one that has gone and is being waited on.
+    Slow,
+}
+
+/// Whether a location counts as there, from what it said, whether it was there before, and
+/// how long it has not answered.
+fn counts_as_there(answer: Answer, was: bool, silent: std::time::Duration) -> bool {
+    match answer {
+        Answer::There => true,
+        Answer::Gone => false,
+        Answer::Slow => was && silent < SILENT_IS_GONE,
+    }
+}
+
 /// Is the location there to be read? A network share that has gone away can keep a caller
 /// waiting, so this only ever runs on a thread of its own.
-fn probe(l: &Location) -> bool {
-    let readable = |dir: &str| std::fs::read_dir(dir).and_then(|mut d| d.next().transpose()).is_ok();
+fn probe(l: &Location) -> Answer {
+    let read = |dir: &str| std::fs::read_dir(dir).and_then(|mut d| d.next().transpose()).map(|_| ());
+    let answer = |r: std::io::Result<()>| match r {
+        Ok(()) => Answer::There,
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Answer::Slow,
+        Err(_) => Answer::Gone,
+    };
     if !l.volume.is_empty() {
-        return is_mount_point(Path::new(&l.volume)) && readable(&l.volume);
+        if !is_mount_point(Path::new(&l.volume)) {
+            return Answer::Gone;
+        }
+        return answer(read(&l.volume));
     }
     let roots: Vec<&String> = [&l.movie_root, &l.series_root].into_iter().filter(|r| !r.is_empty()).collect();
-    !roots.is_empty() && roots.into_iter().all(|r| readable(r))
+    if roots.is_empty() {
+        return Answer::Gone;
+    }
+    roots.into_iter().map(|r| answer(read(r))).find(|a| *a != Answer::There).unwrap_or(Answer::There)
 }
 
 /// Every location with whether it can be reached, as of one moment.
@@ -124,28 +157,41 @@ impl App {
         known.unwrap_or_else(|| self.check_location(l))
     }
 
-    /// Look at a location now, waiting a few seconds at most for an answer. One that is slow to
-    /// say counts as away until it does.
+    /// Look at a location now, waiting a few seconds at most for an answer. One that has not
+    /// been reached yet counts as away until it answers. One that was reached and is slow to
+    /// answer is busy, which a NAS reading and writing films for a while is, and still counts
+    /// as there, until it has said nothing for a minute and a half or said it is gone.
     pub fn check_location(&self, l: &Location) -> bool {
         if !self.location_checking.lock().insert(l.id) {
             // Still waiting on the last look.
-            return self.location_state.lock().get(&l.id).copied().unwrap_or(false);
+            return self.heard(l, Answer::Slow);
         }
         let (app, loc) = (self.clone(), l.clone());
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let ok = probe(&loc);
+            let answer = probe(&loc);
             app.location_checking.lock().remove(&loc.id);
-            app.note_location(&loc, ok);
-            let _ = tx.send(ok);
+            let _ = tx.send(app.heard(&loc, answer));
         });
-        match rx.recv_timeout(std::time::Duration::from_secs(3)) {
-            Ok(ok) => ok,
-            Err(_) => {
-                self.note_location(l, false);
-                false
+        rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap_or_else(|_| self.heard(l, Answer::Slow))
+    }
+
+    /// Take in what a location said, and say whether it counts as there.
+    fn heard(&self, l: &Location, answer: Answer) -> bool {
+        let was = self.location_state.lock().get(&l.id).copied() == Some(true);
+        let silent = match answer {
+            Answer::Slow => self.location_slow.lock().entry(l.id).or_insert_with(std::time::Instant::now).elapsed(),
+            _ => {
+                self.location_slow.lock().remove(&l.id);
+                Default::default()
             }
+        };
+        let ok = counts_as_there(answer, was, silent);
+        // Busy is not news: it stays as it was.
+        if !(answer == Answer::Slow && ok) {
+            self.note_location(l, ok);
         }
+        ok
     }
 
     fn note_location(&self, l: &Location, ok: bool) {
@@ -267,5 +313,30 @@ impl App {
                 format!("{} cannot be reached. Its {n} title{} are offline until it returns.", l.name, if n == 1 { "" } else { "s" })
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn a_location_slow_to_answer_is_busy_until_it_has_been_silent_too_long() {
+        let s = Duration::from_secs;
+        assert!(counts_as_there(Answer::Slow, true, s(0)), "busy, not gone");
+        assert!(counts_as_there(Answer::Slow, true, s(89)));
+        assert!(!counts_as_there(Answer::Slow, true, s(90)), "silent for a minute and a half, it has gone");
+        assert!(!counts_as_there(Answer::Slow, false, s(0)), "one not reached yet is away until it answers");
+        assert!(!counts_as_there(Answer::Gone, true, s(0)), "one that says it is gone is gone at once");
+        assert!(counts_as_there(Answer::There, false, s(500)));
+    }
+
+    #[test]
+    fn a_missing_folder_is_gone_and_a_present_one_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = |root: &Path| Location { id: 1, name: "Shelf".into(), movie_root: root.to_string_lossy().to_string(), series_root: String::new(), volume: String::new(), manage: true, movie_profile: 0, series_profile: 0 };
+        assert_eq!(probe(&at(dir.path())), Answer::There);
+        assert_eq!(probe(&at(&dir.path().join("nowhere"))), Answer::Gone);
     }
 }

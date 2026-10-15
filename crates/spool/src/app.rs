@@ -110,6 +110,8 @@ pub struct Inner {
     pub location_state: Mutex<HashMap<u32, bool>>,
     /// Locations being looked at right now, so a share that does not answer is asked once.
     pub location_checking: Mutex<HashSet<u32>>,
+    /// Locations that were there and have not answered since, with when they last did not.
+    pub location_slow: Mutex<HashMap<u32, std::time::Instant>>,
     /// Counts locations coming and going, for anything that keeps a picture of the library.
     pub location_changes: std::sync::atomic::AtomicU64,
     /// The last look through a location for titles to bring in, and what came of it.
@@ -311,6 +313,7 @@ impl App {
             volume_access: std::sync::atomic::AtomicU8::new(0),
             location_state: Mutex::new(HashMap::new()),
             location_checking: Mutex::new(HashSet::new()),
+            location_slow: Mutex::new(HashMap::new()),
             location_changes: std::sync::atomic::AtomicU64::new(0),
             adoption: Mutex::new(None),
             anime_list: Mutex::new(None),

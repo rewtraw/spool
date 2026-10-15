@@ -54,7 +54,7 @@ On Linux Spool encodes on the processor.
 
 Making compact versions is the one job that goes faster with more computers. Any Mac in the house with Apple silicon can make them alongside the machine Spool runs on, and each one added makes about as many again.
 
-Such a machine holds none of the library and needs no shared folder. Spool gives it one film at a time. It reads the film from Spool over the network, makes the compact version on its video hardware, and Spool brings the result back, checks it and files it as it would one made at home. Spool's own machine goes on making its own meanwhile. Activity shows each film with the machine making it.
+Such a machine holds none of the library and needs no shared folder. Spool gives it one film at a time. It reads the film from Spool over the network, makes the compact version on its video hardware, and Spool brings the result back, checks it and files it as it would one made at home. Spool's own machine goes on making its own meanwhile. Activity shows each film with the machine making it. Films kept on a NAS are read from it one at a time, however many machines are making: reading and writing several films at once keeps a NAS too busy to answer anything else, such as a film being played.
 
 **To add one**, from a checkout of Spool on any Mac:
 
