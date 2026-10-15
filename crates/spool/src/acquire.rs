@@ -285,9 +285,18 @@ struct Held {
     runtime: u32,
 }
 
-fn held(tc: &TitleContext, covered: &[&Episode]) -> Held {
+/// Whether a file has `wanted` among its audio. A title made in it always does, and so does a
+/// file whose tracks were never read.
+fn hears(f: &MediaFile, wanted: &str, original: Option<&str>) -> bool {
+    let code = crate::subs::language_code(wanted);
+    code.is_none()
+        || original.is_none_or(|o| o.starts_with(wanted))
+        || f.media_info.as_ref().is_none_or(|m| m.audio_languages.is_empty() || m.audio_languages.iter().any(|l| crate::subs::language_code(l) == code))
+}
+
+fn held(tc: &TitleContext, covered: &[&Episode], wanted: &str) -> Held {
     let t = &tc.title;
-    let file = |f: &MediaFile| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size };
+    let file = |f: &MediaFile| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size, speaks_wanted: hears(f, wanted, t.original_language.as_deref()) };
     match t.kind {
         Kind::Movie => Held {
             // The main file is what an upgrade is measured against; versions kept beside it
@@ -460,7 +469,8 @@ impl App {
             speaks_wanted: g.language.is_empty()
                 || t.original_language.as_deref().is_none_or(|o| o.starts_with(g.language.as_str()))
                 || languages.contains(&g.language)
-                || spool_core::parser::says_dual_audio(&release.title),
+                // "Dual Audio" is how anime is released with an English track beside the original.
+                || (g.language == "english" && spool_core::parser::says_dual_audio(&release.title)),
             full_season,
             multi_season,
             efficient_codec: playback.hevc || playback.av1,
@@ -473,7 +483,7 @@ impl App {
             return Judged { record, candidate };
         }
 
-        let held = held(tc, &covered);
+        let held = held(tc, &covered, &g.language);
         let queued: Vec<QualityModel> = tc.active.iter().filter(|a| t.kind == Kind::Movie || a.episode_ids.iter().any(|id| covered_ids.contains(id))).map(|a| a.quality).collect();
         let limits = self.settings.size_limits();
         let ctx = Context {

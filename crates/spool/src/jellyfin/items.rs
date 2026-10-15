@@ -134,7 +134,8 @@ impl Library {
         // newer count next time, and the library is read again.
         let revision = (app.db.revision()?, app.location_changes.load(std::sync::atomic::Ordering::Relaxed));
         let slot = if compact { &app.player_library_compact } else { &app.player_library };
-        let kept = slot.lock().as_ref().filter(|(at, _)| *at == revision).map(|(_, data)| data.clone());
+        let language = household_language(app);
+        let kept = slot.lock().as_ref().filter(|(at, data)| *at == revision && data.language == language).map(|(_, data)| data.clone());
         let data = match kept {
             Some(data) => data,
             None => {
@@ -208,7 +209,7 @@ impl Library {
         let index = titles.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         // A copy kept elsewhere is offered by the name of the place it is on.
         let copy_names = files.values().flatten().filter_map(|f| f.base.clone()).map(|b| (places.of(&b).map(|p| p.0.name.clone()).unwrap_or_default(), b)).map(|(name, b)| (b, name)).collect();
-        let language = crate::subs::language_code(&app.settings.general().language).unwrap_or_default().to_string();
+        let language = household_language(app);
         Ok(Data { server_id: super::server_id(app), titles, index, files, episodes, episode_title, sets, set_members, copy_names, language })
     }
 
@@ -1187,13 +1188,7 @@ pub(super) fn three_letter(code: &str) -> String {
     if c.len() == 3 || c.is_empty() {
         return if c.is_empty() { "und".into() } else { c };
     }
-    match c.as_str() {
-        "en" => "eng", "es" => "spa", "fr" => "fre", "de" => "ger", "it" => "ita", "pt" => "por", "nl" => "dut", "ja" => "jpn", "ko" => "kor", "zh" => "chi",
-        "ru" => "rus", "sv" => "swe", "no" => "nor", "da" => "dan", "fi" => "fin", "pl" => "pol", "tr" => "tur", "ar" => "ara", "he" => "heb", "hi" => "hin",
-        "el" => "gre", "cs" => "cze", "hu" => "hun", "ro" => "rum", "th" => "tha", "vi" => "vie", "id" => "ind", "uk" => "ukr",
-        _ => return c,
-    }
-    .into()
+    crate::subs::three_letter(&c).map_or(c, str::to_string)
 }
 
 fn language_label(code: &str) -> String {
@@ -1249,6 +1244,11 @@ fn subtitle_codec(codec: &str) -> &str {
         "dvb_subtitle" => "DVBSUB",
         other => other,
     }
+}
+
+/// The household's language as a two-letter code, or empty for none.
+fn household_language(app: &App) -> String {
+    crate::subs::language_code(&app.settings.general().language).unwrap_or_default().to_string()
 }
 
 /// The tracks a file starts with, marked as the default among `streams`: audio in the

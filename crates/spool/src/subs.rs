@@ -353,6 +353,20 @@ const LANGUAGES: &[(&str, &str, &str)] = &[
     ("th", "tha", "thai"),
     ("vi", "vie", "vietnamese"),
     ("id", "ind", "indonesian"),
+    ("bg", "bul", "bulgarian"),
+    ("is", "ice", "icelandic"),
+    ("sk", "slo", "slovak"),
+    ("lv", "lav", "latvian"),
+    ("fa", "per", "persian"),
+    ("bn", "ben", "bengali"),
+    ("ta", "tam", "tamil"),
+    ("te", "tel", "telugu"),
+    ("ml", "mal", "malayalam"),
+    ("kn", "kan", "kannada"),
+    ("sq", "alb", "albanian"),
+    ("af", "afr", "afrikaans"),
+    ("mr", "mar", "marathi"),
+    ("tl", "tgl", "tagalog"),
 ];
 
 /// A two-letter code from whatever a file or a stream calls its language.
@@ -366,10 +380,20 @@ pub fn language_code(word: &str) -> Option<&'static str> {
         "ces" => "cze",
         "ron" => "rum",
         "ell" => "gre",
+        "isl" => "ice",
+        "slk" => "slo",
+        "fas" => "per",
+        "sqi" => "alb",
+        "fil" => "tgl",
         "pt-br" | "pob" => "por",
         other => other,
     };
     LANGUAGES.iter().find(|(two, three, name)| *two == alt || *three == alt || *name == alt).map(|l| l.0)
+}
+
+/// The three-letter code for a two-letter one.
+pub fn three_letter(two: &str) -> Option<&'static str> {
+    LANGUAGES.iter().find(|l| l.0 == two).map(|l| l.1)
 }
 
 pub fn language_name(code: &str) -> String {
@@ -995,6 +1019,7 @@ mod tests {
         assert_eq!(read_tags(""), ("und".into(), false, false));
         assert_eq!(wanted_languages("en, spanish;fre"), vec!["en", "es", "fr"]);
         assert_eq!(language_name("en"), "English");
+        assert_eq!((language_code("bulgarian"), language_code("bul"), three_letter("bg")), (Some("bg"), Some("bg"), Some("bul")));
     }
 
     /// A made-up film: speech in irregular bursts over a slowly swelling score, with noise.
