@@ -72,7 +72,7 @@
     <fieldset class="card">
       <legend>Choosing releases</legend>
       <label class="field narrow">Fallback releases to save per download<input class="input" type="number" min="0" max="5" bind:value={general.archive_runner_ups} /><span class="hint">When Spool picks a release it also saves this many of the next-best ones to the <a class="link" href="#/archive">Archive</a>. Each costs one indexer download. 0 keeps only what is downloaded.</span></label>
-      <label class="field narrow">Language<input class="input" bind:value={general.language} placeholder="english" /><span class="hint">Releases that name a different language are rejected, unless it is the language the film or series was made in. Leave empty to accept any.</span></label>
+      <label class="field narrow">Language<input class="input" bind:value={general.language} placeholder="english" /><span class="hint">Releases that name a different language are rejected, unless it is the language the film or series was made in. A foreign title is better with a track in it, and players start on that track. Leave empty to accept any.</span></label>
       <label class="field narrow">Propers and repacks
         <select class="input" bind:value={general.proper_policy}>
           <option value="prefer_and_upgrade">Prefer them, and replace an existing file</option>

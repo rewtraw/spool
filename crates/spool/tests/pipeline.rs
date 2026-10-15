@@ -4117,7 +4117,15 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
     assert!(w.app.remotes()[0].makes());
     let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [films[0].id, films[1].id]})).await;
     assert_eq!((status, said["queued"].as_u64()), (200, Some(2)), "{said}");
-    let (_, activity) = call(&api, "GET", "/api/activity", Value::Null).await;
+    // Each machine takes its film as soon as it gets to it.
+    let mut activity = Value::Null;
+    for _ in 0..100 {
+        activity = call(&api, "GET", "/api/activity", Value::Null).await.1;
+        if activity["compact"]["now"].as_array().unwrap().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let by: Vec<&str> = activity["compact"]["now"].as_array().unwrap().iter().filter_map(|n| n["by"].as_str()).collect();
     assert!(by.contains(&"Maker") && by.contains(&""), "one is made there and one here, at once: {}", activity["compact"]);
     let here = activity["compact"]["here"].as_str().unwrap();

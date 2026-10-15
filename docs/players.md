@@ -35,6 +35,7 @@ Played this way the film is on its own, outside Infuse's library: it is not mark
 - **Pictures for Movies and Shows.** The two views a player lists first are each given a picture made of the posters most lately added to them.
 - **Collections.** A series of films, or an anime's series and films together, as [Spool groups them](collections.md).
 - **Every file as it is.** Each version of a film is offered, with its subtitle files.
+- **Your language first.** A file with a track in the language chosen under Settings → General starts on it, as an anime with an English dub does, whichever track the file itself marks. Subtitles in that language come on when what is heard is another, and otherwise only those for signs and foreign lines. The player can still switch either.
 - **Your own artwork.** A poster or backdrop you keep in a title's folder is shown in place of the fetched one, and so are season posters and episode frames. See [Files Spool recognises](local-files.md#artwork).
 - **Trailers and extras.** Trailers and other extras in a title's folder are offered to the player. Whether and where they are shown is up to the player.
 - **What you have watched.** The player reports what was played and where you stopped, and Spool remembers it for next time and for other players.

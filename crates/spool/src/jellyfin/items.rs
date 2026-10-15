@@ -46,6 +46,8 @@ pub struct Data {
     set_members: HashMap<u32, Vec<i64>>,
     /// Per folder of a copy kept on another location, that location's name.
     copy_names: HashMap<String, String>,
+    /// The household's language, as a two-letter code: what is listened to and read first.
+    language: String,
 }
 
 #[derive(Clone, Copy)]
@@ -206,7 +208,8 @@ impl Library {
         let index = titles.iter().enumerate().map(|(i, t)| (t.id, i)).collect();
         // A copy kept elsewhere is offered by the name of the place it is on.
         let copy_names = files.values().flatten().filter_map(|f| f.base.clone()).map(|b| (places.of(&b).map(|p| p.0.name.clone()).unwrap_or_default(), b)).map(|(name, b)| (b, name)).collect();
-        Ok(Data { server_id: super::server_id(app), titles, index, files, episodes, episode_title, sets, set_members, copy_names })
+        let language = crate::subs::language_code(&app.settings.general().language).unwrap_or_default().to_string();
+        Ok(Data { server_id: super::server_id(app), titles, index, files, episodes, episode_title, sets, set_members, copy_names, language })
     }
 
     /// The titles whose posters stand for a whole view, Movies or Shows: the five most lately
@@ -701,7 +704,7 @@ impl Library {
                         "DeliveryMethod": "External", "DeliveryUrl": format!("/Videos/{item}/{id}/Subtitles/{index}/0/Stream.srt"),
                     }));
                 }
-                let audio = streams.iter().position(|s| s["Type"] == "Audio" && s["IsDefault"] == true).or_else(|| streams.iter().position(|s| s["Type"] == "Audio"));
+                let (audio, subtitle) = default_tracks(&mut streams, &self.language);
                 let secs = if info.runtime_secs > 0.0 { info.runtime_secs } else { runtime };
                 let mut source = json!({
                     "Protocol": "File", "Id": id.to_string(), "Path": t.file_path(f).to_string_lossy().to_string(), "Type": "Default", "Container": container(f),
@@ -710,7 +713,7 @@ impl Library {
                     "SupportsTranscoding": false, "SupportsDirectStream": true, "SupportsDirectPlay": true, "IsInfiniteStream": false,
                     "RequiresOpening": false, "RequiresClosing": false, "RequiresLooping": false, "SupportsProbing": true, "HasSegments": false,
                     "VideoType": "VideoFile", "MediaStreams": streams, "MediaAttachments": [], "Formats": [], "RequiredHttpHeaders": {},
-                    "DefaultSubtitleStreamIndex": -1,
+                    "DefaultSubtitleStreamIndex": subtitle.map_or(-1, |i| i as i64),
                 });
                 let rate = if info.bit_rate > 0 { info.bit_rate } else if secs > 0.0 { (f.size as f64 * 8.0 / secs) as u64 } else { 0 };
                 if rate > 0 {
@@ -1179,7 +1182,7 @@ fn version_name(f: &MediaFile) -> String {
 }
 
 /// Jellyfin gives languages as three letters.
-fn three_letter(code: &str) -> String {
+pub(super) fn three_letter(code: &str) -> String {
     let c = code.trim().to_lowercase();
     if c.len() == 3 || c.is_empty() {
         return if c.is_empty() { "und".into() } else { c };
@@ -1246,6 +1249,40 @@ fn subtitle_codec(codec: &str) -> &str {
         "dvb_subtitle" => "DVBSUB",
         other => other,
     }
+}
+
+/// The tracks a file starts with, marked as the default among `streams`: audio in the
+/// household's language when the file has it, as an anime with an English dub, otherwise the
+/// file's own default. Subtitles in that language when what is heard is another, or only its
+/// forced ones (signs, a line in another tongue) when it is not.
+pub fn default_tracks(streams: &mut [Value], wanted: &str) -> (Option<usize>, Option<usize>) {
+    let speaks = |s: &Value| s["Language"].as_str().and_then(crate::subs::language_code) == Some(wanted);
+    let of = |kind: &str| streams.iter().enumerate().filter(|(_, s)| s["Type"] == kind).map(|(i, _)| i).collect::<Vec<_>>();
+    let (audios, subtitles) = (of("Audio"), of("Subtitle"));
+    let default = |i: &&usize| streams[**i]["IsDefault"] == true;
+    let audio = {
+        let ours: Vec<usize> = audios.iter().copied().filter(|i| speaks(&streams[*i])).collect();
+        ours.iter().find(default).or(ours.first()).or(audios.iter().find(default)).or(audios.first()).copied()
+    };
+    let heard = audio.is_some_and(|a| speaks(&streams[a]));
+    let readable = |i: &&usize| speaks(&streams[**i]) && (!heard || streams[**i]["IsForced"] == true);
+    // Full subtitles before ones for the hard of hearing, and forced ones only when nothing else.
+    let rank = |i: &usize| (streams[*i]["IsForced"] == true && !heard, streams[*i]["IsHearingImpaired"] == true);
+    let subtitle = subtitles.iter().filter(readable).min_by_key(|i| rank(i)).copied();
+    for (kind, chosen) in [("Audio", audio), ("Subtitle", subtitle)] {
+        for (i, s) in streams.iter_mut().enumerate().filter(|(_, s)| s["Type"] == kind) {
+            let now = Some(i) == chosen;
+            if s["IsDefault"] == now {
+                continue;
+            }
+            s["IsDefault"] = json!(now);
+            if let Some(title) = s["DisplayTitle"].as_str() {
+                let bare = title.replace(" - Default", "");
+                s["DisplayTitle"] = json!(if now { format!("{bare} - Default") } else { bare });
+            }
+        }
+    }
+    (audio, subtitle)
 }
 
 /// The streams of a file as Jellyfin lists them. A file probed before streams were recorded
@@ -1423,6 +1460,24 @@ mod tests {
         assert_eq!(streams[1]["Codec"], "eac3");
         assert_eq!(streams[1]["Channels"], 6);
         assert_eq!(streams[1]["DisplayTitle"], "English - Dolby Digital+ Atmos - 5.1 - Default");
+    }
+
+    #[test]
+    fn an_english_track_is_heard_first_and_subtitles_come_on_only_for_another_language() {
+        let track = |kind: &str, lang: &str, default: bool, forced: bool| json!({"Type": kind, "Language": lang, "IsDefault": default, "IsForced": forced, "DisplayTitle": if default { "X - Default" } else { "X" }});
+        // Ergo Proxy's Blu-ray: Japanese tracks first and the default, English last.
+        let mut s = vec![track("Video", "", true, false), track("Audio", "jpn", true, false), track("Audio", "jpn", false, false), track("Audio", "eng", false, false), track("Subtitle", "eng", false, true), track("Subtitle", "eng", true, false)];
+        assert_eq!(default_tracks(&mut s, "en"), (Some(3), Some(4)), "the dub, with only the signs");
+        assert_eq!((s[1]["IsDefault"].clone(), s[1]["DisplayTitle"].clone()), (json!(false), json!("X")));
+        assert_eq!((s[3]["IsDefault"].clone(), s[3]["DisplayTitle"].clone()), (json!(true), json!("X - Default")));
+        assert_eq!(s[5]["IsDefault"], false);
+        // Japanese only: full English subtitles, not the forced ones.
+        let mut s = vec![track("Audio", "jpn", true, false), track("Subtitle", "eng", false, true), track("Subtitle", "eng", false, false)];
+        assert_eq!(default_tracks(&mut s, "en"), (Some(0), Some(2)));
+        // English with nothing forced: no subtitles, even one the file turns on.
+        let mut s = vec![track("Audio", "eng", true, false), track("Subtitle", "eng", true, false)];
+        assert_eq!(default_tracks(&mut s, "en"), (Some(0), None));
+        assert_eq!(s[1]["IsDefault"], false);
     }
 
     #[test]

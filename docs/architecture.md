@@ -27,7 +27,7 @@ Inside the server crate, the parts that are easiest to lose track of:
 
 1. **Search.** A scheduled feed read, a backlog search or a person asks the indexers for releases. Series are searched by id first, then by name if wanted episodes are still uncovered.
 2. **Judge.** Every release gets a recorded verdict: accepted, or rejected with reasons (wrong title, quality not wanted, not an upgrade, wrong language, too large, blocklisted and so on). The verdicts are kept and shown, so "why didn't it get this one" always has an answer.
-3. **Choose.** Accepted releases are ranked by the title's profile. For series the aim is a season from as few sources as possible. Releases over the profile's size target are a last resort, and so are dubs.
+3. **Choose.** Accepted releases are ranked by the title's profile. For series the aim is a season from as few sources as possible. Releases over the profile's size target are a last resort, and so are dubs. For a title made in another language, a release with your language to listen to, such as anime marked "Dual Audio", goes before a better one without it.
 4. **Check.** A sample of the release's articles is looked up on the Usenet servers before anything is downloaded. A post that has mostly expired is blocklisted and the choice is made again.
 5. **Download.** Articles are fetched across providers by priority, with fallback for anything missing. Progress is checkpointed, so a restart resumes instead of starting over.
 6. **Verify and unpack.** Stored RAR volumes are unpacked as they arrive and deleted once their checksum is verified. Anything else is verified, repaired from PAR2 recovery data if needed, and extracted at the end.

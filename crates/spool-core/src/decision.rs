@@ -41,6 +41,9 @@ pub struct Candidate {
     /// Names a language that is neither wanted nor the title's own: a dub, usually with that
     /// language as the default track even when the original audio is included.
     pub dubbed: bool,
+    /// Has the wanted language among its audio, said by name or by "Dual Audio", for a title
+    /// made in another language. True for a title made in the wanted language.
+    pub speaks_wanted: bool,
     pub full_season: bool,
     pub multi_season: bool,
     /// The name says H.265, HEVC or AV1.
@@ -304,10 +307,13 @@ pub fn compare(a: &Candidate, b: &Candidate, profile: &QualityProfile, policy: P
     // A release the household's players cannot decode is a last resort, like one that is too big.
     // So is a dub, when a release in the wanted or original language is on offer.
     let unplayable = |c: &Candidate| (profile.prefer_direct_play && c.playback.av1, c.dubbed);
+    // A title made in another language is better with the wanted language to listen to, as
+    // anime with an English track: that comes before picture quality, but not before size.
+    let unheard = |c: &Candidate| !c.speaks_wanted;
     let tail = a.indexer_priority.cmp(&b.indexer_priority).then_with(|| b.item_count.cmp(&a.item_count)).then_with(|| age_bucket(a.age_days).cmp(&age_bucket(b.age_days)));
 
     match profile.target_size_gb {
-        None => unplayable(a).cmp(&unplayable(b)).then(quality).then(revision).then(codec).then(tail).then_with(|| size_bucket(b.size_bytes).cmp(&size_bucket(a.size_bytes))),
+        None => unplayable(a).cmp(&unplayable(b)).then(unheard(a).cmp(&unheard(b))).then(quality).then(revision).then(codec).then(tail).then_with(|| size_bucket(b.size_bytes).cmp(&size_bucket(a.size_bytes))),
         Some((lo, hi)) => {
             // Unknown sizes are treated as fitting; indexers nearly always report one.
             let over = |c: &Candidate| c.size_bytes > 0 && gb(c) > hi;
@@ -316,7 +322,7 @@ pub fn compare(a: &Candidate, b: &Candidate, profile: &QualityProfile, policy: P
                 let g = gb(c);
                 (if g < lo { lo - g } else if g > hi { g - hi } else { 0.0 }).round() as i64
             };
-            unplayable(a).cmp(&unplayable(b)).then(over(a).cmp(&over(b))).then_with(|| {
+            unplayable(a).cmp(&unplayable(b)).then(over(a).cmp(&over(b))).then(unheard(a).cmp(&unheard(b))).then_with(|| {
                 if over(a) {
                     // Both too big: the smaller overshoot wins before quality is considered.
                     distance(a).cmp(&distance(b)).then(quality).then(revision).then(codec).then(tail)
@@ -335,7 +341,7 @@ mod tests {
     use crate::quality::{Quality, Revision};
 
     fn cand(q: Quality) -> Candidate {
-        Candidate { quality: QualityModel::new(q), size_bytes: 8 << 30, age_days: 2.0, languages: vec![], release_group: Some("GRP".into()), indexer_priority: 25, item_count: 1, dubbed: false, full_season: false, multi_season: false, efficient_codec: false, playback: PlaybackTraits::default() }
+        Candidate { quality: QualityModel::new(q), size_bytes: 8 << 30, age_days: 2.0, languages: vec![], release_group: Some("GRP".into()), indexer_priority: 25, item_count: 1, dubbed: false, speaks_wanted: true, full_season: false, multi_season: false, efficient_codec: false, playback: PlaybackTraits::default() }
     }
 
     fn ctx<'a>(p: &'a QualityProfile, existing: &'a [ExistingFile]) -> Context<'a> {
@@ -563,5 +569,17 @@ mod tests {
         // Better quality does not rescue it.
         assert_eq!(compare(&plain, &dub, &p, ProperPolicy::PreferAndUpgrade), Ordering::Less);
         assert!(evaluate(&dub, &ctx(&p, &[])).is_empty(), "still acceptable");
+    }
+
+    #[test]
+    fn a_release_with_the_wanted_language_to_hear_goes_before_a_better_one_without() {
+        let p = QualityProfile::default_hd("movie");
+        let dual = cand(Quality::Webdl1080p);
+        let japanese_only = Candidate { speaks_wanted: false, ..cand(Quality::Bluray1080p) };
+        assert_eq!(compare(&dual, &japanese_only, &p, ProperPolicy::PreferAndUpgrade), Ordering::Less);
+        assert!(evaluate(&japanese_only, &ctx(&p, &[])).is_empty(), "still acceptable");
+        assert!(crate::parser::says_dual_audio("Ergo.Proxy.S01E10.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune"));
+        assert!(crate::parser::says_dual_audio("[Group] Ergo Proxy - 10 (BD 1080p) [Dual Audio]"));
+        assert!(!crate::parser::says_dual_audio("Ergo.Proxy.S01E10.1080p.BluRay.x264-GRP"));
     }
 }

@@ -290,6 +290,14 @@ pub fn language_from_iso(code: &str) -> Option<&'static str> {
     })
 }
 
+static DUAL_AUDIO: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)\bdual[ ._-]?(?:audio)?\b"));
+
+/// The name says "Dual Audio" or "DUAL": as anime is released, the original language and
+/// English together.
+pub fn says_dual_audio(title: &str) -> bool {
+    is_match(&DUAL_AUDIO, title)
+}
+
 /// Languages named in a release title, lower-case. Empty means nothing was stated.
 pub fn parse_languages(title: &str) -> Vec<String> {
     let lower = title.to_lowercase();

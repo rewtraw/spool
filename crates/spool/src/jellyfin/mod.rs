@@ -197,8 +197,10 @@ impl Call {
 
     fn user(&self, who: &crate::models::Account) -> Value {
         let now = items::iso(crate::db::now());
+        // Heard and read in the household's language: subtitles come on when what is heard is another.
+        let language = crate::subs::language_code(&self.app.settings.general().language).map(items::three_letter).unwrap_or_default();
         let configuration = json!({
-            "PlayDefaultAudioTrack": true, "SubtitleLanguagePreference": "", "DisplayMissingEpisodes": false, "GroupedFolders": [], "SubtitleMode": "Default",
+            "PlayDefaultAudioTrack": true, "AudioLanguagePreference": language, "SubtitleLanguagePreference": language, "DisplayMissingEpisodes": false, "GroupedFolders": [], "SubtitleMode": "Smart",
             "DisplayCollectionsView": false, "EnableLocalPassword": false, "OrderedViews": [], "LatestItemsExcludes": [], "MyMediaExcludes": [],
             "HidePlayedInLatest": false, "RememberAudioSelections": true, "RememberSubtitleSelections": true, "EnableNextEpisodeAutoPlay": true, "CastReceiverId": "",
         });

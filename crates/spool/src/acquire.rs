@@ -441,7 +441,7 @@ impl App {
             let unknown = QualityModel::new(Quality::Unknown);
             return Judged {
                 record: rejected(t.id, release, source, unknown, rej("unparseable", "the release name could not be understood")),
-                candidate: Candidate { quality: unknown, size_bytes: release.size, age_days: release.age_days(), languages: vec![], release_group: None, indexer_priority: release.indexer_priority, item_count: 0, dubbed: false, full_season: false, multi_season: false, efficient_codec: false, playback: Default::default() },
+                candidate: Candidate { quality: unknown, size_bytes: release.size, age_days: release.age_days(), languages: vec![], release_group: None, indexer_priority: release.indexer_priority, item_count: 0, dubbed: false, speaks_wanted: false, full_season: false, multi_season: false, efficient_codec: false, playback: Default::default() },
             };
         };
 
@@ -457,6 +457,10 @@ impl App {
             indexer_priority: release.indexer_priority + if tc.budgets.get(&release.indexer_id).is_some_and(|b| b.grabs_low()) { 1000 } else { 0 },
             item_count: covered.len().max(1) as u32,
             dubbed: !g.language.is_empty() && languages.iter().any(|l| l != "original" && *l != g.language && !t.original_language.as_deref().is_some_and(|o| l.starts_with(o))),
+            speaks_wanted: g.language.is_empty()
+                || t.original_language.as_deref().is_none_or(|o| o.starts_with(g.language.as_str()))
+                || languages.contains(&g.language)
+                || spool_core::parser::says_dual_audio(&release.title),
             full_season,
             multi_season,
             efficient_codec: playback.hevc || playback.av1,
