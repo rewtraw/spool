@@ -640,7 +640,8 @@ impl App {
         self.emit(Event::Title { id: title.id });
         self.emit(Event::Attention);
         tracing::info!(title = %title.title, release = %acq.release.title, upgraded, "imported");
-        self.compact_arrivals(title.id);
+        let arrived: Vec<i64> = self.db.files(title.id)?.into_iter().filter(|f| imported.iter().any(|op| op.file.rel_path == f.rel_path)).map(|f| f.id).collect();
+        self.compact_arrivals(title.id, &arrived);
 
         let folders: Vec<String> = ops.iter().filter_map(|o| Path::new(&o.dst).parent().map(|p| p.to_string_lossy().to_string())).collect();
         let app = self.clone();

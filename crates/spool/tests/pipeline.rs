@@ -4225,6 +4225,50 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn only_what_arrives_is_put_in_line_and_turning_that_off_takes_it_out() {
+    use serde_json::{json, Value};
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let mut films = vec![];
+    for (name, imdb) in [("Heat", "tt0113277"), ("Ronin", "tt0122690"), ("Thief", "tt0083190")] {
+        let home = w.root.join(format!("Movies/{name} (1995)"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(format!("{name} (1995) [Bluray-1080p].mkv")), &video).unwrap();
+        let mut t = w.movie(name, 1995, imdb);
+        t.path = home.to_string_lossy().to_string();
+        w.app.db.save_title(&mut t).unwrap();
+        films.push(t);
+    }
+    w.app.scan_all().await.unwrap();
+    let file = |i: usize| w.app.db.files(films[i].id).unwrap()[0].id;
+    let rate = w.app.db.files(films[0].id).unwrap()[0].media_info.as_ref().unwrap().bit_rate;
+    // Held, so that what is in line stays there to be looked at.
+    assert_eq!(call(&api, "POST", "/api/compact/hold", json!({"hold": true})).await.0, 200);
+    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    g["compact"] = json!({"height": 120, "video_kbps": (rate / 4000).max(10), "audio_kbps": 0, "auto": true});
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g.clone()).await.0, 200);
+    let waiting = || async {
+        let (_, a) = call(&api, "GET", "/api/activity", Value::Null).await;
+        let mut ids: Vec<i64> = a["compact"]["waiting"].as_array().map(|w| w.iter().filter_map(|n| n["file_id"].as_i64()).collect()).unwrap_or_default();
+        ids.sort();
+        ids
+    };
+
+    // Heat arrives; Ronin is asked for by hand; Thief, already there, is left alone.
+    w.app.compact_arrivals(films[0].id, &[file(0)]);
+    assert_eq!(waiting().await, [file(0)], "only what arrived");
+    assert_eq!(call(&api, "POST", "/api/compact", json!({"file_ids": [file(1)]})).await.0, 200);
+
+    // Turned off, what it put in line leaves, and what was asked for stays.
+    g["compact"]["auto"] = json!(false);
+    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(waiting().await, [file(1)]);
+    w.app.compact_arrivals(films[2].id, &[file(2)]);
+    assert_eq!(waiting().await, [file(1)], "nothing more while it is off");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_compact_version_is_made_beside_the_original_and_kept_as_a_version_of_it() {
     use serde_json::{json, Value};
     let video = video_or_skip!();

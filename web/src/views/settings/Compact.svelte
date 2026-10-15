@@ -107,8 +107,8 @@
           <span class="hint">They are put in a folder of the title's name there, which becomes one more place the title is held.</span>
         </label>
       {/if}
-      <label class="check"><input type="checkbox" bind:checked={general.compact.auto} /> Make one of whatever arrives, when it would gain from one</label>
-      <span class="hint">Each download that is filed is put in line. What is already in the library is not; use the button below for that.</span>
+      <label class="check"><input type="checkbox" bind:checked={general.compact.auto} onchange={save} /> Make one of whatever arrives, when it would gain from one</label>
+      <span class="hint">Each download that is filed is put in line. What is already in the library is not; use the button below for that. Turning this off takes out of line what it put there.</span>
     </fieldset>
 
     <div><button class="btn primary" type="submit">Save</button></div>

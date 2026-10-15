@@ -30,7 +30,7 @@ Not carried over:
 
 **The whole library.** Settings, Compact versions shows how many files would gain from one, how much room they would take and how much film that is to get through, with a button to put them all in line. Beside it you can give a number and make only that many: the biggest files are taken first, since they gain the most, and asking again takes the next ones.
 
-**Whatever arrives.** The same tab has "Make one of whatever arrives". Each download that is filed is then put in line, if it would gain from one.
+**Whatever arrives.** The same tab has "Make one of whatever arrives". Each download that is filed is then put in line, if it would gain from one: that file alone, not the rest of the title. It takes effect as soon as it is ticked or unticked, and unticking it takes out of line what it put there, stopping any being made. What you asked for by hand stays.
 
 They are made one at a time, in the background. Activity shows the one being made, how far it has got and how fast, and those waiting. Any of them can be cancelled there, and a cancelled one leaves nothing behind.
 
@@ -83,7 +83,7 @@ Under Settings, Compact versions.
 | Surround sound, kilobits a second | The rate for sound that has to be converted. 640 is the most Dolby Digital Plus is usually given. |
 | Use the processor when the video hardware cannot | Off, a file the hardware cannot do is reported and left. |
 | For titles on a location Spool only reads | Where their compact versions go. See below. |
-| Make one of whatever arrives | Puts each filed download in line. |
+| Make one of whatever arrives | Puts each filed download in line. Turned off, takes them out again. |
 
 Changing the settings does not remake what has been made. Delete a compact version and make it again for that.
 

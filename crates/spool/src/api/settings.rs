@@ -64,6 +64,9 @@ pub(super) async fn put_general(State(app): State<App>, headers: HeaderMap, Json
         g.new_titles_location = 0;
     }
     app.settings.set_general(&g)?;
+    if old.compact.auto && !g.compact.auto {
+        app.drop_automatic_compacts();
+    }
     if moved {
         // Look at what was just described, off to one side: a share that is slow to answer
         // must not hold up the reply.

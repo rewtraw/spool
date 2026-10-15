@@ -65,6 +65,9 @@ pub struct Encodes {
     /// No more are begun: those being made are finished and the rest wait. Set before
     /// Spool is restarted, so that nothing half made is thrown away, and forgotten by the restart.
     pub held: bool,
+    /// Files put in line because they arrived, not because anyone asked: they leave it if
+    /// making them so is turned off.
+    pub automatic: std::collections::HashSet<i64>,
 }
 
 #[derive(Clone)]
@@ -478,12 +481,15 @@ impl App {
             let Ok(Some(file)) = self.db.file(*id) else { continue };
             let Ok(Some(title)) = self.db.title(file.title_id) else { continue };
             if self.compacting(*id) {
+                // Asked for again, it is wanted for itself.
+                self.encodes.lock().automatic.remove(id);
                 continue;
             }
             match self.compact_plan(&title, &file) {
                 Ok(_) => {
                     // Looked for again as it is put in, so that two asking at once put it in once.
                     let mut e = self.encodes.lock();
+                    e.automatic.remove(id);
                     if !(e.queue.contains(id) || e.now.iter().any(|n| n.file_id == *id)) {
                         e.queue.push_back(*id);
                         asked.queued += 1;
@@ -972,16 +978,29 @@ impl App {
         Ok(())
     }
 
-    /// After something has arrived for a title: make compact versions of what would gain
-    /// from one, if the settings say to.
-    pub fn compact_arrivals(&self, title_id: i64) {
-        if !self.settings.general().compact.auto {
+    /// After files have arrived: make compact versions of those that would gain from one, if
+    /// the settings say to. Only what arrived: what was there already, or was called off, is
+    /// left as it is.
+    pub fn compact_arrivals(&self, title_id: i64, files: &[i64]) {
+        if !self.settings.general().compact.auto || files.is_empty() {
             return;
         }
-        if let Ok(asked) = self.compact_titles(&[title_id]) {
-            if asked.queued > 0 {
-                tracing::info!(title = title_id, files = asked.queued, "making compact versions of what arrived");
-            }
+        let asked = self.compact_files(files, false);
+        let mut e = self.encodes.lock();
+        let queued: Vec<i64> = files.iter().copied().filter(|id| e.queue.contains(id) || e.now.iter().any(|n| n.file_id == *id)).collect();
+        e.automatic.extend(queued);
+        if asked.queued > 0 {
+            tracing::info!(title = title_id, files = asked.queued, "making compact versions of what arrived");
+        }
+    }
+
+    /// Making compact versions of what arrives was turned off: those it put in line leave it,
+    /// and those being made are stopped.
+    pub fn drop_automatic_compacts(&self) {
+        let ids: Vec<i64> = std::mem::take(&mut self.encodes.lock().automatic).into_iter().collect();
+        if !ids.is_empty() {
+            let (taken, stopping) = self.cancel_compacts(&ids);
+            tracing::info!(taken, stopping, "making compact versions of what arrives was turned off");
         }
     }
 
