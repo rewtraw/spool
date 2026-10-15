@@ -85,10 +85,11 @@ pub struct Encoding {
     pub link: u32,
     /// Bytes of it brought back from the machine that made it, once that has begun.
     pub back: Arc<AtomicU64>,
-    /// The link whose machine keeps the original, or nought for this one. Only one is made
-    /// at a time from each linked machine's disks, which reading and writing a film at
-    /// the speed of the video hardware otherwise keeps too busy to answer anyone else.
-    pub from: u32,
+    /// The address of the linked machine that keeps the original, or empty for this one. Only
+    /// one is made at a time from each linked machine's disks, which reading and writing a film
+    /// at the speed of the video hardware otherwise keeps too busy to answer anyone else. By
+    /// address, so that a link edited meanwhile is still the same machine.
+    pub from: String,
 }
 
 /// A linked machine did not make what it was given, for a reason that is its own and not
@@ -579,10 +580,11 @@ impl App {
         let remotes = self.remotes();
         let kept_by = |id: i64| {
             let folder = self.db.file(id).ok().flatten().and_then(|f| self.db.title(f.title_id).ok().flatten().map(|t| t.folder_of(&f).to_string()));
-            folder.and_then(|f| remotes.iter().find(|r| r.covers(Path::new(&f))).map(|r| r.conf.id)).unwrap_or(0)
+            folder.and_then(|f| remotes.iter().find(|r| r.covers(Path::new(&f))).map(|r| r.conf.url.clone())).unwrap_or_default()
         };
+        let reading = |e: &Encodes| e.now.iter().map(|n| n.from.clone()).filter(|f| !f.is_empty()).collect::<std::collections::HashSet<String>>();
         loop {
-            let (line, reading) = {
+            let (line, seen, was_reading) = {
                 let mut e = self.encodes.lock();
                 // A link whose settings were changed is another link from then on, and takes the line up afresh.
                 if e.held || maker.is_some_and(|r| !(self.listed(r) && r.makes())) {
@@ -590,25 +592,21 @@ impl App {
                     return None;
                 }
                 let line: Vec<i64> = e.queue.iter().copied().filter(|id| maker.is_none() || !e.here_only.contains(id)).collect();
-                (line, e.now.iter().map(|n| n.from).filter(|f| *f != 0).collect::<std::collections::HashSet<u32>>())
+                (line, e.queue.clone(), reading(&e))
             };
             // Worked out with the line let go of, since it asks the database.
-            let pick = line.into_iter().map(|id| (id, kept_by(id))).find(|(_, from)| *from == 0 || !reading.contains(from));
+            let pick = line.into_iter().map(|id| (id, kept_by(id))).find(|(_, from)| from.is_empty() || !was_reading.contains(from));
             let mut e = self.encodes.lock();
+            // Held, or the line or the disks being read changed, while it was looking: look again.
+            // Another machine that queued or finished meanwhile started no one, seeing this one taking.
+            if e.held || maker.is_some_and(|r| !(self.listed(r) && r.makes())) || e.queue != seen || reading(&e) != was_reading {
+                continue;
+            }
             let Some((id, from)) = pick else {
-                // A machine that finished while this one was looking may have freed disks
-                // it passed over, and started no one, seeing this one still taking.
-                if e.now.iter().map(|n| n.from).filter(|f| *f != 0).collect::<std::collections::HashSet<u32>>() != reading {
-                    continue;
-                }
                 e.runners.remove(&key);
                 return None;
             };
-            // Taken by another machine meanwhile: look again.
-            let Some(at) = e.queue.iter().position(|x| *x == id) else { continue };
-            if e.now.iter().any(|n| from != 0 && n.from == from) {
-                continue;
-            }
+            let at = e.queue.iter().position(|x| *x == id).expect("the line is as it was seen");
             e.queue.remove(at);
             e.now.push(Encoding { file_id: id, title_id: 0, done_ms: Default::default(), total_ms: 0, speed: Default::default(), stop: Default::default(), how: Default::default(), by: by.to_string(), link: key, back: Default::default(), from });
             return Some(id);

@@ -154,6 +154,10 @@ impl App {
             return self.volume_ok();
         }
         let known = self.location_state.lock().get(&l.id).copied();
+        // One that has been silent too long is gone, whether or not it has been looked at since.
+        if known == Some(true) && self.location_slow.lock().get(&l.id).is_some_and(|since| since.elapsed() >= SILENT_IS_GONE) {
+            return self.heard(l, Answer::Slow);
+        }
         known.unwrap_or_else(|| self.check_location(l))
     }
 

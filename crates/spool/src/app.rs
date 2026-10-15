@@ -97,6 +97,9 @@ pub struct Inner {
     pub data_dir: PathBuf,
     /// Acquisitions with an import in progress, so two triggers cannot import one download twice.
     pub importing: Mutex<HashSet<i64>>,
+    /// One import at a time into each title, so that two downloads of one episode are not both
+    /// filed as if the other were not there.
+    pub title_imports: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
     /// Last request time per indexer, to space requests out.
     pub indexer_last: Mutex<HashMap<i64, std::time::Instant>>,
     /// Indexers that are failing: (consecutive failures, do not ask again before, last error).
@@ -307,6 +310,7 @@ impl App {
             events,
             data_dir: data_dir.to_path_buf(),
             importing: Mutex::new(HashSet::new()),
+            title_imports: Mutex::new(HashMap::new()),
             indexer_last: Mutex::new(HashMap::new()),
             indexer_backoff: Mutex::new(HashMap::new()),
             tasks: Mutex::new(HashMap::new()),

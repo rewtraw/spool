@@ -506,7 +506,16 @@ impl App {
         if !self.importing.lock().insert(acq_id) {
             return Ok(());
         }
-        let result = self.import_inner(acq_id, forced_episodes).await;
+        let title_id = self.db.acquisition(acq_id).ok().flatten().map(|a| a.title_id).unwrap_or(0);
+        let turn = self.title_imports.lock().entry(title_id).or_default().clone();
+        let result = {
+            // Another import into this title goes first, and this one is planned with its files in place.
+            let _turn = turn.lock().await;
+            self.import_inner(acq_id, forced_episodes).await
+        };
+        drop(turn);
+        // A title no import is waiting on is forgotten.
+        self.title_imports.lock().retain(|_, t| std::sync::Arc::strong_count(t) > 1);
         self.importing.lock().remove(&acq_id);
         result
     }

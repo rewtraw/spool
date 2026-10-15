@@ -475,6 +475,37 @@ async fn interrupted_imports_are_finished_at_startup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn two_downloads_of_one_film_finishing_together_are_filed_one_after_the_other() {
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    let mut movie = w.movie("Cytotropism", 2006, "tt0791205");
+    movie.path = w.root.join("Movies/Cytotropism (2006)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut movie).unwrap();
+    let mut ids = vec![];
+    for (name, quality) in [("Cytotropism.2006.1080p.WEB-DL.DDP2.0.H.264-GRP", "webdl-1080p"), ("Cytotropism.2006.1080p.BluRay.REMUX.AVC.TrueHD-GRP", "remux-1080p")] {
+        let folder = w.root.join("downloads/complete").join(name);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(format!("{name}.mkv")), &video).unwrap();
+        let mut acq: Acquisition = serde_json::from_value(serde_json::json!({
+            "title_id": movie.id, "state": "downloading", "output_path": folder.to_string_lossy(), "reason": "chosen by hand",
+            "release": {"guid": name, "title": name, "indexer_id": 1, "indexer": "Test", "link": "", "info_url": "", "size": video.len(), "published": 0, "imdb_id": null, "tvdb_id": null, "indexer_priority": 25},
+            "quality": {"quality": quality},
+        })).unwrap();
+        w.app.db.save_acquisition(&mut acq).unwrap();
+        ids.push(acq.id);
+    }
+    let (a, b) = tokio::join!(w.app.import(ids[0], None), w.app.import(ids[1], None));
+    a.unwrap();
+    b.unwrap();
+    // The second is planned with the first's file in place: it replaces it or is held back,
+    // and never lies beside it belonging to nothing.
+    let files: Vec<MediaFile> = w.app.db.files(movie.id).unwrap();
+    assert_eq!(files.len(), 1, "{:?}", files.iter().map(|f| &f.rel_path).collect::<Vec<_>>());
+    let kept: Vec<String> = tree(&w.root.join("Movies")).into_iter().filter(|p| !p.starts_with(".spool-recycle")).collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn nothing_is_written_while_the_media_volume_is_missing() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;
