@@ -413,6 +413,42 @@ async fn a_search_lists_what_it_found_best_first_and_says_which_can_be_heard() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn anime_without_the_household_language_is_fetched_again_with_it_once() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let mut film = w.movie("Star Drift", 2001, "tt4444444");
+    film.original_language = Some("ja".into());
+    film.anilist = vec![1];
+    w.app.db.save_title(&mut film).unwrap();
+    w.release("Star.Drift.2001.1080p.WEB-DL.x264-JPN", &[("a.mkv", &video)]);
+    let outcome = w.app.search(film.id, Scope::Movie, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    w.wait_state(film.id, AcqState::Imported).await;
+    // What was imported turns out to have Japanese only.
+    let app = w.app.clone();
+    let heard = |scene: &str| {
+        let mut v = serde_json::to_value(app.db.files(film.id).unwrap().remove(0)).unwrap();
+        v["media_info"]["audio_languages"] = serde_json::json!(["jpn"]);
+        v["scene_name"] = serde_json::json!(scene);
+        app.db.save_file(&serde_json::from_value(v).unwrap()).unwrap();
+    };
+    heard("Star.Drift.2001.1080p.WEB-DL.x264-JPN");
+    w.release("Star.Drift.2001.1080p.WEB-DL.DUAL.x264-DUB", &[("b.mkv", &video)]);
+    let dub = |o: &spool::acquire::SearchOutcome| o.decisions.iter().find(|d| d.release.title.ends_with("-DUB")).map(|d| d.rejections.iter().map(|r| r.code.clone()).collect::<Vec<_>>()).unwrap();
+    let found = w.app.search(film.id, Scope::Movie, true, false).await.unwrap();
+    assert!(dub(&found).is_empty(), "the same quality with English is worth having: {:?}", dub(&found));
+
+    // A file whose release already promised English is not replaced for it again.
+    heard("Star.Drift.2001.1080p.WEB-DL.DUAL.x264-OLD");
+    assert_eq!(dub(&w.app.search(film.id, Scope::Movie, true, false).await.unwrap()), ["not_an_upgrade"]);
+    // Nor is a film that is not anime: it is kept in the language it was made in.
+    heard("Star.Drift.2001.1080p.WEB-DL.x264-JPN");
+    film.anilist = vec![];
+    w.app.db.save_title(&mut film).unwrap();
+    assert_eq!(dub(&w.app.search(film.id, Scope::Movie, true, false).await.unwrap()), ["not_an_upgrade"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn shadow_mode_decides_but_touches_nothing() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Shadow).await;

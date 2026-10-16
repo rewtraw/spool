@@ -300,9 +300,21 @@ fn hears(f: &MediaFile, wanted: &str, original: Option<&str>) -> bool {
         || f.media_info.as_ref().is_none_or(|m| m.audio_languages.is_empty() || m.audio_languages.iter().any(|l| crate::subs::language_code(l) == code))
 }
 
+/// Whether a release's name says it can be heard in `wanted`. "Dual Audio" is how anime is
+/// released with an English track beside the original.
+fn promises(name: &str, wanted: &str) -> bool {
+    spool_core::parser::parse_languages(name).iter().any(|l| l == wanted) || (wanted == "english" && spool_core::parser::says_dual_audio(name))
+}
+
 fn held(tc: &TitleContext, covered: &[&Episode], wanted: &str) -> Held {
     let t = &tc.title;
-    let file = |f: &MediaFile| ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size, speaks_wanted: hears(f, wanted, t.original_language.as_deref()) };
+    let file = |f: &MediaFile| {
+        let speaks_wanted = hears(f, wanted, t.original_language.as_deref());
+        // Anime is released dubbed beside the original, so a copy that has the household's
+        // language is worth fetching; a film made in another language is kept as it was made.
+        let language_wanting = !t.anilist.is_empty() && !speaks_wanted && !f.scene_name.as_deref().is_some_and(|n| promises(n, wanted));
+        ExistingFile { quality: f.quality, release_group: f.release_group.clone(), size_bytes: f.size, speaks_wanted, language_wanting }
+    };
     match t.kind {
         Kind::Movie => Held {
             // The main file is what an upgrade is measured against; versions kept beside it
@@ -475,8 +487,7 @@ impl App {
             speaks_wanted: g.language.is_empty()
                 || t.original_language.as_deref().is_none_or(|o| o.starts_with(g.language.as_str()))
                 || languages.contains(&g.language)
-                // "Dual Audio" is how anime is released with an English track beside the original.
-                || (g.language == "english" && spool_core::parser::says_dual_audio(&release.title)),
+                || promises(&release.title, &g.language),
             full_season,
             multi_season,
             efficient_codec: playback.hevc || playback.av1,

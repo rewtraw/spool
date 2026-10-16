@@ -104,6 +104,10 @@ pub struct ExistingFile {
     pub size_bytes: u64,
     /// Has the wanted language among its audio, as [`Candidate::speaks_wanted`].
     pub speaks_wanted: bool,
+    /// Lacks the wanted language although the release it came from did not promise it, so a
+    /// copy of the same quality that has it is worth fetching. A file whose release promised
+    /// the language and did not have it is not replaced for that, or the promise would repeat.
+    pub language_wanting: bool,
 }
 
 pub struct Context<'a> {
@@ -148,11 +152,16 @@ fn fmt_size(bytes: u64) -> String {
     }
 }
 
-/// Why replacing `current` with `new` is or is not an upgrade.
-fn upgrade_rejection(ctx: &Context, new: &QualityModel, new_group: &Option<String>, current: &ExistingFile, what: &str) -> Option<Rejection> {
+/// Why replacing `current` with `new` is or is not an upgrade. One that brings the household's
+/// language to a file without it is an upgrade at the same quality or better.
+fn upgrade_rejection(ctx: &Context, new: &QualityModel, new_group: &Option<String>, current: &ExistingFile, gains_language: bool, what: &str) -> Option<Rejection> {
     let p = ctx.profile;
     let name = |q: &QualityModel| q.full_name(ctx.flavor);
-    match p.compare(new.quality, current.quality.quality) {
+    let order = p.compare(new.quality, current.quality.quality);
+    if gains_language && order != Ordering::Less {
+        return (!p.upgrade_allowed).then(|| reject("upgrades_not_allowed", format!("{what} has no {} to listen to, and the profile does not allow upgrades", ctx.wanted_language.unwrap_or("audio in your language"))));
+    }
+    match order {
         Ordering::Less => Some(reject("not_an_upgrade", format!("{what} is {}, which is better than {}", name(&current.quality), name(new)))),
         Ordering::Equal => {
             let better_revision = new.revision.rank() > current.quality.revision.rank();
@@ -224,7 +233,7 @@ pub fn evaluate(c: &Candidate, ctx: &Context) -> Vec<Rejection> {
         }
     } else {
         for existing in ctx.existing {
-            if let Some(r) = upgrade_rejection(ctx, &c.quality, &c.release_group, existing, "the file on disk") {
+            if let Some(r) = upgrade_rejection(ctx, &c.quality, &c.release_group, existing, c.speaks_wanted && existing.language_wanting, "the file on disk") {
                 out.push(r);
                 break;
             }
@@ -239,8 +248,8 @@ pub fn evaluate(c: &Candidate, ctx: &Context) -> Vec<Rejection> {
         }
 
         for queued in ctx.queued {
-            let as_file = ExistingFile { quality: *queued, release_group: None, size_bytes: 0, speaks_wanted: false };
-            if let Some(mut r) = upgrade_rejection(ctx, &c.quality, &c.release_group, &as_file, "a download already in the queue") {
+            let as_file = ExistingFile { quality: *queued, release_group: None, size_bytes: 0, speaks_wanted: false, language_wanting: false };
+            if let Some(mut r) = upgrade_rejection(ctx, &c.quality, &c.release_group, &as_file, false, "a download already in the queue") {
                 r.code = "already_queued".into();
                 out.push(r);
                 break;
@@ -370,7 +379,7 @@ mod tests {
     #[test]
     fn upgrade_rules() {
         let p = QualityProfile::default_hd("movie");
-        let have = |q| [ExistingFile { quality: QualityModel::new(q), release_group: Some("GRP".into()), size_bytes: 0, speaks_wanted: true }];
+        let have = |q| [ExistingFile { quality: QualityModel::new(q), release_group: Some("GRP".into()), size_bytes: 0, speaks_wanted: true, language_wanting: false }];
         // below cutoff: upgrade accepted
         assert!(evaluate(&cand(Quality::Bluray1080p), &ctx(&p, &have(Quality::Hdtv1080p))).is_empty());
         // same quality: not an upgrade
@@ -386,7 +395,7 @@ mod tests {
     #[test]
     fn propers_and_repacks() {
         let p = QualityProfile::default_hd("movie");
-        let have = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: Some("GRP".into()), size_bytes: 0, speaks_wanted: true }];
+        let have = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: Some("GRP".into()), size_bytes: 0, speaks_wanted: true, language_wanting: false }];
         let mut proper = cand(Quality::Bluray1080p);
         proper.quality.revision = Revision { version: 2, real: 0, is_repack: false };
         assert!(evaluate(&proper, &ctx(&p, &have)).is_empty());
@@ -513,10 +522,10 @@ mod tests {
     #[test]
     fn oversize_releases_never_replace_an_existing_file() {
         let p = lean();
-        let have = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: None, size_bytes: 0, speaks_wanted: true }];
+        let have = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: None, size_bytes: 0, speaks_wanted: true, language_wanting: false }];
         assert_eq!(codes(evaluate(&sized(Quality::Remux2160p, 62, true), &ctx(&p, &have))), ["too_large_to_upgrade"]);
         assert!(evaluate(&sized(Quality::Webdl2160p, 20, true), &ctx(&p, &have)).is_empty(), "a fitting upgrade is still taken");
-        let at_cutoff = [ExistingFile { quality: QualityModel::new(Quality::Webdl2160p), release_group: None, size_bytes: 0, speaks_wanted: true }];
+        let at_cutoff = [ExistingFile { quality: QualityModel::new(Quality::Webdl2160p), release_group: None, size_bytes: 0, speaks_wanted: true, language_wanting: false }];
         assert_eq!(codes(evaluate(&sized(Quality::Remux2160p, 22, true), &ctx(&p, &at_cutoff))), ["cutoff_met"]);
     }
 
@@ -537,7 +546,7 @@ mod tests {
     fn asked_for_smaller_it_takes_a_smaller_copy_that_fits_even_at_lower_quality() {
         let mut p = QualityProfile::default_hd("movie");
         p.target_size_gb = Some((10.0, 20.0));
-        let have = [ExistingFile { quality: QualityModel::new(Quality::Remux1080p), release_group: None, size_bytes: 37 << 30, speaks_wanted: true }];
+        let have = [ExistingFile { quality: QualityModel::new(Quality::Remux1080p), release_group: None, size_bytes: 37 << 30, speaks_wanted: true, language_wanting: false }];
         let sized = |q, gb: u64| Candidate { size_bytes: gb << 30, ..cand(q) };
         // Ordinarily a lower quality is no upgrade.
         assert_eq!(codes(evaluate(&sized(Quality::Bluray1080p, 12), &ctx(&p, &have))), ["not_an_upgrade"]);
@@ -547,7 +556,7 @@ mod tests {
         assert_eq!(codes(evaluate(&sized(Quality::Bluray1080p, 24), &c)), ["over_target"]);
         assert_eq!(codes(evaluate(&sized(Quality::Bluray720p, 6), &c)), ["quality_not_wanted"]);
         // On a file that is already small, a slightly smaller one is not worth fetching.
-        let small = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: None, size_bytes: 13 << 30, speaks_wanted: true }];
+        let small = [ExistingFile { quality: QualityModel::new(Quality::Bluray1080p), release_group: None, size_bytes: 13 << 30, speaks_wanted: true, language_wanting: false }];
         let mut c = ctx(&p, &small);
         c.smaller = true;
         assert_eq!(codes(evaluate(&sized(Quality::Webdl1080p, 12), &c)), ["not_smaller"]);
@@ -586,10 +595,19 @@ mod tests {
         assert_eq!(compare(&dual, &japanese_only, &p, ProperPolicy::PreferAndUpgrade), Ordering::Less);
         assert!(evaluate(&japanese_only, &ctx(&p, &[])).is_empty(), "still acceptable");
         // Nor is a file that has it replaced by a better one that does not.
-        let have = [ExistingFile { quality: QualityModel::new(Quality::Webdl1080p), release_group: None, size_bytes: 0, speaks_wanted: true }];
+        let have = [ExistingFile { quality: QualityModel::new(Quality::Webdl1080p), release_group: None, size_bytes: 0, speaks_wanted: true, language_wanting: false }];
         assert_eq!(codes(evaluate(&japanese_only, &ctx(&p, &have))), ["loses_language"]);
         let have = [ExistingFile { speaks_wanted: false, ..have.into_iter().next().unwrap() }];
         assert!(evaluate(&japanese_only, &ctx(&p, &have)).is_empty(), "an upgrade when neither has it");
+        // A copy of the same quality that brings the language replaces a file without it, unless
+        // that file's release had promised it too, or the profile keeps what it has.
+        let wanting = [ExistingFile { language_wanting: true, ..have[0].clone() }];
+        assert!(evaluate(&dual, &ctx(&p, &wanting)).is_empty());
+        assert_eq!(codes(evaluate(&dual, &ctx(&p, &have))), ["not_an_upgrade"]);
+        assert!(codes(evaluate(&cand(Quality::Hdtv720p), &ctx(&p, &wanting))).contains(&"not_an_upgrade".to_string()), "not at a lower quality");
+        let mut kept = p.clone();
+        kept.upgrade_allowed = false;
+        assert_eq!(codes(evaluate(&dual, &ctx(&kept, &wanting))), ["upgrades_not_allowed"]);
         assert!(crate::parser::says_dual_audio("Ergo.Proxy.S01E10.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune"));
         assert!(crate::parser::says_dual_audio("[Group] Ergo Proxy - 10 (BD 1080p) [Dual Audio]"));
         assert!(!crate::parser::says_dual_audio("Ergo.Proxy.S01E10.1080p.BluRay.x264-GRP"));
