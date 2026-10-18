@@ -78,8 +78,8 @@
   const aired = (e: Episode) => !!e.air_date && e.air_date <= today;
 
   const SAVED_FROM: Record<string, string> = { grabbed: 'Downloaded before', runner_up: 'Kept as a fallback', manual: 'Added by hand' };
-  async function grabSaved(n: any) {
-    await act(() => api.post(`/archive/${n.id}/grab`), 'Download started');
+  async function grabSaved(n: any, anotherVersion = false) {
+    await act(() => api.post(`/archive/${n.id}/grab`, { another_version: anotherVersion }), anotherVersion ? 'Sent to download. It will be kept beside the file you have.' : 'Download started');
     load();
   }
   async function checkSaved(n: any) {
@@ -591,7 +591,7 @@
                 </td>
                 <td>
                   <div class="row saved-actions">
-                    {#if isActive}<button class="btn small" onclick={() => grabSaved(n)}>Download</button>{/if}
+                    {#if isActive}<button class="btn small" onclick={() => grabSaved(n)}>Download</button>{#if t.kind === 'movie' && t.files.length}<button class="btn small ghost" title="Download this and keep it beside the file you already have, as another version of the film" onclick={() => grabSaved(n, true)}>Keep both</button>{/if}{/if}
                     <button class="btn small ghost" onclick={() => checkSaved(n)}>Check</button>
                     <button class="btn small ghost" onclick={() => removeSaved(n)}>Remove</button>
                   </div>

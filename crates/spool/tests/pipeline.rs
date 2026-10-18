@@ -1922,6 +1922,7 @@ async fn a_film_can_keep_another_version_that_upgrades_leave_alone() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;
     let mut movie = w.movie("Keep Both", 2018, "tt2222222");
+    movie.tmdb_id = Some(2222);
     movie.path = w.root.join("Movies/Keep Both (2018)").to_string_lossy().to_string();
     w.app.db.save_title(&mut movie).unwrap();
     std::fs::create_dir_all(&movie.path).unwrap();
@@ -1943,6 +1944,22 @@ async fn a_film_can_keep_another_version_that_upgrades_leave_alone() {
     let extra = files.iter().find(|f| f.extra).expect("the new file is an extra version").clone();
     assert_eq!(extra.quality, QualityModel::new(Quality::Bluray720p));
     assert!(Path::new(&movie.path).join("old.mkv").exists() && Path::new(&movie.path).join(&extra.rel_path).exists());
+
+    // A saved release can be kept beside them the same way.
+    let (_, detail) = call(&router, "GET", &format!("/api/titles/{}", movie.id), serde_json::Value::Null).await;
+    let saved = detail["saved"].as_array().and_then(|s| s.iter().find(|n| n["release"]["title"].as_str().is_some_and(|t| t.contains("SMALL")))).unwrap_or_else(|| panic!("the download was saved: {}", detail["saved"]))["id"].as_i64().unwrap();
+    let (status, said) = call(&router, "POST", &format!("/api/archive/{saved}/grab"), json!({"another_version": true})).await;
+    assert_eq!(status, 200, "{said}");
+    for _ in 0..400 {
+        if w.app.db.files(movie.id).unwrap().len() == 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let files = w.app.db.files(movie.id).unwrap();
+    assert_eq!((files.len(), files.iter().filter(|f| f.extra).count()), (3, 2), "{files:?}");
+    let second = files.iter().find(|f| f.extra && f.id != extra.id).unwrap().id;
+    w.app.delete_file(second).unwrap();
 
     // An upgrade replaces the main file and leaves the extra version where it is.
     w.release("Keep.Both.2018.1080p.BluRay.x264-NEW", &[("new.mkv", &video)]);

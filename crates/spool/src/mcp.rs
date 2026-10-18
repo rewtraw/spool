@@ -163,8 +163,8 @@ const TOOLS: &[Tool] = &[
         name: "download_release",
         read: false,
         destructive: false,
-        description: "Download one specific release: a release_id from title_detail or search_releases (works for rejected ones too, overriding the rejection), or a saved_id from the archive. If the title already has a file, the new one replaces it once imported.",
-        schema: || obj(json!({"release_id": {"type": "integer"}, "saved_id": {"type": "integer"}}), &[]),
+        description: "Download one specific release: a release_id from title_detail or search_releases (works for rejected ones too, overriding the rejection), or a saved_id from the archive. If the title already has a file, the new one replaces it once imported (the old one goes to the recycle folder), unless keep_both is true for a film.",
+        schema: || obj(json!({"release_id": {"type": "integer"}, "saved_id": {"type": "integer"}, "keep_both": {"type": "boolean", "description": "Films only: keep the download beside the file already there, as another version, instead of replacing it. Default false."}}), &[]),
     },
     Tool {
         name: "manage_download",
@@ -764,9 +764,10 @@ impl Mcp {
                 }))
             }
             "download_release" => {
+                let body = json!({"another_version": a["keep_both"].as_bool().unwrap_or(false)});
                 let r = match (a["release_id"].as_i64(), a["saved_id"].as_i64()) {
-                    (Some(id), _) => self.post(&format!("/api/decisions/{id}/grab"), json!({})).await?,
-                    (_, Some(id)) => self.post(&format!("/api/archive/{id}/grab"), json!({})).await?,
+                    (Some(id), _) => self.post(&format!("/api/decisions/{id}/grab"), body).await?,
+                    (_, Some(id)) => self.post(&format!("/api/archive/{id}/grab"), body).await?,
                     _ => return Err("give release_id or saved_id".into()),
                 };
                 if r["acquisition"].is_null() {

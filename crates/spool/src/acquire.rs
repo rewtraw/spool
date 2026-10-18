@@ -1230,7 +1230,9 @@ impl App {
     }
 
     /// Download a release from the archive for the title it was saved for.
-    pub async fn grab_saved(&self, id: i64) -> Result<Option<Acquisition>> {
+    /// Download a saved release. With `another`, a film keeps it beside the file it has, as
+    /// another version; a series cannot.
+    pub async fn grab_saved(&self, id: i64, another: bool) -> Result<Option<Acquisition>> {
         let n = self.archive_get(id)?.ok_or_else(|| anyhow!("no such saved release"))?;
         let title = self.db.find_title(n.kind, n.tmdb_id, n.tvdb_id)?.ok_or_else(|| anyhow!("{} is not in the library; add it first", n.name))?;
         let tc = self.title_context(title)?;
@@ -1241,7 +1243,8 @@ impl App {
         let j = self.judge(&tc, &r, "manual", None, true);
         self.db.record_decisions(std::slice::from_ref(&j.record))?;
         let d = self.db.decisions(tc.title.id)?.into_iter().find(|d| d.release.link == r.link).unwrap_or(j.record);
-        self.grab(&d, &tc.title, "chosen from saved releases", true).await
+        let another = another && tc.title.kind == Kind::Movie;
+        self.grab(&d, &tc.title, if another { ANOTHER_VERSION_REASON } else { "chosen from saved releases" }, true).await
     }
 
     /// Queue an NZB the user supplied for a known title.

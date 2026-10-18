@@ -31,6 +31,8 @@ Everything in this table needs active mode and a location Spool manages.
 | Creates a title's folder and files a download into it | A monitored title is missing and an acceptable release is found | Nothing is replaced |
 | Renames the downloaded file to your naming format | On import, if Naming has "Rename files when importing" on | Nothing is replaced |
 | Replaces a film or an episode with a better copy | The title is monitored, its profile allows upgrades, and the file is below the profile's cutoff | Recycle folder |
+| Replaces a film or an episode with a release you choose | You press Download on a release, or on a saved release | Recycle folder |
+| Keeps a film's release beside the file it has, as another version | You press Keep both on a release, or on a saved release | Nothing is replaced |
 | Replaces a file with a smaller copy | You ask for it, with Find smaller copies | Recycle folder |
 | Writes subtitle files beside a film | The release brought them, or you set languages under Subtitles | Nothing is replaced |
 | Deletes a file | You ask for it: Delete files, or removing a title and choosing to delete its files | Recycle folder |

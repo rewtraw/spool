@@ -62,11 +62,12 @@ pub(super) async fn archive_check(State(app): State<App>, Path(id): Path<i64>) -
     Ok(Json(json!({"available": n.available, "usable": n.usable(), "checked_at": n.checked_at})))
 }
 
-pub(super) async fn archive_grab(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+pub(super) async fn archive_grab(State(app): State<App>, Path(id): Path<i64>, body: Option<Json<Value>>) -> R<Value> {
     if !app.is_active() {
         return Err(ApiError(StatusCode::CONFLICT, "Spool is in shadow mode and does not download".into()));
     }
-    let a = app.grab_saved(id).await?;
+    let another = body.is_some_and(|b| b.0["another_version"].as_bool().unwrap_or(false));
+    let a = app.grab_saved(id, another).await?;
     Ok(Json(json!({"acquisition": a})))
 }
 
