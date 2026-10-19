@@ -34,7 +34,19 @@ codesign --verify --strict target/release/spool
 URL="http://$HOST:${BIND##*:}"
 ask() { curl -fsS -m 8 ${SPOOL_API_KEY:+-H "X-Api-Key: $SPOOL_API_KEY"} "$@"; }
 RESUME=""
-if STATE=$(ask "$URL/api/busy" 2>/dev/null); then
+# Spool not running at all is the only answer that lets this go ahead unasked. One that
+# refuses to say whether it is busy has a password, and the key is needed to ask.
+if ! STATE=$(ask "$URL/api/busy" 2>&1); then
+  case "$STATE" in
+    *"Failed to connect"*|*"Couldn't connect"*|*"Connection refused"*) STATE="" ;;
+    *)
+      echo "Could not ask Spool on $HOST whether it is busy: $STATE"
+      echo "If it has a password, put its key in deploy/local.env as SPOOL_API_KEY."
+      exit 1
+      ;;
+  esac
+fi
+if [ -n "$STATE" ]; then
   case "$STATE" in
     *'"busy":true'*)
       echo "Spool on $HOST is in the middle of something:"

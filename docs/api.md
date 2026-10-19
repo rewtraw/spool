@@ -6,7 +6,7 @@ For an AI assistant, use the [MCP endpoint](assistants.md) instead.
 
 ## Signing in
 
-If the web app has no password, the API is open to anyone who can reach the address.
+If the web app has no password, the API is open to anyone who can reach the address, and Status warns of it.
 
 If it has one, send Spool's key with each request:
 
@@ -15,6 +15,13 @@ curl -H "X-Api-Key: <key>" http://localhost:7979/api/status
 ```
 
 The key is the one in the command that Settings, General, AI access copies.
+
+Five wrong passwords in a row from one address shut sign-in to that address for a minute. Other addresses can still sign in, and a right password doesn't make up for the wrong guesses before it.
+
+Two rules keep a web page you happen to open from using Spool through your browser:
+
+- **Spool answers only to names your network gives it:** an IP address, a name without a dot such as `casper`, or a name ending in `.local`, `.ts.net`, `.lan`, `.home.arpa`, `.internal` or `.localhost`. Any other name gets `421`, even for a read. To put Spool behind a domain of your own, have the proxy pass on one of those names as the `Host`.
+- **A change sent from a browser must come from Spool's own pages.** A browser marks every request with the page it came from (`Origin`). A change from another page gets `403`, even another port on the same machine. Programs such as `curl` send no `Origin` and aren't affected.
 
 ## Status
 

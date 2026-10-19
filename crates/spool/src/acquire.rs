@@ -1096,7 +1096,7 @@ impl App {
         if let Some(n) = &saved {
             match self.archive_read(n.id) {
                 Ok(bytes) => {
-                    nzb = Some(bytes.into());
+                    nzb = Some(bytes);
                     from_archive = true;
                 }
                 Err(e) => tracing::warn!(release = %d.release.title, error = %e, "saved NZB unreadable; asking the indexer"),
@@ -1118,12 +1118,19 @@ impl App {
             if attempt > 0 {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
+            let client = match self.nzb_client(d.release.indexer_id, &d.release.link) {
+                Ok(client) => client,
+                Err(why) => {
+                    last_error = format!("{} was not asked for the NZB: {why}", d.release.indexer);
+                    break;
+                }
+            };
             let fetched = async {
-                let resp = self.http.get(&d.release.link).timeout(std::time::Duration::from_secs(150)).send().await?;
+                let resp = client.get(&d.release.link).timeout(std::time::Duration::from_secs(150)).send().await?;
                 if !resp.status().is_success() {
                     return Ok(Err(format!("{} answered HTTP {} for the NZB", d.release.indexer, resp.status().as_u16())));
                 }
-                resp.bytes().await.map(Ok)
+                Ok::<_, reqwest::Error>(crate::app::read_at_most(resp, crate::app::NZB_MOST).await.map_err(|why| format!("the NZB {} sent was not kept: {why}", d.release.indexer)))
             }
             .await;
             match fetched {

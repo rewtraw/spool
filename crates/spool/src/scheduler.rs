@@ -155,12 +155,18 @@ impl App {
         }
         let dir = self.data_dir.join("backups");
         std::fs::create_dir_all(&dir)?;
+        let private = |p: &std::path::Path, mode| std::fs::set_permissions(p, std::os::unix::fs::PermissionsExt::from_mode(mode));
+        let _ = private(&dir, 0o700);
         let name = format!("spool-{}.db", chrono::Local::now().format("%Y%m%d"));
         self.db.backup(&dir.join(&name))?;
         let mut backups: Vec<_> = std::fs::read_dir(&dir)?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "db")).collect();
         backups.sort();
         while backups.len() > 14 {
             let _ = std::fs::remove_file(backups.remove(0));
+        }
+        // Copies made before backups were kept private.
+        for b in &backups {
+            let _ = private(b, 0o600);
         }
         // A copy on another disk is what survives this one failing.
         let second = self.settings.general().backup_dir.trim().to_string();
@@ -173,6 +179,9 @@ impl App {
                     old.sort();
                     while old.len() > 14 {
                         let _ = std::fs::remove_file(old.remove(0));
+                    }
+                    for b in &old {
+                        let _ = private(b, 0o600);
                     }
                     copied = format!(" and copied to {second}");
                 }

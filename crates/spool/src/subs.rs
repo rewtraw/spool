@@ -725,6 +725,10 @@ impl App {
     /// Check one subtitle file against the film, correcting it when it is out by a known
     /// amount and `correct` is set.
     pub async fn check_sidecar(&self, file_id: i64, rel_path: &str, correct: bool) -> Result<SyncReport> {
+        // Only one of the file's own subtitles: a path from outside could name any file at all.
+        if !self.file_and_title(file_id)?.0.subtitles.iter().any(|s| s.rel_path == rel_path) {
+            bail!("no such subtitle file");
+        }
         let mut r = self.reference_for(file_id)?;
         self.check_with(file_id, rel_path, &mut r, correct).await
     }

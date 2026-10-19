@@ -54,7 +54,7 @@ Collections are worked out when asked for (`anime::groups`), from the titles and
 
 ## Storage
 
-One SQLite database in WAL mode holds everything, in a "columns plus JSON document" shape: the columns that are queried are real columns and the rest of each record is JSON. Saved NZBs are gzip files beside it. The database contains indexer keys and Usenet passwords and is created readable only by its owner.
+One SQLite database in WAL mode holds everything, in a "columns plus JSON document" shape: the columns that are queried are real columns and the rest of each record is JSON. Saved NZBs are gzip files beside it. The database contains indexer keys and Usenet passwords. It is created readable only by its owner, and so are its backups.
 
 ## Locations
 

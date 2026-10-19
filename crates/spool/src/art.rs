@@ -256,7 +256,8 @@ impl App {
                 if !resp.status().is_success() {
                     bail!("artwork source answered HTTP {}", resp.status().as_u16());
                 }
-                resp.bytes().await.map_err(|e| anyhow!("{}", e.without_url()))?.to_vec()
+                // No picture worth showing is anywhere near this.
+                crate::app::read_at_most(resp, 64 << 20).await.map_err(|why| anyhow!("artwork not kept: {why}"))?
             }
         };
         let out = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {

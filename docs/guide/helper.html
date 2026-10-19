@@ -163,7 +163,7 @@
 </ul>
 <p>A helper that cannot be reached takes nothing with it. Downloads for its part of the library run on Spool&#39;s machine and are filed across the share, as they would be without it; a notice says the helper is away; and what it was already downloading is waited for, not written off.</p>
 <h2 id="what-it-may-touch"><a href="#what-it-may-touch">What it may touch</a></h2>
-<p>A helper is started with a list of folders and works only inside them. Every path it is given is checked against the list.</p>
+<p>A helper is started with a list of folders and works only inside them. Every path it is given is checked against the list. A path that passes through a link is refused, even if the link sits inside one of the folders, because a link can lead outside them. A link inside a folder being moved isn&#39;t followed, and is left where it is.</p>
 <div class="scroll"><table>
 <thead>
 <tr>

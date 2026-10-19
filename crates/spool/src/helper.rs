@@ -349,6 +349,15 @@ impl Helper {
             let what = if c.read_roots.iter().any(inside) { "is in a folder this helper only reads" } else { "is outside the folders this helper was given" };
             return Err(Refused(StatusCode::FORBIDDEN, format!("{given} {what}")));
         }
+        // Inside by its name is not inside on the disk if a link on the way leads elsewhere.
+        let root = c.roots.iter().chain(c.read_roots.iter()).chain([&c.downloads]).filter(|r| inside(r)).max_by_key(|r| r.components().count()).cloned().unwrap_or_default();
+        let mut at = root;
+        for part in p.strip_prefix(&at).unwrap_or(&p).components() {
+            at.push(part);
+            if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err(Refused(StatusCode::CONFLICT, format!("{} is a link, and links are not followed here", at.display())));
+            }
+        }
         Ok(p)
     }
 

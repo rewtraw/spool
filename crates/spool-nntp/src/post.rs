@@ -158,7 +158,8 @@ fn run_par2(tool: &Path, mode: &str, dir: &Path, set: &Par2Set) -> (i32, String)
         // Purge the damaged originals par2 would otherwise leave behind as "name.1".
         cmd.arg("-p");
     }
-    let out = cmd.arg(file_name(&set.index)).args(&extras).current_dir(dir).output();
+    // A name from the post that starts with a dash is still a name, never an option.
+    let out = cmd.arg("--").arg(file_name(&set.index)).args(&extras).current_dir(dir).output();
     match out {
         Ok(o) => (o.status.code().unwrap_or(-1), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))),
         Err(e) => (-1, format!("could not run par2: {e}")),
@@ -280,6 +281,22 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
 }
 
 /// Move everything under `from` into `to`, flattening nothing: directories keep their shape.
+/// Remove every link under `dir`, leaving what they point to alone. Nothing a download is
+/// made of is a link.
+fn drop_links(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        match entry.file_type() {
+            Ok(t) if t.is_symlink() => {
+                tracing::warn!(path = %entry.path().display(), "an archive held a link; it was removed");
+                let _ = std::fs::remove_file(entry.path());
+            }
+            Ok(t) if t.is_dir() => drop_links(&entry.path()),
+            _ => {}
+        }
+    }
+}
+
 fn move_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
@@ -345,6 +362,8 @@ fn extract(tool: Option<&Path>, dir: &Path, password: Option<&str>) -> Result<bo
         for m in &a.members {
             let _ = std::fs::remove_file(m);
         }
+        // An archive can hold links, and a link to somewhere else would carry the import there.
+        drop_links(&tmp);
         move_tree(&tmp, dir).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -618,6 +637,23 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn links_an_archive_held_are_dropped_and_what_they_point_to_is_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("precious"), b"keep").unwrap();
+        std::fs::create_dir_all(dir.path().join("Film/Sub")).unwrap();
+        std::fs::write(dir.path().join("Film/film.mkv"), b"film").unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("Film/Sub/escape")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("precious"), dir.path().join("Film/precious.mkv")).unwrap();
+        drop_links(dir.path());
+        assert!(dir.path().join("Film/film.mkv").is_file());
+        assert!(std::fs::symlink_metadata(dir.path().join("Film/Sub/escape")).is_err());
+        assert!(std::fs::symlink_metadata(dir.path().join("Film/precious.mkv")).is_err());
+        assert_eq!(std::fs::read(outside.path().join("precious")).unwrap(), b"keep");
+    }
 
     #[test]
     fn obfuscation_heuristic() {

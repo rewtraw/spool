@@ -1868,6 +1868,49 @@ async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_app_answers_only_its_own_pages_and_reads_only_its_own_subtitles() {
+    use serde_json::json;
+    use tower::ServiceExt;
+    let w = World::new(Mode::Active).await;
+    let mut movie = w.movie("Sidecar", 2011, "tt3333333");
+    movie.path = w.root.join("Movies/Sidecar (2011)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut movie).unwrap();
+    std::fs::create_dir_all(&movie.path).unwrap();
+    std::fs::write(Path::new(&movie.path).join("film.mkv"), b"film").unwrap();
+    let file: MediaFile = serde_json::from_value(json!({"title_id": movie.id, "rel_path": "film.mkv", "size": 4, "quality": {"quality": "bluray-1080p"}})).unwrap();
+    w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, 'film.mkv', 4, ?2)", rusqlite::params![movie.id, serde_json::to_string(&file).unwrap()])).unwrap();
+    let file_id = w.app.db.files(movie.id).unwrap()[0].id;
+    let router = spool::api::router(w.app.clone());
+
+    // A file that is not one of the film's subtitles is not opened, however it is named.
+    let elsewhere = w.root.join("not-a-subtitle.srt");
+    std::fs::write(&elsewhere, b"1\n00:00:01,000 --> 00:00:02,000\nkept as it is\n").unwrap();
+    for rel in [elsewhere.to_string_lossy().to_string(), "../../not-a-subtitle.srt".into()] {
+        let (status, said) = call(&router, "POST", &format!("/api/files/{file_id}/subtitles/check"), json!({"rel_path": rel, "correct": true})).await;
+        assert!(status >= 400 && said.to_string().contains("no such subtitle"), "{rel}: {status} {said}");
+    }
+    assert_eq!(std::fs::read(&elsewhere).unwrap(), b"1\n00:00:01,000 --> 00:00:02,000\nkept as it is\n");
+
+    let send = |method: &str, host: &str, origin: Option<&str>| {
+        let mut req = axum::http::Request::builder().method(method).uri("/api/queue/pause").header("host", host).header("content-type", "application/json");
+        if let Some(o) = origin {
+            req = req.header("origin", o);
+        }
+        let router = router.clone();
+        let req = req.body(axum::body::Body::from("{}")).unwrap();
+        async move { router.oneshot(req).await.unwrap().status().as_u16() }
+    };
+    // A name a web page has pointed at this machine is not answered, even to read.
+    assert_eq!(send("GET", "evil.example.com:7979", None).await, 421);
+    // A change from another page, even on the same machine, is refused; from Spool's own, made.
+    assert_eq!(send("POST", "casper:7979", Some("https://evil.example.com")).await, 403);
+    assert_eq!(send("POST", "casper:7979", Some("http://casper:8088")).await, 403);
+    assert!(!w.app.engine.is_paused(), "and neither paused anything");
+    assert_eq!(send("POST", "casper:7979", Some("http://casper:7979")).await, 200);
+    assert!(w.app.engine.is_paused());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn bulk_actions_cover_many_titles_and_respect_kind() {
     use serde_json::json;
     let w = World::new(Mode::Active).await;
@@ -3409,12 +3452,16 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
     lay(nas.join("films/Neighbour (1990)/Neighbour (1990).mkv"), b"another film");
     lay(nas.join("films/.spool-moving-7/Odd (1980).mkv"), b"a film in an oddly named folder");
     let film = nas.join("films/Alpha (2001)/Alpha (2001).mkv");
+    std::os::unix::fs::symlink(&outside, nas.join("films/Escape")).unwrap();
     for (path, body, status, why) in [
         // Out of its folders, by either end.
         ("/link/work/v1/fs/move", json!({"from": film, "to": outside.join("taken.mkv")}), 403, "outside the folders"),
         ("/link/work/v1/fs/move", json!({"from": outside.join("Elsewhere (1999).mkv"), "to": nas.join("films/taken.mkv")}), 403, "outside the folders"),
         // Out of them by climbing.
         ("/link/work/v1/fs/move", json!({"from": film, "to": format!("{}/films/../../Movies/taken.mkv", nas.display())}), 400, "not a plain full path"),
+        // Out of them through a link that is inside them by name, either way.
+        ("/link/work/v1/fs/move", json!({"from": film, "to": nas.join("films/Escape/taken.mkv")}), 409, "is a link"),
+        ("/link/work/v1/fs/move", json!({"from": nas.join("films/Escape/Elsewhere (1999).mkv"), "to": nas.join("films/taken.mkv")}), 409, "is a link"),
         // Out of the folder it only reads: nothing is moved away from it or removed.
         ("/link/work/v1/fs/move", json!({"from": kept.join("Alpha (2001).mkv"), "to": nas.join("films/taken.mkv")}), 403, "only reads"),
         ("/link/work/v1/moves", json!({"from": kept, "to": nas.join("films/Taken (2001)"), "working": nas.join("films/.spool-moving-9"), "keep_original": false}), 403, "only reads"),
@@ -3437,6 +3484,7 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
     }
     assert!(outside.join("Elsewhere (1999).mkv").exists() && film.exists() && kept.join("Alpha (2001).mkv").exists() && nas.join("films/Neighbour (1990)/Neighbour (1990).mkv").exists() && nas.join("films/.spool-moving-7/Odd (1980).mkv").exists(), "and nothing was touched by any of it");
     assert_eq!(ask(KEY, "/link/work/v1/fs/stat", json!({"path": film})).await.1.contains(r#""exists":true"#), true);
+    std::fs::remove_file(nas.join("films/Escape")).unwrap();
 
     // Off the helper's disks altogether, a move is Spool's own to carry out, as before.
     let (status, said) = call(&api, "POST", "/api/titles/move", json!({"ids": [alpha.id], "location": 0})).await;

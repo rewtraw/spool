@@ -51,9 +51,9 @@ fn access(app: &App, headers: &HeaderMap) -> Option<Access> {
         .and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")))
         .or_else(|| headers.get("x-api-key").and_then(|v| v.to_str().ok()))?
         .trim();
-    if !g.api_key.is_empty() && given == g.api_key {
+    if !g.api_key.is_empty() && crate::api::same(given, &g.api_key) {
         Some(Access::Full)
-    } else if !g.mcp_read_key.is_empty() && given == g.mcp_read_key {
+    } else if !g.mcp_read_key.is_empty() && crate::api::same(given, &g.mcp_read_key) {
         Some(Access::Read)
     } else {
         None

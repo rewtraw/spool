@@ -544,9 +544,13 @@ impl Db {
         Ok(())
     }
 
-    /// Write a consistent copy of the database to `dest`.
+    /// Write a consistent copy of the database to `dest`, readable by this user alone: it
+    /// holds every key and password the database does.
     pub fn backup(&self, dest: &Path) -> Result<()> {
+        use std::os::unix::fs::OpenOptionsExt;
         let _ = std::fs::remove_file(dest);
+        // Made empty and private first, so the copy is never readable by others even for a moment.
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(dest)?;
         self.with(|c| c.execute("VACUUM INTO ?1", [dest.to_string_lossy()]))?;
         Ok(())
     }

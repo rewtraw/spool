@@ -256,17 +256,9 @@ impl Call {
     }
 
     async fn sign_in(&self) -> Response {
-        const TRIES: u32 = 5;
-        const LOCKED_FOR: i64 = 60;
         let now = crate::db::now();
-        {
-            let mut f = self.app.player_failures.lock();
-            if now - f.1 >= LOCKED_FOR {
-                f.0 = 0;
-            }
-            if f.0 >= TRIES {
-                return (StatusCode::TOO_MANY_REQUESTS, "Too many wrong passwords; wait a minute and try again.").into_response();
-            }
+        if !self.app.player_failures.take(self.peer) {
+            return (StatusCode::TOO_MANY_REQUESTS, "Too many wrong passwords; wait a minute and try again.").into_response();
         }
         let name = self.given("Username").unwrap_or_default();
         let password = self.given("Pw").or_else(|| self.given("Password")).unwrap_or_default();
@@ -274,15 +266,11 @@ impl Call {
         let who = self.app.db.accounts().unwrap_or_default().into_iter().find(|a| a.enabled && a.name.trim().eq_ignore_ascii_case(name.trim()));
         let right = who.as_ref().is_some_and(|a| a.password.is_empty() || crate::settings::verify_password(&a.password, &password));
         let Some(who) = who.filter(|_| right) else {
-            {
-                let mut f = self.app.player_failures.lock();
-                *f = (f.0 + 1, now);
-            }
             tracing::warn!(client = %self.client("Client"), device = %self.client("Device"), "a player gave the wrong name or password");
             tokio::time::sleep(std::time::Duration::from_millis(600)).await;
             return (StatusCode::UNAUTHORIZED, "Invalid username or password entered.").into_response();
         };
-        *self.app.player_failures.lock() = (0, 0);
+        self.app.player_failures.right(self.peer);
         let token = crate::settings::new_key()[..32].to_string();
         let device = crate::models::Device { token: token.clone(), account_id: who.id, name: self.client("Device"), client: self.client("Client"), created_at: now, seen_at: now };
         if self.app.db.add_device(&device).is_err() {
@@ -687,7 +675,8 @@ fn redact(query: &str) -> String {
     query
         .split('&')
         .map(|pair| match pair.split_once('=') {
-            Some((k, _)) if ["api_key", "apikey", "ticket"].iter().any(|secret| k.eq_ignore_ascii_case(secret)) => format!("{k}=..."),
+            // Named as the request will be read, escapes and all.
+            Some((k, _)) if ["api_key", "apikey", "ticket", "pw", "password"].iter().any(|secret| urlencoding::decode(&k.replace('+', " ")).is_ok_and(|k| k.trim().eq_ignore_ascii_case(secret))) => format!("{k}=..."),
             _ => pair.to_string(),
         })
         .collect::<Vec<_>>()
@@ -803,5 +792,6 @@ mod tests {
         assert_eq!(q.num("limit"), Some(5));
         assert_eq!(q.get("searchterm"), Some("the thing"));
         assert_eq!(redact("a=1&api_key=secret&ApiKey=x"), "a=1&api_key=...&ApiKey=...");
+        assert_eq!(redact("Username=trey&Pw=secret&%70assword=secret&p%77=x"), "Username=trey&Pw=...&%70assword=...&p%77=...");
     }
 }

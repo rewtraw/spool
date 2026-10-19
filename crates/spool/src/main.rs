@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
             spool::jellyfin::spawn(app.clone(), bind.rsplit_once(':').map(|(host, _)| host.trim_matches(['[', ']']).to_string()).unwrap_or_else(|| "0.0.0.0".into()));
             tracing::info!(%bind, mode = ?app.mode(), data = %dir.display(), "Spool is running");
             let engine = app.engine.clone();
-            axum::serve(listener, spool::api::router(app))
+            axum::serve(listener, spool::api::router(app).into_make_service_with_connect_info::<std::net::SocketAddr>())
                 .with_graceful_shutdown(async move {
                     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signal handler");
                     tokio::select! {

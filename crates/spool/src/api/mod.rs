@@ -106,7 +106,7 @@ fn authorized(app: &App, headers: &HeaderMap) -> bool {
 }
 
 /// Compare two secrets without the time taken giving away how much of a guess was right.
-fn same(a: &str, b: &str) -> bool {
+pub(crate) fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
@@ -116,8 +116,36 @@ fn save_sessions(app: &App) {
     let _ = app.db.set_setting("sessions", &all);
 }
 
+/// Whether a name the app was reached by is one only this network can give it: an address,
+/// a name without a dot, or one under a suffix no one outside can hand out. A web page could
+/// otherwise point a name of its own at this machine and use the app as if it were its own.
+pub(crate) fn local_name(host: &str) -> bool {
+    let name = match host.strip_prefix('[') {
+        Some(v6) => return v6.split(']').next().is_some_and(|a| a.parse::<std::net::Ipv6Addr>().is_ok()),
+        None => host.rsplit_once(':').filter(|(_, port)| port.bytes().all(|b| b.is_ascii_digit())).map_or(host, |(name, _)| name),
+    };
+    let name = name.trim_end_matches('.').to_ascii_lowercase();
+    name.parse::<std::net::IpAddr>().is_ok() || (!name.is_empty() && !name.contains('.')) || [".local", ".localhost", ".ts.net", ".lan", ".home.arpa", ".internal"].iter().any(|s| name.ends_with(s))
+}
+
+/// A change sent from a page somewhere else, which a browser marks with where it came from.
+fn from_elsewhere(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()) else { return false };
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    origin.split_once("://").is_none_or(|(_, at)| !at.eq_ignore_ascii_case(host))
+}
+
 async fn guard(State(app): State<App>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    // A request without a name comes from a program, not a page in a browser, which always gives one.
+    if !host.is_empty() && !local_name(host) {
+        return ApiError(StatusCode::MISDIRECTED_REQUEST, format!("Spool answers to its address or its name on this network, not {host}")).into_response();
+    }
     let path = req.uri().path();
+    let changes = !matches!(*req.method(), axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS);
+    if changes && path.starts_with("/api/") && from_elsewhere(req.headers()) {
+        return ApiError(StatusCode::FORBIDDEN, "a change can only be made from Spool's own pages".into()).into_response();
+    }
     let open = !path.starts_with("/api/") || path == "/api/login" || path == "/api/session";
     if open || authorized(&app, req.headers()) {
         next.run(req).await
@@ -126,23 +154,15 @@ async fn guard(State(app): State<App>, req: axum::extract::Request, next: axum::
     }
 }
 
-async fn login(State(app): State<App>, Json(body): Json<Value>) -> Response {
-    const TRIES: u32 = 5;
-    const LOCKED_FOR: i64 = 60;
+async fn login(State(app): State<App>, from: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>, Json(body): Json<Value>) -> Response {
     let g = app.settings.general();
-    let now = crate::db::now();
-    {
-        // A run of wrong guesses shuts the door for a minute, which makes guessing hopeless.
-        let mut f = app.login_failures.lock();
-        if now - f.1 >= LOCKED_FOR {
-            f.0 = 0;
-        }
-        if f.0 >= TRIES {
-            return ApiError(StatusCode::TOO_MANY_REQUESTS, "too many wrong passwords; wait a minute and try again".into()).into_response();
-        }
+    let from = from.map(|c| c.0 .0.ip());
+    // A run of wrong guesses from one place shuts the door to it for a minute, which makes guessing hopeless.
+    if !app.login_failures.take(from) {
+        return ApiError(StatusCode::TOO_MANY_REQUESTS, "too many wrong passwords; wait a minute and try again".into()).into_response();
     }
     if g.password.is_empty() || body["password"].as_str().is_some_and(|p| crate::settings::verify_password(&g.password, p)) {
-        *app.login_failures.lock() = (0, 0);
+        app.login_failures.right(from);
         let token = crate::settings::new_key();
         {
             let mut s = app.sessions.lock();
@@ -155,11 +175,7 @@ async fn login(State(app): State<App>, Json(body): Json<Value>) -> Response {
         save_sessions(&app);
         ([(header::SET_COOKIE, format!("spool_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"))], Json(json!({"ok": true}))).into_response()
     } else {
-        {
-            let mut f = app.login_failures.lock();
-            *f = (f.0 + 1, now);
-        }
-        tracing::warn!("wrong password at sign-in");
+        tracing::warn!(from = ?from, "wrong password at sign-in");
         tokio::time::sleep(std::time::Duration::from_millis(600)).await;
         ApiError(StatusCode::UNAUTHORIZED, "wrong password".into()).into_response()
     }
@@ -196,6 +212,9 @@ async fn status(State(app): State<App>) -> R<Value> {
         }
     }
     warnings.extend(app.location_problems());
+    if g.password.is_empty() {
+        warnings.push("No password is set, so anyone on this network can use Spool. Set one in Settings → General.".into());
+    }
     if app.settings.servers().iter().all(|s| !s.enabled || s.host.is_empty()) {
         warnings.push("No usenet server is configured.".into());
     }
@@ -402,4 +421,42 @@ pub fn router(app: App) -> Router {
         .layer(tower_http::compression::CompressionLayer::new())
         // A linked machine comes with a ticket, not the key to the app, and a film is sent as it is.
         .merge(Router::new().route("/link/source/{link}", get(link_source)).with_state(app))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_names_this_network_gives_reach_the_app() {
+        for host in ["casper", "casper:7979", "CASPER.local:7979", "casper.tail1234.ts.net", "192.168.69.96:7979", "100.97.6.66", "[::1]:7979", "localhost:5173", "nas.home.arpa", "casper."] {
+            assert!(local_name(host), "{host}");
+        }
+        for host in ["evil.example.com", "evil.example.com:7979", "casper.evil.com", "local.evil.com", "[nonsense]", ""] {
+            assert!(!local_name(host), "{host}");
+        }
+    }
+
+    #[test]
+    fn a_change_sent_from_another_page_is_told_apart() {
+        let h = |origin: Option<&str>| {
+            let mut h = HeaderMap::new();
+            h.insert(header::HOST, "casper:7979".parse().unwrap());
+            if let Some(o) = origin {
+                h.insert(header::ORIGIN, o.parse().unwrap());
+            }
+            h
+        };
+        assert!(!from_elsewhere(&h(None)), "programs send no origin");
+        assert!(!from_elsewhere(&h(Some("http://casper:7979"))));
+        assert!(!from_elsewhere(&h(Some("http://CASPER:7979"))));
+        assert!(from_elsewhere(&h(Some("https://evil.example.com"))));
+        assert!(from_elsewhere(&h(Some("http://casper:8088"))), "another port on the same machine is another page");
+        assert!(from_elsewhere(&h(Some("null"))));
+        // What the web app's dev server passes on: the page's own name, as it was asked by.
+        let mut dev = HeaderMap::new();
+        dev.insert(header::HOST, "localhost:5173".parse().unwrap());
+        dev.insert(header::ORIGIN, "http://localhost:5173".parse().unwrap());
+        assert!(!from_elsewhere(&dev));
+    }
 }

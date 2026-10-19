@@ -85,6 +85,40 @@ pub struct Playing {
 /// How long a player may say nothing before it is taken to have stopped, in seconds.
 const QUIET: i64 = 120;
 
+/// Passwords tried lately, by the address they came from, so a run of wrong guesses shuts
+/// the door on whoever made them and not on the rest of the household.
+#[derive(Default)]
+pub struct Tries(Mutex<HashMap<Option<std::net::IpAddr>, (u32, i64)>>);
+
+impl Tries {
+    /// Wrong guesses allowed in a row before the door shuts.
+    const TRIES: u32 = 5;
+    /// For how long, in seconds, after the last of them.
+    const SHUT_FOR: i64 = 60;
+
+    /// Count one more try from here, or refuse it when there have been too many. A try is
+    /// counted before the password is checked, so tries sent all at once cannot slip past.
+    pub fn take(&self, from: Option<std::net::IpAddr>) -> bool {
+        let now = crate::db::now();
+        let mut all = self.0.lock();
+        all.retain(|_, (_, last)| now - *last < Self::SHUT_FOR);
+        let (n, last) = all.entry(from).or_insert((0, now));
+        if *n >= Self::TRIES {
+            return false;
+        }
+        (*n, *last) = (*n + 1, now);
+        true
+    }
+
+    /// The password was right. The try is not counted, but neither are the wrong ones before
+    /// it forgiven: signing in to one account must not buy more guesses at another.
+    pub fn right(&self, from: Option<std::net::IpAddr>) {
+        if let Some((n, _)) = self.0.lock().get_mut(&from) {
+            *n = n.saturating_sub(1);
+        }
+    }
+}
+
 pub struct Inner {
     pub db: Db,
     pub settings: Settings,
@@ -92,6 +126,8 @@ pub struct Inner {
     /// The helpers on other machines, as the settings name them. See [`crate::remote`].
     pub remotes: Mutex<Vec<std::sync::Arc<crate::remote::Remote>>>,
     pub http: reqwest::Client,
+    /// The same, held to addresses out on the internet: see [`public_client`].
+    pub public_http: reqwest::Client,
     pub meta: Metadata,
     pub events: broadcast::Sender<Event>,
     pub data_dir: PathBuf,
@@ -141,8 +177,8 @@ pub struct Inner {
     /// The anime id list, once read.
     pub anime_list: Mutex<Option<Arc<crate::anime::Ids>>>,
     pub sessions: Mutex<HashSet<String>>,
-    /// Wrong passwords lately: (how many, when the last one was).
-    pub login_failures: Mutex<(u32, i64)>,
+    /// Wrong passwords at sign-in lately, by where they came from.
+    pub login_failures: Tries,
     /// Titles last turned away for lack of disk space, with the headroom there was at the time.
     pub space_blocked: Mutex<HashMap<i64, i128>>,
     /// The OpenSubtitles sign-in in use, and when it was made.
@@ -150,8 +186,8 @@ pub struct Inner {
     /// Players that have signed in, by the token each was given. Oldest first.
     /// The players that are signed in, by the token each holds. See [`App::reload_players`].
     pub players: Mutex<HashMap<String, Signed>>,
-    /// Wrong passwords from players lately: (how many, when the last one was).
-    pub player_failures: Mutex<(u32, i64)>,
+    /// Wrong passwords from players lately, by where they came from.
+    pub player_failures: Tries,
     /// The last few hundred requests players made, for working out what one of them wants.
     pub player_requests: Mutex<std::collections::VecDeque<String>>,
     /// The library as last read for players, with the database's change count and the count of
@@ -197,7 +233,105 @@ pub fn http_client() -> reqwest::Client {
         .expect("http client")
 }
 
+/// Whether an address is out on the internet, rather than this machine, the home network
+/// or the tailnet.
+pub fn public(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(a) => {
+            let [x, y, ..] = a.octets();
+            !(a.is_private() || a.is_loopback() || a.is_link_local() || a.is_unspecified() || a.is_broadcast() || a.is_documentation() || a.is_multicast() || x == 0 || (x == 100 && (64..128).contains(&y)) || (x == 198 && (18..20).contains(&y)) || x >= 240)
+        }
+        std::net::IpAddr::V6(a) => match a.to_ipv4_mapped() {
+            Some(v4) => public(v4.into()),
+            None => !(a.is_loopback() || a.is_unspecified() || a.is_multicast() || (a.segments()[0] & 0xfe00) == 0xfc00 || (a.segments()[0] & 0xffc0) == 0xfe80),
+        },
+    }
+}
+
+/// Names looked up to addresses out on the internet only.
+struct PublicOnly;
+
+impl reqwest::dns::Resolve for PublicOnly {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(async move {
+            let found: Vec<std::net::SocketAddr> = tokio::net::lookup_host((name.as_str(), 0)).await?.collect();
+            let kept: Vec<std::net::SocketAddr> = found.into_iter().filter(|a| public(a.ip())).collect();
+            if kept.is_empty() {
+                return Err(format!("{} is on this network, not out on the internet", name.as_str()).into());
+            }
+            Ok(Box::new(kept.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// Whether a link names somewhere out on the internet by its address, or by a name, which
+/// [`PublicOnly`] then holds to the same.
+fn public_link(url: &reqwest::Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && url.host_str().is_some_and(|h| h.trim_matches(['[', ']']).parse::<std::net::IpAddr>().map_or(true, public))
+}
+
+/// A client for links someone out on the internet gave: an indexer names where its NZB is in
+/// what it sends back, and one that had gone bad could name a machine here instead. It is
+/// held to the internet at every step, redirects included.
+pub fn public_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(concat!("Spool/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .gzip(true)
+        .dns_resolver(Arc::new(PublicOnly))
+        // A proxy looks the name up itself, past the resolver.
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 10 {
+                attempt.error("too many redirects")
+            } else if public_link(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.error("a redirect into this network")
+            }
+        }))
+        .build()
+        .expect("http client")
+}
+
+/// The most an NZB may be. The largest season packs run to tens of megabytes.
+pub const NZB_MOST: usize = 128 << 20;
+
+/// A response's body, up to `most` bytes: past that it is not what was asked for.
+pub async fn read_at_most(mut resp: reqwest::Response, most: usize) -> std::result::Result<Vec<u8>, String> {
+    if resp.content_length().is_some_and(|n| n > most as u64) {
+        return Err(format!("it was larger than {} MB", most >> 20));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| e.without_url().to_string())? {
+        if body.len() + chunk.len() > most {
+            return Err(format!("it was larger than {} MB", most >> 20));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 impl App {
+    /// The client to fetch an indexer's NZB link with. An indexer on this network, such as a
+    /// local aggregator, hands out links on this network; one out on the internet does not.
+    pub fn nzb_client(&self, indexer_id: i64, link: &str) -> std::result::Result<&reqwest::Client, String> {
+        let at = self.db.indexers().ok().and_then(|all| all.into_iter().find(|i| i.id == indexer_id)).and_then(|i| reqwest::Url::parse(&i.url).ok());
+        // Told by how the indexer was written down, never by what its name looks up to: an
+        // indexer that answers for its own name could otherwise make itself look local.
+        let here = at.as_ref().and_then(|u| u.host_str()).is_some_and(|h| match h.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+            Ok(ip) => !public(ip),
+            Err(_) => crate::api::local_name(h),
+        });
+        if here {
+            return Ok(&self.http);
+        }
+        match reqwest::Url::parse(link) {
+            Ok(url) if public_link(&url) => Ok(&self.public_http),
+            _ => Err("its NZB link points into this network, which an indexer out on the internet has no business doing".into()),
+        }
+    }
+
     /// Note that a player has asked for a file, and where it is being sent for it.
     pub fn note_playing(&self, who: &Signed, path: &Path, from: Option<&str>) {
         let now = crate::db::now();
@@ -307,6 +441,7 @@ impl App {
             remotes: Mutex::new(vec![]),
             meta,
             http,
+            public_http: public_client(),
             events,
             data_dir: data_dir.to_path_buf(),
             importing: Mutex::new(HashSet::new()),
@@ -331,11 +466,11 @@ impl App {
             looked_up: Default::default(),
             heard: Default::default(),
             sessions: Mutex::new(sessions),
-            login_failures: Mutex::new((0, 0)),
+            login_failures: Tries::default(),
             space_blocked: Mutex::new(HashMap::new()),
             subtitle_login: Mutex::new(None),
             players: Default::default(),
-            player_failures: Mutex::new((0, 0)),
+            player_failures: Tries::default(),
             player_requests: Mutex::new(Default::default()),
             player_library: Mutex::new(None),
             player_library_compact: Mutex::new(None),
@@ -624,5 +759,43 @@ mod disk_tests {
         // Folders that cannot be seen just now say nothing, and what was known stands.
         assert_eq!(disk_needed([&text(&series), ""], "/Volumes/Old"), "/Volumes/Old");
         assert_eq!(disk_needed(["", ""], "/Volumes/Old"), "/Volumes/Old");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrong_guesses_shut_the_door_on_whoever_made_them_alone() {
+        let tries = Tries::default();
+        let (guesser, household) = (Some("192.168.69.50".parse().unwrap()), Some("192.168.69.20".parse().unwrap()));
+        for _ in 0..Tries::TRIES - 1 {
+            assert!(tries.take(guesser));
+        }
+        // Signing in to one account with its password buys no more guesses at another.
+        assert!(tries.take(guesser));
+        tries.right(guesser);
+        assert!(tries.take(guesser), "the fifth wrong guess");
+        assert!(!tries.take(guesser), "and none after it");
+        assert!(tries.take(household), "someone else in the house can still sign in");
+        tries.right(household);
+        assert!(!tries.take(guesser));
+    }
+
+    #[test]
+    fn only_addresses_out_on_the_internet_are_public() {
+        for ip in ["8.8.8.8", "104.16.1.1", "2606:4700::1111"] {
+            assert!(public(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["127.0.0.1", "10.0.0.1", "192.168.69.96", "172.16.5.4", "169.254.1.1", "100.97.6.66", "0.0.0.0", "::1", "fd7a:115c:a1e0::1", "fe80::1", "::ffff:192.168.1.1", "255.255.255.255"] {
+            assert!(!public(ip.parse().unwrap()), "{ip}");
+        }
+        let link = |s: &str| public_link(&reqwest::Url::parse(s).unwrap());
+        assert!(link("https://api.nzbgeek.info/api?t=get"));
+        assert!(link("https://1.1.1.1/x.nzb"));
+        assert!(!link("http://127.0.0.1:7979/api/recycle/empty"));
+        assert!(!link("http://[::1]/x"));
+        assert!(!link("file:///etc/passwd"));
     }
 }

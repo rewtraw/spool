@@ -255,9 +255,10 @@ impl App {
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 let _ = app.db.count_indexer(d.release.indexer_id, 0, 1);
+                let Ok(client) = app.nzb_client(d.release.indexer_id, &d.release.link) else { continue };
                 let fetched = async {
-                    let resp = app.http.get(&d.release.link).timeout(std::time::Duration::from_secs(150)).send().await?;
-                    resp.error_for_status()?.bytes().await
+                    let resp = client.get(&d.release.link).timeout(std::time::Duration::from_secs(150)).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.without_url().to_string())?;
+                    crate::app::read_at_most(resp, crate::app::NZB_MOST).await
                 }
                 .await;
                 match fetched {
@@ -266,7 +267,7 @@ impl App {
                             tracing::debug!(release = %d.release.title, error = %e, "runner-up NZB not saved");
                         }
                     }
-                    Err(e) => tracing::debug!(release = %d.release.title, error = %e.without_url(), "runner-up NZB not fetched"),
+                    Err(e) => tracing::debug!(release = %d.release.title, error = %e, "runner-up NZB not fetched"),
                 }
             }
         });

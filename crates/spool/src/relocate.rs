@@ -76,10 +76,12 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
             continue;
         }
         let p = e.path();
-        if p.is_dir() {
-            walk(&p, out);
-        } else {
-            out.push(p);
+        // A link is not part of the title, and following one would carry the move to
+        // whatever it points at, wherever that is.
+        match e.file_type() {
+            Ok(t) if t.is_dir() => walk(&p, out),
+            Ok(t) if t.is_file() => out.push(p),
+            _ => {}
         }
     }
 }
@@ -138,8 +140,10 @@ pub(crate) fn copy_all(from: &Path, to: &Path, files: &[(PathBuf, u64)], done: &
         if let Some(parent) = dst.parent() {
             std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
-        let mut input = std::fs::File::open(&src).with_context(|| format!("reading {}", src.display()))?;
-        let mut output = std::fs::File::create(&dst).with_context(|| format!("writing {}", dst.display()))?;
+        // Neither end is followed if it has become a link since the folder was listed.
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut input = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&src).with_context(|| format!("reading {}", src.display()))?;
+        let mut output = std::fs::OpenOptions::new().write(true).create(true).truncate(true).custom_flags(libc::O_NOFOLLOW).open(&dst).with_context(|| format!("writing {}", dst.display()))?;
         loop {
             if stop.load(Ordering::Relaxed) {
                 bail!(CALLED_OFF);
@@ -605,6 +609,19 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_in_a_title_folder_is_neither_listed_nor_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.mkv"), b"not the title's").unwrap();
+        std::fs::create_dir_all(dir.path().join("Film (2000)")).unwrap();
+        std::fs::write(dir.path().join("Film (2000)/Film (2000).mkv"), b"film").unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("Film (2000)/Extras")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret.mkv"), dir.path().join("Film (2000)/Bonus.mkv")).unwrap();
+        let found = listing(&dir.path().join("Film (2000)"));
+        assert_eq!(found, vec![(PathBuf::from("Film (2000).mkv"), 4)]);
+    }
 
     #[test]
     fn a_folder_is_copied_whole_checked_and_only_then_taken_away() {

@@ -133,7 +133,7 @@ spool backup DEST                   # write a consistent copy of the database
 | Linux | `~/.local/share/spool` |
 | Container | `/data` |
 
-`--data-dir` or `SPOOL_DATA_DIR` puts it elsewhere. The folder holds the database, the saved NZBs, cached artwork, the log and a nightly backup. The database contains indexer keys and Usenet passwords and is created readable only by its owner. Settings, General, Connections can name a second folder on another disk for a copy of the backup.
+`--data-dir` or `SPOOL_DATA_DIR` puts it elsewhere. The folder holds the database, the saved NZBs, cached artwork, the log and a nightly backup. The database contains indexer keys and Usenet passwords. It is created readable only by its owner, and so are its backups. Settings, General, Connections can name a second folder on another disk for a copy of the backup.
 
 ## Next
 

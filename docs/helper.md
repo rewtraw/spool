@@ -28,7 +28,7 @@ A helper that cannot be reached takes nothing with it. Downloads for its part of
 
 ## What it may touch
 
-A helper is started with a list of folders and works only inside them. Every path it is given is checked against the list.
+A helper is started with a list of folders and works only inside them. Every path it is given is checked against the list. A path that passes through a link is refused, even if the link sits inside one of the folders, because a link can lead outside them. A link inside a folder being moved isn't followed, and is left where it is.
 
 | Setting | Meaning |
 | --- | --- |
