@@ -24,7 +24,9 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
-  main { max-width: 760px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 16px 64px; }
+  /* Like an app on a phone: no zoom on a double tap, no grey flash where a finger lands. Fields are 16px, so Safari does not zoom into them. */
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  main { max-width: 760px; margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(64px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
   header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 28px; }
   h1 { font: 600 28px/1.1 var(--serif); margin: 0; letter-spacing: -0.01em; }
   h2 { font: 600 13px/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin: 36px 0 12px; }
@@ -34,7 +36,8 @@
   p { margin: 0 0 14px; }
   button, input { font: inherit; color: inherit; }
   .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); cursor: pointer; font-weight: 500; font-size: 15px; white-space: nowrap; }
-  .btn:hover:not(:disabled) { border-color: var(--faint); }
+  @media (hover: hover) { .btn:hover:not(:disabled) { border-color: var(--faint); } }
+  .btn { -webkit-user-select: none; user-select: none; }
   .btn:disabled { opacity: 0.5; cursor: default; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); padding: 0 8px; }

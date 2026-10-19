@@ -52,6 +52,8 @@
   margin: 0;
   padding: 18px;
   display: grid;
+  /* As wide as the card, so a long button wraps rather than pushing past its edge. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   min-width: 0;
 }

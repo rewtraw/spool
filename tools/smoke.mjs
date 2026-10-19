@@ -65,7 +65,10 @@ async function open(width = 1280, height = 1400) {
   const send = (method, params = {}) => new Promise((r) => { waiting.set(++id, r); ws.send(JSON.stringify({ id, method, params })); });
   for (const d of ['Runtime', 'Log', 'Network', 'Page']) await send(`${d}.enable`);
   if (key) await send('Network.setExtraHTTPHeaders', { headers });
-  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  // A picture as narrow as a phone is taken as a phone sees it: a touch screen, with no pointer to hover.
+  const phone = width <= 500;
+  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: phone ? 2 : 1, mobile: phone });
+  if (phone) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   const text = async () => (await send('Runtime.evaluate', { expression: 'document.body.innerText', returnByValue: true })).result?.value ?? '';
   return {
     problems,
@@ -101,7 +104,7 @@ if (one) {
   const [w, h] = size.split('x').map(Number);
   const tab = await open(w, h);
   await tab.go(url);
-  if (script) await tab.run(script);
+  if (script) { const said = await tab.run(script); if (said !== undefined) console.log(said); }
   await tab.picture(file);
   console.log(`wrote ${file}`);
   done(0);

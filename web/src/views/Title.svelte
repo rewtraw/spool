@@ -675,6 +675,8 @@
   }
   .info {
     display: grid;
+    /* One column as wide as the space, not as wide as its widest control. */
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
     align-content: start;
     min-width: 0;
@@ -757,8 +759,10 @@
     font-size: 14px;
     font-weight: 550;
   }
-  .links a:hover {
-    text-decoration: underline;
+  @media (hover: hover) {
+    .links a:hover {
+      text-decoration: underline;
+    }
   }
   .controls {
     display: flex;

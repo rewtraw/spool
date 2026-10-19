@@ -56,9 +56,13 @@
     position: relative;
     transition: transform 0.15s ease;
   }
-  .tile:hover .art,
   .tile:focus-visible .art {
     transform: translateY(-3px);
+  }
+  @media (hover: hover) {
+    .tile:hover .art {
+      transform: translateY(-3px);
+    }
   }
   .tile.dim .art {
     opacity: 0.55;

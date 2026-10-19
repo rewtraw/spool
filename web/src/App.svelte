@@ -122,7 +122,7 @@
     display: flex;
     flex-direction: column;
     gap: 22px;
-    padding: 22px 12px 18px;
+    padding: calc(22px + env(safe-area-inset-top)) 12px calc(18px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
     border-right: 1px solid var(--line);
     background: var(--surface);
   }
@@ -157,9 +157,11 @@
     color: var(--muted);
     font-weight: 500;
   }
-  .links a:hover {
-    background: var(--raised);
-    color: var(--text);
+  @media (hover: hover) {
+    .links a:hover {
+      background: var(--raised);
+      color: var(--text);
+    }
   }
   .links a.active {
     background: var(--accent-soft);
@@ -203,7 +205,8 @@
     background: var(--warn);
   }
   main {
-    padding: 30px clamp(16px, 3.5vw, 44px) 80px;
+    /* Added to the home screen, the page runs under the status bar and beside the notch. */
+    padding: calc(30px + env(safe-area-inset-top)) max(clamp(16px, 3.5vw, 44px), env(safe-area-inset-right)) 80px max(clamp(16px, 3.5vw, 44px), env(safe-area-inset-left));
     min-width: 0;
   }
   .offline {
@@ -218,7 +221,7 @@
     min-height: 100dvh;
     display: grid;
     place-items: center;
-    padding: 20px;
+    padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
   }
   .signin form {
     width: min(340px, 100%);
@@ -268,7 +271,7 @@
       height: auto;
       z-index: 20;
       flex-direction: row;
-      padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+      padding: 6px max(6px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
       border-right: none;
       border-top: 1px solid var(--line);
     }
@@ -301,7 +304,7 @@
       padding: 0 4px;
     }
     main {
-      padding: 18px 14px calc(96px + env(safe-area-inset-bottom));
+      padding: calc(18px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) calc(96px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
     }
     .toasts {
       bottom: calc(76px + env(safe-area-inset-bottom));

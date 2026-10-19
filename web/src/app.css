@@ -71,6 +71,24 @@ body {
   min-height: 100dvh;
   overflow-x: hidden;
 }
+/* On a phone it should feel like an app: no zooming in on a double tap or a field, no grey
+   flash where a finger lands, and text the size it was set at when the phone turns. Pinching
+   to zoom still works. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+/* Safari zooms into any field whose text is under 16px when it is tapped, and does not zoom
+   back out. On a touch screen fields are 16px, whatever size they are elsewhere. */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
 h1,
 h2,
 h3 {
@@ -129,9 +147,13 @@ textarea {
   font-weight: 500;
   font-size: 14px;
   transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.btn:hover:not(:disabled) {
-  border-color: var(--faint);
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    border-color: var(--faint);
+  }
 }
 .btn:disabled {
   opacity: 0.5;
@@ -173,15 +195,19 @@ textarea {
   border-color: var(--accent);
   color: var(--accent-ink);
 }
-.btn.primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+@media (hover: hover) {
+  .btn.primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
 }
 .btn.ghost {
   background: transparent;
   border-color: transparent;
 }
-.btn.ghost:hover:not(:disabled) {
-  background: var(--raised);
+@media (hover: hover) {
+  .btn.ghost:hover:not(:disabled) {
+    background: var(--raised);
+  }
 }
 .btn.danger {
   color: var(--bad);
@@ -201,6 +227,8 @@ select.input {
   background: var(--surface);
   min-width: 0;
   width: 100%;
+  /* Sized to its words, a field still stops at the edge of what holds it. */
+  max-width: 100%;
 }
 textarea.input {
   height: auto;
@@ -396,6 +424,20 @@ table.table tr:last-child td {
 }
 @media (max-width: 760px) {
   .bulkbar {
-    bottom: 74px;
+    bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+}
+
+/* On a phone a button with a long label wraps, rather than running past what holds it, and a
+   table leaves out the columns marked as only for a wide screen, so it fits without scrolling. */
+@media (max-width: 760px) {
+  .table .wide {
+    display: none;
+  }
+  .btn:not(.small) {
+    white-space: normal;
+    height: auto;
+    min-height: 36px;
+    text-align: left;
   }
 }

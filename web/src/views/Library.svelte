@@ -423,8 +423,10 @@
   tbody tr {
     cursor: pointer;
   }
-  tbody tr:hover {
-    background: var(--raised);
+  @media (hover: hover) {
+    tbody tr:hover {
+      background: var(--raised);
+    }
   }
   .count {
     margin-top: 18px;

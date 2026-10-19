@@ -274,8 +274,10 @@
     text-align: left;
     cursor: pointer;
   }
-  .summary:hover {
-    background: var(--raised);
+  @media (hover: hover) {
+    .summary:hover {
+      background: var(--raised);
+    }
   }
   .thumb {
     width: 52px;

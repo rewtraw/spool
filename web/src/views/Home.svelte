@@ -328,8 +328,10 @@
   .line:last-child {
     border-bottom: none;
   }
-  .line:hover {
-    background: var(--raised);
+  @media (hover: hover) {
+    .line:hover {
+      background: var(--raised);
+    }
   }
   .date {
     width: 104px;

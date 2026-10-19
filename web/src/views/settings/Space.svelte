@@ -109,21 +109,21 @@
       {:else}
         <div class="card scroll-x">
           <table class="table">
-            <thead><tr><th style="width:1%"><input class="tick" type="checkbox" aria-label="Select all shown" checked={spaceAllPicked} onchange={spacePickAll} /></th><th>Title</th><th>Size</th><th>Plex</th><th>Saved release</th><th></th></tr></thead>
+            <thead><tr><th style="width:1%"><input class="tick" type="checkbox" aria-label="Select all shown" checked={spaceAllPicked} onchange={spacePickAll} /></th><th>Title</th><th>Size</th><th class="wide">Plex</th><th class="wide">Saved release</th><th></th></tr></thead>
             <tbody>
               {#each spaceRows.slice(0, 80) as t (t.title_id)}
                 <tr>
                   <td><input class="tick" type="checkbox" aria-label="Select {t.title}" bind:checked={spacePicked[t.title_id]} /></td>
                   <td><a class="link" href="#/title/{t.title_id}"><b>{t.title}</b></a> <span class="muted">{t.year || ''}</span><div class="faint small">{t.kind === 'movie' ? 'Film' : `Series · ${t.files} files`}{t.monitored ? '' : ' · not monitored'}</div></td>
                   <td style="white-space:nowrap"><b>{bytes(t.size)}</b>{#if t.over_target > 0}<div class="faint small">{bytes(t.over_target)} over target</div>{/if}</td>
-                  <td style="white-space:nowrap">
+                  <td class="wide" style="white-space:nowrap">
                     {#if !t.in_plex}<span class="faint">Not in Plex</span>
                     {:else if t.watched}<span class="chip ok">Watched</span>{#if t.last_viewed_at}<div class="faint small">{ago(t.last_viewed_at)}</div>{/if}
                     {:else if t.watched_count}<span class="chip">{t.watched_count} of {t.plex_items} watched</span>
                     {:else}<span class="muted">Not watched</span>{/if}
                   </td>
-                  <td style="white-space:nowrap">{#if t.can_download_again}<span class="chip ok">Kept</span>{:else if t.saved_releases}<span class="chip bad">Gone from Usenet</span>{:else}<span class="faint">None</span>{/if}</td>
-                  <td><div class="row" style="gap:6px;flex-wrap:nowrap">{#if t.over_target > 0}<button class="btn small" onclick={() => smallerTitle(t)}>Find smaller</button>{/if}<button class="btn small ghost" onclick={() => freeTitle(t)}>Delete files</button></div></td>
+                  <td class="wide" style="white-space:nowrap">{#if t.can_download_again}<span class="chip ok">Kept</span>{:else if t.saved_releases}<span class="chip bad">Gone from Usenet</span>{:else}<span class="faint">None</span>{/if}</td>
+                  <td><div class="row" style="gap:6px;flex-wrap:wrap;justify-content:flex-end">{#if t.over_target > 0}<button class="btn small" onclick={() => smallerTitle(t)}>Find smaller</button>{/if}<button class="btn small ghost" onclick={() => freeTitle(t)}>Delete files</button></div></td>
                 </tr>
               {/each}
             </tbody>
