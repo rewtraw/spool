@@ -11,14 +11,17 @@
 // Chrome over its debugging port, because a page here is drawn after its data arrives and
 // Chrome's own --screenshot fires before that.
 //
-// Needs Chrome or Chromium (CHROME names it if it is somewhere unusual) and an instance
-// without an app password. Pages that show keys (General, Library, Usenet, Indexers) are checked and
-// never pictured.
+// Needs Chrome or Chromium (CHROME names it if it is somewhere unusual). An instance with an
+// app password is signed in to with its key, from SPOOL_API_KEY. Pages that show keys
+// (General, Library, Usenet, Indexers) are checked and never pictured.
 
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+const key = process.env.SPOOL_API_KEY;
+const headers = key ? { 'X-Api-Key': key } : {};
 
 const args = process.argv.slice(2);
 const flag = (name) => { const i = args.indexOf(name); return i < 0 ? null : args.splice(i, 2)[1]; };
@@ -61,6 +64,7 @@ async function open(width = 1280, height = 1400) {
   await new Promise((r) => (ws.onopen = r));
   const send = (method, params = {}) => new Promise((r) => { waiting.set(++id, r); ws.send(JSON.stringify({ id, method, params })); });
   for (const d of ['Runtime', 'Log', 'Network', 'Page']) await send(`${d}.enable`);
+  if (key) await send('Network.setExtraHTTPHeaders', { headers });
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   const text = async () => (await send('Runtime.evaluate', { expression: 'document.body.innerText', returnByValue: true })).result?.value ?? '';
   return {
@@ -103,10 +107,10 @@ if (one) {
   done(0);
 }
 
-const api = async (path) => { try { const r = await fetch(base + path); return r.ok ? r.json() : null; } catch { return null; } };
+const api = async (path) => { try { const r = await fetch(base + path, { headers }); return r.ok ? r.json() : null; } catch { return null; } };
 const status = await api('/api/status');
 if (!status) {
-  console.error(`${base} did not answer as Spool does, or it has a password this script cannot give.`);
+  console.error(`${base} did not answer as Spool does, or it has a password and SPOOL_API_KEY does not hold its key.`);
   done(2);
 }
 const listed = await api('/api/titles');
