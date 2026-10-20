@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { api, type Decision, type Episode, type MediaFile, type Title } from '../lib/api';
-  import { app, act, go, loadTitles, toast } from '../lib/state.svelte';
-  import { age, ago, bytes, fullDate, pct, qualityName, STATE_LABEL } from '../lib/format';
+  import { api, type Decision, type Episode, type MediaFile, type Title, type Watched } from '../lib/api';
+  import { app, act, go, loadTitles, markWatched, toast } from '../lib/state.svelte';
+  import { age, ago, bytes, duration, fullDate, pct, qualityName, STATE_LABEL } from '../lib/format';
   import Subtitles from '../components/Subtitles.svelte';
   import Poster from '../components/Poster.svelte';
   import JobLine from '../components/JobLine.svelte';
 
   let { id }: { id: number } = $props();
 
-  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string }; play?: { port: number; path?: string; files?: Record<string, string> }; local?: { extras: any[]; art: any[]; themes: string[]; notes: any } };
+  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string }; play?: { port: number; path?: string; files?: Record<string, string> }; watched?: Watched; watched_episodes?: Record<string, Watched>; local?: { extras: any[]; art: any[]; themes: string[]; notes: any } };
   let t = $state<Detail | null>(null);
   let missing = $state(false);
   let searching = $state('');
@@ -22,7 +22,9 @@
 
   async function load() {
     try {
-      const d = await api.get<Detail>(`/titles/${id}`);
+      // Someone who only watches is not sent how a title was got.
+      const got = await api.get<Detail>(`/titles/${id}`);
+      const d: Detail = { ...got, decisions: got.decisions ?? [], history: got.history ?? [], acquisitions: got.acquisitions ?? [], saved: got.saved ?? [] };
       const first = !t;
       t = d;
       if (first && d.kind === 'series') {
@@ -296,6 +298,16 @@
     return parts;
   });
   const hasLocal = $derived(!!t?.local && (t.local.extras.length || t.local.art.length || t.local.themes.length || t.local.notes.rel_path));
+
+  // ---- what the person signed in has watched
+  const seenOf = (e: Episode): Watched | undefined => t?.watched_episodes?.[e.id];
+  // A series' episodes there are to watch, and how many of them are watched.
+  const toWatch = $derived((t?.episodes ?? []).filter((e) => e.season > 0 && e.file_id && t?.watched_episodes?.[e.id]));
+  const seenCount = $derived(toWatch.filter((e) => seenOf(e)?.done).length);
+  const seasonSeen = (eps: Episode[]) => {
+    const held = eps.filter((e) => e.file_id && seenOf(e));
+    return held.length > 0 && held.every((e) => seenOf(e)?.done);
+  };
 </script>
 
 {#if missing}
@@ -318,10 +330,10 @@
         {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
         {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
         {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
-        {#if t.moving}
+        {#if app.manages && t.moving}
           <p class="where warn">{#if t.move?.total}Being moved to {t.move.to}: {bytes(t.move.done)} of {bytes(t.move.total)}.{:else}Waiting to be moved.{/if} It stays playable where it is until the move is done.
             <button class="btn small" onclick={cancelMove}>Cancel the move</button></p>
-        {:else if elsewhere.length && t.path && !t.offline}
+        {:else if app.manages && elsewhere.length && t.path && !t.offline}
           <p class="where">
             <select class="pick" aria-label="Move to another location" value={''} onchange={(e) => { moveTo(e.currentTarget.value); e.currentTarget.value = ''; }}>
               <option value="">Move to…</option>
@@ -331,15 +343,15 @@
         {/if}
         <p class="where">
           {#if inCollection}Part of <a class="link" href="#/collection/{inCollection.id}">{inCollection.name}</a>{#if myRole}, as {myRole === 'Alternative telling' ? 'an alternative telling' : `a ${myRole.toLowerCase()}`}{/if}.{/if}
-          <select class="pick" aria-label="Collection" value={''} onchange={(e) => { place(e.currentTarget.value); e.currentTarget.value = ''; }}>
+          {#if app.manages}<select class="pick" aria-label="Collection" value={''} onchange={(e) => { place(e.currentTarget.value); e.currentTarget.value = ''; }}>
             <option value="">{inCollection ? 'Move…' : 'Put in a collection…'}</option>
             {#each app.collections.filter((c) => c.id !== inCollection?.id) as c}<option value={c.id}>{c.name}</option>{/each}
             <option value="new">A new collection…</option>
             {#if inCollection}<option value="0">None</option>{/if}
             <option value="auto">Where its sources put it</option>
-          </select>
+          </select>{/if}
         </p>
-        {#if t.kind === 'movie' && t.in_episodes && !t.files.length}
+        {#if app.manages && t.kind === 'movie' && t.in_episodes && !t.files.length}
           <div class="notice warn episodes">
             {#if t.as_series}
               <span>This is listed as a film here and as a series of {t.as_series.episodes} episodes elsewhere, and it is posted as the episodes. Spool turns single episodes down for a film, so as a film it may never arrive.</span>
@@ -349,7 +361,7 @@
             {/if}
           </div>
         {/if}
-        {#if locked}
+        {#if app.manages && locked}
           <div class="notice lockednote">
             <b>No searching here.</b> {locked}
             {#if t.read_only && !t.offline && !t.moving}To get a different copy of it, use <b>Move to…</b> above to put it on a location Spool manages, or turn on "Let Spool change files here" for {t.location} under <a class="link" href="#/settings/general">Settings</a>.{/if}
@@ -362,6 +374,23 @@
             {#if t.kind === 'movie' && (t.tmdb_id || t.imdb_id)}<a href={t.tmdb_id ? `https://letterboxd.com/tmdb/${t.tmdb_id}` : `https://letterboxd.com/imdb/${t.imdb_id}`} target="_blank" rel="noopener noreferrer">Letterboxd <span aria-hidden="true">↗</span></a>{/if}
           </div>
         {/if}
+        {#if app.me && t.watched}
+          {@const w = t.watched}
+          <div class="watch">
+            {#if t.kind === 'movie'}
+              {#if w.done}<span class="chip ok">✓ Watched</span>
+              {:else if w.position}<span class="muted">Stopped at {duration(w.position)}{w.runtime ? ` of ${duration(w.runtime)}` : ''}</span>
+              {:else}<span class="muted">Not watched</span>{/if}
+              <button class="btn small" onclick={() => markWatched(t!.id, !w.done)}>{w.done ? 'Mark not watched' : 'Mark watched'}</button>
+              {#if !w.done && w.position && w.runtime}<div class="progress" role="progressbar" aria-label="How far through" aria-valuenow={Math.round(pct(w.position, w.runtime))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(w.position, w.runtime)}%"></i></div>{/if}
+            {:else if toWatch.length}
+              {#if w.done}<span class="chip ok">✓ Watched</span>{:else}<span class="muted">{seenCount} of {toWatch.length} {toWatch.length === 1 ? 'episode' : 'episodes'} watched</span>{/if}
+              <button class="btn small" onclick={() => markWatched(t!.id, !w.done)}>{w.done ? 'Mark none watched' : 'Mark all watched'}</button>
+              {#if !w.done && seenCount}<div class="progress" role="progressbar" aria-label="Episodes watched" aria-valuenow={Math.round(pct(seenCount, toWatch.length))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(seenCount, toWatch.length)}%"></i></div>{/if}
+            {/if}
+          </div>
+        {/if}
+        {#if app.manages}
         <div class="controls">
           <label class="check"><input type="checkbox" checked={t.monitored} onchange={(e) => patch({ monitored: e.currentTarget.checked })} /> Monitored</label>
           <select class="input auto" value={t.profile_id} onchange={(e) => patch({ profile_id: Number(e.currentTarget.value) })} aria-label="Quality profile">
@@ -394,6 +423,7 @@
         </div>
         {#if !isActive}<p class="faint small">Shadow mode: searching shows what Spool would choose, and downloads nothing.</p>{/if}
         {#if searchMessage}<p class="muted" role="status">{searchMessage}</p>{/if}
+        {/if}
       </div>
     </div>
   </div>
@@ -418,6 +448,7 @@
   {/if}
 
   {#if t.kind === 'movie'}
+    {#if app.manages}
     <section>
       <div class="section-title">{t.files.length > 1 ? 'Versions' : 'File'}</div>
       {#if t.files.length}
@@ -459,6 +490,7 @@
         </div>
       {/if}
     </section>
+    {/if}
   {:else}
     <section>
       <div class="section-title">Episodes</div>
@@ -473,32 +505,38 @@
                 <b>{n === 0 ? 'Specials' : `Season ${n}`}</b>
                 <span class="chip {have >= airedCount && airedCount > 0 ? 'ok' : have < airedCount && seasonOf(n) ? 'warn' : ''}">{have} / {airedCount}{airedCount < eps.length ? ` of ${eps.length}` : ''}</span>
               </button>
+              {#if app.me && have}{@const all = seasonSeen(eps)}<button class="btn small ghost" onclick={() => markWatched(t!.id, !all, { season: n })} title={all ? 'Mark every episode of this season not watched' : 'Mark every episode of this season watched'}>{all ? 'Season watched ✓' : 'Mark season watched'}</button>{/if}
+              {#if app.manages}
               <label class="check small"><input type="checkbox" checked={seasonOf(n)} onchange={(e) => toggleSeason(n, e.currentTarget.checked)} /> Monitored</label>
               {#if n > 0 && !locked}<button class="btn small" disabled={!!searching} onclick={() => search({ season: n }, true, `s${n}`)}>{searching === `s${n}` ? 'Searching…' : 'Search season'}</button>{:else if n > 0 && locked}<span class="faint small" title={locked}>No searching: {t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `${t.location} is only read`}</span>{/if}
+              {/if}
             </div>
             {#if openSeasons[n]}
               <div class="eps">
-                {#each eps as e (e.id)}
+                {#each eps.filter((e) => app.manages || e.file_id) as e (e.id)}
                   {@const f = e.file_id ? fileById.get(e.file_id) : null}
+                  {@const ew = seenOf(e)}
                   <div class="ep" class:dim={!e.monitored && !f}>
-                    <input type="checkbox" checked={e.monitored} onchange={() => toggleEpisode(e)} aria-label="Monitor episode {e.episode}" />
+                    {#if app.manages}<input type="checkbox" checked={e.monitored} onchange={() => toggleEpisode(e)} aria-label="Monitor episode {e.episode}" />{/if}
                     <span class="num">{e.episode}</span>
                     <div class="grow">
                       <div class="truncate">{e.title || 'To be announced'}</div>
-                      <div class="faint small">{e.air_date ? fullDate(e.air_date) : 'No air date'}{f ? ` · ${bytes(f.size)}${f.release_group ? ' · ' + f.release_group : ''}` : ''}</div>
+                      <div class="faint small">{e.air_date ? fullDate(e.air_date) : 'No air date'}{f && app.manages ? ` · ${bytes(f.size)}${f.release_group ? ' · ' + f.release_group : ''}` : ''}{ew && !ew.done && ew.position ? ` · stopped at ${duration(ew.position)}` : ''}</div>
+                      {#if ew && !ew.done && ew.position && ew.runtime}<div class="progress ep-part" aria-hidden="true"><i style="width:{pct(ew.position, ew.runtime)}%"></i></div>{/if}
                     </div>
-                    {#if f}<span class="chip ok">{qualityName(f.quality, 'series')}</span>{/if}
-                    {#if f && compactOf(f.id)}<span class="chip" title="A compact version of {bytes(compactOf(f.id)?.size ?? 0)} is kept beside it">Compact</span>
-                    {:else if f?.compacting}<span class="chip accent" title="A compact version is being made or waiting to be">{making?.file_id === f.id && making.total_ms ? `Compact ${Math.round(pct(making.done_ms, making.total_ms))}%` : 'Compact soon'}</span>{/if}
-                    {#if coming.get(e.id)}<span class="chip accent">{coming.get(e.id)}</span>
+                    {#if app.me && f && ew}<button class="seen-toggle" class:on={ew.done} aria-pressed={ew.done} aria-label="{ew.done ? 'Watched. Mark' : 'Mark'} episode {e.episode} {ew.done ? 'not watched' : 'watched'}" title={ew.done ? 'Watched. Tap to mark not watched' : 'Mark watched'} onclick={() => markWatched(t!.id, !ew.done, { episode_id: e.id })}>✓</button>{/if}
+                    {#if f && app.manages}<span class="chip ok">{qualityName(f.quality, 'series')}</span>{/if}
+                    {#if app.manages && f && compactOf(f.id)}<span class="chip" title="A compact version of {bytes(compactOf(f.id)?.size ?? 0)} is kept beside it">Compact</span>
+                    {:else if app.manages && f?.compacting}<span class="chip accent" title="A compact version is being made or waiting to be">{making?.file_id === f.id && making.total_ms ? `Compact ${Math.round(pct(making.done_ms, making.total_ms))}%` : 'Compact soon'}</span>{/if}
+                    {#if app.manages && coming.get(e.id)}<span class="chip accent">{coming.get(e.id)}</span>
                     {:else if !f && !aired(e)}<span class="chip">Not aired</span>
                     {:else if !f && e.monitored}<span class="chip warn">Missing</span>
                     {:else if !f}<span class="chip">Not here</span>{/if}
-                    {#if !f && aired(e) && locked}<span class="faint small" title={locked}>{t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `no searching on ${t.location}`}</span>{/if}
+                    {#if app.manages && !f && aired(e) && locked}<span class="faint small" title={locked}>{t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `no searching on ${t.location}`}</span>{/if}
                     {#if f && infuseEpisode(e, f)}<a class="btn small ghost" href={infuseEpisode(e, f)} title="Plays the episode in Infuse on this device." aria-label="Play episode {e.episode} in Infuse">Play</a>{/if}
-                    {#if aired(e) && !locked}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
-                    {#if f}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
-                    {#if f}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}
+                    {#if app.manages && aired(e) && !locked}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
+                    {#if f && app.manages}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
+                    {#if f && app.manages}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}
                   </div>
                   {#if f && openSubs[e.id]}<div class="epsubs"><Subtitles fileId={f.id} /></div>{/if}
                 {/each}
@@ -511,7 +549,7 @@
     </section>
   {/if}
 
-  {#if hasLocal && t.local}
+  {#if app.manages && hasLocal && t.local}
     {@const L = t.local}
     <section>
       <div class="section-title">Also in the folder</div>
@@ -544,6 +582,7 @@
     </section>
   {/if}
 
+  {#if app.manages}
   <section id="releases">
     <div class="row wrap">
       <div class="section-title grow">Releases considered</div>
@@ -578,6 +617,7 @@
       {/if}
     {/if}
   </section>
+  {/if}
 
   {#if t.saved?.length}
     <section id="saved">
@@ -633,7 +673,7 @@
     </section>
   {/if}
 
-  <p class="faint mono path break">{t.path}</p>
+  {#if app.manages}<p class="faint mono path break">{t.path}</p>{/if}
 
   {#if confirmDelete}
     <div class="scrim" role="presentation" onclick={(e) => e.target === e.currentTarget && (confirmDelete = false)}>
@@ -831,6 +871,46 @@
   }
   .eps {
     border-top: 1px solid var(--line);
+  }
+  .watch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+  .watch .progress {
+    flex: 1 0 100%;
+    max-width: 420px;
+  }
+  /* An episode's tick: hollow until it is watched. */
+  .seen-toggle {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 1.5px solid var(--line);
+    background: transparent;
+    color: var(--faint);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .seen-toggle.on {
+    border-color: var(--ok);
+    background: var(--ok);
+    color: #fff;
+  }
+  @media (hover: hover) {
+    .seen-toggle:not(.on):hover {
+      border-color: var(--ok);
+      color: var(--ok);
+    }
+  }
+  .ep-part {
+    height: 3px;
+    margin-top: 5px;
+    max-width: 240px;
   }
   .ep {
     display: flex;

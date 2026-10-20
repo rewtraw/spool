@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '../lib/api';
-  import { app, act, go, loadTitles } from '../lib/state.svelte';
-  import { ago, bytes, day, pct, qualityName } from '../lib/format';
+  import { app, act, go, loadTitles, signOut } from '../lib/state.svelte';
+  import { ago, bytes, day, duration, pct, qualityName } from '../lib/format';
   import Poster from '../components/Poster.svelte';
   import JobLine from '../components/JobLine.svelte';
 
@@ -16,10 +16,21 @@
   // Several machines may each be making one.
   const making = $derived<any[]>(compact.now ?? []);
   let loaded = $state(false);
+  // What whoever is signed in was part-way through, and the next episode of what they watch.
+  let watching = $state<any[]>([]);
+  const apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+  const playLink = (w: any) => !apple || !w.tmdb_id ? '' : w.episode ? `infuse://series/${w.tmdb_id}-${w.episode.season}-${w.episode.episode}?play` : `infuse://movie/${w.tmdb_id}?play`;
+  // Someone who only watches is shown what arrived lately from the library itself.
+  const lately = $derived(app.manages ? [] : app.titles.filter((t) => (t.kind === 'movie' ? t.file_count > 0 : t.episodes_have > 0)).sort((a, b) => b.added_at - a.added_at).slice(0, 12));
 
   // Room on each place the library lives, not only where downloads land.
   let places = $state<any[]>([]);
   async function load() {
+    if (app.me) api.get<any[]>('/watching').then((w) => (watching = w)).catch(() => {});
+    if (!app.manages) {
+      loaded = true;
+      return;
+    }
     const [a, h, c, act_] = await Promise.all([
       api.get('/attention').catch(() => []),
       api.get('/history?limit=300').catch(() => []),
@@ -93,20 +104,67 @@
 
 <header class="head">
   <h1>Home</h1>
-  <div class="stats">
-    {#each stats as s}<div><b>{s.value}</b><span>{s.label}</span></div>{/each}
-  </div>
+  {#if app.manages}
+    <div class="stats">
+      {#each stats as s}<div><b>{s.value}</b><span>{s.label}</span></div>{/each}
+    </div>
+  {/if}
+  {#if app.me && app.signInRequired}<div class="me faint small">{app.me.name} · <button class="link" onclick={signOut}>Sign out</button></div>{/if}
 </header>
 
-{#if app.status?.mode === 'shadow'}
+{#if app.manages && app.status?.mode === 'shadow'}
   <div class="notice">
     <b>Shadow mode.</b> Spool is reading the indexer feeds and recording what it would do. It does not download, move or delete anything.
     <a href="#/settings">Change in Settings</a>
   </div>
 {/if}
-{#each app.status?.warnings ?? [] as w}
+{#each app.manages ? (app.status?.warnings ?? []) : [] as w}
   <div class="notice warn">{w}</div>
 {/each}
+
+{#if watching.length}
+  <section>
+    <div class="section-title">Continue watching</div>
+    <div class="shelf">
+      {#each watching as w (`${w.title_id}-${w.episode?.id ?? 0}`)}
+        {@const t = app.titles.find((x) => x.id === w.title_id)}
+        <div class="tile">
+          <a href="#/title/{w.title_id}" class="art">
+            <Poster src={t?.poster_small ?? w.poster} title={w.title} kind={w.kind} />
+            {#if w.position && w.runtime}<span class="part"><i style="width:{Math.max(4, pct(w.position, w.runtime))}%"></i></span>{/if}
+          </a>
+          <a class="truncate name" href="#/title/{w.title_id}">{w.title}</a>
+          <div class="faint small truncate">
+            {#if w.episode}{w.next ? 'Next: ' : ''}S{w.episode.season} E{w.episode.episode}{w.episode.title ? ` · ${w.episode.title}` : ''}{:else if w.position && w.runtime}{duration(Math.max(0, w.runtime - w.position))} left{/if}
+          </div>
+          {#if playLink(w)}<a class="btn small play" href={playLink(w)}>{w.position ? 'Resume' : 'Play'}</a>{/if}
+        </div>
+      {/each}
+    </div>
+  </section>
+{/if}
+
+{#if !app.manages}
+  <section>
+    <div class="section-title">Lately in the library</div>
+    {#if lately.length}
+      <div class="shelf">
+        {#each lately as t (t.id)}
+          <a class="tile" href="#/title/{t.id}">
+            <Poster src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} />
+            <div class="truncate name">{t.title}</div>
+            <div class="faint small">{t.year || ''}{t.kind === 'series' ? ' · Series' : ''}</div>
+          </a>
+        {/each}
+      </div>
+    {:else}
+      <div class="card empty">Nothing in the library yet.</div>
+    {/if}
+  </section>
+{:else}
+
+
+
 
 {#if asks.length}
   <section>
@@ -248,6 +306,7 @@
     </div>
   </section>
 {/if}
+{/if}
 
 <style>
   .head {
@@ -359,10 +418,45 @@
     font-size: 13.5px;
     margin-top: 2px;
   }
+  .tile .art {
+    position: relative;
+    display: block;
+  }
+  .part {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: 5px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  .part i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .play {
+    justify-self: start;
+  }
+  /* On a phone the menu has no room for who is signed in, so Home says. */
+  .me {
+    display: none;
+    flex-basis: 100%;
+    margin-top: -12px;
+  }
+  .me .link {
+    color: inherit;
+    text-decoration: underline;
+  }
   .small {
     font-size: 12px;
   }
   @media (max-width: 760px) {
+    .me {
+      display: block;
+    }
     .stats {
       gap: 18px;
     }

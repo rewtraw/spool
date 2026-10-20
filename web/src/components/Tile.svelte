@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import type { Watched } from '../lib/api';
   import Poster from './Poster.svelte';
 
   // One poster in a grid, with a name and a line under it: a title in the library, a
@@ -15,6 +16,7 @@
     dim = false,
     picked = false,
     stack = false,
+    watched,
     onclick,
     children,
   }: {
@@ -30,6 +32,8 @@
     dim?: boolean;
     picked?: boolean;
     stack?: boolean;
+    /** Where whoever is signed in stands with it: a tick when watched, a bar when part-way. */
+    watched?: Watched;
     onclick?: (e: MouseEvent) => void;
     /** Anything else to lay over the poster. */
     children?: Snippet;
@@ -41,6 +45,8 @@
     <Poster {src} {title} {kind} />
     {@render children?.()}
     {#if chip}<span class="chip {tone} pin">{chip}</span>{/if}
+    {#if watched?.done}<span class="seen" title="Watched" aria-label="Watched">✓</span>
+    {:else if watched?.part}<span class="part" title="{Math.round(watched.part * 100)}% watched"><i style="width:{Math.max(4, watched.part * 100)}%"></i></span>{/if}
   </div>
   <div class="name truncate">{title}</div>
   <div class="faint small">{sub}</div>
@@ -97,6 +103,40 @@
     bottom: 7px;
     backdrop-filter: blur(8px);
     background: color-mix(in srgb, var(--bg) 78%, transparent);
+  }
+  /* Watched: a tick in the corner. Part-way: how far, along the foot of the poster. */
+  .seen {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--ok);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  }
+  .part {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: 5px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  .part i {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .chip.pin + .part {
+    bottom: 34px;
   }
   .name {
     font-weight: 600;

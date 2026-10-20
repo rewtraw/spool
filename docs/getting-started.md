@@ -42,7 +42,7 @@ Open the web app and go to Settings. Three tabs need filling in before Spool can
 
 1. **General.**
    - *Folders*: where movies and series live and where to download to. If the library is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.
-   - *Connections*: a free [TMDB API key](https://www.themoviedb.org/settings/api), which Spool needs to look up movies. Set a password for the app if anyone else can reach the address.
+   - *Connections*: a free [TMDB API key](https://www.themoviedb.org/settings/api), which Spool needs to look up movies. If anyone else can reach the address, add yourself under *Players*, People, with a password; from then on the app asks who you are.
 2. **Usenet.** One or more providers. Priority 0 is asked first; higher numbers only fill in missing articles. The Test button signs in and reports what it found.
 3. **Indexers.** One or more Newznab indexers, each with its address and API key.
 

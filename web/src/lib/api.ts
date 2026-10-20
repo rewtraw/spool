@@ -116,7 +116,19 @@ export interface Collection {
   ordered?: boolean;
 }
 
+/** Where the person signed in stands with a film, an episode or a series. */
+export interface Watched {
+  done: boolean;
+  /** How much of it is seen, from 0 to 1: of a film or an episode its running time, of a series its episodes. */
+  part?: number;
+  /** Seconds in, for a film or an episode stopped part-way. */
+  position?: number;
+  runtime?: number;
+}
+
 export interface Title {
+  /** Where the person signed in stands with it; absent when untouched. */
+  watched?: Watched;
   original_language?: string | null;
   id: number;
   kind: Kind;

@@ -347,7 +347,7 @@ impl Library {
         }
     }
 
-    fn runtime_secs(&self, n: &Node) -> f64 {
+    pub fn runtime_secs(&self, n: &Node) -> f64 {
         let probed = |f: Option<&MediaFile>| f.and_then(|f| f.media_info.as_ref()).map(|m| m.runtime_secs).filter(|s| *s > 0.0);
         match n {
             Node::Movie(t) => probed(self.files_of(t.id).first()).unwrap_or(t.runtime as f64 * 60.0),

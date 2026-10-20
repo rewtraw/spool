@@ -29,6 +29,13 @@ export const app = $state({
   titleTick: {} as Record<number, number>,
   online: true,
   signedOut: false,
+  /** Who is signed in, when it is a person, and whether they run Spool or only watch. */
+  me: null as { id: number; name: string } | null,
+  manages: true,
+  /** Whether sign-in is asked for, so whether signing out means anything. */
+  signInRequired: false,
+  /** The players' port, where someone who only watches asks for more. */
+  playersPort: null as number | null,
   toasts: [] as { id: number; text: string; kind: 'info' | 'error' }[],
 });
 
@@ -180,15 +187,29 @@ export function connect() {
 }
 
 export async function boot() {
-  const session = await api.get('/session').catch(() => ({ required: false, signed_in: true }));
+  const session = await api.get('/session').catch(() => ({ required: false, signed_in: true, me: null, manages: true, players: null }));
   if (session.required && !session.signed_in) {
     app.signedOut = true;
     return;
   }
   app.signedOut = false;
+  app.me = session.me ?? null;
+  app.manages = session.manages ?? true;
+  app.signInRequired = !!session.required;
+  app.playersPort = session.players ?? null;
   api.get('/qualities').then(setQualities).catch(() => {});
   await Promise.all([loadStatus(), loadTitles(true), loadProfiles()]);
   connect();
+}
+
+export async function signOut() {
+  await api.post('/logout').catch(() => {});
+  location.reload();
+}
+
+/** Mark something watched or not for whoever is signed in: a film, one episode, a season or a whole series. */
+export async function markWatched(title_id: number, played: boolean, which: { season?: number; episode_id?: number } = {}) {
+  return act(() => api.post('/watched', { title_id, played, ...which }));
 }
 
 window.addEventListener('spool:signin', () => {

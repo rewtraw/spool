@@ -399,6 +399,9 @@ pub struct Account {
     pub adds: bool,
     /// Away from home it is shown only what has a compact version, and given that version.
     pub compact_away: bool,
+    /// May change what Spool does: settings, downloads, deletions. One that may not can
+    /// still browse the library in the web app, keep what it has watched and ask for more.
+    pub manages: bool,
     pub created_at: i64,
 }
 

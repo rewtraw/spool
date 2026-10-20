@@ -13,8 +13,8 @@ pub(super) async fn art(State(app): State<App>, Path((id, kind)): Path<(i64, Str
 
 /// The library's collections: the films of one series of films, or an anime's series, films
 /// and specials, each with what it is to the story and what of the story is not here.
-pub(super) async fn collections(State(app): State<App>) -> R<Value> {
-    let mut groups = app.collections()?;
+pub(super) async fn collections(State(app): State<App>, who: Option<axum::Extension<Who>>) -> R<Value> {
+    let mut groups = app.collections_for(Who::of(who).account)?;
     for g in &mut groups {
         g.poster = g.poster.as_ref().map(|src| format!("/api/collections/{}/art?v={}", g.id, &crate::art::tag(src)[..10]));
         g.fanart = None;

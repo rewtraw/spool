@@ -138,7 +138,7 @@ cargo run --release -p spool -- serve            # http://localhost:7979
 <ol>
 <li><strong>General.</strong><ul>
 <li><em>Folders</em>: where movies and series live and where to download to. If the library is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.</li>
-<li><em>Connections</em>: a free <a href="https://www.themoviedb.org/settings/api">TMDB API key</a>, which Spool needs to look up movies. Set a password for the app if anyone else can reach the address.</li>
+<li><em>Connections</em>: a free <a href="https://www.themoviedb.org/settings/api">TMDB API key</a>, which Spool needs to look up movies. If anyone else can reach the address, add yourself under <em>Players</em>, People, with a password; from then on the app asks who you are.</li>
 </ul>
 </li>
 <li><strong>Usenet.</strong> One or more providers. Priority 0 is asked first; higher numbers only fill in missing articles. The Test button signs in and reports what it found.</li>

@@ -483,6 +483,29 @@ const MIGRATIONS: &[&str] = &[
         WHERE json_extract(data, '$.compact_of') IS NOT NULL AND json_extract(data, '$.quality.quality') LIKE '%-480p'
         AND (json_extract(data, '$.media_info.width') > 854 OR json_extract(data, '$.media_info.height') > 480);
     "#,
+    r#"
+    -- The people who play are the people who use the web app: each signs in to it as
+    -- themselves, and whether they run Spool is theirs to have or not. The app's own password
+    -- goes. Where nobody had one of their own it becomes the first person's, so a Spool that
+    -- asked for a password still does.
+    -- Only someone who may sign in counts: one turned away is left as they are.
+    ALTER TABLE accounts ADD COLUMN manages INTEGER NOT NULL DEFAULT 0;
+    INSERT INTO accounts(name, password, created_at)
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM accounts WHERE name = 'Spool' COLLATE NOCASE) THEN 'Spool ' || CAST(strftime('%s','now') AS INTEGER) ELSE 'Spool' END,
+            json_extract(value, '$.password'), CAST(strftime('%s','now') AS INTEGER) FROM settings
+        WHERE key = 'general' AND COALESCE(json_extract(value, '$.password'), '') != '' AND NOT EXISTS (SELECT 1 FROM accounts WHERE enabled);
+    UPDATE accounts SET password = (SELECT json_extract(value, '$.password') FROM settings WHERE key = 'general')
+        WHERE id = (SELECT MIN(id) FROM accounts WHERE enabled)
+        AND NOT EXISTS (SELECT 1 FROM accounts WHERE enabled AND password != '')
+        AND COALESCE((SELECT json_extract(value, '$.password') FROM settings WHERE key = 'general'), '') != '';
+    -- Whoever may sign in with a password runs Spool, as they could before; with nobody
+    -- having one, everybody does, as anybody could.
+    UPDATE accounts SET manages = 1 WHERE enabled AND password != '';
+    UPDATE accounts SET manages = 1 WHERE enabled AND NOT EXISTS (SELECT 1 FROM accounts WHERE enabled AND manages);
+    UPDATE settings SET value = json_remove(value, '$.password') WHERE key = 'general';
+    -- A browser signed in before was nobody in particular; it signs in again as someone.
+    DELETE FROM settings WHERE key = 'sessions';
+    "#,
 ];
 
 impl Db {

@@ -2,7 +2,7 @@
   // The Players tab: serving the library to players, and the people who play: an account
   // for each, the players each is signed in on, and what they have watched.
   import { api } from '../../lib/api';
-  import { act, toast } from '../../lib/state.svelte';
+  import { act, app, toast } from '../../lib/state.svelte';
   import { ago, duration } from '../../lib/format';
 
   let general = $state<any>(null);
@@ -43,6 +43,8 @@
   async function change(a: any, what: Record<string, unknown>, said: string) {
     if ((await act(() => api.put(`/accounts/${a.id}`, what), said)) === undefined) return;
     edits[a.id].password = '';
+    // What you may do yourself changed: the app is drawn again for it.
+    if (a.id === app.me?.id && ('manages' in what || 'enabled' in what)) return location.reload();
     loadPeople();
   }
   async function remove(a: any) {
@@ -94,12 +96,12 @@
   <div class="stack form">
     <fieldset class="card">
       <legend>People</legend>
-      <p class="muted">Everyone who plays has an account of their own: a name and a password to sign a player in with. What each has watched, where they stopped and what comes next are theirs, and nobody else's change when they watch something.</p>
+      <p class="muted">Everyone has an account of their own: a name and a password to sign in with, here in a browser and in a player alike. What each has watched, where they stopped and what comes next are theirs, and nobody else's change when they watch something. Someone who runs Spool can change everything here; anyone else can browse the library, mark what they have watched and ask for more.</p>
       {#each people.accounts as a (a.id)}
         <div class="place">
           <div class="row wrap">
             <b>{a.name}</b>
-            <span class="small" class:warn={!a.enabled}>{[a.enabled ? '' : 'may not sign in', a.has_password ? '' : 'no password', a.devices.length ? `signed in on ${a.devices.length} ${a.devices.length === 1 ? 'player' : 'players'}` : 'not signed in anywhere'].filter(Boolean).join(' · ')}</span>
+            <span class="small" class:warn={!a.enabled}>{[a.manages ? 'runs Spool' : '', a.enabled ? '' : 'may not sign in', a.has_password ? '' : 'no password', a.devices.length ? `signed in on ${a.devices.length} ${a.devices.length === 1 ? 'player' : 'players'}` : 'not signed in anywhere'].filter(Boolean).join(' · ')}</span>
           </div>
           {#each a.playing as p}
             <div class="small"><span class="chip accent">Playing</span> <a href="#/title/{p.title_id}">{p.title}</a>{p.device ? ` on ${p.device}` : ''}, {p.from ? `from ${p.from}` : 'through this Spool'}</div>
@@ -109,17 +111,18 @@
             <summary class="small">Name, password and players</summary>
             <div class="cols">
               <label class="field">Name<input class="input" bind:value={edits[a.id].name} autocomplete="off" /></label>
-              <label class="field">New password<input class="input" type="password" bind:value={edits[a.id].password} autocomplete="new-password" placeholder={a.has_password ? 'Unchanged' : 'None'} /><span class="hint">A new password signs every one of {a.name}'s players out.</span></label>
+              <label class="field">New password<input class="input" type="password" bind:value={edits[a.id].password} autocomplete="new-password" placeholder={a.has_password ? 'Unchanged' : 'None'} /><span class="hint">A new password signs {a.name} out of every player and browser{app.me?.id === a.id ? ' but this one' : ''}.</span></label>
             </div>
             <div class="row wrap">
               <button class="btn small" type="button" disabled={!edits[a.id].name.trim() || edits[a.id].name.trim() === a.name} onclick={() => change(a, { name: edits[a.id].name }, 'Renamed')}>Rename</button>
               <button class="btn small" type="button" disabled={!edits[a.id].password} onclick={() => change(a, { password: edits[a.id].password }, 'Password changed')}>Set password</button>
-              {#if a.has_password}<button class="btn small ghost" type="button" onclick={() => confirm(`Let ${a.name} sign in with no password?\n\nAnyone who can reach Spool and knows the name could then play from the library.`) && change(a, { password: '' }, 'Password removed')}>Remove password</button>{/if}
+              {#if a.has_password}<button class="btn small ghost" type="button" onclick={() => confirm(`Let ${a.name} sign in with no password?\n\nAnyone who can reach Spool and knows the name could then sign in as ${a.name}.`) && change(a, { password: '' }, 'Password removed')}>Remove password</button>{/if}
               <button class="btn small ghost" type="button" onclick={() => change(a, { enabled: !a.enabled }, a.enabled ? `${a.name} may no longer sign in` : `${a.name} may sign in again`)}>{a.enabled ? 'Stop sign-in' : 'Allow sign-in'}</button>
               {#if general.plex_token && general.plex_on}<button class="btn small ghost" type="button" onclick={() => fromPlex(a)}>Bring watched from Plex</button>{/if}
               <span class="grow"></span>
               <button class="btn small ghost danger" type="button" onclick={() => remove(a)}>Remove {a.name}</button>
             </div>
+            <label class="check small"><input type="checkbox" checked={a.manages} onchange={(e) => change(a, { manages: e.currentTarget.checked }, e.currentTarget.checked ? `${a.name} runs Spool` : `${a.name} can watch and ask, and change nothing else`)} /> {a.name} runs Spool: settings, downloads and deleting</label>
             <label class="check small"><input type="checkbox" checked={a.adds} onchange={(e) => change(a, { adds: e.currentTarget.checked }, e.currentTarget.checked ? `What ${a.name} asks for is added at once` : `What ${a.name} asks for waits for you`)} /> Add what {a.name} asks for at once, without waiting for an answer</label>
             <label class="check small"><input type="checkbox" checked={a.compact_away} onchange={(e) => change(a, { compact_away: e.currentTarget.checked }, e.currentTarget.checked ? `Away from home, ${a.name} gets compact versions only` : `${a.name} gets everything, at home and away`)} /> Away from home, give {a.name} compact versions only</label>
             {#if a.compact_away}<p class="hint">{lacking ? `${lacking} have no compact version, and are hidden from ${a.name} while away.` : 'Everything has a compact version, so nothing is hidden.'} <a href="#/settings/compact">Compact versions</a></p>{/if}
@@ -143,7 +146,7 @@
       <div class="place">
         <div class="cols">
           <label class="field">Name<input class="input" bind:value={fresh.name} autocomplete="off" placeholder="Someone new" /></label>
-          <label class="field">Password<input class="input" type="password" bind:value={fresh.password} autocomplete="new-password" /><span class="hint">Without one, anyone who can reach Spool and knows the name can play from the library.</span></label>
+          <label class="field">Password<input class="input" type="password" bind:value={fresh.password} autocomplete="new-password" /><span class="hint">Without one, anyone who can reach Spool and knows the name can sign in as them. Once anyone has a password, Spool asks everyone who they are.</span></label>
         </div>
         <div><button class="btn" type="button" disabled={!fresh.name.trim()} onclick={add}>Add this person</button></div>
       </div>

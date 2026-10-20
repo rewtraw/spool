@@ -9,7 +9,7 @@ mod discovery;
 pub mod ids;
 mod asking;
 pub(crate) mod items;
-mod media;
+pub(crate) mod media;
 
 use crate::app::App;
 use axum::extract::{Request, State};

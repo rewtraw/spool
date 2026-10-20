@@ -956,6 +956,9 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
     w.app.settings.set_general(&g).unwrap();
     w.app.db.add_account("Ada", &spool::settings::hash_password("her-own").unwrap()).unwrap();
     let (api, jf) = (spool::api::router(w.app.clone()), spool::jellyfin::router(w.app.clone()));
+    // Someone has a password, so the app is asked through its key.
+    let key = w.app.settings.general().api_key;
+    let by = Some(("x-api-key", key.as_str()));
     let read = |bytes: &[u8]| serde_json::from_slice::<Value>(bytes).unwrap_or(Value::Null);
 
     // The players' address gives a browser a page to ask from, which signs in as a player does.
@@ -975,7 +978,7 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
     };
     let waiting = || {
         let api = api.clone();
-        async move { call(&api, "GET", "/api/status", Value::Null).await.1["asks"].as_u64() }
+        async move { call_as(&api, by, "GET", "/api/status", Value::Null).await.1["asks"].as_u64() }
     };
 
     // Nothing is found or asked for without signing in.
@@ -1004,15 +1007,15 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
     assert!(w.app.db.titles(None).unwrap().is_empty(), "nothing is added until someone says so");
 
     // Whoever runs Spool sees who asked for what, and adding it answers everyone who did.
-    let (_, all) = call(&api, "GET", "/api/asks", Value::Null).await;
+    let (_, all) = call_as(&api, by, "GET", "/api/asks", Value::Null).await;
     assert_eq!(all.as_array().unwrap().iter().map(|a| (a["account"].as_str().unwrap(), a["status"].as_str().unwrap())).collect::<Vec<_>>(), [("Ada", "asked"), ("spool", "asked")], "{all}");
-    let (status, added) = call(&api, "POST", &format!("/api/asks/{}/add", asked["id"]), Value::Null).await;
+    let (status, added) = call_as(&api, by, "POST", &format!("/api/asks/{}/add", asked["id"]), Value::Null).await;
     assert_eq!(status, 200, "{added}");
     let heat = w.app.db.title(added["title_id"].as_i64().unwrap()).unwrap().unwrap();
     assert_eq!((heat.title.as_str(), heat.monitored), ("Heat", true));
     assert_eq!(waiting().await, Some(0));
     assert_eq!((asks_of(me).await[0]["status"].as_str(), asks_of(ada).await[0]["status"].as_str()), (Some("coming"), Some("coming")));
-    assert_eq!(call(&api, "POST", &format!("/api/asks/{}/add", hers["id"]), Value::Null).await.0, 200, "saying so twice does no harm");
+    assert_eq!(call_as(&api, by, "POST", &format!("/api/asks/{}/add", hers["id"]), Value::Null).await.0, 200, "saying so twice does no harm");
     assert_eq!(w.app.db.titles(None).unwrap().len(), 1);
     // Once there is something to play, whoever asked is told so.
     w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, 'x.mkv', 1, '{}')", [heat.id])).unwrap();
@@ -1023,8 +1026,8 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
     // Turned down, it says so, and may be asked for again as a new ask.
     let (_, _, body) = player(&jf, "POST", "/spool/asks", ada, json!({"kind": "movie", "tmdb_id": 593})).await;
     let solaris = read(&body);
-    assert_eq!(call(&api, "POST", &format!("/api/asks/{}/decline", solaris["id"]), Value::Null).await.0, 200);
-    assert_eq!(call(&api, "POST", &format!("/api/asks/{}/burn", solaris["id"]), Value::Null).await.0, 404);
+    assert_eq!(call_as(&api, by, "POST", &format!("/api/asks/{}/decline", solaris["id"]), Value::Null).await.0, 200);
+    assert_eq!(call_as(&api, by, "POST", &format!("/api/asks/{}/burn", solaris["id"]), Value::Null).await.0, 404);
     assert_eq!((asks_of(ada).await[0]["status"].as_str(), waiting().await), (Some("declined"), Some(0)));
     let (_, _, body) = player(&jf, "POST", "/spool/asks", ada, json!({"kind": "movie", "tmdb_id": 593})).await;
     let again = read(&body);
@@ -1036,8 +1039,8 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
 
     // An account whose asks are added at once does not wait; and what the library has
     // already is not asked for twice over: it only remains to say when it is ready.
-    assert_eq!(call(&api, "PUT", "/api/accounts/2", json!({"adds": true})).await.0, 200);
-    let (_, people) = call(&api, "GET", "/api/accounts", Value::Null).await;
+    assert_eq!(call_as(&api, by, "PUT", "/api/accounts/2", json!({"adds": true})).await.0, 200);
+    let (_, people) = call_as(&api, by, "GET", "/api/accounts", Value::Null).await;
     assert_eq!((people["accounts"][0]["adds"].as_bool(), people["accounts"][1]["adds"].as_bool()), (Some(false), Some(true)));
     let (_, _, body) = player(&jf, "POST", "/spool/asks", ada, json!({"kind": "series", "tvmaze_id": 77})).await;
     let series = read(&body);
@@ -1065,8 +1068,8 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
         refused += (player(&jf, "GET", "/spool/find?q=Heat", me, Value::Null).await.0 == 400) as u32;
     }
     assert!((8..=20).contains(&refused), "{refused} of forty were refused");
-    assert_eq!(call(&api, "DELETE", "/api/accounts/2", Value::Null).await.0, 200);
-    let (_, all) = call(&api, "GET", "/api/asks", Value::Null).await;
+    assert_eq!(call_as(&api, by, "DELETE", "/api/accounts/2", Value::Null).await.0, 200);
+    let (_, all) = call_as(&api, by, "GET", "/api/asks", Value::Null).await;
     assert!(all.as_array().unwrap().iter().all(|a| a["account"] == "spool"), "{all}");
 }
 
@@ -1196,8 +1199,10 @@ async fn tool(router: &axum::Router, key: &str, name: &str, args: serde_json::Va
 async fn an_ai_session_can_inspect_and_operate_spool_over_mcp() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;
+    let mut me = w.app.db.account(1).unwrap().unwrap();
+    me.password = spool::settings::hash_password("pw").unwrap();
+    w.app.db.save_account(&me).unwrap();
     let mut g = w.app.settings.general();
-    g.password = "pw".into();
     g.api_key = "full-key".into();
     g.mcp_read_key = "read-key".into();
     w.app.settings.set_general(&g).unwrap();
@@ -1268,11 +1273,9 @@ async fn an_ai_session_can_inspect_and_operate_spool_over_mcp() {
     assert!(refused && msg.as_str().unwrap().contains("confirm=true"), "{msg}");
     assert_eq!(w.app.db.files(movie.id).unwrap().len(), 1);
 
-    // The password set above is kept as a hash, and still lets its owner in.
-    let stored = w.app.settings.general().password;
-    assert!(spool::settings::is_hashed(&stored) && !stored.contains("pw"), "{stored}");
-    assert_eq!(call(&router, "POST", "/api/login", serde_json::json!({"password": "wrong"})).await.0, 401);
-    assert_eq!(call(&router, "POST", "/api/login", serde_json::json!({"password": "pw"})).await.0, 200);
+    // The person given a password above signs in to the web app with it.
+    assert_eq!(call(&router, "POST", "/api/login", serde_json::json!({"name": "spool", "password": "wrong"})).await.0, 401);
+    assert_eq!(call(&router, "POST", "/api/login", serde_json::json!({"name": "Spool", "password": "pw"})).await.0, 200);
 
     // Deleting files takes an explicit confirmation; removing the title alone does not.
     let (refused, msg) = tool(&router, "full-key", "remove_title", serde_json::json!({"title_id": movie.id, "delete_files": true})).await;
@@ -1859,8 +1862,16 @@ async fn a_later_season_posted_under_its_own_name_and_numbered_from_one_lands_in
 }
 
 async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
+    call_as(router, None, method, uri, body).await
+}
+
+/// A call with a header that says who is asking: `("x-api-key", key)` or `("cookie", ...)`.
+async fn call_as(router: &axum::Router, by: Option<(&str, &str)>, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
     use tower::ServiceExt;
-    let req = axum::http::Request::builder().method(method).uri(uri).header("content-type", "application/json");
+    let mut req = axum::http::Request::builder().method(method).uri(uri).header("content-type", "application/json");
+    if let Some((name, value)) = by {
+        req = req.header(name, value);
+    }
     let resp = router.clone().oneshot(req.body(axum::body::Body::from(body.to_string())).unwrap()).await.unwrap();
     let status = resp.status().as_u16();
     let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20).await.unwrap();
@@ -2169,9 +2180,6 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     let t = Some(token.as_str());
     // A player's token opens the library and nothing of Spool's own.
     let app_api = spool::api::router(w.app.clone());
-    let mut g = w.app.settings.general();
-    g.password = "house".into();
-    w.app.settings.set_general(&g).unwrap();
     assert_eq!(player(&app_api, "GET", &format!("/api/settings/general?api_key={token}"), t, Value::Null).await.0, 401);
 
     // The two libraries, then the films in one: names and paths in whatever capitals.
@@ -2286,13 +2294,12 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
 
     // Each person has an account of their own. Another is added, and has watched nothing
     // of what the first has: the film the first finished is unplayed to them.
-    let mut g = w.app.settings.general();
-    g.password = String::new();
-    w.app.settings.set_general(&g).unwrap();
-    let (status, added) = call(&app_api, "POST", "/api/accounts", json!({"name": "Ada", "password": "her-own"})).await;
+    let key = w.app.settings.general().api_key;
+    let by = Some(("x-api-key", key.as_str()));
+    let (status, added) = call_as(&app_api, by, "POST", "/api/accounts", json!({"name": "Ada", "password": "her-own"})).await;
     assert_eq!((status, added["id"].as_i64()), (200, Some(2)), "{added}");
-    assert_eq!(call(&app_api, "POST", "/api/accounts", json!({"name": "ada"})).await.0, 409, "one name, whatever its capitals");
-    assert_eq!(call(&app_api, "POST", "/api/accounts", json!({"name": "  "})).await.0, 400);
+    assert_eq!(call_as(&app_api, by, "POST", "/api/accounts", json!({"name": "ada"})).await.0, 409, "one name, whatever its capitals");
+    assert_eq!(call_as(&app_api, by, "POST", "/api/accounts", json!({"name": "  "})).await.0, 400);
     assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Ada", "Pw": "tv-pass"})).await.0, 401, "one account's password is not another's");
     let (status, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "ada", "Pw": "her-own"})).await;
     assert_eq!(status, 200);
@@ -2310,7 +2317,7 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     assert_eq!(w.app.db.watched(1, "movie", movie.id).unwrap().position, 0.0);
 
     // The accounts, the players signed in to each, and nothing that would let one in.
-    let (_, listed) = call(&app_api, "GET", "/api/accounts", Value::Null).await;
+    let (_, listed) = call_as(&app_api, by, "GET", "/api/accounts", Value::Null).await;
     let of = |name: &str| listed["accounts"].as_array().unwrap().iter().find(|x| x["name"] == name).unwrap().clone();
     assert_eq!((of("spool")["has_password"].as_bool(), of("spool")["devices"].as_array().unwrap().len(), of("Ada")["devices"][0]["client"].as_str()), (Some(true), 1, Some("Infuse-Direct")), "{listed}");
     assert!(!listed.to_string().contains(&ada) && !listed.to_string().contains(&token) && !listed.to_string().contains("argon2"), "no token and no password leaves by this door");
@@ -2318,18 +2325,18 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     // A player is signed out by name; a new password signs out every player of the account,
     // and of that account only; and an account that may not sign in is turned away.
     let hers_device = of("Ada")["devices"][0]["id"].as_str().unwrap().to_string();
-    assert_eq!(call(&app_api, "DELETE", &format!("/api/accounts/2/devices/{hers_device}"), Value::Null).await.0, 200);
+    assert_eq!(call_as(&app_api, by, "DELETE", &format!("/api/accounts/2/devices/{hers_device}"), Value::Null).await.0, 200);
     assert_eq!(player(&jf, "GET", "/Users/Me", a, Value::Null).await.0, 401);
     assert_eq!(player(&jf, "GET", "/Users/Me", t, Value::Null).await.0, 200);
-    assert_eq!(call(&app_api, "PUT", "/api/accounts/1", json!({"password": "another"})).await.0, 200);
+    assert_eq!(call_as(&app_api, by, "PUT", "/api/accounts/1", json!({"password": "another"})).await.0, 200);
     assert_eq!(player(&jf, "GET", "/Users/Me", t, Value::Null).await.0, 401);
     assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "spool", "Pw": "another"})).await.0, 200);
     let (_, _, body) = player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Ada", "Pw": "her-own"})).await;
     let ada = read(&body)["AccessToken"].as_str().unwrap().to_string();
-    assert_eq!(call(&app_api, "PUT", "/api/accounts/2", json!({"enabled": false})).await.0, 200);
+    assert_eq!(call_as(&app_api, by, "PUT", "/api/accounts/2", json!({"enabled": false})).await.0, 200);
     assert_eq!(player(&jf, "GET", "/Users/Me", Some(ada.as_str()), Value::Null).await.0, 401);
     assert_eq!(player(&jf, "POST", "/Users/AuthenticateByName", None, json!({"Username": "Ada", "Pw": "her-own"})).await.0, 401);
-    let (_, status) = call(&app_api, "GET", "/api/players", Value::Null).await;
+    let (_, status) = call_as(&app_api, by, "GET", "/api/players", Value::Null).await;
     assert_eq!((status["enabled"].as_bool(), status["signed_in"].as_u64()), (Some(true), Some(1)));
     // A player may ask who there is to sign in as before it has: the accounts that may, by
     // name, and nothing that would let it in.
@@ -2337,7 +2344,7 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     let offered = read(&body);
     assert_eq!((status, offered.as_array().unwrap().len(), offered[0]["Name"].as_str(), offered[0]["HasPassword"].as_bool()), (200, 1, Some("spool"), Some(true)), "Ada may not sign in, so is not offered: {offered}");
     assert!(!offered.to_string().contains("argon2"));
-    assert_eq!(call(&app_api, "PUT", "/api/accounts/2", json!({"enabled": true})).await.0, 200);
+    assert_eq!(call_as(&app_api, by, "PUT", "/api/accounts/2", json!({"enabled": true})).await.0, 200);
     let (_, _, body) = player(&jf, "GET", "/Users/Public", None, Value::Null).await;
     assert_eq!(read(&body).as_array().unwrap().iter().map(|u| u["Name"].as_str().unwrap()).collect::<Vec<_>>(), ["spool", "Ada"]);
 
@@ -2358,9 +2365,89 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     assert_eq!((named.name.as_str(), named.client.as_str()), ("Apple TV", "Infuse-Direct"));
 
     // Removed, an account takes what it watched with it, and leaves the others' alone.
-    assert_eq!(call(&app_api, "DELETE", "/api/accounts/2", Value::Null).await.0, 200);
+    assert_eq!(call_as(&app_api, by, "DELETE", "/api/accounts/2", Value::Null).await.0, 200);
     assert_eq!(w.app.db.watched(2, "movie", movie.id).unwrap().position, 0.0);
     assert!(w.app.db.watched(1, "movie", movie.id).unwrap().played);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_person_signs_in_as_themselves_and_keeps_what_they_watched() {
+    use serde_json::{json, Value};
+    use tower::ServiceExt;
+    let w = World::new(Mode::Active).await;
+    let router = spool::api::router(w.app.clone());
+    let mut movie = w.movie("Kept", 2011, "tt4444444");
+    movie.path = w.root.join("Movies/Kept (2011)").to_string_lossy().to_string();
+    w.app.db.save_title(&mut movie).unwrap();
+    let file: MediaFile = serde_json::from_value(json!({"title_id": movie.id, "rel_path": "film.mkv", "size": 4, "quality": {"quality": "bluray-1080p"}})).unwrap();
+    w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, 'film.mkv', 4, ?2)", rusqlite::params![movie.id, serde_json::to_string(&file).unwrap()])).unwrap();
+    let seen = |list: &Value| list.as_array().unwrap().iter().find(|t| t["id"] == movie.id).unwrap()["watched"].clone();
+
+    // With nobody's password set the app is open, as the first person who runs Spool, and a
+    // browser is signed in as them so that it stays theirs once there are passwords.
+    let opened = router.clone().oneshot(axum::http::Request::builder().uri("/api/session").body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let mine = opened.headers().get("set-cookie").and_then(|c| c.to_str().ok()).map(|c| c.split(';').next().unwrap().to_string()).expect("a session for the open app");
+    let session: Value = serde_json::from_slice(&axum::body::to_bytes(opened.into_body(), 1 << 20).await.unwrap()).unwrap();
+    assert_eq!((session["required"].as_bool(), session["me"]["name"].as_str(), session["manages"].as_bool()), (Some(false), Some("spool"), Some(true)), "{session}");
+    assert_eq!(call(&router, "POST", "/api/watched", json!({"title_id": movie.id, "played": true})).await.0, 200);
+    assert_eq!(seen(&call(&router, "GET", "/api/titles", Value::Null).await.1)["done"], true);
+
+    // Once someone has a password, everyone signs in as themselves; the browser that was
+    // open is still its person's.
+    let as_me = Some(("cookie", mine.as_str()));
+    assert_eq!(call_as(&router, as_me, "POST", "/api/accounts", json!({"name": "Ada", "password": "hers"})).await.0, 200);
+    assert_eq!(call(&router, "GET", "/api/status", Value::Null).await.0, 401);
+    assert_eq!(call_as(&router, as_me, "PUT", "/api/accounts/1", json!({"password": "mine"})).await.0, 200);
+    assert_eq!(call_as(&router, as_me, "GET", "/api/status", Value::Null).await.0, 200, "the browser that changed its own password stays in");
+    let sign_in = |name: &'static str, password: &'static str| {
+        let router = router.clone();
+        async move {
+            let req = axum::http::Request::builder().method("POST").uri("/api/login").header("content-type", "application/json").body(axum::body::Body::from(json!({"name": name, "password": password}).to_string())).unwrap();
+            let resp = router.oneshot(req).await.unwrap();
+            let cookie = resp.headers().get("set-cookie").and_then(|c| c.to_str().ok()).map(|c| c.split(';').next().unwrap().to_string());
+            (resp.status().as_u16(), cookie)
+        }
+    };
+    assert_eq!(sign_in("ada", "mine").await.0, 401, "one person's password is not another's");
+    let (status, ada) = sign_in("ADA", "hers").await;
+    assert_eq!(status, 200);
+    let ada = ada.unwrap();
+    let as_ada = Some(("cookie", ada.as_str()));
+    let (_, session) = call_as(&router, as_ada, "GET", "/api/session", Value::Null).await;
+    assert_eq!((session["me"]["name"].as_str(), session["manages"].as_bool()), (Some("Ada"), Some(false)), "{session}");
+
+    // Someone who does not run Spool browses, and keeps what they watched; what the first
+    // person watched is not theirs.
+    let (status, list) = call_as(&router, as_ada, "GET", "/api/titles", Value::Null).await;
+    assert_eq!((status, seen(&list)), (200, Value::Null));
+    assert_eq!(call_as(&router, as_ada, "POST", "/api/watched", json!({"title_id": movie.id, "played": true})).await.0, 200);
+    assert!(w.app.db.watched(2, "movie", movie.id).unwrap().played);
+    let (_, page) = call_as(&router, as_ada, "GET", &format!("/api/titles/{}", movie.id), Value::Null).await;
+    assert_eq!(page["watched"]["done"], true);
+    assert!(page.get("decisions").is_none() && page.get("acquisitions").is_none(), "how it was got is not theirs to see");
+    // and changes nothing else.
+    for (method, uri) in [("GET", "/api/settings/general"), ("GET", "/api/accounts"), ("PATCH", &format!("/api/titles/{}", movie.id) as &str), ("DELETE", &format!("/api/titles/{}", movie.id)), ("POST", "/api/tasks/rss")] {
+        assert_eq!(call_as(&router, as_ada, method, uri, json!({})).await.0, 403, "{method} {uri}");
+    }
+    assert!(w.app.db.title(movie.id).unwrap().is_some());
+
+    // Unmarked, it is to watch again; a program with the key is nobody, so has nothing to mark.
+    assert_eq!(call_as(&router, as_ada, "POST", "/api/watched", json!({"title_id": movie.id, "played": false})).await.0, 200);
+    assert!(!w.app.db.watched(2, "movie", movie.id).unwrap().played && w.app.db.watched(1, "movie", movie.id).unwrap().played);
+    let key = w.app.settings.general().api_key;
+    let by_key = Some(("x-api-key", key.as_str()));
+    assert_eq!(call_as(&router, by_key, "POST", "/api/watched", json!({"title_id": movie.id, "played": true})).await.0, 400);
+
+    // Somebody is always left who runs Spool.
+    assert_eq!(call_as(&router, by_key, "PUT", "/api/accounts/1", json!({"manages": false})).await.0, 409);
+    assert_eq!(call_as(&router, by_key, "DELETE", "/api/accounts/1", Value::Null).await.0, 409);
+    assert_eq!(call_as(&router, by_key, "PUT", "/api/accounts/2", json!({"manages": true})).await.0, 200);
+    assert_eq!(call_as(&router, as_ada, "GET", "/api/settings/general", Value::Null).await.0, 200, "what someone may do follows them at once");
+    assert_eq!(call_as(&router, by_key, "PUT", "/api/accounts/1", json!({"manages": false})).await.0, 200);
+
+    // A new password signs a person out of every browser.
+    assert_eq!(call_as(&router, by_key, "PUT", "/api/accounts/2", json!({"password": "new"})).await.0, 200);
+    assert_eq!(call_as(&router, as_ada, "GET", "/api/titles", Value::Null).await.0, 401);
 }
 
 #[tokio::test(flavor = "multi_thread")]

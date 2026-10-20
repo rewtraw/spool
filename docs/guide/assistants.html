@@ -113,7 +113,7 @@
 <h1>AI assistants</h1>
 <p>Spool serves the <a href="https://modelcontextprotocol.io">Model Context Protocol</a> at <code>/mcp</code>, so an assistant such as Claude can look at the library, explain what happened to a title, and operate Spool.</p>
 <h2 id="connecting"><a href="#connecting">Connecting</a></h2>
-<p>The endpoint always requires a key, whether or not the web app has a password. Spool makes a key when it first starts. Settings, General, AI access has a button that copies the command to add Spool to Claude Code:</p>
+<p>The endpoint always requires a key, whether or not anyone has a password for the web app. Spool makes a key when it first starts. Settings, General, AI access has a button that copies the command to add Spool to Claude Code:</p>
 <pre><code class="language-sh">claude mcp add --transport http --scope user spool http://localhost:7979/mcp --header &quot;Authorization: Bearer &lt;key&gt;&quot;
 </code></pre>
 <p>Any client that speaks the protocol over HTTP can connect the same way, sending the key as <code>Authorization: Bearer &lt;key&gt;</code>.</p>

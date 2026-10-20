@@ -441,3 +441,6 @@ table.table tr:last-child td {
     text-align: left;
   }
 }
+
+/* A button that reads as a link in a line of text. */
+button.link { background: none; border: 0; padding: 0; height: auto; font: inherit; cursor: pointer }

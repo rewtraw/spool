@@ -762,12 +762,25 @@ impl App {
         self.collections_among(&self.db.titles(None)?)
     }
 
+    /// The library's collections, with what one person has watched of them; with nobody
+    /// named, what anybody has.
+    pub fn collections_for(&self, account: Option<i64>) -> Result<Vec<Group>> {
+        self.collections_seen(&self.db.titles(None)?, account)
+    }
+
     /// The collections among these titles: the whole library, or what of it can be played.
     pub fn collections_among(&self, titles: &[Title]) -> Result<Vec<Group>> {
+        self.collections_seen(titles, None)
+    }
+
+    fn collections_seen(&self, titles: &[Title], account: Option<i64>) -> Result<Vec<Group>> {
         let works = if titles.iter().any(|t| !t.anilist.is_empty()) { self.db.anime_all()? } else { vec![] };
         let ids = self.anime_ids();
         // A film that was played through; a series whose every episode on disk was.
-        let seen = self.db.played_by_anyone()?;
+        let seen = match account {
+            Some(a) => self.db.watched_all(a)?.into_iter().filter(|(_, w)| w.played).map(|(k, _)| k).collect(),
+            None => self.db.played_by_anyone()?,
+        };
         let played = |kind: &str, id: i64| seen.contains(&(kind.to_string(), id));
         let mut episodes: HashMap<i64, (u32, u32)> = HashMap::new();
         for e in self.db.all_episodes()?.iter().filter(|e| e.season > 0 && e.file_id.is_some()) {

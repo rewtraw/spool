@@ -11,7 +11,7 @@ Under Settings, Players:
 1. Tick **Serve the library to players**.
 2. Leave the **port** at 8096 unless something else uses it. It is the one players expect.
 3. Save.
-4. Under **People**, add an account for each person who plays: a **name** and a **password** to sign a player in with. These are separate from the web app's password, and open nothing but playback.
+4. Under **People**, add an account for each person who plays: a **name** and a **password**. It is the same one they sign in to the web app with.
 
 In a container, publish the port as well (`8096:8096`) and give the player the machine's address. Being found without an address relies on a broadcast on the local network, which reaches a container only when it shares the host's network.
 
@@ -64,16 +64,23 @@ Finding Spool by itself works only on the local network. Over a private network,
 
 ## People
 
-Each person who plays has an account of their own. What they have watched, where they stopped and what comes next are theirs: one person finishing a film does not mark it watched for another. Accounts are kept under Settings, Players.
+Each person has an account of their own, which they sign in to the web app and to a player with. What they have watched, where they stopped and what comes next are theirs: one person finishing a film does not mark it watched for another. Accounts are kept under Settings, Players.
 
-- **A password** is the account's own. One with none lets anyone who can reach Spool and knows the name play from the library.
-- **A new password** signs every one of that person's players out, and nobody else's.
+- **Runs Spool.** Someone who runs Spool can change everything: settings, downloads, deleting. Anyone else can browse the library in the web app, mark what they have watched, and ask for more where players ask. There is always someone left who runs it; the first person added does.
+- **A password** is the account's own. One with none lets anyone who can reach Spool and knows the name sign in as them. Once anyone has a password, the web app asks everyone who they are; until then it is open, as the first person who runs Spool.
+- **A new password** signs that person out of every player and browser but the one it was set from, and nobody else.
 - **Stop sign-in** turns an account away without removing it: its players are signed out, and what it has watched is kept for when it is allowed again.
 - **Removing** an account removes what it watched and played with it. The library is not touched.
 - **Players** signed in to an account are listed under it, each with what it called itself and when it was last seen, and can be signed out one at a time. A player not seen for ninety days is signed out by itself, so the list holds the players there are.
 - **Choosing who.** A player that shows a list of people to sign in as is given the names of the accounts that may sign in. Whether a player shows one is the player's doing; one that does not asks for the name.
 
-The account there was before there were several is the first one, with what had been watched and the players that were signed in.
+The account there was before there were several is the first one, with what had been watched and the players that were signed in. When people and the web app were brought together, everyone with a password was made someone who runs Spool, and the web app's own password, if nobody had one of their own, became the first person's.
+
+## What you have watched, in the web app
+
+Signed in as yourself, the web app shows what you have watched: a tick on a poster you have finished, a bar on one you are part-way through, and **Continue watching** on Home with where you stopped and the next episode of what you watch. A title's page says where you stopped, and marks it, a season, or each episode watched or not with a tap. The library can be narrowed to what you have not watched, are part-way through, or have watched.
+
+It is the record your players keep. Something watched in Infuse is ticked here, and something marked here is marked there the next time Infuse reads the library.
 
 ## Compact versions only, away from home
 

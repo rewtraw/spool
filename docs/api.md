@@ -6,15 +6,19 @@ For an AI assistant, use the [MCP endpoint](assistants.md) instead.
 
 ## Signing in
 
-If the web app has no password, the API is open to anyone who can reach the address, and Status warns of it.
+While nobody under Settings, Players, People has a password, the API is open to anyone who can reach the address, and Status warns of it.
 
-If it has one, send Spool's key with each request:
+Once anyone has one, send Spool's key with each request:
 
 ```sh
 curl -H "X-Api-Key: <key>" http://localhost:7979/api/status
 ```
 
-The key is the one in the command that Settings, General, AI access copies.
+The key is the one in the command that Settings, General, AI access copies. A program with the key may do anything, and is nobody in particular, so it has nothing watched of its own.
+
+The web app signs in as a person: `POST /api/login` with `{"name": ..., "password": ...}` sets a cookie for that browser, and `POST /api/logout` clears it. `GET /api/session` says whether sign-in is asked for (`required`), who is signed in (`me`) and whether they run Spool (`manages`). While the app is open, it signs the browser in as the first person who runs Spool, so the browser stays theirs once passwords are given.
+
+Someone who does not run Spool may read the library (`GET` of `/api/titles`, a title, `/api/collections` and artwork), keep what they have watched, and sign out. Anything else gets `403`. A title's page leaves out, for them, the releases weighed, what was downloaded and from where.
 
 Five wrong passwords in a row from one address shut sign-in to that address for a minute. Other addresses can still sign in, and a right password doesn't make up for the wrong guesses before it.
 
@@ -91,7 +95,9 @@ Compact versions: `GET /api/compact` says how the library stands for them and wh
 
 The Spools this one is linked to, such as a helper on a NAS, are at `GET /api/links`: what each serves, what it allows (`see`, `play`, `work`), whether it hands films to players itself (`play`) and looks through its own folders (`see`), and how it was last found. What players are playing now, and the machine each takes it from, is under `playing` in `GET /api/activity` and `GET /api/players`. A download that runs on one has an id beginning `@`, and its entry in `GET /api/activity` names the helper under `on`.
 
-The people who play are at `GET /api/accounts`: each account with the players signed in to it, what it is playing and what it has played in all, and the latest sittings. `POST /api/accounts` adds one and `PUT /api/accounts/{id}` changes its `name`, `password`, `enabled`, `adds` (whether what it asks for is added at once) or `compact_away` (whether, away from home, it is given compact versions only). `POST /api/accounts/{id}/plex` brings what was watched in Plex to it. What has been asked for is at `GET /api/asks`, each with who asked and how it stands (`asked`, `coming`, `ready`, `declined`, `gone`); `POST /api/asks/{id}/add` and `/decline` answer one, and `DELETE /api/asks/{id}` clears it away. How many wait for an answer is `asks` in `GET /api/status`.
+The people who play are at `GET /api/accounts`: each account with the players signed in to it, what it is playing and what it has played in all, and the latest sittings. `POST /api/accounts` adds one and `PUT /api/accounts/{id}` changes its `name`, `password`, `enabled`, `manages` (whether the person runs Spool), `adds` (whether what it asks for is added at once) or `compact_away` (whether, away from home, it is given compact versions only). A change or a removal that would leave nobody who runs Spool gets `409`. A new password signs the person out of every player and browser but the one that set it. `POST /api/accounts/{id}/plex` brings what was watched in Plex to it. What has been asked for is at `GET /api/asks`, each with who asked and how it stands (`asked`, `coming`, `ready`, `declined`, `gone`); `POST /api/asks/{id}/add` and `/decline` answer one, and `DELETE /api/asks/{id}` clears it away. How many wait for an answer is `asks` in `GET /api/status`.
+
+What the person signed in has watched comes with the library: each title in `GET /api/titles` has `watched` when they have started it, with `done` and `part` (how much of a film is seen, or how many of a series' episodes). A title's page has `watched` with the place they stopped (`position` and `runtime`, in seconds) and, for a series, `watched_episodes` by episode. `POST /api/watched` with `{"title_id": ..., "played": true}` marks a film or a whole series watched, or not with `false`; add `season` for one season or `episode_id` for one episode. `GET /api/watching` is what they were part-way through and the next episode of what they watch, the most recent first. It is the same record players keep, so a mark made in either shows in the other.
 
 ## Following events
 

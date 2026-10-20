@@ -98,7 +98,7 @@
           <button class:on={order === 'story'} aria-pressed={order === 'story'} onclick={() => (order = 'story')}>{otherOrder}</button>
         </div>
       {/if}
-      <button class="btn small" class:primary={editing} onclick={toggleEdit}>{editing ? 'Done' : 'Edit'}</button>
+      {#if app.manages}<button class="btn small" class:primary={editing} onclick={toggleEdit}>{editing ? 'Done' : 'Edit'}</button>{/if}
     </div>
   </header>
 
@@ -153,7 +153,7 @@
             <b>{m.title}</b> <span class="muted">{m.year || 'Not released'}</span>
             <div class="faint small">{[FORMAT[m.format] ?? m.format, m.episodes > 1 ? `${m.episodes} episodes` : '', m.role].filter(Boolean).join(' · ')}</div>
           </div>
-          {#if m.can_add}<button class="btn small" disabled={adding[key]} onclick={() => add(m)}>{adding[key] ? 'Adding…' : 'Add'}</button>
+          {#if m.can_add && app.manages}<button class="btn small" disabled={adding[key]} onclick={() => add(m)}>{adding[key] ? 'Adding…' : 'Add'}</button>
           {:else}<span class="faint small">Add it from Discover</span>{/if}
         </div>
       {/each}

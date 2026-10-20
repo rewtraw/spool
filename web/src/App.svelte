@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { app, boot, route, go } from './lib/state.svelte';
+  import { app, boot, route, go, signOut } from './lib/state.svelte';
   import { api } from './lib/api';
   import Home from './views/Home.svelte';
   import Library from './views/Library.svelte';
@@ -20,6 +20,7 @@
     { id: 'settings', label: 'Settings', icon: 'M4 6h10v2H4zm12 0h4v2h-4zM4 11h4v2H4zm6 0h10v2H10zM4 16h10v2H4zm12 0h4v2h-4zM14 4.5h2v5h-2zM8 9.5h2v5H8zM14 14.5h2v5h-2z' },
   ];
 
+  let name = $state('');
   let password = $state('');
   let loginError = $state('');
 
@@ -29,13 +30,17 @@
     e.preventDefault();
     loginError = '';
     try {
-      await api.post('/login', { password });
+      await api.post('/login', { name, password });
       password = '';
       await boot();
     } catch (err: any) {
       loginError = err.message;
     }
   }
+
+  // Someone who only watches has the library, and asks for more where players ask.
+  const shown = $derived(app.manages ? nav : nav.filter((n) => n.id === 'home' || n.id === 'library'));
+  const askAt = $derived(!app.manages && app.playersPort ? `http://${location.hostname}:${app.playersPort}/` : '');
 
   const active = $derived(route.view === 'title' || route.view === 'collection' ? 'library' : route.view);
   const busy = $derived(Object.values(app.jobs).filter((j) => !['completed', 'failed', 'paused'].includes(j.state)).length);
@@ -45,10 +50,10 @@
     if (t && ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const map: Record<string, string> = { '1': 'home', '2': 'library', '3': 'discover', '4': 'activity', '5': 'archive', '6': 'settings' };
-    if (map[e.key]) go(map[e.key]);
+    if (map[e.key] && shown.some((n) => n.id === map[e.key])) go(map[e.key]);
     if (e.key === '/') {
       e.preventDefault();
-      if (!['library', 'discover', 'archive'].includes(route.view)) go('library');
+      if (!['library', 'discover', 'archive'].includes(route.view) || !app.manages) go('library');
       setTimeout(() => (document.querySelector('[data-search]') as HTMLInputElement | null)?.focus(), 30);
     }
   }
@@ -60,6 +65,7 @@
   <main class="signin">
     <form class="card" onsubmit={signIn}>
       <div class="brand"><span class="mark"></span>Spool</div>
+      <label class="field">Name<input class="input" bind:value={name} autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
       <label class="field">Password<input class="input" type="password" bind:value={password} autocomplete="current-password" /></label>
       {#if loginError}<p class="error">{loginError}</p>{/if}
       <button class="btn primary" type="submit">Sign in</button>
@@ -70,7 +76,7 @@
     <nav aria-label="Main">
       <a class="brand" href="#/home"><span class="mark"></span><span class="word">Spool</span></a>
       <div class="links">
-        {#each nav as n}
+        {#each shown as n}
           <a href="#/{n.id}" class:active={active === n.id} aria-current={active === n.id ? 'page' : undefined}>
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d={n.icon} fill="currentColor" /></svg>
             <span>{n.label}</span>
@@ -78,8 +84,17 @@
             {#if n.id === 'activity' && busy > 0}<b class="badge quiet">{busy}</b>{/if}
           </a>
         {/each}
+        {#if askAt}
+          <a href={askAt} target="_blank" rel="noreferrer">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z" fill="currentColor" /></svg>
+            <span>Ask for more</span>
+          </a>
+        {/if}
       </div>
-      {#if app.status}
+      {#if app.me && app.signInRequired}
+        <div class="who"><span class="truncate">{app.me.name}</span><button class="link" onclick={signOut}>Sign out</button></div>
+      {/if}
+      {#if app.status && app.manages}
         <div class="mode" class:shadow={app.status.mode === 'shadow'} title={app.status.mode === 'shadow' ? 'Watching and deciding only. Nothing is downloaded or moved.' : 'Downloading and importing.'}>
           <i></i>{app.status.mode === 'shadow' ? 'Shadow mode' : 'Active'}
         </div>
@@ -90,7 +105,8 @@
       {#if !app.online}
         <div class="offline" role="status">Lost contact with Spool. Reconnecting…</div>
       {/if}
-      {#if route.view === 'home'}<Home />
+      {#if !app.manages && !['home', 'library', 'title', 'collection'].includes(route.view)}<div class="empty">Only someone who runs Spool can open this. <a href="#/home">Go home</a></div>
+      {:else if route.view === 'home'}<Home />
       {:else if route.view === 'library'}<Library />
       {:else if route.view === 'title'}{#key route.arg}<TitleView id={Number(route.arg)} />{/key}
       {:else if route.view === 'collection'}{#key route.arg}<CollectionView id={Number(route.arg)} />{/key}
@@ -186,6 +202,24 @@
     background: var(--raised);
     color: var(--muted);
   }
+  .who {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .who .link {
+    margin-left: auto;
+    color: var(--muted);
+    text-decoration: underline;
+    font-size: 12.5px;
+  }
+  .who + .mode {
+    margin-top: 0;
+  }
   .mode {
     margin-top: auto;
     display: flex;
@@ -276,6 +310,7 @@
       border-top: 1px solid var(--line);
     }
     nav .brand,
+    nav .who,
     nav .mode {
       display: none;
     }

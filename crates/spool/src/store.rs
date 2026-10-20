@@ -307,8 +307,8 @@ impl Db {
 
     pub fn accounts(&self) -> Result<Vec<Account>> {
         self.with(|c| {
-            let mut s = c.prepare("SELECT id, name, password, enabled, created_at, adds, compact_away FROM accounts ORDER BY id")?;
-            let rows = s.query_map([], |r| Ok(Account { id: r.get(0)?, name: r.get(1)?, password: r.get(2)?, enabled: r.get(3)?, created_at: r.get(4)?, adds: r.get(5)?, compact_away: r.get(6)? }))?;
+            let mut s = c.prepare("SELECT id, name, password, enabled, created_at, adds, compact_away, manages FROM accounts ORDER BY id")?;
+            let rows = s.query_map([], |r| Ok(Account { id: r.get(0)?, name: r.get(1)?, password: r.get(2)?, enabled: r.get(3)?, created_at: r.get(4)?, adds: r.get(5)?, compact_away: r.get(6)?, manages: r.get(7)? }))?;
             rows.collect()
         })
     }
@@ -317,16 +317,20 @@ impl Db {
         Ok(self.accounts()?.into_iter().find(|a| a.id == id))
     }
 
-    /// Add an account. The password is given already hashed, or empty.
+    /// Add an account. The password is given already hashed, or empty. While nobody runs
+    /// Spool, as when it is new, the one added does: somebody has to.
     pub fn add_account(&self, name: &str, password: &str) -> Result<i64> {
         self.with(|c| {
-            c.execute("INSERT INTO accounts(name, password, created_at) VALUES (?1, ?2, ?3)", params![name, password, now()])?;
+            c.execute(
+                "INSERT INTO accounts(name, password, created_at, manages) VALUES (?1, ?2, ?3, NOT EXISTS (SELECT 1 FROM accounts WHERE manages AND enabled))",
+                params![name, password, now()],
+            )?;
             Ok(c.last_insert_rowid())
         })
     }
 
     pub fn save_account(&self, a: &Account) -> Result<()> {
-        self.with(|c| c.execute("UPDATE accounts SET name = ?2, password = ?3, enabled = ?4, adds = ?5, compact_away = ?6 WHERE id = ?1", params![a.id, a.name, a.password, a.enabled, a.adds, a.compact_away]))?;
+        self.with(|c| c.execute("UPDATE accounts SET name = ?2, password = ?3, enabled = ?4, adds = ?5, compact_away = ?6, manages = ?7 WHERE id = ?1", params![a.id, a.name, a.password, a.enabled, a.adds, a.compact_away, a.manages]))?;
         Ok(())
     }
 

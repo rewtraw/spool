@@ -87,5 +87,26 @@ pub async fn seed(app: &App, root: &Path) -> Result<usize> {
         }
     }
     app.scan_all().await?;
+
+    // Someone who has watched a little: two films, one of them part-way, and the start of the
+    // series, stopped in its third episode.
+    let me = app.db.add_account("You", "")?;
+    let titles = app.db.titles(None)?;
+    let id_of = |name: &str| titles.iter().find(|t| t.title == name).map(|t| t.id);
+    let now = crate::db::now();
+    let seen = |played: bool, position: f64, ago: i64| Watched { played, position, play_count: played as u32, last_played_at: now - ago, updated_at: now - ago, ..Default::default() };
+    for (name, w) in [("Nosferatu", seen(true, 0.0, 86400 * 3)), ("Metropolis", seen(false, 41.0 * 60.0, 3600))] {
+        if let Some(id) = id_of(name) {
+            app.db.save_watched(me, "movie", id, &w)?;
+        }
+    }
+    for e in app.db.episodes(s.id)? {
+        let w = match e.episode {
+            1 | 2 => seen(true, 0.0, 86400 * 2 - e.episode as i64),
+            3 => seen(false, 17.0 * 60.0, 7200),
+            _ => continue,
+        };
+        app.db.save_watched(me, "episode", e.id, &w)?;
+    }
     Ok(app.db.titles(None)?.len())
 }

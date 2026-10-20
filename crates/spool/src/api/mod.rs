@@ -25,6 +25,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
 mod titles;
+mod watched;
 mod subtitles;
 mod activity;
 mod settings;
@@ -92,28 +93,74 @@ fn session_cookie(headers: &HeaderMap) -> Option<String> {
     headers.get(header::COOKIE)?.to_str().ok()?.split(';').find_map(|c| c.trim().strip_prefix("spool_session=").map(str::to_string))
 }
 
-fn authorized(app: &App, headers: &HeaderMap) -> bool {
-    let g = app.settings.general();
-    if g.password.is_empty() {
-        return true;
+/// Who a request comes from: a person signed in to the web app, or a program with the key.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Who {
+    /// The person, when there is one. A program with the key is nobody in particular.
+    pub account: Option<i64>,
+    /// Whether they may change what Spool does, and not only watch and ask.
+    pub manages: bool,
+}
+
+impl Who {
+    /// A request that came in without passing the sign-in, as the assistants' endpoint's do
+    /// once it has checked its own key.
+    fn of(who: Option<axum::Extension<Who>>) -> Who {
+        who.map(|w| w.0).unwrap_or(Who { account: None, manages: true })
     }
+}
+
+/// Whether the web app asks who you are: once anyone has a password. Until then it is open to
+/// whoever can reach it, as the first person who runs Spool.
+fn sign_in_required(accounts: &[Account]) -> bool {
+    accounts.iter().any(|a| !a.password.is_empty())
+}
+
+fn who(app: &App, headers: &HeaderMap) -> Option<Who> {
+    let g = app.settings.general();
     if let Some(key) = headers.get("x-api-key").and_then(|k| k.to_str().ok()) {
         if !g.api_key.is_empty() && same(key, &g.api_key) {
-            return true;
+            return Some(Who { account: None, manages: true });
         }
     }
-    session_cookie(headers).is_some_and(|c| app.sessions.lock().contains(&c))
+    let accounts = app.db.accounts().ok()?;
+    if let Some(id) = session_cookie(headers).and_then(|c| app.sessions.lock().get(&c).copied()) {
+        if let Some(a) = accounts.iter().find(|a| a.id == id && a.enabled) {
+            return Some(Who { account: Some(a.id), manages: a.manages });
+        }
+    }
+    (!sign_in_required(&accounts)).then(|| Who { account: accounts.iter().find(|a| a.enabled && a.manages).map(|a| a.id), manages: true })
+}
+
+/// What someone who does not run Spool may do: read the library, keep what they have
+/// watched, and sign out. Asking for more is done where players ask.
+fn a_viewer_may(method: &axum::http::Method, path: &str) -> bool {
+    let read = matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD);
+    let parts: Vec<&str> = path.trim_start_matches("/api/").split('/').collect();
+    matches!(
+        (read, parts.as_slice()),
+        (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching"])
+            | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"])
+            | (false, ["logout" | "watched"])
+    )
+}
+
+/// Browsers signed in as someone, kept so that signing in is not needed again after every
+/// upgrade.
+fn save_sessions(app: &App) {
+    let all = app.sessions.lock().clone();
+    let _ = app.db.set_setting("sessions", &all);
+}
+
+/// Sign someone out of every browser, but the one named.
+pub(crate) fn sign_out_everywhere(app: &App, account: i64, but: Option<&str>) {
+    app.sessions.lock().retain(|token, whose| *whose != account || Some(token.as_str()) == but);
+    save_sessions(app);
 }
 
 /// Compare two secrets without the time taken giving away how much of a guess was right.
 pub(crate) fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
-}
-
-/// Sessions outlive a restart, so signing in is not needed again after every upgrade.
-fn save_sessions(app: &App) {
-    let all: Vec<String> = app.sessions.lock().iter().cloned().collect();
-    let _ = app.db.set_setting("sessions", &all);
 }
 
 /// Whether a name the app was reached by is one only this network can give it: an address,
@@ -146,38 +193,40 @@ async fn guard(State(app): State<App>, req: axum::extract::Request, next: axum::
     if changes && path.starts_with("/api/") && from_elsewhere(req.headers()) {
         return ApiError(StatusCode::FORBIDDEN, "a change can only be made from Spool's own pages".into()).into_response();
     }
-    let open = !path.starts_with("/api/") || path == "/api/login" || path == "/api/session";
-    if open || authorized(&app, req.headers()) {
-        next.run(req).await
-    } else {
-        ApiError(StatusCode::UNAUTHORIZED, "sign in required".into()).into_response()
+    if !path.starts_with("/api/") || path == "/api/login" || path == "/api/session" {
+        return next.run(req).await;
+    }
+    match who(&app, req.headers()) {
+        Some(w) if w.manages || a_viewer_may(req.method(), path) => {
+            let mut req = req;
+            req.extensions_mut().insert(w);
+            next.run(req).await
+        }
+        Some(_) => ApiError(StatusCode::FORBIDDEN, "only someone who runs Spool can do that".into()).into_response(),
+        None => ApiError(StatusCode::UNAUTHORIZED, "sign in required".into()).into_response(),
     }
 }
 
 async fn login(State(app): State<App>, from: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>, Json(body): Json<Value>) -> Response {
-    let g = app.settings.general();
     let from = from.map(|c| c.0 .0.ip());
     // A run of wrong guesses from one place shuts the door to it for a minute, which makes guessing hopeless.
     if !app.login_failures.take(from) {
         return ApiError(StatusCode::TOO_MANY_REQUESTS, "too many wrong passwords; wait a minute and try again".into()).into_response();
     }
-    if g.password.is_empty() || body["password"].as_str().is_some_and(|p| crate::settings::verify_password(&g.password, p)) {
-        app.login_failures.right(from);
-        let token = crate::settings::new_key();
-        {
-            let mut s = app.sessions.lock();
-            // A household has a handful of browsers; past that, the oldest are not worth keeping.
-            if s.len() >= 40 {
-                s.clear();
-            }
-            s.insert(token.clone());
+    let (name, given) = (body["name"].as_str().unwrap_or_default().trim(), body["password"].as_str().unwrap_or_default());
+    let person = app.db.accounts().ok().and_then(|all| all.into_iter().find(|a| a.enabled && a.name.eq_ignore_ascii_case(name)));
+    // One with no password signs in by name, as a player does.
+    match person.filter(|a| a.password.is_empty() || crate::settings::verify_password(&a.password, given)) {
+        Some(a) => {
+            app.login_failures.right(from);
+            tracing::info!(account = %a.name, "signed in to the web app");
+            ([(header::SET_COOKIE, new_session(&app, a.id))], Json(json!({"ok": true}))).into_response()
         }
-        save_sessions(&app);
-        ([(header::SET_COOKIE, format!("spool_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"))], Json(json!({"ok": true}))).into_response()
-    } else {
-        tracing::warn!(from = ?from, "wrong password at sign-in");
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-        ApiError(StatusCode::UNAUTHORIZED, "wrong password".into()).into_response()
+        None => {
+            tracing::warn!(from = ?from, "wrong name or password at sign-in");
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            ApiError(StatusCode::UNAUTHORIZED, "wrong name or password".into()).into_response()
+        }
     }
 }
 
@@ -189,8 +238,46 @@ async fn logout(State(app): State<App>, headers: HeaderMap) -> Response {
     ([(header::SET_COOKIE, "spool_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string())], Json(json!({"ok": true}))).into_response()
 }
 
-async fn session(State(app): State<App>, headers: HeaderMap) -> Json<Value> {
-    Json(json!({"required": !app.settings.general().password.is_empty(), "signed_in": authorized(&app, &headers)}))
+/// Start a browser's session as someone, and the cookie that carries it.
+fn new_session(app: &App, account: i64) -> String {
+    let token = crate::settings::new_key();
+    {
+        let mut s = app.sessions.lock();
+        // A household has a handful of browsers each; past that, the oldest are not worth keeping.
+        if s.len() >= 200 {
+            s.clear();
+        }
+        s.insert(token.clone(), account);
+    }
+    save_sessions(app);
+    format!("spool_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000")
+}
+
+/// Whether the app asks who you are, and who you are to it. While it is open, a browser is
+/// signed in as the first person who runs Spool, so that it stays theirs once passwords are
+/// given.
+async fn session(State(app): State<App>, headers: HeaderMap) -> Response {
+    let accounts = app.db.accounts().unwrap_or_default();
+    let w = who(&app, &headers);
+    let mut cookie = None;
+    if let (Some(Who { account: Some(id), .. }), false) = (w, session_cookie(&headers).is_some_and(|c| app.sessions.lock().contains_key(&c))) {
+        if !sign_in_required(&accounts) && headers.get("x-api-key").is_none() {
+            cookie = Some(new_session(&app, id));
+        }
+    }
+    let me = w.and_then(|w| w.account).and_then(|id| accounts.iter().find(|a| a.id == id)).map(|a| json!({"id": a.id, "name": a.name}));
+    let g = app.settings.general();
+    let body = Json(json!({
+        "required": sign_in_required(&accounts),
+        "signed_in": w.is_some(),
+        "me": me,
+        "manages": w.is_some_and(|w| w.manages),
+        "players": g.players_enabled.then_some(g.players_port),
+    }));
+    match cookie {
+        Some(c) => ([(header::SET_COOKIE, c)], body).into_response(),
+        None => body.into_response(),
+    }
 }
 
 // ---------------------------------------------------------------- status
@@ -212,8 +299,8 @@ async fn status(State(app): State<App>) -> R<Value> {
         }
     }
     warnings.extend(app.location_problems());
-    if g.password.is_empty() {
-        warnings.push("No password is set, so anyone on this network can use Spool. Set one in Settings → General.".into());
+    if !sign_in_required(&app.db.accounts()?) {
+        warnings.push("Nobody has a password, so anyone on this network can use Spool. Give yourself one under Settings → Players → People.".into());
     }
     if app.settings.servers().iter().all(|s| !s.enabled || s.host.is_empty()) {
         warnings.push("No usenet server is configured.".into());
@@ -256,8 +343,12 @@ async fn players(State(app): State<App>) -> Json<Value> {
     }))
 }
 
-async fn events(State(app): State<App>) -> Sse<impl Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
-    let stream = BroadcastStream::new(app.events.subscribe()).filter_map(|e| match e {
+async fn events(State(app): State<App>, who: Option<axum::Extension<Who>>) -> Sse<impl Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
+    let manages = Who::of(who).manages;
+    let stream = BroadcastStream::new(app.events.subscribe()).filter_map(move |e| match e {
+        // Someone who only watches hears that a title or a location changed, and nothing of
+        // what is downloaded, decided or wrong.
+        Ok(Event::Job { .. } | Event::Acquisition { .. } | Event::Decisions { .. } | Event::Attention | Event::Task { .. }) if !manages => None,
         Ok(ev) => serde_json::to_string(&ev).ok().map(|s| Ok(SseEvent::default().data(s))),
         // A slow client missed events: tell it to reload its state.
         Err(_) => Some(Ok(SseEvent::default().data(r#"{"type":"resync"}"#))),
@@ -310,6 +401,8 @@ fn api_routes() -> Router<App> {
         .route("/api/blocklist/clear", post(clear_blocklist))
         .route("/api/attention/dismiss-all", post(dismiss_all_attention))
         .route("/api/titles/{id}", get(get_title).patch(patch_title).delete(delete_title))
+        .route("/api/watched", post(watched::mark))
+        .route("/api/watching", get(watched::watching))
         .route("/api/titles/{id}/search", post(search_title))
         .route("/api/titles/{id}/refresh", post(refresh_title))
         .route("/api/titles/{id}/scan", post(scan_title))

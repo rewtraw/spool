@@ -6,7 +6,6 @@ pub(super) async fn get_general(State(app): State<App>) -> Json<General> {
     let mut g = app.settings.general();
     g.tmdb_api_key = mask(&g.tmdb_api_key);
     g.plex_token = mask(&g.plex_token);
-    g.password = mask(&g.password);
     g.opensubtitles_api_key = mask(&g.opensubtitles_api_key);
     g.opensubtitles_password = mask(&g.opensubtitles_password);
     for h in &mut g.links {
@@ -15,26 +14,14 @@ pub(super) async fn get_general(State(app): State<App>) -> Json<General> {
     Json(g)
 }
 
-pub(super) async fn put_general(State(app): State<App>, headers: HeaderMap, Json(mut g): Json<General>) -> Result<Response, ApiError> {
+pub(super) async fn put_general(State(app): State<App>, Json(mut g): Json<General>) -> Result<Response, ApiError> {
     let old = app.settings.general();
     g.tmdb_api_key = unmask(g.tmdb_api_key, &old.tmdb_api_key);
     g.plex_token = unmask(g.plex_token, &old.plex_token);
-    g.password = unmask(g.password, &old.password);
     g.opensubtitles_api_key = unmask(g.opensubtitles_api_key, &old.opensubtitles_api_key);
     g.opensubtitles_password = unmask(g.opensubtitles_password, &old.opensubtitles_password);
     if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password {
         *app.subtitle_login.lock() = None;
-    }
-    let mut cookie = None;
-    if g.password != old.password {
-        // A new password signs every other browser out; the one that set it stays in.
-        let mine = session_cookie(&headers).filter(|c| app.sessions.lock().contains(c)).unwrap_or_else(|| {
-            let token = crate::settings::new_key();
-            cookie = Some(format!("spool_session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000"));
-            token
-        });
-        *app.sessions.lock() = HashSet::from([mine]);
-        save_sessions(&app);
     }
     if g.mode == crate::settings::Mode::Active && old.mode != g.mode {
         if !app.volume_ok() {
@@ -77,10 +64,7 @@ pub(super) async fn put_general(State(app): State<App>, headers: HeaderMap, Json
     }
     app.apply_engine_config();
     app.sync_remotes();
-    Ok(match cookie {
-        Some(c) => ([(header::SET_COOKIE, c)], Json(json!({"ok": true}))).into_response(),
-        None => Json(json!({"ok": true})).into_response(),
-    })
+    Ok(Json(json!({"ok": true})).into_response())
 }
 
 pub(super) async fn get_naming(State(app): State<App>) -> Json<spool_core::naming::NamingConfig> {

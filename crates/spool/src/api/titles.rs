@@ -76,23 +76,30 @@ pub(super) fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<V
 }
 
 /// What a row in the title list is made from. Watched state is not part of it.
-pub(super) const LISTED: &[&str] = &["title", "episode", "file", "activity"];
+pub(super) const LISTED: &[&str] = &["title", "episode", "file", "activity", "watched_movie", "watched_episode"];
 
 /// The title list. With `since`, the answer carries the library's change count, and when that
 /// count is one this server handed out before, only the titles that changed after it and the
 /// ids of those that went. `full` says the list is everything and replaces what the caller had.
-pub(super) async fn list_titles(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
+pub(super) async fn list_titles(State(app): State<App>, who: Option<axum::Extension<Who>>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
+    let who = Who::of(who);
+    // Each with where the person asking stands with it.
+    let marked = |only: Option<&HashSet<i64>>| -> anyhow::Result<Vec<Value>> {
+        let mut titles = listed(&app, only)?;
+        super::watched::mark_list(&app, who, &mut titles)?;
+        Ok(titles)
+    };
     let Some(since) = q.get("since").map(|s| s.parse::<i64>().unwrap_or(0)) else {
-        return Ok(Json(json!(listed(&app, None)?)));
+        return Ok(Json(json!(marked(None)?)));
     };
     // Read the count first: a change that lands while the list is being put together is then
     // sent again next time, not missed.
     let revision = app.db.revision()?;
     if since <= 0 || since > revision || since < app.db.changes_floor()? {
-        return Ok(Json(json!({"revision": revision, "full": true, "titles": listed(&app, None)?, "removed": []})));
+        return Ok(Json(json!({"revision": revision, "full": true, "titles": marked(None)?, "removed": []})));
     }
     let touched: HashSet<i64> = app.db.changes_since(since, LISTED, u32::MAX)?.iter().map(|c| c.title_id).collect();
-    let titles = if touched.is_empty() { vec![] } else { listed(&app, Some(&touched))? };
+    let titles = if touched.is_empty() { vec![] } else { marked(Some(&touched))? };
     let still: HashSet<i64> = titles.iter().filter_map(|t| t["id"].as_i64()).collect();
     let mut removed: Vec<i64> = touched.difference(&still).copied().collect();
     removed.sort();
@@ -111,7 +118,8 @@ pub(super) async fn changes(State(app): State<App>, Query(q): Query<HashMap<Stri
     Ok(Json(json!({"revision": revision, "floor": floor, "complete": since >= floor && since <= revision, "more": list.len() as u32 == limit, "changes": list})))
 }
 
-pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+pub(super) async fn get_title(State(app): State<App>, who: Option<axum::Extension<Who>>, Path(id): Path<i64>) -> R<Value> {
+    let who = Who::of(who);
     let t = app.db.title(id)?.ok_or_else(|| not_found("title"))?;
     let (files, eps, profiles, active) = (app.db.file_counts()?, app.db.episode_counts()?, app.db.profiles()?, app.db.active_acquisitions()?);
     let mut v = summarize(&t, &files, &eps, &profiles, &active, &app.placement());
@@ -166,6 +174,16 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
         } else if !sources.is_empty() {
             let files: serde_json::Map<String, Value> = sources.iter().map(|f| (f.id.to_string(), json!(app.play_path(f)))).collect();
             v["play"] = json!({"port": port, "files": files});
+        }
+    }
+    super::watched::mark_title(&app, who, &t, &mut v)?;
+    // Someone who only watches is not shown how it was got: the releases weighed, what was
+    // downloaded and from where.
+    if !who.manages {
+        if let Some(o) = v.as_object_mut() {
+            for k in ["decisions", "history", "acquisitions", "saved"] {
+                o.remove(k);
+            }
         }
     }
     Ok(Json(v))

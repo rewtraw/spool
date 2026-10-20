@@ -7,7 +7,7 @@
 
   const saved = JSON.parse(localStorage.getItem('spool.library') ?? '{}');
   let kind = $state<'all' | 'movie' | 'series'>(saved.kind ?? 'all');
-  let show = $state<'all' | 'have' | 'missing' | 'incomplete' | 'compact' | 'nocompact' | 'monitored' | 'unmonitored'>(saved.show ?? 'all');
+  let show = $state<'all' | 'have' | 'missing' | 'incomplete' | 'compact' | 'nocompact' | 'monitored' | 'unmonitored' | 'unwatched' | 'watching' | 'watched'>(saved.show ?? 'all');
   let sort = $state<'title' | 'added' | 'year' | 'size'>(saved.sort ?? 'title');
   let layout = $state<'grid' | 'table'>(saved.layout ?? 'grid');
   /** Show each collection as one tile in place of its titles. */
@@ -53,6 +53,11 @@
       if (show === 'incomplete' && !(t.kind === 'series' && t.episodes_have > 0 && t.episodes_have < t.episodes_aired)) return false;
       if (show === 'compact' && !t.compact_count) return false;
       if (show === 'nocompact' && (t.compact_count || !have(t))) return false;
+      if (show === 'unwatched' && (!have(t) || t.watched?.done)) return false;
+      if (show === 'watching' && !(t.watched && !t.watched.done && t.watched.part)) return false;
+      if (show === 'watched' && !t.watched?.done) return false;
+      // Someone who only watches is shown what there is to watch.
+      if (!app.manages && !have(t)) return false;
       if (show === 'monitored' && !t.monitored) return false;
       if (show === 'unmonitored' && t.monitored) return false;
       if (q && !t.title.toLowerCase().includes(q) && String(t.year) !== q) return false;
@@ -200,10 +205,12 @@
 
 <header class="head">
   <h1>Library</h1>
-  <div class="row">
-    <button class="btn" onclick={() => (selecting ? stopSelecting() : (selecting = true))} aria-pressed={selecting}>{selecting ? 'Done' : 'Select'}</button>
-    <button class="btn primary" onclick={() => go('discover')}>Add</button>
-  </div>
+  {#if app.manages}
+    <div class="row">
+      <button class="btn" onclick={() => (selecting ? stopSelecting() : (selecting = true))} aria-pressed={selecting}>{selecting ? 'Done' : 'Select'}</button>
+      <button class="btn primary" onclick={() => go('discover')}>Add</button>
+    </div>
+  {/if}
 </header>
 
 <div class="bar">
@@ -220,8 +227,15 @@
     <option value="incomplete">Incomplete series</option>
     <option value="compact">Have a compact version</option>
     <option value="nocompact">Have files, no compact version</option>
-    <option value="monitored">Monitored</option>
-    <option value="unmonitored">Not monitored</option>
+    {#if app.me}
+      <option value="unwatched">Not watched</option>
+      <option value="watching">Part-way through</option>
+      <option value="watched">Watched</option>
+    {/if}
+    {#if app.manages}
+      <option value="monitored">Monitored</option>
+      <option value="unmonitored">Not monitored</option>
+    {/if}
   </select>
   {#if placeNames.length > 1}
     <select class="input narrow" bind:value={place} aria-label="Location">
@@ -254,7 +268,7 @@
       {:else}
         {@const t = e.t}
         {@const s = statusOf(t)}
-        <Tile href="#/title/{t.id}" src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} sub={`${t.year || ''}${t.kind === 'series' ? ' · Series' : ''}`} chip={s.label} tone={s.tone} dim={t.offline || (!t.monitored && !(t.file_count || t.episodes_have))} picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
+        <Tile href="#/title/{t.id}" src={t.poster_small ?? t.poster} title={t.title} kind={t.kind} sub={`${t.year || ''}${t.kind === 'series' ? ' · Series' : ''}`} chip={app.manages || t.offline ? s.label : ''} tone={s.tone} watched={selecting ? undefined : t.watched} dim={t.offline || (!t.monitored && !(t.file_count || t.episodes_have))} picked={picked[t.id]} onclick={(e) => selecting && pick(e, t)}>
           {#if selecting}<span class="check" class:on={picked[t.id]} aria-hidden="true">{picked[t.id] ? '✓' : ''}</span>{/if}
         </Tile>
       {/if}

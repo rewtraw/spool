@@ -83,7 +83,7 @@ Debian's and Ubuntu's `7zip` cannot open RAR archives. Spool unpacks the common 
 
 Then, in Settings:
 
-1. **General**: where movies and series live, where to download to, and a free [TMDB API key](https://www.themoviedb.org/settings/api) for movie lookups. Set a password if anyone else can reach the address.
+1. **General**: where movies and series live, where to download to, and a free [TMDB API key](https://www.themoviedb.org/settings/api) for movie lookups. If anyone else can reach the address, add yourself with a password under **Players**, People.
 2. **Usenet**: one or more providers.
 3. **Indexers**: one or more Newznab indexers.
 

@@ -123,8 +123,6 @@ pub struct General {
     /// Whether Spool writes its collections into Plex, as collection tags on the items.
     pub plex_collections: bool,
     pub ffprobe_path: String,
-    /// When set, the API and web app require it.
-    pub password: String,
     pub api_key: String,
     /// A second key that may only use the read-only MCP tools. Empty disables it.
     pub mcp_read_key: String,
@@ -193,7 +191,6 @@ impl Default for General {
             plex_on: true,
             plex_collections: false,
             ffprobe_path: String::new(),
-            password: String::new(),
             api_key: String::new(),
             mcp_read_key: String::new(),
             backup_dir: String::new(),
@@ -236,14 +233,8 @@ impl Settings {
     pub fn general(&self) -> General {
         self.db.get_setting("general")
     }
-    /// Save the general settings. Passwords are never stored as typed: whatever arrives in
-    /// the clear is replaced by a salted hash on the way in.
     pub fn set_general(&self, g: &General) -> anyhow::Result<()> {
-        let mut g = g.clone();
-        if !g.password.is_empty() && !is_hashed(&g.password) {
-            g.password = hash_password(&g.password)?;
-        }
-        self.db.set_setting("general", &g)
+        self.db.set_setting("general", g)
     }
     pub fn naming(&self) -> NamingConfig {
         self.db.get_setting("naming")

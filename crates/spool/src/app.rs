@@ -176,7 +176,8 @@ pub struct Inner {
     pub port: std::sync::OnceLock<u16>,
     /// The anime id list, once read.
     pub anime_list: Mutex<Option<Arc<crate::anime::Ids>>>,
-    pub sessions: Mutex<HashSet<String>>,
+    /// The browsers signed in to the web app, each with whose it is.
+    pub sessions: Mutex<HashMap<String, i64>>,
     /// Wrong passwords at sign-in lately, by where they came from.
     pub login_failures: Tries,
     /// Titles last turned away for lack of disk space, with the headroom there was at the time.
@@ -417,8 +418,16 @@ impl App {
     /// As [`start`], asking for film and series details at the given addresses (TMDB's, then
     /// TVmaze's) in place of the real ones.
     pub async fn start_with(data_dir: &Path, db: Db, sources: Option<(&str, &str)>) -> anyhow::Result<App> {
-        let sessions: HashSet<String> = db.get_setting::<Vec<String>>("sessions").into_iter().collect();
+        let sessions: HashMap<String, i64> = db.get_setting("sessions");
         let settings = Settings::new(db.clone());
+        // A password kept as typed, from before passwords were hashed or carried over from
+        // the app's own, is hashed before anyone signs in with it.
+        for mut a in db.accounts()? {
+            if !a.password.is_empty() && !crate::settings::is_hashed(&a.password) {
+                a.password = crate::settings::hash_password(&a.password)?;
+                db.save_account(&a)?;
+            }
+        }
         // API and MCP access always go through a key, so there is always one.
         let mut g = settings.general();
         if g.api_key.is_empty() {

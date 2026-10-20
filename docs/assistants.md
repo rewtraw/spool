@@ -4,7 +4,7 @@ Spool serves the [Model Context Protocol](https://modelcontextprotocol.io) at `/
 
 ## Connecting
 
-The endpoint always requires a key, whether or not the web app has a password. Spool makes a key when it first starts. Settings, General, AI access has a button that copies the command to add Spool to Claude Code:
+The endpoint always requires a key, whether or not anyone has a password for the web app. Spool makes a key when it first starts. Settings, General, AI access has a button that copies the command to add Spool to Claude Code:
 
 ```sh
 claude mcp add --transport http --scope user spool http://localhost:7979/mcp --header "Authorization: Bearer <key>"

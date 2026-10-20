@@ -23,7 +23,7 @@ pub(super) async fn accounts(State(app): State<App>) -> R<Value> {
         .map(|a| {
             let on: Vec<Value> = devices.iter().filter(|d| d.account_id == a.id).map(|d| json!({"id": device_name(&d.token), "name": d.name, "client": d.client, "created_at": d.created_at, "seen_at": d.seen_at})).collect();
             json!({
-                "id": a.id, "name": a.name, "enabled": a.enabled, "adds": a.adds, "compact_away": a.compact_away, "has_password": !a.password.is_empty(), "created_at": a.created_at,
+                "id": a.id, "name": a.name, "enabled": a.enabled, "adds": a.adds, "compact_away": a.compact_away, "manages": a.manages, "has_password": !a.password.is_empty(), "created_at": a.created_at,
                 "devices": on, "playing": playing.iter().filter(|p| p.account.eq_ignore_ascii_case(&a.name)).collect::<Vec<_>>(),
                 "totals": totals.get(&a.id).cloned().unwrap_or_default(),
             })
@@ -47,6 +47,8 @@ pub(super) struct AccountChange {
     adds: Option<bool>,
     /// Whether, away from home, the account is given compact versions and nothing else.
     compact_away: Option<bool>,
+    /// Whether the person may change what Spool does.
+    manages: Option<bool>,
 }
 
 fn named(name: &str) -> Result<String, ApiError> {
@@ -73,13 +75,36 @@ pub(super) async fn account_add(State(app): State<App>, Json(b): Json<AccountCha
     let name = named(b.name.as_deref().unwrap_or_default())?;
     taken(&app, &name, 0)?;
     let id = app.db.add_account(&name, &hashed(b.password.as_deref().unwrap_or_default())?)?;
-    tracing::info!(account = %name, "an account for a player was added");
+    if b.manages == Some(true) {
+        let mut a = app.db.account(id)?.ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such account".into()))?;
+        a.manages = true;
+        app.db.save_account(&a)?;
+    }
+    tracing::info!(account = %name, "someone was added");
     Ok(Json(json!({"id": id})))
 }
 
+/// Changes to people are made one at a time, so two at once cannot each find somebody else
+/// still running Spool and together leave nobody.
+static PEOPLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Somebody has to be left who can sign in and run Spool, or nobody could set it right again.
+fn someone_runs_it(app: &App, changed: Option<&Account>, gone: Option<i64>) -> Result<(), ApiError> {
+    let left = app.db.accounts()?.into_iter().filter(|a| Some(a.id) != gone).map(|a| match changed {
+        Some(c) if c.id == a.id => c.clone(),
+        _ => a,
+    });
+    match left.into_iter().any(|a| a.enabled && a.manages) {
+        true => Ok(()),
+        false => Err(ApiError(StatusCode::CONFLICT, "somebody has to be left who runs Spool; let someone else run it first".into())),
+    }
+}
+
 /// Change an account. A new password, or an account that may no longer sign in, signs its
-/// players out: what they hold was given under what no longer stands.
-pub(super) async fn account_change(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<AccountChange>) -> R<Value> {
+/// players and its browsers out: what they hold was given under what no longer stands. The
+/// browser that changed its own password stays in.
+pub(super) async fn account_change(State(app): State<App>, headers: HeaderMap, Path(id): Path<i64>, Json(b): Json<AccountChange>) -> R<Value> {
+    let _one_at_a_time = PEOPLE.lock().unwrap_or_else(|e| e.into_inner());
     let mut a = app.db.account(id)?.ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "no such account".into()))?;
     if let Some(name) = &b.name {
         a.name = named(name)?;
@@ -100,9 +125,15 @@ pub(super) async fn account_change(State(app): State<App>, Path(id): Path<i64>, 
     if let Some(compact) = b.compact_away {
         a.compact_away = compact;
     }
+    if let Some(manages) = b.manages {
+        a.manages = manages;
+    }
+    someone_runs_it(&app, Some(&a), None)?;
     app.db.save_account(&a)?;
     if out {
         app.db.remove_devices(None, Some(id))?;
+        let mine = session_cookie(&headers).filter(|_| a.enabled);
+        sign_out_everywhere(&app, id, mine.as_deref());
     }
     app.reload_players();
     Ok(Json(json!({"ok": true})))
@@ -110,7 +141,10 @@ pub(super) async fn account_change(State(app): State<App>, Path(id): Path<i64>, 
 
 /// Remove an account, with what it watched and played.
 pub(super) async fn account_remove(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+    let _one_at_a_time = PEOPLE.lock().unwrap_or_else(|e| e.into_inner());
+    someone_runs_it(&app, None, Some(id))?;
     app.db.remove_account(id)?;
+    sign_out_everywhere(&app, id, None);
     app.reload_players();
     Ok(Json(json!({"ok": true})))
 }

@@ -170,20 +170,25 @@ pub fn mark(app: &App, lib: &Library, id: Id, played: bool) -> Result<()> {
         Some(Node::Season(t, s)) => lib.episodes_of(t.id).iter().filter(|e| e.season == s).map(|e| ("episode", e.id)).collect(),
         _ => vec![],
     };
-    let now = crate::db::now();
     for (kind, ref_id) in targets {
-        let mut w = app.db.watched(lib.account, kind, ref_id)?;
-        w.played = played;
-        w.position = 0.0;
-        if played {
-            w.play_count = w.play_count.max(1);
-            w.last_played_at = now;
-        } else {
-            w.play_count = 0;
-        }
-        app.db.save_watched(lib.account, kind, ref_id, &w)?;
+        set(app, lib.account, kind, ref_id, played)?;
     }
     Ok(())
+}
+
+/// Mark one film or episode watched or not, for one person, wherever the word came from.
+/// Either way the place they stopped is forgotten.
+pub(crate) fn set(app: &App, account: i64, kind: &str, ref_id: i64, played: bool) -> Result<()> {
+    let mut w = app.db.watched(account, kind, ref_id)?;
+    w.played = played;
+    w.position = 0.0;
+    if played {
+        w.play_count = w.play_count.max(1);
+        w.last_played_at = crate::db::now();
+    } else {
+        w.play_count = 0;
+    }
+    app.db.save_watched(account, kind, ref_id, &w)
 }
 
 pub fn favorite(app: &App, lib: &Library, id: Id, on: bool) -> Result<()> {
