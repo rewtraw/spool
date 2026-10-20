@@ -45,6 +45,7 @@ impl App {
         // Before anything is searched for: is it anime, and is this film a series somewhere else?
         self.learn_anime(&mut title).await;
         self.ask_series_source(&mut title).await;
+        self.learn_series_tmdb(&mut title).await;
         self.ensure_title_path_on(&mut title, location)?;
         self.db.save_title(&mut title)?;
         for mut e in episodes {
@@ -69,6 +70,26 @@ impl App {
     /// single episode's name carries the film's whole title; knowing beforehand is what keeps
     /// one from being downloaded as the film. A source that cannot be reached is asked again
     /// at the next refresh.
+    /// A series' id at the film source, which players such as Infuse find it by. Asked once it is
+    /// known by another id; one the library already gives another series is not taken, and a
+    /// source that cannot be reached is asked again at the next refresh.
+    async fn learn_series_tmdb(&self, t: &mut Title) {
+        if t.kind != Kind::Series || t.tmdb_id.is_some() {
+            return;
+        }
+        let key = self.settings.general().tmdb_api_key;
+        match self.meta.series_tmdb(&key, t.tvdb_id, t.imdb_id.as_deref()).await {
+            Ok(Some(tmdb)) => {
+                let taken = self.db.find_title(Kind::Series, Some(tmdb), None).ok().flatten().is_some_and(|other| other.id != t.id);
+                if !taken {
+                    t.tmdb_id = Some(tmdb);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => tracing::debug!(title = %t.title, error = %e, "the film source could not be asked for a series' id"),
+        }
+    }
+
     async fn ask_series_source(&self, t: &mut Title) {
         if t.kind != Kind::Movie {
             return;
@@ -209,6 +230,8 @@ impl App {
                     _ => return Ok(()),
                 };
                 t.tvmaze_id = m.tvmaze_id.or(t.tvmaze_id);
+                t.imdb_id = t.imdb_id.or(m.imdb_id);
+                self.learn_series_tmdb(&mut t).await;
                 t.original_language = m.original_language.or(t.original_language);
                 t.overview = m.overview;
                 t.status = m.status;

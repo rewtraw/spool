@@ -117,11 +117,14 @@
   const compactCount = $derived((t?.files ?? []).filter((f) => f.compact_of).length);
   const compacting = $derived((t?.files ?? []).some((f) => f.compacting));
   let making = $state<any>(null);
-  // Infuse is on Apple devices only, and takes a film or an episode by its address. The file
-  // comes from the players' door of whatever name this app was reached by.
+  // Infuse is on Apple devices only. A title the film source knows is opened in Infuse's own
+  // library, which plays it from Spool's door signed in as its person, so what is watched and
+  // where they stopped come back here. One it does not know is handed over by its address,
+  // from the players' door of whatever name this app was reached by, and is played on its own.
   const apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
   const infuseAt = (path?: string) => (apple && t?.play && path ? `infuse://x-callback-url/play?url=${encodeURIComponent(`http://${location.hostname}:${t.play.port}${path}`)}` : '');
-  const infuse = $derived(infuseAt(t?.play?.path));
+  const infuse = $derived(apple && t?.play && t.tmdb_id ? `infuse://movie/${t.tmdb_id}?play` : infuseAt(t?.play?.path));
+  const infuseEpisode = (e: Episode, f: MediaFile) => (apple && t?.play?.files?.[f.id] && t.tmdb_id ? `infuse://series/${t.tmdb_id}-${e.season}-${e.episode}?play` : infuseAt(t?.play?.files?.[f.id]));
   // An encode sends no events as it goes, so the page asks while one of this title's is in line.
   $effect(() => {
     if (!compacting) {
@@ -354,7 +357,7 @@
         {/if}
         {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url || infuse}
           <div class="links">
-            {#if infuse}<a href={infuse} title="Plays the film in Infuse on this device, straight from Spool. Played this way it is not marked as watched.">Play in Infuse <span aria-hidden="true">↗</span></a>{/if}
+            {#if infuse}<a href={infuse} title="Plays the film in Infuse on this device.">Play in Infuse <span aria-hidden="true">↗</span></a>{/if}
             {#if t.plex?.url}<a href={t.plex.url} target="_blank" rel="noopener noreferrer">Open in Plex <span aria-hidden="true">↗</span></a>{/if}
             {#if t.kind === 'movie' && (t.tmdb_id || t.imdb_id)}<a href={t.tmdb_id ? `https://letterboxd.com/tmdb/${t.tmdb_id}` : `https://letterboxd.com/imdb/${t.imdb_id}`} target="_blank" rel="noopener noreferrer">Letterboxd <span aria-hidden="true">↗</span></a>{/if}
           </div>
@@ -492,7 +495,7 @@
                     {:else if !f && e.monitored}<span class="chip warn">Missing</span>
                     {:else if !f}<span class="chip">Not here</span>{/if}
                     {#if !f && aired(e) && locked}<span class="faint small" title={locked}>{t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `no searching on ${t.location}`}</span>{/if}
-                    {#if f && infuseAt(t.play?.files?.[f.id])}<a class="btn small ghost" href={infuseAt(t.play?.files?.[f.id])} title="Plays the episode in Infuse on this device, straight from Spool. Played this way it is not marked as watched." aria-label="Play episode {e.episode} in Infuse">Play</a>{/if}
+                    {#if f && infuseEpisode(e, f)}<a class="btn small ghost" href={infuseEpisode(e, f)} title="Plays the episode in Infuse on this device." aria-label="Play episode {e.episode} in Infuse">Play</a>{/if}
                     {#if aired(e) && !locked}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
                     {#if f}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}

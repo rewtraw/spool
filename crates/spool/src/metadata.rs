@@ -222,6 +222,22 @@ impl Metadata {
         Ok(v.get("movie_results").and_then(|r| r.as_array()).and_then(|r| r.first()).and_then(|m| m.get("id")).and_then(|x| x.as_u64()).map(|x| x as u32))
     }
 
+    /// The film source's id for a series known by its TVDB or IMDb id. Players such as Infuse
+    /// find a series in their library by it.
+    pub async fn series_tmdb(&self, key: &str, tvdb_id: Option<u32>, imdb_id: Option<&str>) -> Result<Option<u32>> {
+        if key.is_empty() {
+            return Ok(None);
+        }
+        let asks = tvdb_id.map(|id| (id.to_string(), "tvdb_id")).into_iter().chain(imdb_id.map(|id| (id.to_string(), "imdb_id")));
+        for (id, source) in asks {
+            let v = self.get(&format!("{}/find/{id}?external_source={source}&api_key={key}", self.tmdb_base)).await?;
+            if let Some(found) = v.get("tv_results").and_then(|r| r.as_array()).and_then(|r| r.first()).and_then(|m| m.get("id")).and_then(|x| x.as_u64()) {
+                return Ok(Some(found as u32));
+            }
+        }
+        Ok(None)
+    }
+
     pub async fn movie(&self, key: &str, tmdb_id: u32) -> Result<Title> {
         if key.is_empty() {
             bail!("add a TMDB API key in Settings to fetch movie details");

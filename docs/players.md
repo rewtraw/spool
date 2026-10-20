@@ -25,9 +25,12 @@ If an Apple TV says an error occurred on a server it received through iCloud fro
 
 ## Playing from a title's page
 
-On an iPhone, iPad or Mac, a film's page in Spool has a **Play in Infuse** link, and each episode a series has on disk has a **Play** button. It hands that one film or episode to Infuse on the device you are holding, on a ticket that lasts twelve hours, and Infuse plays it straight away. It is a quick way to start something you were just looking at.
+On an iPhone, iPad or Mac, a film's page in Spool has a **Play in Infuse** link, and each episode a series has on disk has a **Play** button. It opens that film or episode in Infuse on the device you are holding and plays it straight away. It is a quick way to start something you were just looking at.
 
-Played this way the file is on its own, outside Infuse's library: it is not marked as watched, your place in it is not kept, and the next episode does not follow. For that, play it from the library in Infuse as usual. The link does nothing on a device without Infuse.
+- **From Infuse's library.** The link asks Infuse for the title by its id at [TMDB](https://www.themoviedb.org), and Infuse plays it from its share of Spool, signed in as the person that device uses. What is watched and where you stopped come back to Spool as when you start it in Infuse. The share has to be added in Infuse on that device, and Infuse has to have finished reading it; for a title just added, refresh the share in Infuse first. Spool learns a series' TMDB id when the series is added or its details are next refreshed.
+- **On its own.** A title TMDB does not know is handed to Infuse by its address instead, on a ticket that lasts twelve hours. Played this way it is outside Infuse's library: it is not marked as watched, your place in it is not kept, and the next episode does not follow.
+
+The link does nothing on a device without Infuse.
 
 ## What the player gets
 
