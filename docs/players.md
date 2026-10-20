@@ -23,11 +23,11 @@ In a container, publish the port as well (`8096:8096`) and give the player the m
 
 If an Apple TV says an error occurred on a server it received through iCloud from another device, remove the server on the Apple TV and add it again there.
 
-## Playing a film from its page
+## Playing from a title's page
 
-On an iPhone, iPad or Mac, a film's page in Spool has a **Play in Infuse** link. It hands that one film to Infuse on the device you are holding, on a ticket that lasts twelve hours, and Infuse plays it straight away. It is a quick way to start something you were just looking at.
+On an iPhone, iPad or Mac, a film's page in Spool has a **Play in Infuse** link, and each episode a series has on disk has a **Play** button. It hands that one film or episode to Infuse on the device you are holding, on a ticket that lasts twelve hours, and Infuse plays it straight away. It is a quick way to start something you were just looking at.
 
-Played this way the film is on its own, outside Infuse's library: it is not marked as watched and your place in it is not kept. For that, play it from the library in Infuse as usual. The link is for films, not episodes, and does nothing on a device without Infuse.
+Played this way the file is on its own, outside Infuse's library: it is not marked as watched, your place in it is not kept, and the next episode does not follow. For that, play it from the library in Infuse as usual. The link does nothing on a device without Infuse.
 
 ## What the player gets
 

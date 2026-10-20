@@ -376,7 +376,7 @@ impl Call {
             // One file, to whoever holds a ticket the app made out for it.
             (true, ["spool", "play", _]) => {
                 let file = self.q.get("ticket").and_then(|t| self.app.played_on(t)).and_then(|id| self.app.db.file(id).ok().flatten());
-                let Some(path) = file.and_then(|f| Some(self.app.db.title(f.title_id).ok()??.file_path(&f))) else { return (StatusCode::UNAUTHORIZED, "The link has run out. Open the film's page again.").into_response() };
+                let Some(path) = file.and_then(|f| Some(self.app.db.title(f.title_id).ok()??.file_path(&f))) else { return (StatusCode::UNAUTHORIZED, "The link has run out. Open its page in Spool again.").into_response() };
                 return crate::serve::send_file(&path, &self.headers, head).await;
             }
             (true, ["items", id, "images", kind, ..]) => return media::image(&self.app, id, kind, self.q.get("tag").is_some(), head).await,

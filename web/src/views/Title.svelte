@@ -8,7 +8,7 @@
 
   let { id }: { id: number } = $props();
 
-  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string }; play?: { port: number; path: string }; local?: { extras: any[]; art: any[]; themes: string[]; notes: any } };
+  type Detail = Title & { episodes: Episode[]; files: MediaFile[]; decisions: Decision[]; history: any[]; acquisitions: any[]; saved: any[]; plex?: { rating_key: string; url: string | null; section: string }; play?: { port: number; path?: string; files?: Record<string, string> }; local?: { extras: any[]; art: any[]; themes: string[]; notes: any } };
   let t = $state<Detail | null>(null);
   let missing = $state(false);
   let searching = $state('');
@@ -117,10 +117,11 @@
   const compactCount = $derived((t?.files ?? []).filter((f) => f.compact_of).length);
   const compacting = $derived((t?.files ?? []).some((f) => f.compacting));
   let making = $state<any>(null);
-  // Infuse is on Apple devices only, and takes a film by its address. The film comes from
-  // the players' door of whatever name this app was reached by.
+  // Infuse is on Apple devices only, and takes a film or an episode by its address. The file
+  // comes from the players' door of whatever name this app was reached by.
   const apple = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
-  const infuse = $derived(apple && t?.play ? `infuse://x-callback-url/play?url=${encodeURIComponent(`http://${location.hostname}:${t.play.port}${t.play.path}`)}` : '');
+  const infuseAt = (path?: string) => (apple && t?.play && path ? `infuse://x-callback-url/play?url=${encodeURIComponent(`http://${location.hostname}:${t.play.port}${path}`)}` : '');
+  const infuse = $derived(infuseAt(t?.play?.path));
   // An encode sends no events as it goes, so the page asks while one of this title's is in line.
   $effect(() => {
     if (!compacting) {
@@ -302,91 +303,95 @@
   <div class="hero" style={t.fanart ? `--art:url("${t.fanart}")` : ''}>
     <div class="art"><Poster src={t.poster} title={t.title} kind={t.kind} /></div>
     <div class="info">
-      <a class="back" href="#/library">Library</a>
-      <h1>{t.title}</h1>
-      <div class="meta muted">
-        {[t.year || '', t.kind === 'movie' ? (t.runtime ? `${t.runtime} min` : '') : t.network, t.kind === 'series' ? (t.status === 'ended' ? 'Ended' : t.status === 'continuing' ? 'Continuing' : '') : t.studio, t.genres.slice(0, 3).join(', '), t.original_language && t.original_language !== 'english' ? `In ${t.original_language[0].toUpperCase()}${t.original_language.slice(1)}` : ''].filter(Boolean).join(' · ')}
+      <div class="heading">
+        <a class="back" href="#/library">Library</a>
+        <h1>{t.title}</h1>
+        <div class="meta muted">
+          {[t.year || '', t.kind === 'movie' ? (t.runtime ? `${t.runtime} min` : '') : t.network, t.kind === 'series' ? (t.status === 'ended' ? 'Ended' : t.status === 'continuing' ? 'Continuing' : '') : t.studio, t.genres.slice(0, 3).join(', '), t.original_language && t.original_language !== 'english' ? `In ${t.original_language[0].toUpperCase()}${t.original_language.slice(1)}` : ''].filter(Boolean).join(' · ')}
+        </div>
       </div>
-      {#if t.overview}<p class="overview">{t.overview}</p>{/if}
-      {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
-      {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
-      {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
-      {#if t.moving}
-        <p class="where warn">{#if t.move?.total}Being moved to {t.move.to}: {bytes(t.move.done)} of {bytes(t.move.total)}.{:else}Waiting to be moved.{/if} It stays playable where it is until the move is done.
-          <button class="btn small" onclick={cancelMove}>Cancel the move</button></p>
-      {:else if elsewhere.length && t.path && !t.offline}
+      <div class="details">
+        {#if t.overview}<p class="overview">{t.overview}</p>{/if}
+        {#if t.offline}<p class="where warn">Kept on {t.location ?? 'a location'} that cannot be reached right now. Spool leaves it alone until the location is back.</p>
+        {:else if t.read_only}<p class="where">Kept on {t.location}, which Spool only reads: it can be played, and nothing here is downloaded, replaced or deleted.</p>
+        {:else if t.location}<p class="where">Kept on {t.location}.</p>{/if}
+        {#if t.moving}
+          <p class="where warn">{#if t.move?.total}Being moved to {t.move.to}: {bytes(t.move.done)} of {bytes(t.move.total)}.{:else}Waiting to be moved.{/if} It stays playable where it is until the move is done.
+            <button class="btn small" onclick={cancelMove}>Cancel the move</button></p>
+        {:else if elsewhere.length && t.path && !t.offline}
+          <p class="where">
+            <select class="pick" aria-label="Move to another location" value={''} onchange={(e) => { moveTo(e.currentTarget.value); e.currentTarget.value = ''; }}>
+              <option value="">Move to…</option>
+              {#each elsewhere as p}<option value={p.id}>{p.name}{p.free != null ? ` (${bytes(p.free)} free)` : ''}</option>{/each}
+            </select>
+          </p>
+        {/if}
         <p class="where">
-          <select class="pick" aria-label="Move to another location" value={''} onchange={(e) => { moveTo(e.currentTarget.value); e.currentTarget.value = ''; }}>
-            <option value="">Move to…</option>
-            {#each elsewhere as p}<option value={p.id}>{p.name}{p.free != null ? ` (${bytes(p.free)} free)` : ''}</option>{/each}
+          {#if inCollection}Part of <a class="link" href="#/collection/{inCollection.id}">{inCollection.name}</a>{#if myRole}, as {myRole === 'Alternative telling' ? 'an alternative telling' : `a ${myRole.toLowerCase()}`}{/if}.{/if}
+          <select class="pick" aria-label="Collection" value={''} onchange={(e) => { place(e.currentTarget.value); e.currentTarget.value = ''; }}>
+            <option value="">{inCollection ? 'Move…' : 'Put in a collection…'}</option>
+            {#each app.collections.filter((c) => c.id !== inCollection?.id) as c}<option value={c.id}>{c.name}</option>{/each}
+            <option value="new">A new collection…</option>
+            {#if inCollection}<option value="0">None</option>{/if}
+            <option value="auto">Where its sources put it</option>
           </select>
         </p>
-      {/if}
-      <p class="where">
-        {#if inCollection}Part of <a class="link" href="#/collection/{inCollection.id}">{inCollection.name}</a>{#if myRole}, as {myRole === 'Alternative telling' ? 'an alternative telling' : `a ${myRole.toLowerCase()}`}{/if}.{/if}
-        <select class="pick" aria-label="Collection" value={''} onchange={(e) => { place(e.currentTarget.value); e.currentTarget.value = ''; }}>
-          <option value="">{inCollection ? 'Move…' : 'Put in a collection…'}</option>
-          {#each app.collections.filter((c) => c.id !== inCollection?.id) as c}<option value={c.id}>{c.name}</option>{/each}
-          <option value="new">A new collection…</option>
-          {#if inCollection}<option value="0">None</option>{/if}
-          <option value="auto">Where its sources put it</option>
-        </select>
-      </p>
-      {#if t.kind === 'movie' && t.in_episodes && !t.files.length}
-        <div class="notice warn episodes">
-          {#if t.as_series}
-            <span>This is listed as a film here and as a series of {t.as_series.episodes} episodes elsewhere, and it is posted as the episodes. Spool turns single episodes down for a film, so as a film it may never arrive.</span>
-            <button class="btn small" onclick={toSeries}>Switch to series</button>
-          {:else}
-            <span>This film is posted in episodes, and Spool turns single episodes down for a film. No series of the same name was found; if there is one, add it from Discover and remove this film.</span>
+        {#if t.kind === 'movie' && t.in_episodes && !t.files.length}
+          <div class="notice warn episodes">
+            {#if t.as_series}
+              <span>This is listed as a film here and as a series of {t.as_series.episodes} episodes elsewhere, and it is posted as the episodes. Spool turns single episodes down for a film, so as a film it may never arrive.</span>
+              <button class="btn small" onclick={toSeries}>Switch to series</button>
+            {:else}
+              <span>This film is posted in episodes, and Spool turns single episodes down for a film. No series of the same name was found; if there is one, add it from Discover and remove this film.</span>
+            {/if}
+          </div>
+        {/if}
+        {#if locked}
+          <div class="notice lockednote">
+            <b>No searching here.</b> {locked}
+            {#if t.read_only && !t.offline && !t.moving}To get a different copy of it, use <b>Move to…</b> above to put it on a location Spool manages, or turn on "Let Spool change files here" for {t.location} under <a class="link" href="#/settings/general">Settings</a>.{/if}
+          </div>
+        {/if}
+        {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url || infuse}
+          <div class="links">
+            {#if infuse}<a href={infuse} title="Plays the film in Infuse on this device, straight from Spool. Played this way it is not marked as watched.">Play in Infuse <span aria-hidden="true">↗</span></a>{/if}
+            {#if t.plex?.url}<a href={t.plex.url} target="_blank" rel="noopener noreferrer">Open in Plex <span aria-hidden="true">↗</span></a>{/if}
+            {#if t.kind === 'movie' && (t.tmdb_id || t.imdb_id)}<a href={t.tmdb_id ? `https://letterboxd.com/tmdb/${t.tmdb_id}` : `https://letterboxd.com/imdb/${t.imdb_id}`} target="_blank" rel="noopener noreferrer">Letterboxd <span aria-hidden="true">↗</span></a>{/if}
+          </div>
+        {/if}
+        <div class="controls">
+          <label class="check"><input type="checkbox" checked={t.monitored} onchange={(e) => patch({ monitored: e.currentTarget.checked })} /> Monitored</label>
+          <select class="input auto" value={t.profile_id} onchange={(e) => patch({ profile_id: Number(e.currentTarget.value) })} aria-label="Quality profile">
+            {#each app.profiles.filter((p) => p.kind === (t!.kind === 'movie' ? 'movie' : 'tv')) as p}<option value={p.id}>{p.name}</option>{/each}
+            {#if !app.profiles.some((p) => p.id === t!.profile_id)}<option value={t.profile_id}>No profile</option>{/if}
+          </select>
+          {#if t.kind === 'movie'}
+            <select class="input auto" value={t.minimum_availability} onchange={(e) => patch({ minimum_availability: e.currentTarget.value })} aria-label="Get it once it is">
+              <option value="announced">Get as soon as announced</option>
+              <option value="in_cinemas">Get once in cinemas</option>
+              <option value="released">Get once released for home</option>
+            </select>
           {/if}
         </div>
-      {/if}
-      {#if locked}
-        <div class="notice lockednote">
-          <b>No searching here.</b> {locked}
-          {#if t.read_only && !t.offline && !t.moving}To get a different copy of it, use <b>Move to…</b> above to put it on a location Spool manages, or turn on "Let Spool change files here" for {t.location} under <a class="link" href="#/settings/general">Settings</a>.{/if}
+        <div class="row wrap">
+          {#if !locked}
+          <button class="btn primary" disabled={!!searching} onclick={() => search({}, true, 'all')}>
+            {searching === 'all' ? 'Searching…' : !isActive ? 'Search' : t.kind === 'movie' ? 'Search and download' : 'Get missing episodes'}
+          </button>
+          {#if isActive}<button class="btn" disabled={!!searching} onclick={() => search({}, false, 'look')}>{searching === 'look' ? 'Searching…' : 'Show releases'}</button>{/if}
+          {#if isActive && oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ smaller: true }, true, 'smaller')}>{searching === 'smaller' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
+          {/if}
+          {#if t.kind === 'series' && t.files.length}
+            {#if compacting}<button class="btn ghost" onclick={() => cancelCompact()}>Cancel compact versions</button>
+            {:else}<button class="btn ghost" title="Make a smaller copy of each episode that would gain from one, kept beside it for playing away from home" onclick={() => makeCompact()}>Make compact versions</button>{/if}
+          {/if}
+          <button class="btn ghost" onclick={async () => { await act(() => api.post(`/titles/${id}/refresh`), 'Details refreshed'); load(); }}>Refresh details</button>
+          <button class="btn ghost" onclick={async () => { const r = await act(() => api.post(`/titles/${id}/scan`)); if (r) { searchMessage = `Scan: ${r.files_found} files on disk, ${r.files_added} added, ${r.files_missing} missing`; load(); } }}>Rescan folder</button>
+          <button class="btn ghost danger" onclick={() => (confirmDelete = true)}>Remove</button>
         </div>
-      {/if}
-      {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url || infuse}
-        <div class="links">
-          {#if infuse}<a href={infuse} title="Plays the film in Infuse on this device, straight from Spool. Played this way it is not marked as watched.">Play in Infuse <span aria-hidden="true">↗</span></a>{/if}
-          {#if t.plex?.url}<a href={t.plex.url} target="_blank" rel="noopener noreferrer">Open in Plex <span aria-hidden="true">↗</span></a>{/if}
-          {#if t.kind === 'movie' && (t.tmdb_id || t.imdb_id)}<a href={t.tmdb_id ? `https://letterboxd.com/tmdb/${t.tmdb_id}` : `https://letterboxd.com/imdb/${t.imdb_id}`} target="_blank" rel="noopener noreferrer">Letterboxd <span aria-hidden="true">↗</span></a>{/if}
-        </div>
-      {/if}
-      <div class="controls">
-        <label class="check"><input type="checkbox" checked={t.monitored} onchange={(e) => patch({ monitored: e.currentTarget.checked })} /> Monitored</label>
-        <select class="input auto" value={t.profile_id} onchange={(e) => patch({ profile_id: Number(e.currentTarget.value) })} aria-label="Quality profile">
-          {#each app.profiles.filter((p) => p.kind === (t!.kind === 'movie' ? 'movie' : 'tv')) as p}<option value={p.id}>{p.name}</option>{/each}
-          {#if !app.profiles.some((p) => p.id === t!.profile_id)}<option value={t.profile_id}>No profile</option>{/if}
-        </select>
-        {#if t.kind === 'movie'}
-          <select class="input auto" value={t.minimum_availability} onchange={(e) => patch({ minimum_availability: e.currentTarget.value })} aria-label="Get it once it is">
-            <option value="announced">Get as soon as announced</option>
-            <option value="in_cinemas">Get once in cinemas</option>
-            <option value="released">Get once released for home</option>
-          </select>
-        {/if}
+        {#if !isActive}<p class="faint small">Shadow mode: searching shows what Spool would choose, and downloads nothing.</p>{/if}
+        {#if searchMessage}<p class="muted" role="status">{searchMessage}</p>{/if}
       </div>
-      <div class="row wrap">
-        {#if !locked}
-        <button class="btn primary" disabled={!!searching} onclick={() => search({}, true, 'all')}>
-          {searching === 'all' ? 'Searching…' : !isActive ? 'Search' : t.kind === 'movie' ? 'Search and download' : 'Get missing episodes'}
-        </button>
-        {#if isActive}<button class="btn" disabled={!!searching} onclick={() => search({}, false, 'look')}>{searching === 'look' ? 'Searching…' : 'Show releases'}</button>{/if}
-        {#if isActive && oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ smaller: true }, true, 'smaller')}>{searching === 'smaller' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
-        {/if}
-        {#if t.kind === 'series' && t.files.length}
-          {#if compacting}<button class="btn ghost" onclick={() => cancelCompact()}>Cancel compact versions</button>
-          {:else}<button class="btn ghost" title="Make a smaller copy of each episode that would gain from one, kept beside it for playing away from home" onclick={() => makeCompact()}>Make compact versions</button>{/if}
-        {/if}
-        <button class="btn ghost" onclick={async () => { await act(() => api.post(`/titles/${id}/refresh`), 'Details refreshed'); load(); }}>Refresh details</button>
-        <button class="btn ghost" onclick={async () => { const r = await act(() => api.post(`/titles/${id}/scan`)); if (r) { searchMessage = `Scan: ${r.files_found} files on disk, ${r.files_added} added, ${r.files_missing} missing`; load(); } }}>Rescan folder</button>
-        <button class="btn ghost danger" onclick={() => (confirmDelete = true)}>Remove</button>
-      </div>
-      {#if !isActive}<p class="faint small">Shadow mode: searching shows what Spool would choose, and downloads nothing.</p>{/if}
-      {#if searchMessage}<p class="muted" role="status">{searchMessage}</p>{/if}
     </div>
   </div>
 
@@ -487,6 +492,7 @@
                     {:else if !f && e.monitored}<span class="chip warn">Missing</span>
                     {:else if !f}<span class="chip">Not here</span>{/if}
                     {#if !f && aired(e) && locked}<span class="faint small" title={locked}>{t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `no searching on ${t.location}`}</span>{/if}
+                    {#if f && infuseAt(t.play?.files?.[f.id])}<a class="btn small ghost" href={infuseAt(t.play?.files?.[f.id])} title="Plays the episode in Infuse on this device, straight from Spool. Played this way it is not marked as watched." aria-label="Play episode {e.episode} in Infuse">Play</a>{/if}
                     {#if aired(e) && !locked}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
                     {#if f}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}
@@ -673,7 +679,7 @@
     background-position: center 20%;
     z-index: -1;
   }
-  .info {
+  .info, .heading, .details {
     display: grid;
     /* One column as wide as the space, not as wide as its widest control. */
     grid-template-columns: minmax(0, 1fr);
@@ -893,10 +899,14 @@
       gap: 14px;
       padding: 14px;
     }
-    .overview {
-      -webkit-line-clamp: 3;
-      line-clamp: 3;
-    }
+    /* Only the heading shares the poster row; everything else gets the full card. */
+    .info { display: contents; }
+    .heading { grid-column: 2; }
+    .details { grid-column: 1 / -1; }
+    .controls .auto { min-width: 0; max-width: 100%; }
+    .pick { margin-left: 0; max-width: 100%; }
+    .hero h1 { overflow-wrap: anywhere; }
+
     .hero :global(.btn) {
       white-space: normal;
       height: auto;
@@ -905,6 +915,11 @@
     }
     .ep {
       flex-wrap: wrap;
+      row-gap: 6px;
+    }
+    /* The episode's name keeps the first line to itself; what it has and can do goes beneath. */
+    .ep .grow {
+      flex: 1 1 calc(100% - 84px);
     }
   }
 </style>

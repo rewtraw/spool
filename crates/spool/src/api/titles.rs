@@ -155,10 +155,17 @@ pub(super) async fn get_title(State(app): State<App>, Path(id): Path<i64>) -> R<
             v["plex"] = json!({"rating_key": item.rating_key, "url": idx.url(item), "section": item.section});
         }
     }
-    // A film can be handed to a player on the device the app is open on.
-    if t.kind == Kind::Movie && v["offline"].as_bool() != Some(true) {
-        if let Some(file) = app.compact_sources(&t)?.first() {
-            v["play"] = json!({"port": app.settings.general().players_port, "path": app.play_path(file)});
+    // A film, or each episode held, can be handed to a player on the device the app is open on.
+    if v["offline"].as_bool() != Some(true) {
+        let sources = app.compact_sources(&t)?;
+        let port = app.settings.general().players_port;
+        if t.kind == Kind::Movie {
+            if let Some(file) = sources.first() {
+                v["play"] = json!({"port": port, "path": app.play_path(file)});
+            }
+        } else if !sources.is_empty() {
+            let files: serde_json::Map<String, Value> = sources.iter().map(|f| (f.id.to_string(), json!(app.play_path(f)))).collect();
+            v["play"] = json!({"port": port, "files": files});
         }
     }
     Ok(Json(v))
