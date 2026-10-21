@@ -373,7 +373,8 @@ pub fn track(path: &Path, stream: u32, streams: &[(u32, String, String)]) -> Opt
         })?;
         // Only an index made by mkvmerge or ffmpeg, which list every line of subtitles, is
         // taken to be whole: from anything else a line missing from it would be lost.
-        if !(made_by.contains("libmatroska") || made_by.starts_with("Lavf")) || scale == 0 {
+        // mkvmerge asked to leave out what changes from run to run names itself so.
+        if !(made_by.contains("libmatroska") || made_by.starts_with("Lavf") || made_by == "no_variable_data") || scale == 0 {
             return None;
         }
     }
