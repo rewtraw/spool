@@ -4857,6 +4857,15 @@ async fn what_is_said_across_the_library_is_found_with_the_lines_around_it() {
     .unwrap();
     let ok = std::process::Command::new("ffmpeg").args(["-v", "error", "-y", "-i"]).arg(&plain).arg("-i").arg(&inside).args(["-map", "0", "-map", "1", "-c", "copy", "-c:s", "srt", "-metadata:s:s:0", "language=eng"]).arg(&city_file).status().unwrap();
     assert!(ok.success());
+    // Read by the file's own index of where its lines are, as they are by ffmpeg reading it all.
+    let streams = |codec: &str| vec![(0, "video".to_string(), "h264".to_string()), (1, "audio".into(), "aac".into()), (2, "subtitle".into(), codec.to_string())];
+    let quick = spool::mkv::track(&city_file, 2, &streams("subrip")).expect("ffmpeg writes where each line is");
+    let tool = spool::subs::ffmpeg_installed().unwrap();
+    let slow = spool::captions::every_line(&tool, &city_file, &spool::captions::Source::Text(2), &[], &std::sync::atomic::AtomicBool::new(false)).await.unwrap();
+    assert_eq!(quick.iter().map(|c| (c.start, c.end, spool::captions::clean(&c.text))).collect::<Vec<_>>(), slow.iter().map(|c| (c.start, c.end, c.text.clone())).collect::<Vec<_>>());
+    assert!(spool::mkv::track(&city_file, 2, &streams("ass")).is_none(), "a track that is not what it should be is left to ffmpeg");
+    let shifted = vec![(0, "video".to_string(), "h264".to_string()), (1, "subtitle".into(), "subrip".into()), (2, "audio".into(), "aac".into())];
+    assert!(spool::mkv::track(&city_file, 1, &shifted).is_none(), "nor are tracks whose places differ from ffmpeg's");
     let (heat, heat_file) = film("Heat", 1995, "tt0113277");
     std::fs::write(&heat_file, &video).unwrap();
     let beside = heat_file.with_file_name("Heat (1995) [Bluray-1080p].en.srt");

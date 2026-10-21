@@ -148,7 +148,7 @@
         {#each [0, 1.5, 3, 5, 10, 20, 30] as n}<option value={n}>{n} s after</option>{/each}
       </select>
     </label>
-    <select class="input small-select" bind:value={subtitles} aria-label="Subtitles">
+    <select class="input small-select fit" bind:value={subtitles} aria-label="Subtitles">
       <option value="auto">Subtitles when needed</option>
       <option value="on">Subtitles always</option>
       <option value="none">No subtitles</option>
@@ -226,6 +226,10 @@
   }
   .line {
     font-weight: 600;
+  }
+  .fit {
+    width: auto;
+    flex: none;
   }
   .opt {
     display: inline-flex;

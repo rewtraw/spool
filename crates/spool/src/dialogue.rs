@@ -70,7 +70,7 @@ const KEEP_FOR_HAND: i64 = 10;
 /// How long before OpenSubtitles is asked again about a file it had nothing for.
 const ASK_AGAIN: i64 = 30 * 86400;
 /// How alike in meaning a passage must be to what is looked for to be found by that alone.
-const ALIKE: f32 = 0.42;
+const ALIKE: f32 = 0.45;
 
 /// What the index covers, and what it is doing.
 #[derive(Clone, Debug, Default, Serialize)]
@@ -545,6 +545,8 @@ struct Want {
     source: Option<Source>,
     /// What it is read from and the file as it is: read again when this changes.
     mark: String,
+    /// The file's streams, to read a track inside it by.
+    streams: Vec<(u32, String, String)>,
     away: bool,
     /// Whether subtitles may be put beside it.
     can_take: bool,
@@ -555,10 +557,10 @@ struct Want {
 fn readable(title: &Title, file: &MediaFile, language: &str) -> Option<(Source, String)> {
     let ours = |code: &str| crate::subs::language_code(code) == Some(language);
     if let Some(info) = &file.media_info {
-        let mut text: Vec<_> = info.streams.iter().filter(|s| s.kind == "subtitle" && crate::captions::is_text(&s.codec) && !s.forced && ours(&s.language)).collect();
+        let mut text: Vec<_> = info.streams.iter().filter(|s| s.kind == "subtitle" && crate::captions::is_text(&s.codec) && !s.forced && !crate::captions::only_signs(s) && ours(&s.language)).collect();
         text.sort_by_key(|s| crate::captions::for_the_hard_of_hearing(s));
         if let Some(s) = text.first() {
-            return Some((Source::Text(s.index), format!("track {}", s.index)));
+            return Some((Source::Text(s.index), format!("track {} {}", s.index, s.codec)));
         }
     }
     if file.base.is_some() {
@@ -605,6 +607,7 @@ impl App {
                     }
                 }
                 let mark = format!("{} {} {}", file.rel_path, file.size, source.as_ref().map(|s| s.1.as_str()).unwrap_or("none"));
+                let streams = file.media_info.as_ref().map(crate::captions::streams_of).unwrap_or_default();
                 out.push(Want {
                     file_id: file.id,
                     title_id: title.id,
@@ -612,6 +615,7 @@ impl App {
                     path: title.file_path(&file),
                     source: source.map(|s| s.0),
                     mark,
+                    streams,
                     away: !places.online_at(title.folder_of(&file)),
                     can_take: can_take && file.base.is_none(),
                 });
@@ -727,7 +731,7 @@ impl App {
                 let Some(source) = &want.source else { continue };
                 self.dialogue.doing(&format!("Reading what is said in {}", self.dialogue_label(want)));
                 // A share that stops answering does not hold everything up.
-                let read = tokio::time::timeout(Duration::from_secs(1200), crate::captions::every_line(&tool, &want.path, source, &never)).await.unwrap_or_else(|_| Err(anyhow!("reading it took too long")));
+                let read = tokio::time::timeout(Duration::from_secs(1200), crate::captions::every_line(&tool, &want.path, source, &want.streams, &never)).await.unwrap_or_else(|_| Err(anyhow!("reading it took too long")));
                 match read {
                     Ok(cues) => self.dialogue.put(want, &tidy(cues))?,
                     Err(e) => {

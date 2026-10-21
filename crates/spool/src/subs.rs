@@ -659,35 +659,43 @@ impl App {
 
     /// The subtitle tracks inside a video that are text, as (position among its subtitle
     /// tracks, language). Picture-based tracks, as on Blu-ray, cannot be read as times and words.
-    async fn written_tracks(&self, video: &Path) -> Vec<(usize, String)> {
-        let Some(tool) = self.ffmpeg_path().map(|p| p.with_file_name("ffprobe")).filter(|p| p.is_file()) else { return vec![] };
-        let Ok(out) = tokio::process::Command::new(tool).args(["-v", "error", "-select_streams", "s", "-show_entries", "stream=codec_name:stream_tags=language", "-of", "json"]).arg(video).output().await else { return vec![] };
+    /// The streams inside a file, each one's number, kind and codec; and of them the
+    /// subtitles, text first and then pictures, whose times say as much about when lines are
+    /// spoken.
+    async fn written_tracks(&self, video: &Path) -> (Vec<(u32, String, String)>, Vec<(u32, String)>) {
+        let Some(tool) = self.ffmpeg_path().map(|p| p.with_file_name("ffprobe")).filter(|p| p.is_file()) else { return (vec![], vec![]) };
+        let Ok(out) = tokio::process::Command::new(tool).args(["-v", "error", "-show_entries", "stream=index,codec_type,codec_name", "-of", "json"]).arg(video).output().await else { return (vec![], vec![]) };
         let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
-        v["streams"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .enumerate()
-            // The "forced" flag is set wrongly too often to go by; a track of only signs and
-            // songs is told apart later by how little it says.
-            .filter(|(_, s)| matches!(s["codec_name"].as_str(), Some("subrip" | "ass" | "ssa" | "mov_text" | "webvtt" | "text")))
-            .map(|(i, s)| (i, s["tags"]["language"].as_str().and_then(language_code).unwrap_or("und").to_string()))
-            .collect()
+        let streams: Vec<(u32, String, String)> = v["streams"].as_array().into_iter().flatten().filter_map(|s| Some((s["index"].as_u64()? as u32, s["codec_type"].as_str()?.to_string(), s["codec_name"].as_str().unwrap_or("").to_string()))).collect();
+        // The "forced" flag is set wrongly too often to go by; a track of only signs and
+        // songs is told apart later by how little it says.
+        let mut subtitles: Vec<(u32, String)> = streams.iter().filter(|s| s.1 == "subtitle" && matches!(s.2.as_str(), "subrip" | "ass" | "ssa" | "mov_text" | "webvtt" | "text" | "hdmv_pgs_subtitle")).map(|s| (s.0, s.2.clone())).collect();
+        subtitles.sort_by_key(|(_, codec)| codec == "hdmv_pgs_subtitle");
+        (streams, subtitles)
     }
 
-    async fn read_written(&self, video: &Path, position: usize) -> Result<Vec<Cue>> {
+    /// A track inside a file, read where its lines lie when the file says where, and otherwise
+    /// by reading it all. Pictures are only read where the file says.
+    async fn read_written(&self, video: &Path, index: u32, codec: &str, streams: &[(u32, String, String)]) -> Result<Vec<Cue>> {
+        let (path, all) = (video.to_path_buf(), streams.to_vec());
+        if let Some(cues) = tokio::task::spawn_blocking(move || crate::mkv::track(&path, index, &all)).await? {
+            return Ok(cues);
+        }
+        if codec == "hdmv_pgs_subtitle" {
+            return Ok(vec![]);
+        }
         let tool = self.ffmpeg_path().ok_or_else(|| anyhow!("ffmpeg is not installed"))?;
-        let out = tokio::process::Command::new(tool).args(["-v", "error", "-nostdin", "-i"]).arg(video).args(["-map", &format!("0:s:{position}"), "-f", "srt", "-"]).kill_on_drop(true).output().await?;
+        let out = tokio::process::Command::new(tool).args(["-v", "error", "-nostdin", "-i"]).arg(video).args(["-map", &format!("0:{index}"), "-f", "srt", "-"]).kill_on_drop(true).output().await?;
         Ok(parse_srt(&decode(&out.stdout)))
     }
 
-    /// The fullest text track inside the video, as a shape to check other subtitles against.
     async fn written_shape(&self, r: &Reference) -> Option<Vec<f32>> {
         // A track of signs and songs, or a handful of translated captions, says too little.
         const ENOUGH: usize = 60;
         let mut best: Vec<Cue> = vec![];
-        for (position, _) in self.written_tracks(&r.video).await.into_iter().take(3) {
-            let cues = self.read_written(&r.video, position).await.unwrap_or_default();
+        let (streams, subtitles) = self.written_tracks(&r.video).await;
+        for (index, codec) in subtitles.into_iter().take(3) {
+            let cues = self.read_written(&r.video, index, &codec, &streams).await.unwrap_or_default();
             if cues.len() > best.len() {
                 best = cues;
             }

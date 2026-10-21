@@ -45,6 +45,13 @@ fn is_picture(codec: &str) -> bool {
     matches!(codec, "hdmv_pgs_subtitle" | "dvd_subtitle" | "dvb_subtitle")
 }
 
+/// A track of only the words shown on screen, signs and songs, though not marked forced, as
+/// anime often has beside the full subtitles.
+pub(crate) fn only_signs(s: &Stream) -> bool {
+    let t = s.title.to_lowercase();
+    t.contains("sign") || t.contains("song") || t.contains("forced")
+}
+
 pub(crate) fn for_the_hard_of_hearing(s: &Stream) -> bool {
     let t = s.title.to_lowercase();
     t.contains("sdh") || t.contains("hearing") || t.split(|c: char| !c.is_alphanumeric()).any(|w| w == "cc")
@@ -68,7 +75,7 @@ pub fn choose(info: &MediaInfo, beside: &[(Sidecar, PathBuf)], heard: Option<&st
     let mut found: Vec<((u8, u8, u8), Source)> = vec![];
     for s in info.streams.iter().filter(|s| s.kind == "subtitle" && ours(&s.language)) {
         let kind = if is_text(&s.codec) { 0 } else if is_picture(&s.codec) { 2 } else { continue };
-        found.push(((s.forced as u8, for_the_hard_of_hearing(s) as u8, kind), if kind == 0 { Source::Text(s.index) } else { Source::Picture(s.index) }));
+        found.push((((s.forced || only_signs(s)) as u8, for_the_hard_of_hearing(s) as u8, kind), if kind == 0 { Source::Text(s.index) } else { Source::Picture(s.index) }));
     }
     for (s, path) in beside.iter().filter(|(s, _)| ours(&s.language)) {
         found.push(((s.forced as u8, s.hearing_impaired as u8, 1), Source::Beside(path.clone())));
@@ -120,11 +127,24 @@ pub async fn cues(tool: &Path, src: &Path, source: &Source, start: f64, seconds:
         .collect())
 }
 
+/// The streams of a file as [`crate::mkv::track`] takes them: each one's number, kind and codec.
+pub fn streams_of(info: &MediaInfo) -> Vec<(u32, String, String)> {
+    info.streams.iter().map(|s| (s.index, s.kind.clone(), s.codec.clone())).collect()
+}
+
 /// Every line of subtitles that are text, from start to end, cleaned of how to show them.
 /// Reading a track inside a file reads the whole file.
-pub async fn every_line(tool: &Path, src: &Path, source: &Source, stop: &AtomicBool) -> Result<Vec<Cue>> {
+/// `streams` are the file's streams, as [`crate::mkv::track`] takes them.
+pub async fn every_line(tool: &Path, src: &Path, source: &Source, streams: &[(u32, String, String)], stop: &AtomicBool) -> Result<Vec<Cue>> {
     let all = match source {
-        Source::Text(index) => read_track(tool, src, *index, &[], stop).await?,
+        Source::Text(index) => {
+            // Where the file's index says where each line is, only the lines are read.
+            let (path, index, streams) = (src.to_path_buf(), *index, streams.to_vec());
+            match tokio::task::spawn_blocking(move || crate::mkv::track(&path, index, &streams)).await? {
+                Some(cues) => cues,
+                None => read_track(tool, src, index, &[], stop).await?,
+            }
+        }
         Source::Beside(path) => crate::subs::parse_srt(&crate::subs::decode(&tokio::fs::read(path).await?)),
         Source::Picture(_) => return Ok(vec![]),
     };
@@ -355,6 +375,10 @@ mod tests {
         let beside = Sidecar { language: "en".into(), rel_path: "a.en.srt".into(), source: "found".into(), release: String::new(), hearing_impaired: false, forced: false, sync: None };
         assert_eq!(choose(&pictures, &[(beside, PathBuf::from("/a.en.srt"))], Some("ja"), "en", "auto").unwrap().source, Source::Beside(PathBuf::from("/a.en.srt")));
         assert_eq!(choose(&pictures, &[], Some("en"), "en", "auto"), None, "no forced lines, so nothing");
+        // A track of signs and songs, as anime has, counts as the lines always shown even unmarked.
+        let anime = MediaInfo { streams: vec![stream(3, "ass", "eng", false, "Signs & Songs"), stream(4, "ass", "eng", false, "Full Subtitles")], ..Default::default() };
+        assert_eq!(choose(&anime, &[], Some("ja"), "en", "auto").unwrap().source, Source::Text(4));
+        assert_eq!(choose(&anime, &[], Some("en"), "en", "auto").unwrap().source, Source::Text(3));
     }
 
     #[test]

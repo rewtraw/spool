@@ -19,6 +19,7 @@ pub mod local;
 pub mod locations;
 pub mod mcp;
 pub mod metadata;
+pub mod mkv;
 pub mod migrate;
 pub mod models;
 pub mod names;
