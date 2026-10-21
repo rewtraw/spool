@@ -10,11 +10,13 @@
   import Archive from './views/Archive.svelte';
   import Settings from './views/Settings.svelte';
   import CollectionView from './views/Collection.svelte';
+  import Clips from './views/Clips.svelte';
 
   const nav = [
     { id: 'home', label: 'Home', icon: 'M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
     { id: 'library', label: 'Library', icon: 'M4 4h4v16H4zM10 4h4v16h-4zM16.5 5.2l3.8-1 3 14.6-3.8 1z' },
     { id: 'discover', label: 'Discover', icon: 'M11 4a7 7 0 1 0 4.4 12.5L20 21l1.4-1.4-4.6-4.6A7 7 0 0 0 11 4zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+    { id: 'clips', label: 'Clips', icon: 'M9.6 7.2A3.5 3.5 0 1 0 8 8.9L10.6 12 8 15.1a3.5 3.5 0 1 0 1.6 1.7L12 14l7.5 8H22L9.6 7.2zM6.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0 11a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM22 2h-2.5L13.4 9l1.3 1.5z' },
     { id: 'activity', label: 'Activity', icon: 'M12 3v10.6l-3.3-3.3-1.4 1.4L12 16.4l4.7-4.7-1.4-1.4L12 13.6zM5 19h14v2H5z' },
     { id: 'archive', label: 'Archive', icon: 'M3 4h18v5H3zm2 7h14v9H5zm4 2.5v2h6v-2z' },
     { id: 'settings', label: 'Settings', icon: 'M4 6h10v2H4zm12 0h4v2h-4zM4 11h4v2H4zm6 0h10v2H10zM4 16h10v2H4zm12 0h4v2h-4zM14 4.5h2v5h-2zM8 9.5h2v5H8zM14 14.5h2v5h-2z' },
@@ -39,7 +41,7 @@
   }
 
   // Someone who only watches has the library, and asks for more where players ask.
-  const shown = $derived(app.manages ? nav : nav.filter((n) => n.id === 'home' || n.id === 'library'));
+  const shown = $derived(app.manages ? nav : nav.filter((n) => ['home', 'library', 'clips'].includes(n.id)));
   const askAt = $derived(!app.manages && app.playersPort ? `http://${location.hostname}:${app.playersPort}/` : '');
 
   const active = $derived(route.view === 'title' || route.view === 'collection' ? 'library' : route.view);
@@ -105,11 +107,12 @@
       {#if !app.online}
         <div class="offline" role="status">Lost contact with Spool. Reconnecting…</div>
       {/if}
-      {#if !app.manages && !['home', 'library', 'title', 'collection'].includes(route.view)}<div class="empty">Only someone who runs Spool can open this. <a href="#/home">Go home</a></div>
+      {#if !app.manages && !['home', 'library', 'title', 'collection', 'clips'].includes(route.view)}<div class="empty">Only someone who runs Spool can open this. <a href="#/home">Go home</a></div>
       {:else if route.view === 'home'}<Home />
       {:else if route.view === 'library'}<Library />
       {:else if route.view === 'title'}{#key route.arg}<TitleView id={Number(route.arg)} />{/key}
       {:else if route.view === 'collection'}{#key route.arg}<CollectionView id={Number(route.arg)} />{/key}
+      {:else if route.view === 'clips'}<Clips />
       {:else if route.view === 'discover'}<Discover />
       {:else if route.view === 'activity'}<Activity />
       {:else if route.view === 'archive'}<Archive />
@@ -323,11 +326,12 @@
       flex-direction: column;
       gap: 3px;
       height: 48px;
-      padding: 0 8px;
+      padding: 0 2px;
       font-size: 11px;
       justify-content: center;
       position: relative;
       flex: 1;
+      min-width: 0;
     }
     .badge {
       position: absolute;

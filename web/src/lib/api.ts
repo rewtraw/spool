@@ -117,6 +117,32 @@ export interface Collection {
 }
 
 /** Where the person signed in stands with a film, an episode or a series. */
+/** A clip cut from a film or an episode. */
+export interface Clip {
+  id: number;
+  title_id: number | null;
+  episode_id: number | null;
+  name: string;
+  /** What it was cut from, in words. */
+  from: string;
+  start: number;
+  seconds: number;
+  state: 'making' | 'ready' | 'failed';
+  error: string;
+  size: number;
+  width: number;
+  height: number;
+  created_at: number;
+  /** What its link is known by: the link plays it without signing in. */
+  link: string;
+  /** How far it has got while it is being made, from 0 to 1. */
+  progress: number | null;
+  /** Who made it. */
+  by: string | null;
+  /** Whether whoever is signed in may remove it. */
+  yours: boolean;
+}
+
 export interface Watched {
   done: boolean;
   /** How much of it is seen, from 0 to 1: of a film or an episode its running time, of a series its episodes. */

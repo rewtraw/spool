@@ -4,6 +4,7 @@
   import { age, ago, bytes, duration, fullDate, pct, qualityName, STATE_LABEL } from '../lib/format';
   import Subtitles from '../components/Subtitles.svelte';
   import Poster from '../components/Poster.svelte';
+  import ClipMaker from '../components/ClipMaker.svelte';
   import JobLine from '../components/JobLine.svelte';
 
   let { id }: { id: number } = $props();
@@ -389,6 +390,9 @@
               {#if !w.done && seenCount}<div class="progress" role="progressbar" aria-label="Episodes watched" aria-valuenow={Math.round(pct(seenCount, toWatch.length))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(seenCount, toWatch.length)}%"></i></div>{/if}
             {/if}
           </div>
+        {/if}
+        {#if !t.offline && (t.kind === 'movie' ? t.files.some((f) => !f.compact_of) : t.episodes.some((e) => e.file_id))}
+          <div class="clipping"><ClipMaker titleId={t.id} kind={t.kind} episodes={t.episodes} watched={t.watched_episodes ?? {}} filmPosition={t.kind === 'movie' && t.watched && !t.watched.done ? (t.watched.position ?? 0) : 0} /></div>
         {/if}
         {#if app.manages}
         <div class="controls">
@@ -883,6 +887,9 @@
     max-width: 420px;
   }
   /* An episode's tick: hollow until it is watched. */
+  .clipping {
+    margin: 4px 0 10px;
+  }
   .seen-toggle {
     flex: none;
     width: 28px;

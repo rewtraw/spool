@@ -49,6 +49,13 @@ export function duration(secs: number | null | undefined): string {
   return m ? `${h} hr ${m} min` : `${h} hr`;
 }
 
+/** A time as a clock: 1:02:05, or 2:05 under an hour. */
+export function clock(secs: number): string {
+  const s = Math.max(0, Math.round(secs));
+  const two = (n: number) => String(n).padStart(2, '0');
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(s % 60)}` : `${Math.floor(s / 60)}:${two(s % 60)}`;
+}
+
 export function ago(ts: number): string {
   if (!ts) return '';
   const s = Date.now() / 1000 - ts;

@@ -24,6 +24,8 @@ pub enum Event {
     Task { name: String, running: bool, message: String },
     /// A location came back or went away, which changes how its titles are listed.
     Locations,
+    /// A clip was asked for, was made, could not be, or was removed.
+    Clip { id: i64 },
 }
 
 /// How long a player stays signed in without being seen, in seconds: ninety days.

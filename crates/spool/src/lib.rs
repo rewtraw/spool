@@ -9,6 +9,7 @@ pub mod archive;
 pub mod asks;
 pub mod art;
 pub mod catalog;
+pub mod clips;
 pub mod db;
 pub mod import;
 pub mod jellyfin;

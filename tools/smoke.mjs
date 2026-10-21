@@ -129,6 +129,7 @@ const pages = [
   ['library', '#/library', ['Library', ...(titles.length ? [titles[0].title.slice(0, 12)] : [])], true],
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
+  ['clips', '#/clips', ['Clips', 'Make a clip'], true],
   ['archive', '#/archive', ['Archive'], true],
   ['settings-general', '#/settings/general', ['Mode', 'Downloads', 'Connections'], false],
   ['settings-players', '#/settings/players', ['People', 'Asked for', 'Lately'], true],
@@ -143,7 +144,7 @@ const pages = [
   ['settings-maintenance', '#/settings/maintenance', ['Read indexer feeds', 'Recycled files'], true],
 ];
 const film = titles.find((t) => t.kind === 'movie' && t.file_count > 0) ?? titles[0];
-if (film) pages.push(['title', `#/title/${film.id}`, [film.title.slice(0, 12), 'Monitored'], true]);
+if (film) pages.push(['title', `#/title/${film.id}`, [film.title.slice(0, 12), 'Monitored', 'Make a clip'], true]);
 if (collections[0]) pages.push(['collection', `#/collection/${collections[0].id}`, [collections[0].name.slice(0, 12), 'in the library'], true]);
 
 if (shots) mkdirSync(shots, { recursive: true });

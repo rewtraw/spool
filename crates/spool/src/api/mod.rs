@@ -34,6 +34,7 @@ mod collections;
 mod locations;
 mod compact;
 mod players;
+mod clips;
 use titles::*;
 use subtitles::*;
 use activity::*;
@@ -43,6 +44,7 @@ use upkeep::*;
 use collections::*;
 use locations::*;
 use compact::*;
+use clips::*;
 
 #[derive(rust_embed::RustEmbed)]
 #[folder = "../../web/dist"]
@@ -139,9 +141,9 @@ fn a_viewer_may(method: &axum::http::Method, path: &str) -> bool {
     let parts: Vec<&str> = path.trim_start_matches("/api/").split('/').collect();
     matches!(
         (read, parts.as_slice()),
-        (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching"])
-            | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"])
-            | (false, ["logout" | "watched"])
+        (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching" | "clips"])
+            | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"] | ["clips", ..])
+            | (false, ["logout" | "watched" | "clips"] | ["clips", _])
     )
 }
 
@@ -346,7 +348,7 @@ async fn players(State(app): State<App>) -> Json<Value> {
 async fn events(State(app): State<App>, who: Option<axum::Extension<Who>>) -> Sse<impl Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
     let manages = Who::of(who).manages;
     let stream = BroadcastStream::new(app.events.subscribe()).filter_map(move |e| match e {
-        // Someone who only watches hears that a title or a location changed, and nothing of
+        // Someone who only watches hears that a title, a location or a clip changed, and nothing of
         // what is downloaded, decided or wrong.
         Ok(Event::Job { .. } | Event::Acquisition { .. } | Event::Decisions { .. } | Event::Attention | Event::Task { .. }) if !manages => None,
         Ok(ev) => serde_json::to_string(&ev).ok().map(|s| Ok(SseEvent::default().data(s))),
@@ -384,6 +386,11 @@ fn api_routes() -> Router<App> {
         .route("/api/busy", get(busy))
         .route("/api/titles", get(list_titles).post(add_title))
         .route("/api/titles/bulk", post(bulk_titles))
+        .route("/api/clips", get(list_clips).post(add_clip))
+        .route("/api/clips/{id}", get(get_clip).delete(delete_clip))
+        .route("/api/clips/{id}/video", get(clip_video))
+        .route("/api/clips/{id}/still", get(clip_still))
+        .route("/clip/{file}", get(shared_clip))
         .route("/api/accounts", get(accounts).post(account_add))
         .route("/api/accounts/{id}", put(account_change).delete(account_remove))
         .route("/api/accounts/{id}/devices/{device}", delete(device_remove))

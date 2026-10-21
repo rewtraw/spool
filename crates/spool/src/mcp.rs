@@ -22,6 +22,7 @@ const INSTRUCTIONS: &str = "Spool finds, downloads and files movies and TV for o
 Start with `status` for the overall picture or `find_title` to get a title's id; most other tools take that id. \
 `diagnose` answers \"why has this not downloaded\" in one call. Sizes are in GB. \
 Disk space is tight: check `status` before starting large downloads. \
+`make_clip` cuts a short shareable MP4 from a film or episode and gives its file path. \
 Tools that delete files need `confirm: true` and should only be called when the person asked for that deletion.";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -243,6 +244,15 @@ const TOOLS: &[Tool] = &[
     Tool { name: "film_to_series", read: false, destructive: false, description: "Turn a film that is posted in episodes into the series it is listed as elsewhere: the film's entry, which must have no file, is replaced by the series with the same monitoring, and a download of the film that turned out to be an episode is filed as that episode. Use when title_detail shows in_episodes with an as_series listing.", schema: || obj(json!({"title_id": {"type": "integer"}}), &["title_id"]) },
     Tool { name: "discover", read: true, destructive: false, description: "Search for something to add, films and series together, with whether each is already in the library. Anime is also looked up on AniList, so a romanised name finds it and an OVA that is listed as a film is marked as posted in episodes, with the series to add in its place. Gives the tmdb_id or tvmaze_id that add_title takes.", schema: || obj(json!({"query": {"type": "string"}}), &["query"]) },
     Tool { name: "profile_fit", read: true, destructive: false, description: "How each quality profile fits the files of the titles that use it, location by location: how many files are in a quality the profile does not allow, how many are over its size target, and how many it would replace. A profile that does not describe what is on disk is harmless while nothing is monitored and will try to change the files once something is.", schema: || obj(json!({}), &[]) },
+    Tool {
+        name: "make_clip",
+        read: false,
+        destructive: false,
+        description: "Cut a clip from a film or an episode, to keep or send on: H.264 MP4 up to 1080p with stereo AAC in the household's language, HDR brought down to ordinary colour, ready to stream before it has all arrived. Waits until it is made (seconds, a minute for a long one) and gives the file's path on the machine Spool runs on. Start is written as 30m, 1h2m5s, 1:02:05 or seconds; length is up to 10 minutes, 30 seconds when not given. For a series give season and episode.",
+        schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "start": {"type": "string", "description": "Where it starts: 30m, 1h2m5s, 1:02:05 or a number of seconds."}, "seconds": {"type": "number", "description": "How long it runs, in seconds. Default 30, at most 600."}, "name": {"type": "string", "description": "What to call it. Defaults to the title and the time."}}), &["title_id", "start"]),
+    },
+    Tool { name: "clips", read: true, destructive: false, description: "The clips that have been cut, newest first: what each is from, where it starts and how long it runs, its size, whether it is ready, and its file's path on the machine Spool runs on.", schema: || obj(json!({}), &[]) },
+    Tool { name: "delete_clip", read: false, destructive: true, description: "Remove a clip and its file. Needs confirm=true.", schema: || obj(json!({"clip_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["clip_id"]) },
 ];
 
 fn gb(bytes: &Value) -> Value {
@@ -405,6 +415,14 @@ impl Mcp {
 
     async fn post(&self, path: &str, body: Value) -> Result<Value, String> {
         self.api(Method::POST, path, Some(body)).await
+    }
+
+    fn clip_row(&self, c: &crate::clips::Clip) -> Value {
+        json!({
+            "clip_id": c.id, "name": c.name, "from": c.from, "starts_at": crate::clips::clock(c.start), "seconds": (c.seconds * 10.0).round() / 10.0, "state": c.state,
+            "error": if c.error.is_empty() { Value::Null } else { json!(c.error) }, "size_mb": (c.size as f64 / 1e5).round() / 10.0, "size": format!("{}x{}", c.width, c.height),
+            "file": if c.state == "ready" { json!(self.app.clip_video(c.id)) } else { Value::Null }, "made": when(&json!(c.created_at)),
+        })
     }
 
     fn profile_id(&self, name: &str, kind: &str) -> Result<i64, String> {
@@ -699,6 +717,34 @@ impl Mcp {
                 };
                 let t = self.post("/api/titles", json!({"kind": kind, "tmdb_id": a["tmdb_id"], "tvmaze_id": a["tvmaze_id"], "profile_id": profile, "monitored": a["monitored"].as_bool().unwrap_or(true), "search": a["search"].as_bool().unwrap_or(true)})).await?;
                 Ok(json!({"added": t["title"], "year": t["year"], "title_id": t["id"], "monitored": t["monitored"], "path": t["path"], "searching": a["search"].as_bool().unwrap_or(true)}))
+            }
+            "make_clip" => {
+                let mut body = json!({"title_id": int("title_id")?, "start": a["start"].clone()});
+                for k in ["season", "episode", "seconds", "name"] {
+                    if !a[k].is_null() {
+                        body[k] = a[k].clone();
+                    }
+                }
+                let made = self.post("/api/clips", body).await?;
+                let id = made["id"].as_i64().ok_or("the clip was not recorded")?;
+                // A clip takes seconds; a long one from a far disk, a minute or two.
+                for _ in 0..600 {
+                    match self.app.db.clip(id).map_err(|e| e.to_string())? {
+                        Some(c) if c.state == "making" => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
+                        Some(c) if c.state == "failed" => return Err(format!("the clip could not be made: {}", c.error)),
+                        Some(c) => return Ok(self.clip_row(&c)),
+                        None => return Err("the clip was removed while it was being made".into()),
+                    }
+                }
+                Ok(json!({"clip_id": id, "state": "making", "note": "still being made; ask clips for it in a while"}))
+            }
+            "clips" => Ok(json!(self.app.db.clips().map_err(|e| e.to_string())?.iter().map(|c| self.clip_row(c)).collect::<Vec<_>>())),
+            "delete_clip" => {
+                if !confirmed {
+                    return Err("removing a clip needs confirm=true".into());
+                }
+                let id = int("clip_id")?;
+                self.api(Method::DELETE, &format!("/api/clips/{id}"), None).await
             }
             "update_title" => {
                 let id = int("title_id")?;

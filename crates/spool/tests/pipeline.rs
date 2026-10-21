@@ -4667,3 +4667,111 @@ async fn a_title_on_a_location_spool_only_reads_gets_its_compact_version_somewhe
     assert!(kept.join("Alpha (2001).mkv").exists());
     let _ = Value::Null;
 }
+
+#[tokio::test]
+async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_removed() {
+    use serde_json::{json, Value};
+    use tower::ServiceExt;
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let ready = |id: i64| {
+        let app = w.app.clone();
+        async move {
+            for _ in 0..600 {
+                match app.db.clip(id).unwrap() {
+                    Some(c) if c.state == "making" => tokio::time::sleep(Duration::from_millis(50)).await,
+                    Some(c) => return c,
+                    None => panic!("the clip went"),
+                }
+            }
+            panic!("the clip was never finished");
+        }
+    };
+    let raw = |uri: String, range: Option<&'static str>| {
+        let api = api.clone();
+        async move {
+            let mut req = axum::http::Request::builder().uri(uri);
+            if let Some(r) = range {
+                req = req.header("range", r);
+            }
+            let resp = api.oneshot(req.body(axum::body::Body::empty()).unwrap()).await.unwrap();
+            let (status, headers) = (resp.status().as_u16(), resp.headers().clone());
+            (status, headers, axum::body::to_bytes(resp.into_body(), 64 << 20).await.unwrap().to_vec())
+        }
+    };
+
+    let home = w.root.join("Movies/Heat (1995)");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("Heat (1995) [Bluray-1080p].mkv"), &video).unwrap();
+    let mut heat = w.movie("Heat", 1995, "tt0113277");
+    heat.path = home.to_string_lossy().to_string();
+    w.app.db.save_title(&mut heat).unwrap();
+    let (mut show, _) = w.series("Example World", 296762, &[(1, 1, "The Original")]);
+    let season = w.root.join("TV Shows/Example World/Season 01");
+    std::fs::create_dir_all(&season).unwrap();
+    std::fs::write(season.join("Example World - S01E01 - The Original.mkv"), &video).unwrap();
+    show.path = w.root.join("TV Shows/Example World").to_string_lossy().to_string();
+    w.app.db.save_title(&mut show).unwrap();
+    w.app.scan_all().await.unwrap();
+
+    // What cannot be cut is refused with the reason.
+    for (body, why) in [
+        (json!({"title_id": heat.id, "start": "soon"}), "not a time"),
+        (json!({"title_id": heat.id, "start": "5m"}), "nothing at 5:00"),
+        (json!({"title_id": heat.id, "start": 0, "seconds": 900}), "at most 10 minutes"),
+        (json!({"title_id": show.id, "start": 0}), "which episode"),
+        (json!({"title_id": show.id, "season": 1, "episode": 9, "start": 0}), "no S01E09"),
+    ] {
+        let (status, said) = call(&api, "POST", "/api/clips", body).await;
+        assert!(status == 400 && said.to_string().contains(why), "{why}: {status} {said}");
+    }
+
+    // A second of the film, from half a second in, named by the title and the time.
+    let (status, asked) = call(&api, "POST", "/api/clips", json!({"title_id": heat.id, "start": "0.5", "seconds": 1})).await;
+    assert_eq!(status, 200, "{asked}");
+    assert_eq!((asked["state"].as_str(), asked["name"].as_str(), asked["from"].as_str()), (Some("making"), Some("Heat at 0:01"), Some("Heat (1995)")), "{asked}");
+    let id = asked["id"].as_i64().unwrap();
+    let clip = ready(id).await;
+    assert_eq!(clip.state, "ready", "{}", clip.error);
+    assert!((clip.seconds - 1.0).abs() < 0.2 && clip.size > 0 && clip.height == 240, "{clip:?}");
+    let info = w.app.probe(&w.app.clip_video(id), "").await.unwrap().unwrap();
+    assert!(info.video_codec.to_lowercase().contains("264") && info.audio_codec.to_lowercase().contains("aac"), "{} {}", info.video_codec, info.audio_codec);
+    assert!(w.app.clip_still(id).is_file(), "a still is kept to show it by");
+
+    // It plays in parts, and is saved under its name.
+    let (status, headers, bytes) = raw(format!("/api/clips/{id}/video"), Some("bytes=0-99")).await;
+    assert_eq!((status, bytes.len(), headers["content-type"].to_str().unwrap()), (206, 100, "video/mp4"));
+    let (status, headers, _) = raw(format!("/api/clips/{id}/video?download"), None).await;
+    assert_eq!(status, 200);
+    assert!(headers["content-disposition"].to_str().unwrap().contains("filename=\"Heat at 0 01.mp4\""), "{:?}", headers["content-disposition"]);
+    // Its link plays it to whoever it is sent to, and a link made up plays nothing.
+    let link = w.app.db.clip(id).unwrap().unwrap().link;
+    assert!(link.len() >= 32, "{link}");
+    let (status, _, bytes) = raw(format!("/clip/{link}.mp4"), None).await;
+    assert_eq!((status, bytes.len() as u64), (200, clip.size));
+    assert_eq!(raw("/clip/0000.mp4".into(), None).await.0, 404);
+    let (status, headers, _) = raw(format!("/api/clips/{id}/still"), None).await;
+    assert_eq!((status, headers["content-type"].to_str().unwrap()), (200, "image/jpeg"));
+
+    // An episode, by its season and number, with a name of its own; past the end it stops at the end.
+    let (_, asked) = call(&api, "POST", "/api/clips", json!({"title_id": show.id, "season": 1, "episode": 1, "start": "1s", "seconds": "30", "name": "The bit"})).await;
+    let episode_clip = ready(asked["id"].as_i64().unwrap()).await;
+    assert_eq!((episode_clip.state.as_str(), episode_clip.name.as_str(), episode_clip.from.as_str()), ("ready", "The bit", "Example World S01E01 · The Original"), "{}", episode_clip.error);
+    assert!(episode_clip.seconds <= 1.2, "{}", episode_clip.seconds);
+
+    // Listed newest first; removing one takes its files with it. The film is untouched.
+    let (_, listed) = call(&api, "GET", "/api/clips", Value::Null).await;
+    assert_eq!(listed.as_array().unwrap().iter().map(|c| c["id"].as_i64().unwrap()).collect::<Vec<_>>(), [episode_clip.id, id]);
+    assert_eq!(listed[0]["yours"].as_bool(), Some(true));
+    let (status, _) = call(&api, "DELETE", &format!("/api/clips/{id}"), Value::Null).await;
+    assert_eq!(status, 200);
+    assert!(!w.app.clip_video(id).exists() && !w.app.clip_still(id).exists());
+    assert_eq!(raw(format!("/api/clips/{id}/video"), None).await.0, 404);
+    assert_eq!(std::fs::read(home.join("Heat (1995) [Bluray-1080p].mkv")).unwrap(), video);
+
+    // A clip outlives the title it was cut from.
+    w.app.db.delete_title(show.id).unwrap();
+    let kept = w.app.db.clip(episode_clip.id).unwrap().unwrap();
+    assert_eq!((kept.title_id, kept.state.as_str()), (None, "ready"));
+}

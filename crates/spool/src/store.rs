@@ -794,6 +794,41 @@ impl Db {
         })
     }
 
+    // ------------------------------------------------------------ clips
+
+    pub fn add_clip(&self, clip: &crate::clips::Clip) -> Result<i64> {
+        self.with(|c| {
+            c.execute("INSERT INTO clips(title_id, episode_id, account_id, created_at, data) VALUES (?1,?2,?3,?4,?5)", params![clip.title_id, clip.episode_id, clip.account_id, clip.created_at, serde_json::to_string(clip).unwrap_or_default()])?;
+            Ok(c.last_insert_rowid())
+        })
+    }
+
+    /// Write down how a clip stands. One removed meanwhile stays removed.
+    pub fn save_clip(&self, clip: &crate::clips::Clip) -> Result<()> {
+        self.with(|c| c.execute("UPDATE clips SET data = ?2 WHERE id = ?1", params![clip.id, serde_json::to_string(clip).unwrap_or_default()]))?;
+        Ok(())
+    }
+
+    fn clip_row(r: &Row) -> rusqlite::Result<crate::clips::Clip> {
+        let mut clip: crate::clips::Clip = json(r.get::<_, String>(5)?)?;
+        (clip.id, clip.title_id, clip.episode_id, clip.account_id, clip.created_at) = (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?);
+        Ok(clip)
+    }
+
+    /// Every clip, the newest first.
+    pub fn clips(&self) -> Result<Vec<crate::clips::Clip>> {
+        self.with(|c| c.prepare("SELECT id, title_id, episode_id, account_id, created_at, data FROM clips ORDER BY created_at DESC, id DESC")?.query_map([], Self::clip_row)?.collect())
+    }
+
+    pub fn clip(&self, id: i64) -> Result<Option<crate::clips::Clip>> {
+        self.with(|c| c.query_row("SELECT id, title_id, episode_id, account_id, created_at, data FROM clips WHERE id = ?1", [id], Self::clip_row).optional())
+    }
+
+    pub fn delete_clip(&self, id: i64) -> Result<()> {
+        self.with(|c| c.execute("DELETE FROM clips WHERE id = ?1", [id]))?;
+        Ok(())
+    }
+
     // ------------------------------------------------------------ history, blocklist, attention
 
     pub fn add_history(&self, title_id: Option<i64>, kind: &str, data: serde_json::Value) -> Result<()> {

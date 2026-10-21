@@ -161,6 +161,7 @@ async fn main() -> Result<()> {
             }
             app.resume_moves().await;
             app.resume_compacts();
+            app.resume_clips();
             if std::env::var_os("SPOOL_NO_SCHEDULER").is_none() {
                 app.spawn_scheduler();
             }

@@ -167,7 +167,7 @@ fn stem_of(rel: &str) -> String {
 }
 
 /// The picture size to ask for, to fit a screen `height` high: None when it fits already.
-fn fit(width: u32, height: u32, target: u32) -> Option<(i64, i64)> {
+pub(crate) fn fit(width: u32, height: u32, target: u32) -> Option<(i64, i64)> {
     let wide = (target as u64 * 16 / 9) as u32;
     if width == 0 || height == 0 {
         return None;

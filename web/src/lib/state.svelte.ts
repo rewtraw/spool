@@ -27,6 +27,8 @@ export const app = $state({
   /** Bumped when something changes that open views should refetch. */
   tick: 0,
   titleTick: {} as Record<number, number>,
+  /** Bumped when a clip is asked for, made, fails or is removed. */
+  clipTick: 0,
   online: true,
   signedOut: false,
   /** Who is signed in, when it is a person, and whether they run Spool or only watch. */
@@ -135,7 +137,10 @@ export function connect() {
   source = new EventSource('/api/events');
   source.onopen = () => {
     // Anything missed while the connection was down arrives now.
-    if (!app.online && app.titlesLoaded) loadTitles();
+    if (!app.online && app.titlesLoaded) {
+      loadTitles();
+      app.clipTick++;
+    }
     app.online = true;
   };
   source.onerror = () => {
@@ -177,8 +182,12 @@ export function connect() {
         loadTitles(true);
         loadStatus();
         break;
+      case 'clip':
+        app.clipTick++;
+        break;
       case 'resync':
         app.tick++;
+        app.clipTick++;
         loadTitles(true);
         loadStatus();
         break;

@@ -506,6 +506,18 @@ const MIGRATIONS: &[&str] = &[
     -- A browser signed in before was nobody in particular; it signs in again as someone.
     DELETE FROM settings WHERE key = 'sessions';
     "#,
+    r#"
+    -- Clips cut from films and episodes. One outlives the title it was cut from. A clip's
+    -- number is never given to another, so nothing still finishing one touches the next.
+    CREATE TABLE clips (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title_id INTEGER REFERENCES titles(id) ON DELETE SET NULL,
+        episode_id INTEGER REFERENCES episodes(id) ON DELETE SET NULL,
+        account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+        created_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+    "#,
 ];
 
 impl Db {
