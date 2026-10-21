@@ -2,6 +2,7 @@
   import { api, type Clip } from '../lib/api';
   import { app, act, toast } from '../lib/state.svelte';
   import { ago, bytes, clock, pct } from '../lib/format';
+  import MomentFinder from '../components/MomentFinder.svelte';
 
   let clips = $state<Clip[] | null>(null);
   let confirming = $state<number | null>(null);
@@ -60,7 +61,9 @@
 <header class="head">
   <h1>Clips</h1>
 </header>
-<p class="muted lede">Moments cut from films and episodes, made to play anywhere they are sent. Make one from a film's or a series' page, under <b>Make a clip</b>.</p>
+<p class="muted lede">Moments cut from films and episodes, made to play anywhere they are sent. Find them here by what is said in them, or make one from a film's or a series' page, under <b>Make a clip</b>.</p>
+
+<MomentFinder onmade={load} />
 
 {#if clips === null}
   <div class="empty">Loading…</div>

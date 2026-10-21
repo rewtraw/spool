@@ -19,6 +19,16 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
 
+/// What a clip is cut from, in words: "Westworld S01E07 · Trompe L'Oeil", "Dark City (1998)".
+pub fn cut_from(title: &Title, episode: Option<&Episode>) -> String {
+    match episode {
+        Some(e) if e.title.is_empty() => format!("{} S{:02}E{:02}", title.title, e.season, e.episode),
+        Some(e) => format!("{} S{:02}E{:02} · {}", title.title, e.season, e.episode, e.title),
+        None if title.year > 0 => format!("{} ({})", title.title, title.year),
+        None => title.title.clone(),
+    }
+}
+
 /// The longest clip there can be, in seconds.
 pub const LONGEST: f64 = 600.0;
 
@@ -251,7 +261,7 @@ impl App {
     /// called.
     fn clip_source(&self, title: &Title, episode: Option<&Episode>) -> Result<(MediaFile, String)> {
         let file = match (title.kind, episode) {
-            (Kind::Movie, _) => self.compact_sources(title)?.into_iter().max_by_key(|f| f.size).ok_or_else(|| anyhow!("{} has no file to cut a clip from", title.title))?,
+            (Kind::Movie, _) => self.film_file(title)?.ok_or_else(|| anyhow!("{} has no file to cut a clip from", title.title))?,
             (Kind::Series, None) => bail!("say which episode of {} to cut it from", title.title),
             (Kind::Series, Some(e)) => {
                 let id = e.file_id.ok_or_else(|| anyhow!("{} S{:02}E{:02} has no file to cut a clip from", title.title, e.season, e.episode))?;
@@ -261,13 +271,13 @@ impl App {
         if !self.placement().online_at(title.folder_of(&file)) {
             bail!("it is on a location that cannot be reached right now");
         }
-        let from = match episode {
-            Some(e) if e.title.is_empty() => format!("{} S{:02}E{:02}", title.title, e.season, e.episode),
-            Some(e) => format!("{} S{:02}E{:02} · {}", title.title, e.season, e.episode, e.title),
-            None if title.year > 0 => format!("{} ({})", title.title, title.year),
-            None => title.title.clone(),
-        };
-        Ok((file, from))
+        Ok((file, cut_from(title, episode)))
+    }
+
+    /// The file of a film that clips are cut from, and whose words are searched: its largest
+    /// main file.
+    pub(crate) fn film_file(&self, title: &Title) -> Result<Option<MediaFile>> {
+        Ok(self.compact_sources(title)?.into_iter().max_by_key(|f| f.size))
     }
 
     /// The subtitles to draw into a clip of a file, as asked.

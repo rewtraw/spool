@@ -118,6 +118,51 @@ export interface Collection {
 
 /** Where the person signed in stands with a film, an episode or a series. */
 /** A clip cut from a film or an episode. */
+/** A line of subtitles, timed in seconds from the start of the film or episode. */
+export interface SaidLine {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** A moment found by what is said in it. */
+export interface Moment {
+  title_id: number;
+  episode_id: number | null;
+  /** What it is in, in words. */
+  from: string;
+  file_id: number;
+  start: number;
+  end: number;
+  lines: SaidLine[];
+  before: SaidLine[];
+  after: SaidLine[];
+  score: number;
+  /** Whether the words looked for are said in it, and not only something like them. */
+  words: boolean;
+}
+
+/** How much of the library can be searched by what is said. */
+export interface Coverage {
+  files: number;
+  read: number;
+  lines: number;
+  placed: number;
+  passages: number;
+  unreadable: number;
+  not_found: number;
+  away: number;
+  can_fetch: boolean;
+  doing: string;
+  problems: string[];
+}
+
+export interface Found {
+  moments: Moment[];
+  by_meaning: boolean;
+  coverage: Coverage;
+}
+
 export interface Clip {
   id: number;
   title_id: number | null;

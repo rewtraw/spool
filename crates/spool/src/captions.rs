@@ -15,6 +15,7 @@ use anyhow::{anyhow, Result};
 use spool_core::mediainfo::{MediaInfo, Stream};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 const FONT: &[u8] = include_bytes!("../fonts/Roboto-Regular.ttf");
 
@@ -36,7 +37,7 @@ pub struct Chosen {
     pub language: String,
 }
 
-fn is_text(codec: &str) -> bool {
+pub(crate) fn is_text(codec: &str) -> bool {
     matches!(codec, "subrip" | "srt" | "ass" | "ssa" | "mov_text" | "webvtt" | "text")
 }
 
@@ -44,7 +45,7 @@ fn is_picture(codec: &str) -> bool {
     matches!(codec, "hdmv_pgs_subtitle" | "dvd_subtitle" | "dvb_subtitle")
 }
 
-fn for_the_hard_of_hearing(s: &Stream) -> bool {
+pub(crate) fn for_the_hard_of_hearing(s: &Stream) -> bool {
     let t = s.title.to_lowercase();
     t.contains("sdh") || t.contains("hearing") || t.split(|c: char| !c.is_alphanumeric()).any(|w| w == "cc")
 }
@@ -99,42 +100,14 @@ pub fn clean(text: &str) -> String {
 
 /// The lines of a clip's stretch of time, timed from the start of the clip. Stops, and says
 /// so, when `stop` is set.
-pub async fn cues(tool: &Path, src: &Path, source: &Source, start: f64, seconds: f64, stop: &std::sync::atomic::AtomicBool) -> Result<Vec<Cue>> {
+pub async fn cues(tool: &Path, src: &Path, source: &Source, start: f64, seconds: f64, stop: &AtomicBool) -> Result<Vec<Cue>> {
     let all: Vec<Cue> = match source {
         Source::Text(index) => {
             // Read from a little before the clip, with the file's own times: ffmpeg's times
             // counted from where it was asked to begin shift when a line is up at that moment.
             let from = (start - 10.0).max(0.0);
-            let mut child = tokio::process::Command::new(tool)
-                .args(["-nostdin", "-v", "error", "-ss", &format!("{from:.3}"), "-t", &format!("{:.3}", seconds + (start - from)), "-i"])
-                .arg(src)
-                .args(["-copyts", "-map", &format!("0:{index}"), "-f", "srt", "pipe:1"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()?;
-            let (mut out, mut err) = (child.stdout.take().ok_or_else(|| anyhow!("no output from ffmpeg"))?, child.stderr.take().ok_or_else(|| anyhow!("no output from ffmpeg"))?);
-            let read = async move {
-                use tokio::io::AsyncReadExt;
-                let (mut text, mut said) = (Vec::new(), Vec::new());
-                let _ = tokio::join!(out.read_to_end(&mut text), err.read_to_end(&mut said));
-                (text, said)
-            };
-            let watch = async {
-                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                }
-            };
-            let (text, said) = tokio::select! {
-                biased;
-                _ = watch => return Err(anyhow!(crate::compact::CALLED_OFF)),
-                got = read => got,
-            };
-            if !child.wait().await?.success() {
-                return Err(anyhow!("the subtitles could not be read: {}", String::from_utf8_lossy(&said).lines().last().unwrap_or("").trim()));
-            }
-            crate::subs::parse_srt(&String::from_utf8_lossy(&text))
+            let window = ["-ss".to_string(), format!("{from:.3}"), "-t".to_string(), format!("{:.3}", seconds + (start - from))];
+            read_track(tool, src, *index, &window, stop).await?
         }
         Source::Beside(path) => crate::subs::parse_srt(&crate::subs::decode(&tokio::fs::read(path).await?)),
         Source::Picture(_) => return Ok(vec![]),
@@ -145,6 +118,54 @@ pub async fn cues(tool: &Path, src: &Path, source: &Source, start: f64, seconds:
         .map(|c| Cue { start: c.start.max(0.0), end: c.end.min(seconds), text: clean(&c.text) })
         .filter(|c| c.end > c.start && !c.text.is_empty())
         .collect())
+}
+
+/// Every line of subtitles that are text, from start to end, cleaned of how to show them.
+/// Reading a track inside a file reads the whole file.
+pub async fn every_line(tool: &Path, src: &Path, source: &Source, stop: &AtomicBool) -> Result<Vec<Cue>> {
+    let all = match source {
+        Source::Text(index) => read_track(tool, src, *index, &[], stop).await?,
+        Source::Beside(path) => crate::subs::parse_srt(&crate::subs::decode(&tokio::fs::read(path).await?)),
+        Source::Picture(_) => return Ok(vec![]),
+    };
+    Ok(all.into_iter().map(|c| Cue { text: clean(&c.text), ..c }).filter(|c| c.end > c.start && !c.text.is_empty()).collect())
+}
+
+/// A track of text subtitles inside a file, read by ffmpeg in the file's own times, from
+/// where `window` says or from the start.
+async fn read_track(tool: &Path, src: &Path, index: u32, window: &[String], stop: &AtomicBool) -> Result<Vec<Cue>> {
+    let mut child = tokio::process::Command::new(tool)
+        .args(["-nostdin", "-v", "error"])
+        .args(window)
+        .arg("-i")
+        .arg(src)
+        .args(["-copyts", "-map", &format!("0:{index}"), "-f", "srt", "pipe:1"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
+    let (mut out, mut err) = (child.stdout.take().ok_or_else(|| anyhow!("no output from ffmpeg"))?, child.stderr.take().ok_or_else(|| anyhow!("no output from ffmpeg"))?);
+    let read = async move {
+        use tokio::io::AsyncReadExt;
+        let (mut text, mut said) = (Vec::new(), Vec::new());
+        let _ = tokio::join!(out.read_to_end(&mut text), err.read_to_end(&mut said));
+        (text, said)
+    };
+    let watch = async {
+        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    };
+    let (text, said) = tokio::select! {
+        biased;
+        _ = watch => return Err(anyhow!(crate::compact::CALLED_OFF)),
+        got = read => got,
+    };
+    if !child.wait().await?.success() {
+        return Err(anyhow!("the subtitles could not be read: {}", String::from_utf8_lossy(&said).lines().last().unwrap_or("").trim()));
+    }
+    Ok(crate::subs::parse_srt(&String::from_utf8_lossy(&text)))
 }
 
 /// What is on screen from moment to moment: the times at which it changes, each with the

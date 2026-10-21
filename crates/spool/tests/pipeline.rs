@@ -2099,7 +2099,7 @@ async fn subtitles_come_with_the_release_and_can_be_found_and_checked() {
     assert!(asked.contains("languages=en") && asked.contains("imdb_id=3333333") && asked.ends_with("key=os-key"), "{asked}");
 
     // The clip is too short to judge timing by, so only the exact match is trusted.
-    let kept = w.app.auto_subtitle(file.id, "en").await.unwrap().expect("the exact match is kept");
+    let kept = w.app.auto_subtitle(file.id, "en", 0).await.unwrap().expect("the exact match is kept");
     assert_eq!((kept.language.as_str(), kept.source.as_str()), ("en", "opensubtitles"));
     assert_eq!(kept.sync.as_ref().unwrap().verdict, spool::subs::Verdict::Unsure);
     assert_eq!(hits.lock().iter().filter(|h| h.starts_with("download")).cloned().collect::<Vec<_>>(), vec!["download 22"]);
@@ -4821,4 +4821,119 @@ async fn subtitles_inside_a_file_are_read_for_the_clip_in_their_own_time() {
     // Called off, it stops.
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     assert!(spool::captions::cues(&tool, &with, &spool::captions::Source::Text(2), 1.0, 0.95, &stop).await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn what_is_said_across_the_library_is_found_with_the_lines_around_it() {
+    use serde_json::{json, Value};
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    // No model to be had here: searches go by the words alone.
+    w.app.dialogue.take_model_from("http://127.0.0.1:9");
+    let api = spool::api::router(w.app.clone());
+    let srt = |lines: &[(&str, &str, &str)]| lines.iter().enumerate().map(|(i, (a, b, t))| format!("{}\n{a} --> {b}\n{t}\n", i + 1)).collect::<Vec<_>>().join("\n");
+    let film = |name: &str, year: u32, imdb: &str| {
+        let home = w.root.join(format!("Movies/{name} ({year})"));
+        std::fs::create_dir_all(&home).unwrap();
+        let mut t = w.movie(name, year, imdb);
+        t.path = home.to_string_lossy().to_string();
+        w.app.db.save_title(&mut t).unwrap();
+        (t, home.join(format!("{name} ({year}) [Bluray-1080p].mkv")))
+    };
+    // One with its subtitles inside, one with them beside it, one with none to read.
+    let (city, city_file) = film("Dark City", 1998, "tt0118929");
+    let (inside, plain) = (w.root.join("inside.srt"), w.root.join("plain.mkv"));
+    std::fs::write(&plain, &video).unwrap();
+    std::fs::write(
+        &inside,
+        srt(&[
+            ("00:00:01,000", "00:00:02,000", "Where am I?"),
+            ("00:00:02,500", "00:00:03,500", "Nobody knows."),
+            ("00:05:00,000", "00:05:02,000", "<i>Wake up.</i>"),
+            ("00:05:02,500", "00:05:04,000", "They come when you sleep."),
+            ("00:05:04,500", "00:05:06,000", "Shell Beach."),
+        ]),
+    )
+    .unwrap();
+    let ok = std::process::Command::new("ffmpeg").args(["-v", "error", "-y", "-i"]).arg(&plain).arg("-i").arg(&inside).args(["-map", "0", "-map", "1", "-c", "copy", "-c:s", "srt", "-metadata:s:s:0", "language=eng"]).arg(&city_file).status().unwrap();
+    assert!(ok.success());
+    let (heat, heat_file) = film("Heat", 1995, "tt0113277");
+    std::fs::write(&heat_file, &video).unwrap();
+    let beside = heat_file.with_file_name("Heat (1995) [Bluray-1080p].en.srt");
+    std::fs::write(&beside, srt(&[("00:10:00,000", "00:10:02,000", "Don't let yourself get attached."), ("01:00:00,000", "01:00:02,000", "The proxy has awakened.")])).unwrap();
+    let (_, quiet_file) = film("Quiet", 2001, "tt0000001");
+    std::fs::write(&quiet_file, &video).unwrap();
+    w.app.scan_all().await.unwrap();
+    for _ in 0..5 {
+        if !w.app.dialogue_round(false).await.unwrap() {
+            break;
+        }
+    }
+    let c = w.app.dialogue.coverage();
+    assert_eq!((c.files, c.read, c.unreadable, c.lines, c.can_fetch), (3, 2, 1, 7, false), "{c:?}");
+    assert!(c.problems.iter().any(|p| p.contains("model")), "without the model it says so, and goes by the words: {c:?}");
+
+    // The words by their stems, with the lines either side; the tags of how to show them gone.
+    let found = w.app.search_dialogue("the awakening", 10, None).await.unwrap();
+    assert!(!found.by_meaning);
+    assert_eq!(found.moments.len(), 1, "{found:?}");
+    let m = &found.moments[0];
+    assert_eq!((m.from.as_str(), m.start, m.lines[0].text.as_str(), m.before.len(), m.words), ("Heat (1995)", 3600.0, "The proxy has awakened.", 1, true));
+    let found = w.app.search_dialogue("wake up; Shell Beach", 10, None).await.unwrap();
+    let said: Vec<(&str, &str)> = found.moments.iter().map(|m| (m.from.as_str(), m.lines[0].text.as_str())).collect();
+    assert_eq!(said, [("Dark City (1998)", "Wake up.")], "lines said together are one moment: {found:?}");
+    assert_eq!((found.moments[0].start, found.moments[0].end, found.moments[0].before.len()), (300.0, 306.0, 2));
+    assert!(w.app.search_dialogue("wake up", 10, Some(heat.id)).await.unwrap().moments.is_empty(), "only in the title asked");
+    let across = w.app.search_dialogue("sleep beach", 10, Some(city.id)).await.unwrap();
+    assert_eq!(across.moments.len(), 1, "words on lines said together are found together: {across:?}");
+
+    // Over the API, for anyone signed in to choose clips from.
+    let (status, got) = call(&api, "GET", "/api/dialogue?q=attached", Value::Null).await;
+    assert_eq!((status, got["moments"][0]["title_id"].as_i64(), got["coverage"]["read"].as_u64()), (200, Some(heat.id), Some(2)), "{got}");
+    let (status, _) = call(&api, "GET", "/api/dialogue?q=", Value::Null).await;
+    assert_eq!(status, 400);
+
+    // Subtitles taken away are forgotten; a title gone from the library goes from the index.
+    std::fs::remove_file(&beside).unwrap();
+    for f in w.app.db.files(heat.id).unwrap() {
+        w.app.find_sidecars(f.id).unwrap();
+    }
+    w.app.dialogue_round(false).await.unwrap();
+    assert!(w.app.search_dialogue("attached", 10, None).await.unwrap().moments.is_empty());
+    let (status, _) = call(&api, "DELETE", &format!("/api/titles/{}", city.id), json!({})).await;
+    assert_eq!(status, 200);
+    w.app.dialogue_round(false).await.unwrap();
+    let c = w.app.dialogue.coverage();
+    assert_eq!((c.files, c.read, c.lines), (2, 0, 0), "{c:?}");
+}
+
+/// With the model at hand (SPOOL_TEST_MODEL, a folder of its files), what is meant is found
+/// when it is put another way.
+#[tokio::test(flavor = "multi_thread")]
+async fn what_is_meant_is_found_when_it_is_put_another_way() {
+    let Ok(model) = std::env::var("SPOOL_TEST_MODEL") else {
+        eprintln!("SPOOL_TEST_MODEL not set; skipping");
+        return;
+    };
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    w.app.dialogue.take_model_from(&model);
+    let home = w.root.join("Movies/Dark City (1998)");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut t = w.movie("Dark City", 1998, "tt0118929");
+    t.path = home.to_string_lossy().to_string();
+    w.app.db.save_title(&mut t).unwrap();
+    std::fs::write(home.join("Dark City (1998).mkv"), &video).unwrap();
+    let lines = ["Pass the salt, please.", "Whatever you do, don't fall asleep.", "The bank closes at five.", "I keep thinking about the ocean.", "Nobody has a key to that door."];
+    let srt: String = lines.iter().enumerate().map(|(i, l)| format!("{}\n00:{:02}:00,000 --> 00:{:02}:02,000\n{l}\n\n", i + 1, i * 5, i * 5)).collect();
+    std::fs::write(home.join("Dark City (1998).en.srt"), srt).unwrap();
+    w.app.scan_all().await.unwrap();
+    while w.app.dialogue_round(false).await.unwrap() {}
+    let c = w.app.dialogue.coverage();
+    assert_eq!((c.read, c.passages, c.placed), (1, 5, 5), "{c:?}");
+    let found = w.app.search_dialogue("stay awake", 10, None).await.unwrap();
+    assert!(found.by_meaning);
+    assert_eq!(found.moments.first().map(|m| m.lines[0].text.as_str()), Some("Whatever you do, don't fall asleep."), "{found:?}");
+    assert!(!found.moments[0].words);
+    assert!(found.moments.iter().all(|m| m.lines[0].text != "The bank closes at five."), "what means nothing like it is left out: {found:?}");
 }

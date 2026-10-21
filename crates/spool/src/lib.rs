@@ -26,6 +26,8 @@ pub mod newznab;
 pub mod plex;
 pub mod compact;
 pub mod demo;
+pub mod dialogue;
+pub mod embed;
 pub mod helper;
 pub mod relocate;
 pub mod remote;

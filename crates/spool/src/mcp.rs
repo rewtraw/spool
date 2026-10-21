@@ -23,6 +23,7 @@ Start with `status` for the overall picture or `find_title` to get a title's id;
 `diagnose` answers \"why has this not downloaded\" in one call. Sizes are in GB. \
 Disk space is tight: check `status` before starting large downloads. \
 `make_clip` cuts a short shareable MP4 from a film or episode and gives its file path. \
+`search_dialogue` finds moments across the library by what is said, by meaning as well as by words; list them for the person to choose from, then `make_clips` makes the chosen ones. \
 Tools that delete files need `confirm: true` and should only be called when the person asked for that deletion.";
 
 #[derive(Clone, Copy, PartialEq)]
@@ -250,6 +251,20 @@ const TOOLS: &[Tool] = &[
         destructive: false,
         description: "Cut a clip from a film or an episode, to keep or send on: H.264 MP4 up to 1080p with stereo AAC in the household's language, HDR brought down to ordinary colour, subtitles drawn in where the soundtrack is in another language, ready to stream before it has all arrived. Waits until it is made (seconds, a minute for a long one) and gives the file's path on the machine Spool runs on. Start is written as 30m, 1h2m5s, 1:02:05 or seconds; length is up to 10 minutes, 30 seconds when not given. For a series give season and episode.",
         schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "start": {"type": "string", "description": "Where it starts: 30m, 1h2m5s, 1:02:05 or a number of seconds."}, "seconds": {"type": "number", "description": "How long it runs, in seconds. Default 30, at most 600."}, "name": {"type": "string", "description": "What to call it. Defaults to the title and the time."}, "subtitles": {"type": "string", "description": "auto (default: drawn in when the soundtrack is not in the household's language, otherwise only forced lines such as signs), on (always, in the household's language), none, or a language such as french."}}), &["title_id", "start"]),
+    },
+    Tool {
+        name: "search_dialogue",
+        read: true,
+        destructive: false,
+        description: "Find moments across the whole library by what is said in them, from the subtitles of every film and episode. Matches the words (by their stems: awakening finds awakened) and what is meant when it is put another way (wake up finds don't fall asleep), the words as written ranked first. Several things can be looked for at once, put apart by ;. Each moment comes with what it is in, where, the lines said, the lines either side, and a clip that would hold it, ready for make_clips. Show the person the moments and let them choose before making any. Also says how much of the library can be searched yet.",
+        schema: || obj(json!({"query": {"type": "string", "description": "What is said, or something like it. Put several apart with ;."}, "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "How many moments at most. Default 30."}, "title_id": {"type": "integer", "description": "Only in this film or series."}}), &["query"]),
+    },
+    Tool {
+        name: "make_clips",
+        read: false,
+        destructive: false,
+        description: "Make several clips at once, such as the moments the person chose from search_dialogue: each is given as that tool's clip suggestion (title_id, episode_id, start, seconds), with a name if wanted and subtitles as for make_clip. They are made one after another in the background; clips says when each is ready. Gives each one's clip_id, or why it could not be made.",
+        schema: || obj(json!({"clips": {"type": "array", "items": {"type": "object", "properties": {"title_id": {"type": "integer"}, "episode_id": {"type": "integer"}, "start": {"type": "number", "description": "Seconds from the start."}, "seconds": {"type": "number"}, "name": {"type": "string"}, "subtitles": {"type": "string"}}, "required": ["title_id", "start"]}}}), &["clips"]),
     },
     Tool { name: "clips", read: true, destructive: false, description: "The clips that have been cut, newest first: what each is from, where it starts and how long it runs, its size, whether it is ready, and its file's path on the machine Spool runs on.", schema: || obj(json!({}), &[]) },
     Tool { name: "delete_clip", read: false, destructive: true, description: "Remove a clip and its file. Needs confirm=true.", schema: || obj(json!({"clip_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["clip_id"]) },
@@ -738,6 +753,53 @@ impl Mcp {
                     }
                 }
                 Ok(json!({"clip_id": id, "state": "making", "note": "still being made; ask clips for it in a while"}))
+            }
+            "search_dialogue" => {
+                let query = a["query"].as_str().ok_or("say what to look for in query")?;
+                let found = self.app.search_dialogue(query, a["limit"].as_u64().unwrap_or(30) as usize, a["title_id"].as_i64()).await.map_err(|e| format!("{e:#}"))?;
+                let said = |lines: &[crate::dialogue::Line]| lines.iter().map(|l| l.text.replace('\n', " ")).collect::<Vec<_>>().join(" / ");
+                let moments: Vec<Value> = found
+                    .moments
+                    .iter()
+                    .enumerate()
+                    .map(|(i, m)| {
+                        let (start, end) = ((m.start - 2.0).max(0.0), m.end + 1.5);
+                        json!({
+                            "n": i + 1, "from": m.from, "at": crate::clips::clock(m.start), "said": said(&m.lines), "before": said(&m.before), "after": said(&m.after),
+                            "the_words_themselves": m.words, "fit": m.score,
+                            "clip": {"title_id": m.title_id, "episode_id": m.episode_id, "start": (start * 10.0).round() / 10.0, "seconds": ((end - start).max(5.0) * 10.0).round() / 10.0},
+                        })
+                    })
+                    .collect();
+                let c = &found.coverage;
+                Ok(json!({
+                    "moments": moments,
+                    "by_meaning": found.by_meaning,
+                    "searched": format!("{} of {} films and episodes ({} lines)", c.read, c.files, c.lines),
+                    "not_yet_searchable": {"without_subtitles_to_read": c.unreadable, "of_which_none_found": c.not_found, "on_locations_away": c.away, "subtitles_can_be_fetched": c.can_fetch, "passages_still_to_place_by_meaning": c.passages - c.placed},
+                    "working_on": if c.doing.is_empty() { Value::Null } else { json!(c.doing) },
+                    "problems": c.problems,
+                }))
+            }
+            "make_clips" => {
+                let list = a["clips"].as_array().ok_or("give clips: a list of title_id, start and seconds")?;
+                if list.len() > 100 {
+                    return Err("at most 100 clips at once".into());
+                }
+                let mut out = vec![];
+                for c in list {
+                    let mut body = json!({"title_id": c["title_id"], "start": c["start"]});
+                    for k in ["episode_id", "seconds", "name", "subtitles"] {
+                        if !c[k].is_null() {
+                            body[k] = c[k].clone();
+                        }
+                    }
+                    out.push(match self.post("/api/clips", body).await {
+                        Ok(made) => json!({"clip_id": made["id"], "name": made["name"], "state": made["state"]}),
+                        Err(e) => json!({"title_id": c["title_id"], "start": c["start"], "error": e}),
+                    });
+                }
+                Ok(json!({"clips": out, "note": "made one after another in the background; clips says when each is ready"}))
             }
             "clips" => Ok(json!(self.app.db.clips().map_err(|e| e.to_string())?.iter().map(|c| self.clip_row(c)).collect::<Vec<_>>())),
             "delete_clip" => {

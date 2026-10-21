@@ -17,6 +17,24 @@ It is made in the background, one at a time, and appears under **Clips**. Half a
 
 Anyone who can sign in can make clips and see them all. A clip is removed by whoever made it, or by someone who runs Spool.
 
+## Finding a moment by what is said
+
+At the top of **Clips**, write what is said, or something like it, and choose **Find**: `wake up`, `the awakening`, `don't go to sleep`. Spool looks through what is said in every film and episode and lists the moments, each with what it is in, where, and a couple of lines either side, so you can tell which you meant. Look for several things at once by putting them apart with `;`.
+
+It finds the words themselves, in any form of them (`awakening` finds "awakened"), and what is meant when it is put another way (`stay awake` finds "whatever you do, don't fall asleep"). Moments with the words themselves are marked and come first.
+
+Tick the moments you want, choose how much before the first line and after the last each clip holds and whether it has subtitles, and choose **Make clips**. They are made one after another and appear below, each named by where it is from and the first words said.
+
+### What can be searched
+
+What is said is read from subtitles in your language (Settings → General): text inside the file, or a subtitle file beside it. Spool reads the whole library in the background, a file at a time, and pauses while anything is being played. A new film or episode is read soon after it arrives. The first reading of a large library takes some hours, most of it reading the files; working out what the lines mean takes about half an hour for the whole library, on a Mac's graphics chip.
+
+Some files have no subtitles that can be read: only pictures of them, as on a disc, or none at all. With an OpenSubtitles account set in Settings → General, Spool fetches subtitles for those, newest files first. It keeps only subtitles that prove to be in time with the film's own speech, puts them beside the video, where players find them too, and leaves a few of the day's allowance for looking by hand. A free account allows few a day; a VIP account, about a thousand. Files OpenSubtitles has nothing in time for are asked about again after a month.
+
+Above the search, Spool says how much of the library can be searched yet, and what it is doing.
+
+The first time, Spool fetches the small model it works out meaning with (all-MiniLM-L6-v2, about 90 MB) and keeps it in its data folder. Until it has it, searches go by the words alone. What is said is kept in `dialogue.db` beside Spool's own database, apart from it, as it can always be read again.
+
 ## What a clip is
 
 | | |
@@ -43,6 +61,8 @@ Spool is reached over plain `http`, where browsers do not let a page open the sh
 ## From an assistant
 
 An [assistant](assistants.md) can make one when asked: "clip Westworld S01E07 at 30m for 30 seconds". `make_clip` takes the same choices, subtitles among them, waits until the clip is made and gives the path of its file on the machine Spool runs on, so an assistant that can send files can send it on. `clips` lists them, and `delete_clip` removes one.
+
+It can find them by what is said, too: "make clips of everything that says something like wake up". `search_dialogue` lists the moments with the lines around them, for you to choose from, and `make_clips` makes those you choose.
 
 ## Where they are kept
 

@@ -141,8 +141,8 @@ fn a_viewer_may(method: &axum::http::Method, path: &str) -> bool {
     let parts: Vec<&str> = path.trim_start_matches("/api/").split('/').collect();
     matches!(
         (read, parts.as_slice()),
-        (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching" | "clips"])
-            | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"] | ["clips", ..])
+        (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching" | "clips" | "dialogue"])
+            | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"] | ["clips", ..] | ["dialogue", "coverage"])
             | (false, ["logout" | "watched" | "clips"] | ["clips", _])
     )
 }
@@ -390,6 +390,8 @@ fn api_routes() -> Router<App> {
         .route("/api/clips/{id}", get(get_clip).delete(delete_clip))
         .route("/api/clips/{id}/video", get(clip_video))
         .route("/api/clips/{id}/still", get(clip_still))
+        .route("/api/dialogue", get(search_dialogue))
+        .route("/api/dialogue/coverage", get(dialogue_coverage))
         .route("/clip/{file}", get(shared_clip))
         .route("/api/accounts", get(accounts).post(account_add))
         .route("/api/accounts/{id}", put(account_change).delete(account_remove))

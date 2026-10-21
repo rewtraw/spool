@@ -129,7 +129,7 @@ const pages = [
   ['library', '#/library', ['Library', ...(titles.length ? [titles[0].title.slice(0, 12)] : [])], true],
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
-  ['clips', '#/clips', ['Clips', 'Make a clip'], true],
+  ['clips', '#/clips', ['Clips', 'Make a clip', 'Find'], true],
   ['archive', '#/archive', ['Archive'], true],
   ['settings-general', '#/settings/general', ['Mode', 'Downloads', 'Connections'], false],
   ['settings-players', '#/settings/players', ['People', 'Asked for', 'Lately'], true],

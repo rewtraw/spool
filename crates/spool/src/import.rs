@@ -642,6 +642,8 @@ impl App {
         tracing::info!(title = %title.title, release = %acq.release.title, upgraded, "imported");
         let arrived: Vec<i64> = self.db.files(title.id)?.into_iter().filter(|f| imported.iter().any(|op| op.file.rel_path == f.rel_path)).map(|f| f.id).collect();
         self.compact_arrivals(title.id, &arrived);
+        // What is said in it is read for searching soon after it arrives.
+        self.dialogue.wake.notify_one();
 
         let folders: Vec<String> = ops.iter().filter_map(|o| Path::new(&o.dst).parent().map(|p| p.to_string_lossy().to_string())).collect();
         let app = self.clone();

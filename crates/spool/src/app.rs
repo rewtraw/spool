@@ -186,6 +186,11 @@ pub struct Inner {
     pub space_blocked: Mutex<HashMap<i64, i128>>,
     /// The OpenSubtitles sign-in in use, and when it was made.
     pub subtitle_login: Mutex<Option<(String, i64)>>,
+    /// How many subtitles OpenSubtitles will still hand over today, and when that starts
+    /// again, as it last said.
+    pub subtitle_allowance: Mutex<Option<(i64, i64)>>,
+    /// The words said in the library. See [`crate::dialogue`].
+    pub dialogue: crate::dialogue::Index,
     /// Players that have signed in, by the token each was given. Oldest first.
     /// The players that are signed in, by the token each holds. See [`App::reload_players`].
     pub players: Mutex<HashMap<String, Signed>>,
@@ -480,6 +485,8 @@ impl App {
             login_failures: Tries::default(),
             space_blocked: Mutex::new(HashMap::new()),
             subtitle_login: Mutex::new(None),
+            subtitle_allowance: Mutex::new(None),
+            dialogue: crate::dialogue::Index::open(&data_dir.join("dialogue.db"))?,
             players: Default::default(),
             player_failures: Tries::default(),
             player_requests: Mutex::new(Default::default()),

@@ -865,6 +865,11 @@ impl App {
         let resp = req.send().await.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?;
         let status = resp.status();
         let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        // How many more may be fetched today, said with each answer, given or refused.
+        if let Some(left) = body["remaining"].as_i64() {
+            let resets = body["reset_time_utc"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t.timestamp()).unwrap_or_else(|| now() + 86400);
+            *self.subtitle_allowance.lock() = Some((left, resets));
+        }
         let Some(link) = body["link"].as_str() else { bail!("OpenSubtitles would not hand over the file: {}", body["message"].as_str().unwrap_or(status.as_str())) };
         let bytes = self.http.get(link).send().await.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?.error_for_status().map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?.bytes().await?;
         Ok(bytes.to_vec())
@@ -903,8 +908,9 @@ impl App {
     }
 
     /// Find subtitles in one language for one file and keep the first that proves to be in
-    /// time, trying a few. Returns what was kept, if anything.
-    pub async fn auto_subtitle(&self, file_id: i64, language: &str) -> Result<Option<Sidecar>> {
+    /// time, trying a few, and none once the day's allowance is down to `reserve`. Returns
+    /// what was kept, if anything.
+    pub async fn auto_subtitle(&self, file_id: i64, language: &str, reserve: i64) -> Result<Option<Sidecar>> {
         const TRIES: usize = 3;
         let candidates = self.search_subtitles(file_id, language).await?;
         if candidates.is_empty() {
@@ -913,6 +919,9 @@ impl App {
         let (_, title) = self.file_and_title(file_id)?;
         let mut reference = self.reference_for(file_id)?;
         for c in candidates.iter().take(TRIES) {
+            if (*self.subtitle_allowance.lock()).is_some_and(|(left, resets)| left <= reserve && now() < resets) {
+                break;
+            }
             let (side, report) = self.add_subtitle(file_id, c, Some(&mut reference)).await?;
             match report.verdict {
                 Verdict::InSync => return Ok(Some(side)),
@@ -979,7 +988,7 @@ impl App {
             looked += 1;
             tried.insert(file_id, now());
             for language in languages {
-                match self.auto_subtitle(file_id, &language).await {
+                match self.auto_subtitle(file_id, &language, 0).await {
                     Ok(Some(_)) => found += 1,
                     Ok(None) => {}
                     Err(e) => {

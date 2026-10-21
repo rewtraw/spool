@@ -26,7 +26,7 @@ The same settings can make a second, read-only key. A session using it can use t
 | Collections | `collections`, `add_missing_work` |
 | Profiles | `profile_fit` |
 | Compact versions | `compact_versions`, `make_compact_versions`, `cancel_compact_versions` |
-| Clips | `make_clip`, `clips`, `delete_clip` |
+| Clips | `make_clip`, `search_dialogue`, `make_clips`, `clips`, `delete_clip` |
 | Why something has not arrived | `diagnose` |
 | Releases and downloads | `search_releases`, `download_release`, `manage_download`, `unblock_release`, `dismiss_attention` |
 | The archive | `archive`, `check_availability` |

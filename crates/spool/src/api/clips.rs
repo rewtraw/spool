@@ -44,6 +44,23 @@ pub(super) async fn delete_clip(State(app): State<App>, who: Option<axum::Extens
     Ok(Json(json!({"deleted": id})))
 }
 
+#[derive(Deserialize)]
+pub(super) struct Look {
+    q: String,
+    limit: Option<usize>,
+    title_id: Option<i64>,
+}
+
+/// Moments found by what is said in them, to choose clips from.
+pub(super) async fn search_dialogue(State(app): State<App>, Query(look): Query<Look>) -> R<Value> {
+    Ok(Json(json!(app.search_dialogue(&look.q, look.limit.unwrap_or(60), look.title_id).await?)))
+}
+
+/// How much of the library can be searched by what is said, and what is being done about the rest.
+pub(super) async fn dialogue_coverage(State(app): State<App>) -> R<Value> {
+    Ok(Json(json!(app.dialogue.coverage())))
+}
+
 /// A name a clip can be saved as: its own, without what a file name cannot hold.
 fn file_name(c: &Clip) -> String {
     let clean: String = c.name.chars().map(|ch| if matches!(ch, '/' | '\\' | ':' | '"' | '\'' | '\n' | '\r') || ch.is_control() { ' ' } else { ch }).collect();

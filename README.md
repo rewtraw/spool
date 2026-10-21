@@ -39,7 +39,7 @@ The guides are at **[rewtraw.github.io/spool/guide](https://rewtraw.github.io/sp
 | [Your library and what Spool does to it](docs/your-library.md) | What it changes, what it never touches, how to undo things |
 | [A library in more than one place](docs/locations.md) | Further disks and NAS shares, managed or only read |
 | [Compact versions](docs/compact.md) | Smaller copies made on the machine's video hardware, kept beside the originals |
-| [Clips](docs/clips.md) | Moments cut from films and episodes, made to play wherever they are sent |
+| [Clips](docs/clips.md) | Moments cut from films and episodes, made to play wherever they are sent, and found by what is said in them |
 | [A helper on the machine that holds the disks](docs/helper.md) | Downloading, filing and moving on a NAS's own disks |
 | [Playing on a television](docs/players.md) | Infuse and other players that speak to Jellyfin |
 | [Collections and anime](docs/collections.md) | Films and series grouped by themselves, on players and in Plex |

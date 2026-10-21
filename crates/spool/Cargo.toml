@@ -39,6 +39,16 @@ spake2 = "0.4"
 if-addrs = "0.15"
 socket2 = "0.6"
 ab_glyph = "0.2"
+candle-core = "0.11"
+candle-nn = "0.11"
+candle-transformers = "0.11"
+unicode-normalization = "0.1"
+
+# On a Mac the model for finding what is said runs on the graphics chip.
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.11", features = ["metal", "accelerate"] }
+candle-nn = { version = "0.11", features = ["metal", "accelerate"] }
+candle-transformers = { version = "0.11", features = ["metal", "accelerate"] }
 
 [dev-dependencies]
 spool-nntp = { path = "../spool-nntp", features = ["testing"] }

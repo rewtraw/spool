@@ -30,7 +30,7 @@ pub(super) async fn add_file_subtitle(State(app): State<App>, Path(id): Path<i64
 /// Find and keep the first subtitles that prove to be in time, without choosing by hand.
 pub(super) async fn auto_file_subtitle(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
     let language = b["language"].as_str().and_then(crate::subs::language_code).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, "which language?".into()))?;
-    Ok(Json(json!({"subtitle": app.auto_subtitle(id, language).await?})))
+    Ok(Json(json!({"subtitle": app.auto_subtitle(id, language, 0).await?})))
 }
 
 pub(super) async fn check_file_subtitle(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
