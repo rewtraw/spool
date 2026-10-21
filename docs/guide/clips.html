@@ -119,6 +119,7 @@
 <li><strong>Starts at.</strong> Written as you would say it: <code>30m</code>, <code>1h2m5s</code>, <code>1:02:05</code>, <code>30:00</code>, or a number of seconds.</li>
 <li><strong>Seconds long.</strong> Thirty to begin with, up to ten minutes. A clip that would run past the end stops at the end.</li>
 <li><strong>Up to where I stopped.</strong> Where you stopped watching is offered as the start, so that the clip ends at the moment you stopped on.</li>
+<li><strong>Subtitles.</strong> Automatic draws them in when what is said is in another language than yours, as with anime in Japanese, and otherwise only the lines a film always shows, such as signs and words in another tongue. Or always, or none.</li>
 <li><strong>Name.</strong> If none is given it is called by the title and the time: &quot;Westworld S01E07 at 30:00&quot;.</li>
 </ul>
 <p>It is made in the background, one at a time, and appears under <strong>Clips</strong>. Half a minute of a 4K film takes a few seconds.</p>
@@ -144,11 +145,15 @@
 <td>The soundtrack in the language chosen under Settings → General where the file has one, otherwise the file&#39;s own first choice, as stereo AAC.</td>
 </tr>
 <tr>
+<td>Subtitles</td>
+<td>Drawn into the picture, so they show wherever it is played. Text subtitles, inside the file or in a file beside it, are drawn by Spool in white with a dark edge; the styling of anime subtitles is not kept. Subtitles that are pictures, as on a disc, are laid over as they are.</td>
+</tr>
+<tr>
 <td>File</td>
 <td>MP4, laid out so that it starts playing before it has all arrived.</td>
 </tr>
 </tbody></table></div>
-<p>Not in a clip: subtitles, other soundtracks, chapters, and Dolby Vision with nothing under it, which is refused with the reason.</p>
+<p>Not in a clip: other soundtracks, chapters, and Dolby Vision with nothing under it, which is refused with the reason. Text in scripts the font does not have, such as Chinese or Japanese, is not drawn.</p>
 <p>A half-minute clip is usually between 10 and 30 MB.</p>
 <h2 id="sending-one-on"><a href="#sending-one-on">Sending one on</a></h2>
 <p>Each clip under <strong>Clips</strong> has:</p>
@@ -158,7 +163,7 @@
 </ul>
 <p>Spool is reached over plain <code>http</code>, where browsers do not let a page open the share sheet. That is why there is a Save button and no Share button.</p>
 <h2 id="from-an-assistant"><a href="#from-an-assistant">From an assistant</a></h2>
-<p>An <a href="assistants.html">assistant</a> can make one when asked: &quot;clip Westworld S01E07 at 30m for 30 seconds&quot;. <code>make_clip</code> waits until the clip is made and gives the path of its file on the machine Spool runs on, so an assistant that can send files can send it on. <code>clips</code> lists them, and <code>delete_clip</code> removes one.</p>
+<p>An <a href="assistants.html">assistant</a> can make one when asked: &quot;clip Westworld S01E07 at 30m for 30 seconds&quot;. <code>make_clip</code> takes the same choices, subtitles among them, waits until the clip is made and gives the path of its file on the machine Spool runs on, so an assistant that can send files can send it on. <code>clips</code> lists them, and <code>delete_clip</code> removes one.</p>
 <h2 id="where-they-are-kept"><a href="#where-they-are-kept">Where they are kept</a></h2>
 <p>In a <code>clips</code> folder in Spool&#39;s data folder, apart from the library: one MP4 and one still for each. A clip outlives the film or episode it was cut from. A clip that was being made when Spool stopped is made again when it starts.</p>
 <nav class="around" aria-label="Other guides"><a class="prev" href="compact.html"><span>Before</span>Compact versions</a><a class="next" href="local-files.html"><span>Next</span>Files Spool recognises in a title's folder</a></nav>

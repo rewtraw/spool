@@ -10,6 +10,7 @@ On a film's page, or a series' page, choose **Make a clip**.
 - **Starts at.** Written as you would say it: `30m`, `1h2m5s`, `1:02:05`, `30:00`, or a number of seconds.
 - **Seconds long.** Thirty to begin with, up to ten minutes. A clip that would run past the end stops at the end.
 - **Up to where I stopped.** Where you stopped watching is offered as the start, so that the clip ends at the moment you stopped on.
+- **Subtitles.** Automatic draws them in when what is said is in another language than yours, as with anime in Japanese, and otherwise only the lines a film always shows, such as signs and words in another tongue. Or always, or none.
 - **Name.** If none is given it is called by the title and the time: "Westworld S01E07 at 30:00".
 
 It is made in the background, one at a time, and appears under **Clips**. Half a minute of a 4K film takes a few seconds.
@@ -23,9 +24,10 @@ Anyone who can sign in can make clips and see them all. A clip is removed by who
 | Picture | H.264, no larger than 1080p, at a quality that holds up when it is watched full screen. |
 | Colour | HDR (HDR10, HDR10+, HLG, and Dolby Vision over an HDR10 layer) is brought down to ordinary colour on the video hardware, so it does not look grey and washed out on a phone. |
 | Sound | The soundtrack in the language chosen under Settings → General where the file has one, otherwise the file's own first choice, as stereo AAC. |
+| Subtitles | Drawn into the picture, so they show wherever it is played. Text subtitles, inside the file or in a file beside it, are drawn by Spool in white with a dark edge; the styling of anime subtitles is not kept. Subtitles that are pictures, as on a disc, are laid over as they are. |
 | File | MP4, laid out so that it starts playing before it has all arrived. |
 
-Not in a clip: subtitles, other soundtracks, chapters, and Dolby Vision with nothing under it, which is refused with the reason.
+Not in a clip: other soundtracks, chapters, and Dolby Vision with nothing under it, which is refused with the reason. Text in scripts the font does not have, such as Chinese or Japanese, is not drawn.
 
 A half-minute clip is usually between 10 and 30 MB.
 
@@ -40,7 +42,7 @@ Spool is reached over plain `http`, where browsers do not let a page open the sh
 
 ## From an assistant
 
-An [assistant](assistants.md) can make one when asked: "clip Westworld S01E07 at 30m for 30 seconds". `make_clip` waits until the clip is made and gives the path of its file on the machine Spool runs on, so an assistant that can send files can send it on. `clips` lists them, and `delete_clip` removes one.
+An [assistant](assistants.md) can make one when asked: "clip Westworld S01E07 at 30m for 30 seconds". `make_clip` takes the same choices, subtitles among them, waits until the clip is made and gives the path of its file on the machine Spool runs on, so an assistant that can send files can send it on. `clips` lists them, and `delete_clip` removes one.
 
 ## Where they are kept
 

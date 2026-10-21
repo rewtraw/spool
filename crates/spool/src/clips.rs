@@ -47,6 +47,10 @@ pub struct Clip {
     /// What its link is known by: the link plays it without signing in, for whoever it is sent
     /// to that can reach Spool.
     pub link: String,
+    /// Which subtitles were asked for: "auto", "none", "on", or a language.
+    pub subtitles: String,
+    /// The language of the subtitles drawn into it, in words; empty for none.
+    pub subtitles_shown: String,
 }
 
 /// What a clip is asked for with.
@@ -63,6 +67,9 @@ pub struct Wanted {
     /// How long it runs, in seconds or as written; thirty seconds when not said.
     pub seconds: Option<serde_json::Value>,
     pub name: Option<String>,
+    /// "auto" (the default: when what is heard is not in the household's language, and the
+    /// lines always shown otherwise), "none", "on", or a language.
+    pub subtitles: Option<String>,
 }
 
 /// How far each clip being made has got, in thousandths of a second, and whether to stop it.
@@ -149,8 +156,27 @@ fn soundtrack(info: &MediaInfo, language: &str) -> Option<u32> {
     ours.iter().find(|s| s.default).or(ours.first()).copied().or(audio.iter().find(|s| s.default)).or(audio.first()).map(|s| s.index)
 }
 
+/// What is laid over the picture of a clip.
+#[derive(Debug, PartialEq)]
+enum Over {
+    /// Subtitles drawn here: the list of pictures ffmpeg reads them by.
+    Drawn(PathBuf),
+    /// A track of picture subtitles inside the file, by its stream number.
+    Picture(u32),
+}
+
+/// The size a picture comes out at: no larger than 1080p, its shape kept, both sides even.
+fn out_size(width: u32, height: u32) -> (u32, u32) {
+    let even = |n: f64| ((n / 2.0).round() as u32 * 2).max(2);
+    match crate::compact::fit(width, height, 1080) {
+        Some((w, -2)) => (w as u32, even(height as f64 * w as f64 / width as f64)),
+        Some((-2, h)) => (even(width as f64 * h as f64 / height as f64), h as u32),
+        _ => (width, height),
+    }
+}
+
 /// What to hand ffmpeg to cut a clip.
-fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64, language: &str) -> Vec<String> {
+fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64, language: &str, over: Option<&Over>) -> Vec<String> {
     let mut a: Vec<String> = vec![];
     let mut add = |items: &[&str]| a.extend(items.iter().map(|s| s.to_string()));
     add(&["-nostdin", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-y"]);
@@ -158,14 +184,12 @@ fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64,
     if hdr {
         add(&["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]);
     }
-    add(&["-ss", &format!("{start:.3}"), "-i", &src.to_string_lossy(), "-t", &format!("{seconds:.3}")]);
-    add(&["-map", "0:v:0"]);
-    match soundtrack(info, language) {
-        Some(i) => add(&["-map", &format!("0:{i}")]),
-        None => add(&["-map", "0:a:0?"]),
+    add(&["-ss", &format!("{start:.3}"), "-i", &src.to_string_lossy()]);
+    if let Some(Over::Drawn(list)) = over {
+        add(&["-f", "concat", "-safe", "0", "-i", &list.to_string_lossy()]);
     }
     let size = crate::compact::fit(info.width, info.height, 1080);
-    let filter = if hdr {
+    let picture = if hdr {
         // The video hardware maps the picture to ordinary colour as it resizes it.
         let (w, h) = size.map_or(("iw".to_string(), "ih".to_string()), |(w, h)| (w.to_string(), h.to_string()));
         format!("scale_vt=w={w}:h={h}:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709,hwdownload,format=p010le,format=yuv420p")
@@ -175,7 +199,25 @@ fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64,
             None => "format=yuv420p".into(),
         }
     };
-    add(&["-vf", &filter]);
+    let (w, h) = out_size(info.width, info.height);
+    match over {
+        None => add(&["-map", "0:v:0", "-vf", &picture]),
+        Some(Over::Drawn(_)) => {
+            add(&["-filter_complex", &format!("[0:v:0]{picture}[v];[1:v]format=rgba[s];[v][s]overlay=x=0:y=main_h-overlay_h:eof_action=pass:format=auto,format=yuv420p[out]")]);
+            add(&["-map", "[out]"]);
+        }
+        Some(Over::Picture(index)) => {
+            add(&["-filter_complex", &format!("[0:v:0]{picture}[v];[0:{index}]scale={w}:{h}[s];[v][s]overlay=eof_action=pass:format=auto,format=yuv420p[out]")]);
+            add(&["-map", "[out]"]);
+        }
+    }
+    match soundtrack(info, language) {
+        Some(i) => add(&["-map", &format!("0:{i}")]),
+        None => add(&["-map", "0:a:0?"]),
+    }
+    // How long, as an option of what is written, after every input: placed before an input it
+    // would be that input's.
+    add(&["-t", &format!("{seconds:.3}")]);
     add(&["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-profile:v", "high", "-maxrate", "12M", "-bufsize", "24M"]);
     add(&["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]);
     add(&["-c:a", "aac", "-b:a", "192k", "-ac", "2"]);
@@ -228,6 +270,25 @@ impl App {
         Ok((file, from))
     }
 
+    /// The subtitles to draw into a clip of a file, as asked.
+    async fn clip_subtitles(&self, title: &Title, file: &MediaFile, info: &MediaInfo, wanted: &str) -> Option<crate::captions::Chosen> {
+        if matches!(wanted.trim().to_lowercase().as_str(), "none" | "off") {
+            return None;
+        }
+        let household = crate::subs::language_code(&self.settings.general().language).unwrap_or_default();
+        let heard = soundtrack(info, household).and_then(|i| info.streams.iter().find(|s| s.index == i)).and_then(|s| crate::subs::language_code(&s.language));
+        // What lies beside the video is looked for afresh, and remembered; away from the
+        // work of answering, as a slow share can take a while to list.
+        let (app, folder, id, known) = (self.clone(), title.path.clone(), file.id, file.subtitles.clone());
+        let beside = tokio::task::spawn_blocking(move || {
+            let found = app.find_sidecars(id).unwrap_or(known);
+            found.into_iter().map(|s| { let p = Path::new(&folder).join(&s.rel_path); (s, p) }).filter(|(_, p)| p.is_file()).collect::<Vec<_>>()
+        })
+        .await
+        .unwrap_or_default();
+        crate::captions::choose(info, &beside, heard, household, wanted)
+    }
+
     /// Ask for a clip. It is recorded at once and made in the background.
     pub async fn add_clip(&self, w: &Wanted, account: Option<i64>) -> Result<Clip> {
         let title = self.db.title(w.title_id)?.ok_or_else(|| anyhow!("there is no such title"))?;
@@ -268,6 +329,11 @@ impl App {
             bail!("it runs {}, so there is nothing at {}", clock(runs), clock(start));
         }
         let seconds = if runs > 0.0 { seconds.min(runs - start) } else { seconds };
+        let subtitles = w.subtitles.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("auto").to_lowercase();
+        if !matches!(subtitles.as_str(), "auto" | "none" | "off") && self.clip_subtitles(&title, &file, &info, &subtitles).await.is_none() {
+            let language = if subtitles == "on" { self.settings.general().language } else { subtitles.clone() };
+            bail!("it has no {language} subtitles to draw in");
+        }
         let name = w.name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| {
             let short = match &episode {
                 Some(e) => format!("{} S{:02}E{:02}", title.title, e.season, e.episode),
@@ -286,6 +352,7 @@ impl App {
             state: "making".into(),
             created_at: crate::db::now(),
             link: crate::settings::new_key(),
+            subtitles,
             ..Default::default()
         };
         clip.id = self.db.add_clip(&clip)?;
@@ -301,7 +368,7 @@ impl App {
         tokio::spawn(async move {
             let made = {
                 let _turn = ONE.acquire().await;
-                if stop.load(Ordering::Relaxed) { Err(anyhow!(crate::compact::CALLED_OFF)) } else { app.make_clip(id, &done, &stop).await }
+                if stop.load(Ordering::Relaxed) { Err(anyhow!(crate::compact::CALLED_OFF)) } else { app.make_clip(id, &done, stop.clone()).await }
             };
             MAKING.lock().remove(&id);
             if stop.load(Ordering::Relaxed) {
@@ -323,7 +390,7 @@ impl App {
         });
     }
 
-    async fn make_clip(&self, id: i64, done: &AtomicU64, stop: &AtomicBool) -> Result<()> {
+    async fn make_clip(&self, id: i64, done: &AtomicU64, stop: Arc<AtomicBool>) -> Result<()> {
         let mut clip = self.db.clip(id)?.ok_or_else(|| anyhow!("the clip was removed"))?;
         let title = self.db.title(clip.title_id.ok_or_else(|| anyhow!("the title it was cut from was removed"))?)?.ok_or_else(|| anyhow!("the title it was cut from was removed"))?;
         let episode = match clip.episode_id {
@@ -339,8 +406,36 @@ impl App {
         tokio::fs::create_dir_all(self.clips_dir()).await.context("making the folder clips are kept in")?;
         let out = self.clip_video(id);
         let language = crate::subs::language_code(&self.settings.general().language).unwrap_or_default();
+        let src = title.file_path(&file);
+        // The subtitles, drawn as pictures in a folder of their own while the clip is made,
+        // and cleared away however that ends.
+        struct Tidy(PathBuf);
+        impl Drop for Tidy {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let drawing = Tidy(self.clips_dir().join(format!(".{id}-subtitles")));
+        let chosen = self.clip_subtitles(&title, &file, &info, &clip.subtitles).await;
+        let over = match &chosen {
+            None => None,
+            Some(c) => match &c.source {
+                crate::captions::Source::Picture(index) => Some(Over::Picture(*index)),
+                source => {
+                    let cues = crate::captions::cues(&tool, &src, source, clip.start, clip.seconds, &stop).await?;
+                    let (w, h) = out_size(info.width, info.height);
+                    let (dir, seconds, halt) = (drawing.0.clone(), clip.seconds, stop.clone());
+                    tokio::task::spawn_blocking(move || crate::captions::render(&cues, seconds, w, h, &dir, &halt)).await??.map(Over::Drawn)
+                }
+            },
+        };
+        clip.subtitles_shown = match (&chosen, &over) {
+            (Some(c), Some(_)) => crate::subs::language_name(&c.language),
+            _ => String::new(),
+        };
         let speed = AtomicU64::new(0);
-        crate::compact::run(&tool, &arguments(&info, &title.file_path(&file), &out, clip.start, clip.seconds, language), crate::compact::frames_a_second(&info), done, &speed, stop).await?;
+        crate::compact::run(&tool, &arguments(&info, &src, &out, clip.start, clip.seconds, language, over.as_ref()), crate::compact::frames_a_second(&info), done, &speed, &stop).await?;
+        drop(drawing);
         let made = self.probe(&out, "").await?.ok_or_else(|| anyhow!("the clip could not be read back"))?;
         if made.runtime_secs < 0.5 {
             bail!("the clip came out empty");
@@ -419,14 +514,27 @@ mod tests {
     #[test]
     fn hdr_is_brought_down_on_the_video_hardware_and_a_big_picture_made_1080p() {
         let hdr = MediaInfo { width: 3840, height: 2160, dynamic_range_type: "HDR10".into(), ..Default::default() };
-        let a = arguments(&hdr, Path::new("/f.mkv"), Path::new("/c.mp4"), 1800.0, 30.0, "en").join(" ");
+        let a = arguments(&hdr, Path::new("/f.mkv"), Path::new("/c.mp4"), 1800.0, 30.0, "en", None).join(" ");
         assert!(a.contains("-hwaccel videotoolbox"));
         assert!(a.contains("scale_vt=w=1920:h=-2:color_matrix=bt709"));
-        assert!(a.contains("-ss 1800.000 -i /f.mkv -t 30.000"));
+        assert!(a.contains("-ss 1800.000 -i /f.mkv") && a.contains("-t 30.000 -c:v libx264"));
         let sdr = MediaInfo { width: 1920, height: 1080, ..Default::default() };
-        let a = arguments(&sdr, Path::new("/f.mkv"), Path::new("/c.mp4"), 0.0, 30.0, "en").join(" ");
+        let a = arguments(&sdr, Path::new("/f.mkv"), Path::new("/c.mp4"), 0.0, 30.0, "en", None).join(" ");
         assert!(!a.contains("videotoolbox"));
         assert!(a.contains("-vf format=yuv420p"));
         assert!(a.contains("-c:v libx264") && a.contains("+faststart"));
+    }
+
+    #[test]
+    fn subtitles_are_laid_over_the_picture_at_the_size_it_comes_out() {
+        assert_eq!(out_size(3840, 2160), (1920, 1080));
+        assert_eq!(out_size(3840, 1600), (1920, 800));
+        assert_eq!(out_size(1440, 1080), (1440, 1080));
+        let hdr = MediaInfo { width: 3840, height: 2160, dynamic_range_type: "HDR10".into(), ..Default::default() };
+        let a = arguments(&hdr, Path::new("/f.mkv"), Path::new("/c.mp4"), 60.0, 30.0, "en", Some(&Over::Picture(4))).join(" ");
+        assert!(a.contains("[0:4]scale=1920:1080[s];[v][s]overlay") && a.contains("-map [out]") && !a.contains("-vf"), "{a}");
+        let sdr = MediaInfo { width: 1920, height: 1080, ..Default::default() };
+        let a = arguments(&sdr, Path::new("/f.mkv"), Path::new("/c.mp4"), 60.0, 30.0, "en", Some(&Over::Drawn(PathBuf::from("/d/list.ffconcat")))).join(" ");
+        assert!(a.contains("-f concat -safe 0 -i /d/list.ffconcat") && a.contains("y=main_h-overlay_h"), "{a}");
     }
 }

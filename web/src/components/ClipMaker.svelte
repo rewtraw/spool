@@ -9,6 +9,7 @@
   let start = $state('');
   let seconds = $state(30);
   let name = $state('');
+  let subtitles = $state('auto');
   let error = $state('');
   let made = $state<{ name: string } | null>(null);
 
@@ -30,6 +31,7 @@
       const body: any = { title_id: titleId, start: start.trim(), seconds: Number(seconds) || 30 };
       if (kind === 'series') body.episode_id = episodeId;
       if (name.trim()) body.name = name.trim();
+      body.subtitles = subtitles;
       const clip = await api.post('/clips', body);
       made = { name: clip.name };
       name = '';
@@ -66,6 +68,13 @@
       {#if stoppedAt > 1}<button type="button" class="btn small ghost" onclick={() => (start = clock(Math.max(0, stoppedAt - seconds)))} title="Starts {clock(seconds)} before where you stopped, so it ends there">Up to where I stopped ({clock(stoppedAt)})</button>{/if}
       {#each [15, 30, 60] as n}<button type="button" class="btn small ghost" class:on={Number(seconds) === n} onclick={() => (seconds = n)}>{n} s</button>{/each}
     </div>
+    <label class="field">Subtitles
+      <select class="input" bind:value={subtitles}>
+        <option value="auto">Automatic: when the speech is in another language</option>
+        <option value="on">Always</option>
+        <option value="none">None</option>
+      </select>
+    </label>
     <label class="field">Name, if not the title and the time
       <input class="input" bind:value={name} autocomplete="off" />
     </label>

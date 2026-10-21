@@ -248,8 +248,8 @@ const TOOLS: &[Tool] = &[
         name: "make_clip",
         read: false,
         destructive: false,
-        description: "Cut a clip from a film or an episode, to keep or send on: H.264 MP4 up to 1080p with stereo AAC in the household's language, HDR brought down to ordinary colour, ready to stream before it has all arrived. Waits until it is made (seconds, a minute for a long one) and gives the file's path on the machine Spool runs on. Start is written as 30m, 1h2m5s, 1:02:05 or seconds; length is up to 10 minutes, 30 seconds when not given. For a series give season and episode.",
-        schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "start": {"type": "string", "description": "Where it starts: 30m, 1h2m5s, 1:02:05 or a number of seconds."}, "seconds": {"type": "number", "description": "How long it runs, in seconds. Default 30, at most 600."}, "name": {"type": "string", "description": "What to call it. Defaults to the title and the time."}}), &["title_id", "start"]),
+        description: "Cut a clip from a film or an episode, to keep or send on: H.264 MP4 up to 1080p with stereo AAC in the household's language, HDR brought down to ordinary colour, subtitles drawn in where the soundtrack is in another language, ready to stream before it has all arrived. Waits until it is made (seconds, a minute for a long one) and gives the file's path on the machine Spool runs on. Start is written as 30m, 1h2m5s, 1:02:05 or seconds; length is up to 10 minutes, 30 seconds when not given. For a series give season and episode.",
+        schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "start": {"type": "string", "description": "Where it starts: 30m, 1h2m5s, 1:02:05 or a number of seconds."}, "seconds": {"type": "number", "description": "How long it runs, in seconds. Default 30, at most 600."}, "name": {"type": "string", "description": "What to call it. Defaults to the title and the time."}, "subtitles": {"type": "string", "description": "auto (default: drawn in when the soundtrack is not in the household's language, otherwise only forced lines such as signs), on (always, in the household's language), none, or a language such as french."}}), &["title_id", "start"]),
     },
     Tool { name: "clips", read: true, destructive: false, description: "The clips that have been cut, newest first: what each is from, where it starts and how long it runs, its size, whether it is ready, and its file's path on the machine Spool runs on.", schema: || obj(json!({}), &[]) },
     Tool { name: "delete_clip", read: false, destructive: true, description: "Remove a clip and its file. Needs confirm=true.", schema: || obj(json!({"clip_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["clip_id"]) },
@@ -421,6 +421,7 @@ impl Mcp {
         json!({
             "clip_id": c.id, "name": c.name, "from": c.from, "starts_at": crate::clips::clock(c.start), "seconds": (c.seconds * 10.0).round() / 10.0, "state": c.state,
             "error": if c.error.is_empty() { Value::Null } else { json!(c.error) }, "size_mb": (c.size as f64 / 1e5).round() / 10.0, "size": format!("{}x{}", c.width, c.height),
+            "subtitles": if c.subtitles_shown.is_empty() { Value::Null } else { json!(c.subtitles_shown) },
             "file": if c.state == "ready" { json!(self.app.clip_video(c.id)) } else { Value::Null }, "made": when(&json!(c.created_at)),
         })
     }
@@ -720,7 +721,7 @@ impl Mcp {
             }
             "make_clip" => {
                 let mut body = json!({"title_id": int("title_id")?, "start": a["start"].clone()});
-                for k in ["season", "episode", "seconds", "name"] {
+                for k in ["season", "episode", "seconds", "name", "subtitles"] {
                     if !a[k].is_null() {
                         body[k] = a[k].clone();
                     }

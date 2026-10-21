@@ -4704,6 +4704,7 @@ async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_rem
     let home = w.root.join("Movies/Heat (1995)");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(home.join("Heat (1995) [Bluray-1080p].mkv"), &video).unwrap();
+    std::fs::write(home.join("Heat (1995) [Bluray-1080p].en.srt"), "1\n00:00:00,600 --> 00:00:01,400\n<i>Hello</i> there\n").unwrap();
     let mut heat = w.movie("Heat", 1995, "tt0113277");
     heat.path = home.to_string_lossy().to_string();
     w.app.db.save_title(&mut heat).unwrap();
@@ -4714,6 +4715,23 @@ async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_rem
     show.path = w.root.join("TV Shows/Example World").to_string_lossy().to_string();
     w.app.db.save_title(&mut show).unwrap();
     w.app.scan_all().await.unwrap();
+    // The film's sound says no language, so by itself it gets no subtitles; asked, it gets the file beside it.
+    let (_, asked) = call(&api, "POST", "/api/clips", json!({"title_id": heat.id, "start": 0, "seconds": 1.5, "subtitles": "on"})).await;
+    let with_words = ready(asked["id"].as_i64().unwrap_or_else(|| panic!("{asked}"))).await;
+    assert_eq!((with_words.state.as_str(), with_words.subtitles_shown.as_str()), ("ready", "English"), "{}", with_words.error);
+    assert!((with_words.seconds - 1.5).abs() < 0.2, "it runs as long as asked, subtitles or not: {}", with_words.seconds);
+    let frame = |at: f64, of: std::path::PathBuf| async move {
+        let out = std::process::Command::new("ffmpeg").args(["-v", "error", "-ss", &at.to_string(), "-i"]).arg(&of).args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]).output().unwrap();
+        out.stdout
+    };
+    // The foot of the picture differs while the line is up, and not before it.
+    let plain = w.app.clip_video(with_words.id);
+    let (before, during) = (frame(0.2, plain.clone()).await, frame(1.0, plain.clone()).await);
+    assert_eq!(before.len(), 320 * 240);
+    let foot = |f: &[u8]| f[200 * 320..230 * 320].iter().filter(|p| **p > 235).count();
+    assert!(foot(&during) > foot(&before) + 20, "white letters appear: {} then {}", foot(&before), foot(&during));
+    assert!(!w.app.data_dir.join(format!("clips/.{}-subtitles", with_words.id)).exists(), "the drawings are cleared away");
+    call(&api, "DELETE", &format!("/api/clips/{}", with_words.id), Value::Null).await;
 
     // What cannot be cut is refused with the reason.
     for (body, why) in [
@@ -4722,6 +4740,7 @@ async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_rem
         (json!({"title_id": heat.id, "start": 0, "seconds": 900}), "at most 10 minutes"),
         (json!({"title_id": show.id, "start": 0}), "which episode"),
         (json!({"title_id": show.id, "season": 1, "episode": 9, "start": 0}), "no S01E09"),
+        (json!({"title_id": show.id, "season": 1, "episode": 1, "start": 0, "subtitles": "french"}), "no french subtitles"),
     ] {
         let (status, said) = call(&api, "POST", "/api/clips", body).await;
         assert!(status == 400 && said.to_string().contains(why), "{why}: {status} {said}");
@@ -4774,4 +4793,32 @@ async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_rem
     w.app.db.delete_title(show.id).unwrap();
     let kept = w.app.db.clip(episode_clip.id).unwrap().unwrap();
     assert_eq!((kept.title_id, kept.state.as_str()), (None, "ready"));
+}
+
+#[tokio::test]
+async fn subtitles_inside_a_file_are_read_for_the_clip_in_their_own_time() {
+    let video = video_or_skip!();
+    let dir = tempfile::tempdir().unwrap();
+    let (plain, srt, with) = (dir.path().join("v.mkv"), dir.path().join("v.srt"), dir.path().join("with.mkv"));
+    std::fs::write(&plain, &video).unwrap();
+    std::fs::write(&srt, "1\n00:00:00,500 --> 00:00:01,600\nAlready up\n\n2\n00:00:01,700 --> 00:00:01,900\n{\\an8}<b>Next</b>\n").unwrap();
+    let ok = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-y", "-i"])
+        .arg(&plain)
+        .arg("-i")
+        .arg(&srt)
+        .args(["-map", "0", "-map", "1", "-c", "copy", "-c:s", "srt", "-metadata:s:s:0", "language=eng"])
+        .arg(&with)
+        .status()
+        .unwrap();
+    assert!(ok.success());
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let tool = spool::subs::ffmpeg_installed().unwrap();
+    // From a second in, for half a second: the line already up is there from the start, the next where it falls.
+    let cues = spool::captions::cues(&tool, &with, &spool::captions::Source::Text(2), 1.0, 0.95, &stop).await.unwrap();
+    let got: Vec<(i64, i64, &str)> = cues.iter().map(|c| ((c.start * 100.0).round() as i64, (c.end * 100.0).round() as i64, c.text.as_str())).collect();
+    assert_eq!(got, [(0, 60, "Already up"), (70, 90, "Next")]);
+    // Called off, it stops.
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    assert!(spool::captions::cues(&tool, &with, &spool::captions::Source::Text(2), 1.0, 0.95, &stop).await.is_err());
 }

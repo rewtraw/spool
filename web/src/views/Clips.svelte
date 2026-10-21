@@ -54,7 +54,7 @@
     load();
   }
 
-  const size = (c: Clip) => [c.height ? `${c.height}p` : '', bytes(c.size)].filter(Boolean).join(' · ');
+  const size = (c: Clip) => [c.height ? `${c.height}p` : '', c.subtitles_shown ? `${c.subtitles_shown} subtitles` : '', bytes(c.size)].filter(Boolean).join(' · ');
 </script>
 
 <header class="head">

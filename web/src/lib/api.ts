@@ -135,6 +135,9 @@ export interface Clip {
   created_at: number;
   /** What its link is known by: the link plays it without signing in. */
   link: string;
+  /** Which subtitles were asked for, and the language of those drawn in, in words. */
+  subtitles: string;
+  subtitles_shown: string;
   /** How far it has got while it is being made, from 0 to 1. */
   progress: number | null;
   /** Who made it. */

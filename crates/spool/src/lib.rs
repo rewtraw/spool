@@ -8,6 +8,7 @@ pub mod app;
 pub mod archive;
 pub mod asks;
 pub mod art;
+pub mod captions;
 pub mod catalog;
 pub mod clips;
 pub mod db;
