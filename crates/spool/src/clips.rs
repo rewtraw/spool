@@ -176,7 +176,7 @@ fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64,
         }
     };
     add(&["-vf", &filter]);
-    add(&["-c:v", "libx264", "-preset", "slow", "-crf", "20", "-profile:v", "high", "-maxrate", "12M", "-bufsize", "24M"]);
+    add(&["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-profile:v", "high", "-maxrate", "12M", "-bufsize", "24M"]);
     add(&["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]);
     add(&["-c:a", "aac", "-b:a", "192k", "-ac", "2"]);
     add(&["-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1", "-movflags", "+faststart", "-f", "mp4", &out.to_string_lossy()]);

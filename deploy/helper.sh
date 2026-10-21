@@ -47,7 +47,7 @@ if INFO=$(ask "$URL/link/work/v1/info" 2>/dev/null); then
   esac
 fi
 
-ssh "$HOST" "midclt call -job app.pull_images '$APP' '{\"redeploy\": true}'" >/dev/null
+ssh "$HOST" "midclt call --job app.pull_images '$APP' '{\"redeploy\": true}'" >/dev/null
 for i in $(seq 1 30); do
   if INFO=$(ask "$URL/link/work/v1/info" 2>/dev/null); then
     echo "The helper on $HOST is updated: $(printf '%s' "$INFO" | sed -e 's/.*"version":"\([^"]*\)".*/version \1/')"
