@@ -68,3 +68,7 @@ It can find them by what is said, too: "make clips of everything that says somet
 ## Where they are kept
 
 In a `clips` folder in Spool's data folder, apart from the library: one MP4 and one still for each, and a GIF once one has been asked for. A clip outlives the film or episode it was cut from. A clip that was being made when Spool stopped is made again when it starts.
+
+## Of a video outside the library
+
+`spool clip` cuts a clip of any video file, such as one downloaded with yt-dlp, with a subtitle file drawn in as Spool draws them: `spool clip talk.mp4 --from 0 --to 1:20 --subs talk.srt`. The subtitle file is timed against the whole video, and the clip comes out beside it as "talk clip.mp4" unless `--out` says otherwise. It needs no library or running Spool, only ffmpeg, and works with an ffmpeg that cannot draw text itself, as Homebrew's cannot. Correct a subtitle file's words before clipping; automatic captions from YouTube repeat each line and should be cut down to one of each first.

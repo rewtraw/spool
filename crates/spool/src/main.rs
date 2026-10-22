@@ -84,6 +84,22 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Cut a clip of any video, with a file of subtitles drawn in as Spool draws them in clips.
+    Clip {
+        video: PathBuf,
+        /// Where the clip starts: "1:05", "65", "1m5s". The start of the video when not given.
+        #[arg(long, default_value = "0")]
+        from: String,
+        /// Where it ends, written the same way. The end of the video when not given.
+        #[arg(long)]
+        to: Option<String>,
+        /// A subtitle file (SRT), timed against the whole video.
+        #[arg(long)]
+        subs: Option<PathBuf>,
+        /// The clip made. Beside the video, as "<name> clip.mp4", when not given.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Write a consistent copy of the database.
     Backup { dest: PathBuf },
     /// Switch between shadow and active mode.
@@ -142,6 +158,22 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).with_target(false).with_writer(move || log.clone()).init();
     let dir = data_dir(&cli);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+    // Clipping a file outside the library needs no catalogue.
+    if let Command::Clip { video, from, to, subs, out } = &cli.command {
+        let time = |t: &str| spool::clips::read_time(&serde_json::Value::String(t.to_string()));
+        let start = time(from)?;
+        let end = match to {
+            Some(t) => time(t)?,
+            None => f64::INFINITY,
+        };
+        if end <= start {
+            anyhow::bail!("--to must come after --from");
+        }
+        let out = out.clone().unwrap_or_else(|| video.with_file_name(format!("{} clip.mp4", video.file_stem().unwrap_or_default().to_string_lossy())));
+        spool::clips::clip_file(video, &out, start, end - start, subs.as_deref()).await?;
+        println!("Made {}", out.display());
+        return Ok(());
+    }
     // A helper keeps no catalogue, so it opens no database.
     if let Command::Helper { bind } = &cli.command {
         return spool::helper::serve(bind, &dir, spool::helper::Conf::from_env()?).await;
@@ -149,7 +181,7 @@ async fn main() -> Result<()> {
     let db = Db::open(&dir.join("spool.db"))?;
 
     match cli.command {
-        Command::Helper { .. } => unreachable!("handled above"),
+        Command::Helper { .. } | Command::Clip { .. } => unreachable!("handled above"),
         Command::Serve { bind } => {
             let app = App::start(&dir, db).await?;
             // Ask for access to the media volume now, so any consent prompt appears at startup

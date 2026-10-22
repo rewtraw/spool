@@ -202,6 +202,43 @@ fn gif_filter(seconds: f64, width: u32, height: u32) -> String {
     format!("fps={fps},scale={wide}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
 }
 
+/// Cut a stretch of any video, outside the library, with the subtitles of a file of them drawn
+/// in as a clip of the library has its own drawn. Without subtitles it is cut plain.
+pub async fn clip_file(src: &Path, out: &Path, start: f64, seconds: f64, subtitles: Option<&Path>) -> Result<()> {
+    let tool = crate::subs::ffmpeg_installed().ok_or_else(|| anyhow!("ffmpeg is not installed"))?;
+    let probe = tool.with_file_name("ffprobe");
+    let info = crate::import::probe_with(&probe, src, "").await?;
+    let seconds = seconds.min((info.runtime_secs - start).max(0.0));
+    if seconds <= 0.0 {
+        bail!("the video ends before {}", clock(start));
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    // The subtitles are drawn as pictures in a folder beside what is made, cleared away after.
+    struct Tidy(PathBuf);
+    impl Drop for Tidy {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let drawing = Tidy(out.with_extension("subtitles"));
+    let over = match subtitles {
+        None => None,
+        Some(path) => {
+            let source = crate::captions::Source::Beside(path.to_path_buf());
+            let cues = crate::captions::cues(&tool, src, &source, &[], start, seconds, &stop).await?;
+            if cues.is_empty() {
+                bail!("{} has no lines between {} and {}", path.display(), clock(start), clock(start + seconds));
+            }
+            let (w, h) = out_size(info.width, info.height);
+            let dir = drawing.0.clone();
+            let halt = stop.clone();
+            tokio::task::spawn_blocking(move || crate::captions::render(&cues, seconds, w, h, &dir, &halt)).await??.map(Over::Drawn)
+        }
+    };
+    let (done, speed) = (AtomicU64::new(0), AtomicU64::new(0));
+    crate::compact::run(&tool, &arguments(&info, src, out, start, seconds, "", over.as_ref()), crate::compact::frames_a_second(&info), &done, &speed, &stop).await
+}
+
 /// What to hand ffmpeg to cut a clip.
 fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64, language: &str, over: Option<&Over>) -> Vec<String> {
     let mut a: Vec<String> = vec![];

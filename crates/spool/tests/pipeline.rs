@@ -5078,3 +5078,27 @@ async fn what_is_meant_is_found_when_it_is_put_another_way() {
     assert!(!found.moments[0].words);
     assert!(found.moments.iter().all(|m| m.lines[0].text != "The bank closes at five."), "what means nothing like it is left out: {found:?}");
 }
+
+/// Any video can be clipped with a file of subtitles drawn in, without a library.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_video_outside_the_library_is_clipped_with_its_subtitles_drawn_in() {
+    let video = video_or_skip!();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("talk.mkv");
+    std::fs::write(&src, &video).unwrap();
+    let srt = dir.path().join("talk.srt");
+    std::fs::write(&srt, "1\n00:00:00,200 --> 00:00:01,800\nHello there\n").unwrap();
+    let (plain, drawn) = (dir.path().join("plain.mp4"), dir.path().join("drawn.mp4"));
+    spool::clips::clip_file(&src, &plain, 0.0, 2.0, None).await.unwrap();
+    spool::clips::clip_file(&src, &drawn, 0.0, 2.0, Some(&srt)).await.unwrap();
+    // The same stretch, with something laid over it in one and not the other.
+    let frame = |p: &Path| std::process::Command::new(spool::subs::ffmpeg_installed().unwrap()).args(["-v", "error", "-ss", "1", "-i"]).arg(p).args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]).output().unwrap().stdout;
+    let (a, b) = (frame(&plain), frame(&drawn));
+    assert!(!a.is_empty() && a.len() == b.len());
+    assert!(a.iter().zip(&b).filter(|(x, y)| x.abs_diff(**y) > 40).count() > 100, "no subtitles were drawn");
+    // Nothing is left behind from drawing them.
+    assert_eq!(tree(dir.path()), ["drawn.mp4", "plain.mp4", "talk.mkv", "talk.srt"]);
+    // Subtitles with nothing in the stretch asked for say so.
+    let err = spool::clips::clip_file(&src, &dir.path().join("x.mp4"), 1.9, 0.05, Some(&srt)).await.unwrap_err();
+    assert!(format!("{err:#}").contains("has no lines"), "{err:#}");
+}

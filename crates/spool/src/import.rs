@@ -108,24 +108,7 @@ impl App {
     /// Probe a file. Ok(None) when ffprobe is not installed; an error when the file is not playable video.
     pub async fn probe(&self, path: &Path, scene_name: &str) -> Result<Option<MediaInfo>> {
         let Some(tool) = self.ffprobe_path() else { return Ok(None) };
-        let out = tokio::process::Command::new(tool)
-            .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_frames", "-read_intervals", "%+#1", "-select_streams", "v:0", "-show_entries", "frame=media_type,side_data_list"])
-            .arg(path)
-            .output()
-            .await?;
-        // A second pass without stream selection gives audio and subtitle streams.
-        let streams = tokio::process::Command::new(self.ffprobe_path().unwrap()).args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"]).arg(path).output().await?;
-        if !streams.status.success() {
-            bail!("ffprobe could not read the file: {}", String::from_utf8_lossy(&streams.stderr).lines().next().unwrap_or("unknown error"));
-        }
-        let mut probe: serde_json::Value = serde_json::from_slice(&streams.stdout)?;
-        if let Ok(frames) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
-            probe["frames"] = frames["frames"].clone();
-        }
-        match MediaInfo::from_ffprobe(&probe, scene_name) {
-            Some(mi) => Ok(Some(mi)),
-            None => bail!("the file has no video stream"),
-        }
+        probe_with(&tool, path, scene_name).await.map(Some)
     }
 
     /// Where a replaced or deleted file is parked. Empty when files are deleted outright.
@@ -799,4 +782,26 @@ fn version_label(file: &MediaFile, flavor: Flavor) -> String {
         }
     };
     label.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')).collect()
+}
+
+/// What ffprobe finds in a video, with the ffprobe given.
+pub async fn probe_with(tool: &Path, path: &Path, scene_name: &str) -> Result<MediaInfo> {
+    let out = tokio::process::Command::new(tool)
+        .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_frames", "-read_intervals", "%+#1", "-select_streams", "v:0", "-show_entries", "frame=media_type,side_data_list"])
+        .arg(path)
+        .output()
+        .await?;
+    // A second pass without stream selection gives audio and subtitle streams.
+    let streams = tokio::process::Command::new(tool).args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"]).arg(path).output().await?;
+    if !streams.status.success() {
+        bail!("ffprobe could not read the file: {}", String::from_utf8_lossy(&streams.stderr).lines().next().unwrap_or("unknown error"));
+    }
+    let mut probe: serde_json::Value = serde_json::from_slice(&streams.stdout)?;
+    if let Ok(frames) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+        probe["frames"] = frames["frames"].clone();
+    }
+    match MediaInfo::from_ffprobe(&probe, scene_name) {
+        Some(mi) => Ok(mi),
+        None => bail!("the file has no video stream"),
+    }
 }
