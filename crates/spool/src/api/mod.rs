@@ -142,7 +142,7 @@ fn a_viewer_may(method: &axum::http::Method, path: &str) -> bool {
     matches!(
         (read, parts.as_slice()),
         (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching" | "clips" | "dialogue"])
-            | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"] | ["clips", ..] | ["dialogue", "coverage"])
+            | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"] | ["clips", ..] | ["dialogue", "coverage" | "lines"])
             | (false, ["logout" | "watched" | "clips"] | ["clips", _])
     )
 }
@@ -392,6 +392,7 @@ fn api_routes() -> Router<App> {
         .route("/api/clips/{id}/still", get(clip_still))
         .route("/api/dialogue", get(search_dialogue))
         .route("/api/dialogue/coverage", get(dialogue_coverage))
+        .route("/api/dialogue/lines", get(dialogue_lines))
         .route("/clip/{file}", get(shared_clip))
         .route("/api/accounts", get(accounts).post(account_add))
         .route("/api/accounts/{id}", put(account_change).delete(account_remove))

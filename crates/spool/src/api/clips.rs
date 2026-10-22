@@ -56,6 +56,21 @@ pub(super) async fn search_dialogue(State(app): State<App>, Query(look): Query<L
     Ok(Json(json!(app.search_dialogue(&look.q, look.limit.unwrap_or(60), look.title_id).await?)))
 }
 
+#[derive(Deserialize)]
+pub(super) struct Between {
+    file_id: i64,
+    from: f64,
+    to: f64,
+}
+
+/// What is said in a file between two times, to see more of a moment found.
+pub(super) async fn dialogue_lines(State(app): State<App>, Query(b): Query<Between>) -> R<Value> {
+    if !(b.from.is_finite() && b.to.is_finite()) || b.to - b.from > 1800.0 {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "ask for at most half an hour of lines at once".into()));
+    }
+    Ok(Json(json!(app.dialogue.lines_between(b.file_id, b.from, b.to)?)))
+}
+
 /// How much of the library can be searched by what is said, and what is being done about the rest.
 pub(super) async fn dialogue_coverage(State(app): State<App>) -> R<Value> {
     Ok(Json(json!(app.dialogue.coverage())))

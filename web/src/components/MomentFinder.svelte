@@ -1,6 +1,6 @@
 <script lang="ts">
   // Find moments across the library by what is said in them, and make clips of those chosen.
-  import { api, type Coverage, type Found, type Moment } from '../lib/api';
+  import { api, type Coverage, type Found, type Moment, type SaidLine } from '../lib/api';
   import { toast } from '../lib/state.svelte';
   import { clock } from '../lib/format';
 
@@ -17,6 +17,43 @@
   let subtitles = $state('auto');
 
   const key = (m: Moment) => `${m.file_id}:${m.start}`;
+  // A moment opened to show more of what is said around it, and the stretch of it to clip,
+  // which tapping lines there moves.
+  let opened = $state<Record<string, { from: number; to: number; lines: SaidLine[] }>>({});
+  let spans = $state<Record<string, { start: number; end: number }>>({});
+  const spanOf = (m: Moment) => spans[key(m)] ?? { start: m.start, end: m.end };
+  const AROUND = 60;
+
+  async function around(m: Moment, from: number, to: number) {
+    from = Math.max(0, from);
+    try {
+      const lines: SaidLine[] = await api.get(`/dialogue/lines?file_id=${m.file_id}&from=${from}&to=${to}`);
+      opened[key(m)] = { from, to, lines };
+    } catch (err: any) {
+      toast(err.message, 'error');
+    }
+  }
+
+  function toggle(m: Moment) {
+    if (opened[key(m)]) delete opened[key(m)];
+    else around(m, m.start - AROUND, m.end + AROUND);
+  }
+
+  /** Stretch the clip to a line tapped outside it, or draw an end of it in to the next line. */
+  function tap(m: Moment, l: SaidLine, lines: SaidLine[]) {
+    const s = spanOf(m);
+    let { start, end } = s;
+    if (l.start < start) start = l.start;
+    else if (l.end > end) end = l.end;
+    else {
+      const inside = lines.filter((x) => x.start >= start && x.end <= end);
+      if (inside.length > 1 && l === inside[0]) start = inside[1].start;
+      else if (inside.length > 1 && l === inside[inside.length - 1]) end = inside[inside.length - 2].end;
+      else return;
+    }
+    spans[key(m)] = { start, end };
+    picked[key(m)] = true;
+  }
   const chosen = $derived(found?.moments.filter((m) => picked[key(m)]) ?? []);
 
   async function loadCoverage() {
@@ -37,6 +74,8 @@
       found = await api.get(`/dialogue?q=${encodeURIComponent(query.trim())}&limit=60`);
       coverage = found!.coverage;
       picked = {};
+      opened = {};
+      spans = {};
     } catch (err: any) {
       error = err.message;
     } finally {
@@ -56,8 +95,9 @@
     let made = 0;
     const failed: string[] = [];
     for (const m of list) {
-      const start = Math.max(0, m.start - lead);
-      const seconds = Math.max(3, m.end + tail - start);
+      const span = spanOf(m);
+      const start = Math.max(0, span.start - lead);
+      const seconds = Math.max(3, span.end + tail - start);
       try {
         await api.post('/clips', { title_id: m.title_id, episode_id: m.episode_id ?? undefined, start: Math.round(start * 10) / 10, seconds: Math.round(seconds * 10) / 10, name: nameOf(m), subtitles });
         made++;
@@ -114,20 +154,46 @@
       </div>
       <ul class="moments">
         {#each found.moments as m (key(m))}
+          {@const open = opened[key(m)]}
+          {@const span = spanOf(m)}
           <li class:picked={picked[key(m)]}>
-            <label class="moment">
+            <div class="moment">
               <input class="tick" type="checkbox" bind:checked={picked[key(m)]} aria-label="Make a clip of {m.from} at {clock(m.start)}" />
               <div class="grow said">
                 <div class="row wrap where">
-                  <a class="link" href="#/title/{m.title_id}" onclick={(e) => e.stopPropagation()}>{m.from}</a>
+                  <a class="link" href="#/title/{m.title_id}">{m.from}</a>
                   <span class="faint mono">{clock(m.start)}</span>
                   {#if m.words}<span class="chip accent">the words</span>{/if}
                 </div>
-                {#each m.before as l}<p class="faint">{l.text}</p>{/each}
-                {#each m.lines as l}<p class="line">{l.text}</p>{/each}
-                {#each m.after as l}<p class="faint">{l.text}</p>{/each}
+                {#if !open}
+                  <button class="plain" onclick={() => toggle(m)} aria-expanded="false" title="Show more of what is said around it">
+                    {#each m.before as l}<p class="faint">{l.text}</p>{/each}
+                    {#each m.lines as l}<p class="line">{l.text}</p>{/each}
+                    {#each m.after as l}<p class="faint">{l.text}</p>{/each}
+                    <span class="more small">More of what is said</span>
+                  </button>
+                {:else}
+                  <p class="small muted hint">Tap a line to start or end the clip there. It runs {clock(span.start)} to {clock(span.end)}.</p>
+                  <button class="btn small ghost edge" onclick={() => around(m, open.from - AROUND, open.to)}>Earlier</button>
+                  <ol class="script">
+                    {#each open.lines as l (l.start + l.text)}
+                      {@const inside = l.start >= span.start - 0.01 && l.end <= span.end + 0.01}
+                      <li>
+                        <button class="plain row lineat" class:inside onclick={() => tap(m, l, open.lines)} aria-pressed={inside}>
+                          <span class="faint mono at">{clock(l.start)}</span>
+                          <span class="grow">{l.text}</span>
+                        </button>
+                      </li>
+                    {/each}
+                  </ol>
+                  <div class="row wrap">
+                    <button class="btn small ghost edge" onclick={() => around(m, open.from, open.to + AROUND)}>Later</button>
+                    <span class="grow"></span>
+                    <button class="btn small ghost" onclick={() => toggle(m)} aria-expanded="true">Less</button>
+                  </div>
+                {/if}
               </div>
-            </label>
+            </div>
           </li>
         {/each}
       </ul>
@@ -205,7 +271,52 @@
     gap: 12px;
     align-items: flex-start;
     padding: 10px 8px;
+  }
+  .plain {
+    all: unset;
+    display: grid;
+    gap: 2px;
     cursor: pointer;
+    min-width: 0;
+  }
+  .plain:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  .more {
+    color: var(--accent);
+    margin-top: 4px;
+  }
+  .hint {
+    margin: 4px 0 6px;
+  }
+  .edge {
+    justify-self: start;
+  }
+  .script {
+    list-style: none;
+    margin: 4px 0;
+    padding: 0;
+    display: grid;
+    gap: 1px;
+  }
+  .lineat {
+    display: flex;
+    gap: 10px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    color: var(--muted);
+  }
+  .lineat.inside {
+    color: var(--text);
+    font-weight: 600;
+    background: var(--accent-soft);
+  }
+  .lineat .at {
+    flex: none;
+    font-weight: 400;
+    min-width: 4.5em;
   }
   .moment .tick {
     margin-top: 2px;

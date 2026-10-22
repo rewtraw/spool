@@ -4901,6 +4901,14 @@ async fn what_is_said_across_the_library_is_found_with_the_lines_around_it() {
     assert_eq!((status, got["moments"][0]["title_id"].as_i64(), got["coverage"]["read"].as_u64()), (200, Some(heat.id), Some(2)), "{got}");
     let (status, _) = call(&api, "GET", "/api/dialogue?q=", Value::Null).await;
     assert_eq!(status, 400);
+    // More of what is said around a moment, to see where to start and end.
+    let city_file_id = found_city_file(&w, city.id);
+    let (status, around) = call(&api, "GET", &format!("/api/dialogue/lines?file_id={city_file_id}&from=290&to=305"), Value::Null).await;
+    assert_eq!(status, 200, "{around}");
+    let said: Vec<&str> = around.as_array().unwrap().iter().map(|l| l["text"].as_str().unwrap()).collect();
+    assert_eq!(said, ["Wake up.", "They come when you sleep.", "Shell Beach."]);
+    let (status, _) = call(&api, "GET", &format!("/api/dialogue/lines?file_id={city_file_id}&from=0&to=99999"), Value::Null).await;
+    assert_eq!(status, 400);
 
     // Subtitles taken away are forgotten; a title gone from the library goes from the index.
     std::fs::remove_file(&beside).unwrap();
@@ -4914,6 +4922,10 @@ async fn what_is_said_across_the_library_is_found_with_the_lines_around_it() {
     w.app.dialogue_round(false).await.unwrap();
     let c = w.app.dialogue.coverage();
     assert_eq!((c.files, c.read, c.lines), (2, 0, 0), "{c:?}");
+}
+
+fn found_city_file(w: &World, title_id: i64) -> i64 {
+    w.app.db.files(title_id).unwrap()[0].id
 }
 
 /// With the model at hand (SPOOL_TEST_MODEL, a folder of its files), what is meant is found

@@ -23,7 +23,7 @@ At the top of **Clips**, write what is said, or something like it, and choose **
 
 It finds the words themselves, in any form of them (`awakening` finds "awakened"), and what is meant when it is put another way (`stay awake` finds "whatever you do, don't fall asleep"). Moments with the words themselves are marked and come first.
 
-Tick the moments you want, choose how much before the first line and after the last each clip holds and whether it has subtitles, and choose **Make clips**. They are made one after another and appear below, each named by where it is from and the first words said.
+Tap a moment to see more of what is said around it, a minute either side and more with **Earlier** and **Later**; tap a line there to start or end its clip on that line. Tick the moments you want, choose how much before the first line and after the last each clip holds and whether it has subtitles, and choose **Make clips**. They are made one after another and appear below, each named by where it is from and the first words said.
 
 ### What can be searched
 

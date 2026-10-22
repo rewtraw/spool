@@ -452,6 +452,14 @@ impl Index {
         Ok(Some(Passage { file, before, lines, after, title, episode }))
     }
 
+    /// The lines of a file shown between two times, in order.
+    pub fn lines_between(&self, file_id: i64, from: f64, to: f64) -> Result<Vec<Line>> {
+        let conn = self.conn.lock();
+        let mut q = conn.prepare("SELECT start, end, text FROM lines WHERE file_id = ? AND end > ? AND start < ? ORDER BY start LIMIT 500")?;
+        let rows = q.query_map(params![file_id, from, to], |r| Ok(Line { start: r.get(0)?, end: r.get(1)?, text: r.get(2)? }))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     fn files_of_title(&self, title_id: i64) -> Result<HashSet<i64>> {
         let conn = self.conn.lock();
         let mut q = conn.prepare("SELECT file_id FROM files WHERE title_id = ?")?;
