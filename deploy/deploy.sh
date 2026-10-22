@@ -102,6 +102,8 @@ ssh "$HOST" LABEL="$LABEL" sh <<'REMOTE'
     sleep 1
   done
   launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/"$LABEL".plist
+  # Loading it does not always start it (seen after casper restarted), so it is started too.
+  launchctl kickstart "gui/$(id -u)/$LABEL" 2>/dev/null || true
   sleep 3
   ~/spool/bin/spool --version
   tail -n 3 ~/Library/Logs/spool.log
