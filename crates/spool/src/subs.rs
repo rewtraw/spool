@@ -863,13 +863,15 @@ impl App {
             tokio::time::sleep(wait).await;
         }
         *last = Some(Instant::now());
-        let resp = self.opensubtitles(reqwest::Method::POST, "/login")?.json(&serde_json::json!({"username": g.opensubtitles_username, "password": g.opensubtitles_password})).send().await.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?;
+        // Bounded, so a sign-in that never answers does not hold up every fetch after it.
+        let login = self.opensubtitles(reqwest::Method::POST, "/login")?.json(&serde_json::json!({"username": g.opensubtitles_username, "password": g.opensubtitles_password})).send();
+        let resp = tokio::time::timeout(Duration::from_secs(30), login).await.map_err(|_| anyhow!("OpenSubtitles did not answer the sign-in"))?.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?;
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let body: serde_json::Value = tokio::time::timeout(Duration::from_secs(30), resp.json()).await.ok().and_then(|b| b.ok()).unwrap_or_default();
         let Some(token) = body["token"].as_str() else {
             let why = format!("OpenSubtitles would not sign in: {}", body["message"].as_str().unwrap_or(status.as_str()));
-            // Turned away for the account itself, rather than for asking too often.
-            if matches!(status.as_u16(), 400 | 401 | 403) {
+            // Turned away for the username or password, rather than for anything passing.
+            if status == reqwest::StatusCode::UNAUTHORIZED {
                 *self.subtitle_login.lock() = Some((Err((account, why.clone())), now()));
             }
             bail!(why)
