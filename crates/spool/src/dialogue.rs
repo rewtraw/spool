@@ -873,9 +873,14 @@ impl App {
                         Err(e) => {
                             tracing::info!(file = want.file_id, error = %format!("{e:#}"), "subtitles could not be fetched for the index");
                             self.dialogue.note_asked(want.file_id, Asked::Failed)?;
+                            // A file that cannot be read, or whose soundtrack is slow to reach, is
+                            // that file's own trouble and holds up none of the rest.
+                            if !e.chain().any(|c| c.is::<crate::subs::AtOpenSubtitles>()) {
+                                continue;
+                            }
                             failed.push(want.file_id);
-                            // Several in a row is something in the way of every file alike, such
-                            // as signing in: looked at again in a while, or when the account
+                            // Several in a row from OpenSubtitles is something in the way of every
+                            // file alike, such as signing in: looked at again in a while, or when the account
                             // changes, with those files asked about again then.
                             if failed.len() >= 3 {
                                 self.dialogue.unask(&failed)?;

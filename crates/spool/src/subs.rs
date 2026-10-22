@@ -30,6 +30,23 @@ const CLOSE_ENOUGH: f64 = 0.35;
 /// of the usual frame rates (23.976, 24 and 25 a second).
 const RATES: [f64; 7] = [1.0, 25.0 / 23.976, 23.976 / 25.0, 24.0 / 23.976, 23.976 / 24.0, 25.0 / 24.0, 24.0 / 25.0];
 
+/// A failure in OpenSubtitles or in reaching it, which is the same for every file, as against
+/// one in the file itself.
+#[derive(Debug)]
+pub struct AtOpenSubtitles(pub String);
+
+impl std::fmt::Display for AtOpenSubtitles {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for AtOpenSubtitles {}
+
+fn at_opensubtitles(why: impl Into<String>) -> anyhow::Error {
+    AtOpenSubtitles(why.into()).into()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Cue {
     pub start: f64,
@@ -814,11 +831,11 @@ impl App {
             q.push(("moviehash".into(), hash));
         }
         q.sort();
-        let resp = req.query(&q).send().await.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?;
+        let resp = req.query(&q).send().await.map_err(|e| at_opensubtitles(format!("OpenSubtitles: {}", e.without_url())))?;
         let status = resp.status();
         let body: serde_json::Value = resp.json().await.unwrap_or_default();
         if !status.is_success() {
-            bail!("OpenSubtitles says: {}", body["message"].as_str().or(body["errors"][0].as_str()).unwrap_or(status.as_str()));
+            return Err(at_opensubtitles(format!("OpenSubtitles says: {}", body["message"].as_str().or(body["errors"][0].as_str()).unwrap_or(status.as_str()))));
         }
         let list: Vec<Candidate> = body["data"]
             .as_array()
@@ -856,7 +873,7 @@ impl App {
         let account = format!("{}\n{}\n{}\n{}", g.opensubtitles_username, g.opensubtitles_password, g.opensubtitles_api_key, g.opensubtitles_url);
         match self.subtitle_login.lock().clone() {
             Some((Ok(token), at)) if now() - at < 20 * 3600 => return Ok(Some(token)),
-            Some((Err((refused, why)), _)) if refused == account => bail!("{why}"),
+            Some((Err((refused, why)), _)) if refused == account => return Err(at_opensubtitles(why)),
             _ => {}
         }
         if let Some(wait) = last.and_then(|t| Duration::from_millis(1100).checked_sub(t.elapsed())) {
@@ -865,7 +882,7 @@ impl App {
         *last = Some(Instant::now());
         // Bounded, so a sign-in that never answers does not hold up every fetch after it.
         let login = self.opensubtitles(reqwest::Method::POST, "/login")?.json(&serde_json::json!({"username": g.opensubtitles_username, "password": g.opensubtitles_password})).send();
-        let resp = tokio::time::timeout(Duration::from_secs(30), login).await.map_err(|_| anyhow!("OpenSubtitles did not answer the sign-in"))?.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?;
+        let resp = tokio::time::timeout(Duration::from_secs(30), login).await.map_err(|_| at_opensubtitles("OpenSubtitles did not answer the sign-in"))?.map_err(|e| at_opensubtitles(format!("OpenSubtitles: {}", e.without_url())))?;
         let status = resp.status();
         let body: serde_json::Value = tokio::time::timeout(Duration::from_secs(30), resp.json()).await.ok().and_then(|b| b.ok()).unwrap_or_default();
         let Some(token) = body["token"].as_str() else {
@@ -874,7 +891,7 @@ impl App {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 *self.subtitle_login.lock() = Some((Err((account, why.clone())), now()));
             }
-            bail!(why)
+            return Err(at_opensubtitles(why));
         };
         *self.subtitle_login.lock() = Some((Ok(token.to_string()), now()));
         Ok(Some(token.to_string()))
@@ -888,7 +905,7 @@ impl App {
         if let Some(t) = token {
             req = req.bearer_auth(t);
         }
-        let resp = req.send().await.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?;
+        let resp = req.send().await.map_err(|e| at_opensubtitles(format!("OpenSubtitles: {}", e.without_url())))?;
         let status = resp.status();
         let body: serde_json::Value = resp.json().await.unwrap_or_default();
         // How many more may be fetched today, said with each answer, given or refused.
@@ -896,8 +913,8 @@ impl App {
             let resets = body["reset_time_utc"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t.timestamp()).unwrap_or_else(|| now() + 86400);
             *self.subtitle_allowance.lock() = Some((left, resets));
         }
-        let Some(link) = body["link"].as_str() else { bail!("OpenSubtitles would not hand over the file: {}", body["message"].as_str().unwrap_or(status.as_str())) };
-        let bytes = self.http.get(link).send().await.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?.error_for_status().map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?.bytes().await?;
+        let Some(link) = body["link"].as_str() else { return Err(at_opensubtitles(format!("OpenSubtitles would not hand over the file: {}", body["message"].as_str().unwrap_or(status.as_str())))) };
+        let bytes = self.http.get(link).send().await.map_err(|e| at_opensubtitles(format!("OpenSubtitles: {}", e.without_url())))?.error_for_status().map_err(|e| at_opensubtitles(format!("OpenSubtitles: {}", e.without_url())))?.bytes().await?;
         Ok(bytes.to_vec())
     }
 

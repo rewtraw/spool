@@ -5004,6 +5004,52 @@ async fn subtitles_that_cannot_be_fetched_for_the_index_are_not_taken_as_missing
     assert_eq!((c.unreadable, c.read), (0, 3), "{c:?}");
 }
 
+/// A file that fails for its own reasons fails alone: fetching goes on for the rest.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_that_fails_alone_does_not_stop_subtitles_being_fetched_for_the_rest() {
+    use axum::routing::post;
+    use serde_json::json;
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    w.app.dialogue.take_model_from("http://127.0.0.1:9");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let srt = "1\n00:00:00,500 --> 00:00:01,500\nHello\n";
+    let router = axum::Router::new()
+        .route("/login", post(|| async { axum::Json(json!({"token": "t"})) }))
+        .route("/subtitles", get(|| async { axum::Json(json!({"data": [{"attributes": {"language": "en", "release": "x", "moviehash_match": true, "files": [{"file_id": 7}]}}]})) }))
+        .route("/download", post(move || async move { axum::Json(json!({"link": format!("http://{addr}/file.srt"), "remaining": 990, "reset_time_utc": "2099-01-01T00:00:00Z"})) }))
+        .route("/file.srt", get(move || async move { srt }));
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut g = w.app.settings.general();
+    (g.opensubtitles_api_key, g.opensubtitles_url, g.opensubtitles_username, g.opensubtitles_password) = ("os-key".into(), format!("http://{addr}"), "someone".into(), "right".into());
+    w.app.settings.set_general(&g).unwrap();
+    // The first made is fine; the three after it, asked about first, cannot be written beside.
+    for (name, imdb) in [("Fine", "tt0000001"), ("Torn", "tt0000002"), ("Ripped", "tt0000003"), ("Rent", "tt0000004")] {
+        let home = w.root.join(format!("Movies/{name} (2001)"));
+        std::fs::create_dir_all(&home).unwrap();
+        let mut t = w.movie(name, 2001, imdb);
+        t.path = home.to_string_lossy().to_string();
+        w.app.db.save_title(&mut t).unwrap();
+        std::fs::write(home.join(format!("{name} (2001) [Bluray-1080p].mkv")), &video).unwrap();
+    }
+    w.app.scan_all().await.unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    for name in ["Torn", "Ripped", "Rent"] {
+        std::fs::set_permissions(w.root.join(format!("Movies/{name} (2001)")), std::fs::Permissions::from_mode(0o555)).unwrap();
+    }
+
+    // Fetching waits while a clip is made, as another test may be making one.
+    while spool::clips::any_making() {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    w.app.dialogue_round(true).await.unwrap();
+    let c = w.app.dialogue_coverage();
+    assert!(c.problems.is_empty(), "{c:?}");
+    assert_eq!(c.fetches_left, Some(990), "the good one was still fetched: {c:?}");
+    assert!(w.root.join("Movies/Fine (2001)/Fine (2001) [Bluray-1080p].en.srt").exists());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn what_is_meant_is_found_when_it_is_put_another_way() {
     let Ok(model) = std::env::var("SPOOL_TEST_MODEL") else {
