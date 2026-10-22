@@ -12,9 +12,9 @@
   let looking = $state(false);
   let error = $state('');
   let picked = $state<Record<string, boolean>>({});
-  let lead = $state(2);
-  let tail = $state(1.5);
-  let subtitles = $state('auto');
+  let lead = $state(0);
+  let tail = $state(0);
+  let subtitles = $state('on');
 
   const key = (m: Moment) => `${m.file_id}:${m.start}`;
   // A moment opened to show more of what is said around it, and the stretch of it to clip,

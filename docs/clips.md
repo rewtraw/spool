@@ -23,7 +23,7 @@ At the top of **Clips**, write what is said, or something like it, and choose **
 
 It finds the words themselves, in any form of them (`awakening` finds "awakened"), and what is meant when it is put another way (`stay awake` finds "whatever you do, don't fall asleep"). Moments with the words themselves are marked and come first.
 
-Tap a moment to see more of what is said around it, a minute either side and more with **Earlier** and **Later**; tap a line there to start or end its clip on that line. Tick the moments you want, choose how much before the first line and after the last each clip holds and whether it has subtitles, and choose **Make clips**. They are made one after another and appear below, each named by where it is from and the first words said.
+Tap a moment to see more of what is said around it, a minute either side and more with **Earlier** and **Later**; tap a line there to start or end its clip on that line. Tick the moments you want, choose how much before the first line and after the last each clip holds (none, unless you choose more) and whether it has subtitles (always, unless you choose otherwise), and choose **Make clips**. They are made one after another and appear below, each named by where it is from and the first words said.
 
 ### What can be searched
 
@@ -53,10 +53,11 @@ A half-minute clip is usually between 10 and 30 MB.
 
 Each clip under **Clips** has:
 
-- **Save.** Downloads the file. On an iPhone it goes to Downloads in the Files app, and can be sent from there to Messages, Photos or anywhere else.
+- **Save.** On a phone with Spool open over `https`, opens the share sheet, where **Save Video** puts it straight into Photos. Elsewhere it downloads the file; on an iPhone that is Downloads in the Files app.
+- **Save as GIF.** The same clip as a GIF, made the first time someone asks for it, which takes a few seconds, and kept. A short clip comes out 480 pixels wide at 15 pictures a second; a longer one comes out smaller and with fewer, so that it stays a file that can be sent. It is saved the same way as the video, with **Save Image** in the share sheet.
 - **Copy link.** A link that plays the clip for whoever opens it, without signing in. It works for anyone who can reach Spool: on your network, or on your Tailscale network. Each clip has a link of its own that cannot be guessed; removing the clip ends it.
 
-Spool is reached over plain `http`, where browsers do not let a page open the share sheet. That is why there is a Save button and no Share button.
+Browsers open the share sheet only for a page reached over `https`. At `http://casper:7979` the buttons download instead. With [Tailscale Serve](https://tailscale.com/kb/1312/serve) in front of Spool, it is reached at an `https` address on your Tailscale network and the share sheet opens. If the sheet takes too long to come up after a large clip has been fetched, the button changes to **Save it now**; tap it again.
 
 ## From an assistant
 
@@ -66,4 +67,4 @@ It can find them by what is said, too: "make clips of everything that says somet
 
 ## Where they are kept
 
-In a `clips` folder in Spool's data folder, apart from the library: one MP4 and one still for each. A clip outlives the film or episode it was cut from. A clip that was being made when Spool stopped is made again when it starts.
+In a `clips` folder in Spool's data folder, apart from the library: one MP4 and one still for each, and a GIF once one has been asked for. A clip outlives the film or episode it was cut from. A clip that was being made when Spool stopped is made again when it starts.

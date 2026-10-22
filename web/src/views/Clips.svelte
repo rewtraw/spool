@@ -21,6 +21,56 @@
     return () => clearInterval(timer);
   });
 
+  // What is being fetched to save, and a file fetched but not yet handed over, by clip.
+  let saving = $state<Record<number, string>>({});
+  let ready = $state<Record<number, File>>({});
+
+  /** A clip's name as a file name. */
+  const fileName = (c: Clip, kind: string) => `${c.name.replace(/[/\\:"'\n\r]+/g, ' ').replace(/\s+/g, ' ').trim() || `Clip ${c.id}`}.${kind}`;
+
+  /** Hand a file to the phone's share sheet, where it can go straight to Photos; false where
+   * the browser offers no such thing. */
+  async function share(c: Clip, file: File) {
+    try {
+      await navigator.share({ files: [file] });
+      delete ready[c.id];
+    } catch (err: any) {
+      // Fetching took long enough that the tap no longer counts: the next one hands it over.
+      if (err?.name === 'NotAllowedError') ready[c.id] = file;
+      else if (err?.name !== 'AbortError') toast(err.message, 'error');
+    }
+  }
+
+  /** Save a clip, as its video or as a GIF: to Photos through the share sheet where there is
+   * one, and as a download where there is not. */
+  async function save(c: Clip, kind: 'mp4' | 'gif') {
+    const url = kind === 'gif' ? `/api/clips/${c.id}/gif` : `/api/clips/${c.id}/video`;
+    const sheet = typeof navigator.canShare === 'function';
+    if (!sheet && kind === 'mp4') {
+      location.href = `${url}?download`;
+      return;
+    }
+    saving[c.id] = kind === 'gif' ? 'Making the GIF…' : 'Fetching…';
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `It could not be fetched (${res.status})`);
+      const file = new File([await res.blob()], fileName(c, kind), { type: kind === 'gif' ? 'image/gif' : 'video/mp4' });
+      if (sheet && navigator.canShare({ files: [file] })) {
+        await share(c, file);
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(file);
+        a.download = file.name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      }
+    } catch (err: any) {
+      toast(err.message, 'error');
+    } finally {
+      delete saving[c.id];
+    }
+  }
+
   const linkOf = (c: Clip) => `${location.origin}/clip/${c.link}.mp4`;
 
   /** Put a link on the clipboard. Spool is reached over plain http, where browsers keep the
@@ -95,7 +145,14 @@
         </div>
         <div class="row wrap actions">
           {#if c.state === 'ready'}
-            <a class="btn small" href="/api/clips/{c.id}/video?download" download>Save</a>
+            {#if saving[c.id]}
+              <span class="small muted">{saving[c.id]}</span>
+            {:else if ready[c.id]}
+              <button class="btn small primary" onclick={() => share(c, ready[c.id])}>Save {ready[c.id].type === 'image/gif' ? 'the GIF' : 'it'} now</button>
+            {:else}
+              <button class="btn small" onclick={() => save(c, 'mp4')}>Save</button>
+              <button class="btn small ghost" onclick={() => save(c, 'gif')}>Save as GIF</button>
+            {/if}
             <button class="btn small ghost" onclick={() => copyLink(c)}>Copy link</button>
           {/if}
           {#if c.yours}

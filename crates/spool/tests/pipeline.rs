@@ -4772,6 +4772,12 @@ async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_rem
     assert_eq!(raw("/clip/0000.mp4".into(), None).await.0, 404);
     let (status, headers, _) = raw(format!("/api/clips/{id}/still"), None).await;
     assert_eq!((status, headers["content-type"].to_str().unwrap()), (200, "image/jpeg"));
+    // As a GIF, made the first time it is asked for and kept, saved under its name.
+    let (status, headers, bytes) = raw(format!("/api/clips/{id}/gif"), None).await;
+    assert_eq!((status, headers["content-type"].to_str().unwrap()), (200, "image/gif"));
+    assert!(bytes.starts_with(b"GIF89a") && w.app.clip_gif(id).is_file());
+    assert!(headers["content-disposition"].to_str().unwrap().contains("filename=\"Heat at 0 01.gif\""), "{:?}", headers["content-disposition"]);
+    assert_eq!(raw(format!("/api/clips/{id}/gif"), None).await.2, bytes);
 
     // An episode, by its season and number, with a name of its own; past the end it stops at the end.
     let (_, asked) = call(&api, "POST", "/api/clips", json!({"title_id": show.id, "season": 1, "episode": 1, "start": "1s", "seconds": "30", "name": "The bit"})).await;
@@ -4785,7 +4791,7 @@ async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_rem
     assert_eq!(listed[0]["yours"].as_bool(), Some(true));
     let (status, _) = call(&api, "DELETE", &format!("/api/clips/{id}"), Value::Null).await;
     assert_eq!(status, 200);
-    assert!(!w.app.clip_video(id).exists() && !w.app.clip_still(id).exists());
+    assert!(!w.app.clip_video(id).exists() && !w.app.clip_still(id).exists() && !w.app.clip_gif(id).exists());
     assert_eq!(raw(format!("/api/clips/{id}/video"), None).await.0, 404);
     assert_eq!(std::fs::read(home.join("Heat (1995) [Bluray-1080p].mkv")).unwrap(), video);
 

@@ -390,6 +390,7 @@ fn api_routes() -> Router<App> {
         .route("/api/clips/{id}", get(get_clip).delete(delete_clip))
         .route("/api/clips/{id}/video", get(clip_video))
         .route("/api/clips/{id}/still", get(clip_still))
+        .route("/api/clips/{id}/gif", get(clip_gif))
         .route("/api/dialogue", get(search_dialogue))
         .route("/api/dialogue/coverage", get(dialogue_coverage))
         .route("/api/dialogue/lines", get(dialogue_lines))

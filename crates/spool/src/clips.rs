@@ -190,6 +190,14 @@ fn out_size(width: u32, height: u32) -> (u32, u32) {
     }
 }
 
+/// How a clip is drawn as a GIF: smaller and with fewer pictures a second the longer it runs,
+/// so that a long one is still a file that can be sent, in colours chosen for it.
+fn gif_filter(seconds: f64, width: u32) -> String {
+    let (wide, fps) = if seconds <= 15.0 { (480, 15) } else if seconds <= 45.0 { (400, 12) } else { (320, 10) };
+    let wide = if width > 0 { wide.min(width) } else { wide };
+    format!("fps={fps},scale={wide}:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
+}
+
 /// What to hand ffmpeg to cut a clip.
 fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64, language: &str, over: Option<&Over>) -> Vec<String> {
     let mut a: Vec<String> = vec![];
@@ -248,6 +256,37 @@ impl App {
     /// Where a clip's video is kept.
     pub fn clip_video(&self, id: i64) -> PathBuf {
         self.clips_dir().join(format!("{id}.mp4"))
+    }
+
+    /// Where a clip as a GIF is kept, once someone has asked for it.
+    pub fn clip_gif(&self, id: i64) -> PathBuf {
+        self.clips_dir().join(format!("{id}.gif"))
+    }
+
+    /// A clip as a GIF, made from its video the first time it is asked for.
+    pub async fn gif_of(&self, c: &Clip) -> Result<PathBuf> {
+        static ONE_GIF: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let gif = self.clip_gif(c.id);
+        let _one = ONE_GIF.lock().await;
+        if gif.is_file() {
+            return Ok(gif);
+        }
+        let tool = self.ffmpeg_path().ok_or_else(|| anyhow!("ffmpeg is not installed"))?;
+        let part = self.clips_dir().join(format!(".{}.gif.part", c.id));
+        let made = tokio::process::Command::new(&tool)
+            .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(self.clip_video(c.id))
+            .args(["-vf", &gif_filter(c.seconds, c.width), "-loop", "0", "-f", "gif"])
+            .arg(&part)
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        if !made.status.success() {
+            let _ = tokio::fs::remove_file(&part).await;
+            bail!("the GIF could not be made: {}", String::from_utf8_lossy(&made.stderr).lines().last().unwrap_or("ffmpeg failed"));
+        }
+        tokio::fs::rename(&part, &gif).await?;
+        Ok(gif)
     }
 
     /// Where the still from a clip is kept.
@@ -486,7 +525,7 @@ impl App {
             stop.store(true, Ordering::Relaxed);
         }
         self.db.delete_clip(id)?;
-        for path in [self.clip_video(id), self.clip_still(id)] {
+        for path in [self.clip_video(id), self.clip_still(id), self.clip_gif(id)] {
             match std::fs::remove_file(&path) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e).with_context(|| format!("removing {}", path.display())),
                 _ => {}
@@ -538,6 +577,14 @@ mod tests {
         assert!(!a.contains("videotoolbox"));
         assert!(a.contains("-vf format=yuv420p"));
         assert!(a.contains("-c:v libx264") && a.contains("+faststart"));
+    }
+
+    #[test]
+    fn a_long_clip_makes_a_smaller_gif() {
+        assert!(gif_filter(10.0, 1920).starts_with("fps=15,scale=480:-1"));
+        assert!(gif_filter(30.0, 1920).starts_with("fps=12,scale=400:-1"));
+        assert!(gif_filter(120.0, 1920).starts_with("fps=10,scale=320:-1"));
+        assert!(gif_filter(10.0, 300).starts_with("fps=15,scale=300:-1"), "never larger than the clip");
     }
 
     #[test]

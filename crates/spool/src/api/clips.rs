@@ -77,10 +77,10 @@ pub(super) async fn dialogue_coverage(State(app): State<App>) -> R<Value> {
 }
 
 /// A name a clip can be saved as: its own, without what a file name cannot hold.
-fn file_name(c: &Clip) -> String {
+fn file_name(c: &Clip, kind: &str) -> String {
     let clean: String = c.name.chars().map(|ch| if matches!(ch, '/' | '\\' | ':' | '"' | '\'' | '\n' | '\r') || ch.is_control() { ' ' } else { ch }).collect();
     let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
-    format!("{}.mp4", if clean.is_empty() { format!("Clip {}", c.id) } else { clean })
+    format!("{}.{kind}", if clean.is_empty() { format!("Clip {}", c.id) } else { clean })
 }
 
 /// The clip, to play; with `?download`, to save.
@@ -109,15 +109,39 @@ async fn send_clip(app: &App, c: Clip, uri: Uri, req: axum::extract::Request) ->
     let head = req.method() == axum::http::Method::HEAD;
     let mut response = crate::serve::send_file(&app.clip_video(id), req.headers(), head).await;
     if uri.query().is_some_and(|q| q.split('&').any(|p| p == "download")) {
-        // The name as plain letters for old browsers, and in full for the rest.
-        let name = file_name(&c);
-        let plain: String = name.chars().map(|ch| if ch.is_ascii() { ch } else { '_' }).collect();
-        let full: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() || b".-_".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
-        if let Ok(v) = format!("attachment; filename=\"{plain}\"; filename*=UTF-8''{full}").parse() {
-            response.headers_mut().insert(header::CONTENT_DISPOSITION, v);
-        }
+        to_save(&mut response, &file_name(&c, "mp4"));
     }
     response.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=86400"));
+    response
+}
+
+/// Mark a response as a file to save by this name: as plain letters for old browsers, and in
+/// full for the rest.
+fn to_save(response: &mut Response, name: &str) {
+    let plain: String = name.chars().map(|ch| if ch.is_ascii() { ch } else { '_' }).collect();
+    let full: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() || b".-_".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+    if let Ok(v) = format!("attachment; filename=\"{plain}\"; filename*=UTF-8''{full}").parse() {
+        response.headers_mut().insert(header::CONTENT_DISPOSITION, v);
+    }
+}
+
+/// The clip as a GIF to save, made the first time it is asked for.
+pub(super) async fn clip_gif(State(app): State<App>, Path(id): Path<i64>, req: axum::extract::Request) -> Response {
+    let c = match app.db.clip(id) {
+        Ok(Some(c)) if c.state == "ready" => c,
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let gif = match app.gif_of(&c).await {
+        Ok(gif) => gif,
+        Err(e) => return ApiError(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
+    };
+    let head = req.method() == axum::http::Method::HEAD;
+    let mut response = crate::serve::send_file(&gif, req.headers(), head).await;
+    if response.status().is_success() {
+        response.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("image/gif"));
+        response.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("private, max-age=86400"));
+        to_save(&mut response, &file_name(&c, "gif"));
+    }
     response
 }
 
