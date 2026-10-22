@@ -4948,10 +4948,14 @@ async fn subtitles_that_cannot_be_fetched_for_the_index_are_not_taken_as_missing
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let srt = "1\n00:00:00,500 --> 00:00:01,500\nHello\n";
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let logins = Arc::new(AtomicUsize::new(0));
+    let tries = logins.clone();
     let router = axum::Router::new()
         .route(
             "/login",
-            post(|axum::Json(b): axum::Json<serde_json::Value>| async move {
+            post(move |axum::Json(b): axum::Json<serde_json::Value>| async move {
+                tries.fetch_add(1, Ordering::SeqCst);
                 if b["password"] == "right" {
                     (axum::http::StatusCode::OK, axum::Json(json!({"token": "t"})))
                 } else {
@@ -4985,6 +4989,8 @@ async fn subtitles_that_cannot_be_fetched_for_the_index_are_not_taken_as_missing
     // It stays said in the rounds after, while fetching waits.
     w.app.dialogue_round(true).await.unwrap();
     assert!(w.app.dialogue_coverage().problems.iter().any(|p| p.contains("invalid username")));
+    // Turned away once, the same details are not tried again for each file.
+    assert_eq!(logins.load(Ordering::SeqCst), 1);
 
     // Put right, it is tried at once: each gets its subtitles, which are read in the next round,
     // and how many more may be fetched today is said.

@@ -13,6 +13,7 @@ use crate::models::{Kind, MediaFile, Title};
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// Seconds of sound summed into one measurement.
 const FRAME: f64 = 0.05;
@@ -849,16 +850,31 @@ impl App {
         if g.opensubtitles_username.is_empty() {
             return Ok(None);
         }
-        if let Some((token, at)) = self.subtitle_login.lock().clone() {
-            if now() - at < 20 * 3600 {
-                return Ok(Some(token));
-            }
+        // OpenSubtitles takes one sign-in a second, so they are made one at a time, apart.
+        static ONE_LOGIN: tokio::sync::Mutex<Option<Instant>> = tokio::sync::Mutex::const_new(None);
+        let mut last = ONE_LOGIN.lock().await;
+        let account = format!("{}\n{}\n{}\n{}", g.opensubtitles_username, g.opensubtitles_password, g.opensubtitles_api_key, g.opensubtitles_url);
+        match self.subtitle_login.lock().clone() {
+            Some((Ok(token), at)) if now() - at < 20 * 3600 => return Ok(Some(token)),
+            Some((Err((refused, why)), _)) if refused == account => bail!("{why}"),
+            _ => {}
         }
+        if let Some(wait) = last.and_then(|t| Duration::from_millis(1100).checked_sub(t.elapsed())) {
+            tokio::time::sleep(wait).await;
+        }
+        *last = Some(Instant::now());
         let resp = self.opensubtitles(reqwest::Method::POST, "/login")?.json(&serde_json::json!({"username": g.opensubtitles_username, "password": g.opensubtitles_password})).send().await.map_err(|e| anyhow!("OpenSubtitles: {}", e.without_url()))?;
         let status = resp.status();
         let body: serde_json::Value = resp.json().await.unwrap_or_default();
-        let Some(token) = body["token"].as_str() else { bail!("OpenSubtitles would not sign in: {}", body["message"].as_str().unwrap_or(status.as_str())) };
-        *self.subtitle_login.lock() = Some((token.to_string(), now()));
+        let Some(token) = body["token"].as_str() else {
+            let why = format!("OpenSubtitles would not sign in: {}", body["message"].as_str().unwrap_or(status.as_str()));
+            // Turned away for the account itself, rather than for asking too often.
+            if matches!(status.as_u16(), 400 | 401 | 403) {
+                *self.subtitle_login.lock() = Some((Err((account, why.clone())), now()));
+            }
+            bail!(why)
+        };
+        *self.subtitle_login.lock() = Some((Ok(token.to_string()), now()));
         Ok(Some(token.to_string()))
     }
 

@@ -184,8 +184,9 @@ pub struct Inner {
     pub login_failures: Tries,
     /// Titles last turned away for lack of disk space, with the headroom there was at the time.
     pub space_blocked: Mutex<HashMap<i64, i128>>,
-    /// The OpenSubtitles sign-in in use, and when it was made.
-    pub subtitle_login: Mutex<Option<(String, i64)>>,
+    /// The OpenSubtitles sign-in in use and when it was made, or the account details last
+    /// refused and why, which are not tried again until they change.
+    pub subtitle_login: Mutex<Option<(Result<String, (String, String)>, i64)>>,
     /// How many subtitles OpenSubtitles will still hand over today, and when that starts
     /// again, as it last said.
     pub subtitle_allowance: Mutex<Option<(i64, i64)>>,
