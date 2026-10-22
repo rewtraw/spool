@@ -4937,6 +4937,68 @@ fn found_city_file(w: &World, title_id: i64) -> i64 {
 /// With the model at hand (SPOOL_TEST_MODEL, a folder of its files), what is meant is found
 /// when it is put another way.
 #[tokio::test(flavor = "multi_thread")]
+async fn subtitles_that_cannot_be_fetched_for_the_index_are_not_taken_as_missing() {
+    use axum::routing::post;
+    use serde_json::json;
+    let video = video_or_skip!();
+    let w = World::new(Mode::Active).await;
+    w.app.dialogue.take_model_from("http://127.0.0.1:9");
+    // A stand-in for OpenSubtitles that turns one password away, and has subtitles timed for
+    // each file for whoever it lets in.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let srt = "1\n00:00:00,500 --> 00:00:01,500\nHello\n";
+    let router = axum::Router::new()
+        .route(
+            "/login",
+            post(|axum::Json(b): axum::Json<serde_json::Value>| async move {
+                if b["password"] == "right" {
+                    (axum::http::StatusCode::OK, axum::Json(json!({"token": "t"})))
+                } else {
+                    (axum::http::StatusCode::UNAUTHORIZED, axum::Json(json!({"message": "Error, invalid username/password"})))
+                }
+            }),
+        )
+        .route("/subtitles", get(|| async { axum::Json(json!({"data": [{"attributes": {"language": "en", "release": "x", "moviehash_match": true, "files": [{"file_id": 7}]}}]})) }))
+        .route("/download", post(move || async move { axum::Json(json!({"link": format!("http://{addr}/file.srt"), "remaining": 990, "reset_time_utc": "2099-01-01T00:00:00Z"})) }))
+        .route("/file.srt", get(move || async move { srt }));
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let mut g = w.app.settings.general();
+    (g.opensubtitles_api_key, g.opensubtitles_url, g.opensubtitles_username, g.opensubtitles_password) = ("os-key".into(), format!("http://{addr}"), "someone@example.com".into(), "wrong".into());
+    w.app.settings.set_general(&g).unwrap();
+    // Films with no subtitles to read, enough that failing on each says it is not them.
+    for (name, imdb) in [("Quiet", "tt0000001"), ("Hush", "tt0000002"), ("Still", "tt0000003")] {
+        let home = w.root.join(format!("Movies/{name} (2001)"));
+        std::fs::create_dir_all(&home).unwrap();
+        let mut t = w.movie(name, 2001, imdb);
+        t.path = home.to_string_lossy().to_string();
+        w.app.db.save_title(&mut t).unwrap();
+        std::fs::write(home.join(format!("{name} (2001) [Bluray-1080p].mkv")), &video).unwrap();
+    }
+    w.app.scan_all().await.unwrap();
+
+    // Turned away at sign-in: none of them is taken as having none, and it says why.
+    w.app.dialogue_round(true).await.unwrap();
+    let c = w.app.dialogue_coverage();
+    assert_eq!((c.unreadable, c.not_found, c.can_fetch), (3, 0, true), "{c:?}");
+    assert!(c.problems.iter().any(|p| p.contains("invalid username")), "{c:?}");
+    // It stays said in the rounds after, while fetching waits.
+    w.app.dialogue_round(true).await.unwrap();
+    assert!(w.app.dialogue_coverage().problems.iter().any(|p| p.contains("invalid username")));
+
+    // Put right, it is tried at once: each gets its subtitles, which are read in the next round,
+    // and how many more may be fetched today is said.
+    g.opensubtitles_password = "right".into();
+    w.app.settings.set_general(&g).unwrap();
+    w.app.dialogue_round(true).await.unwrap();
+    let c = w.app.dialogue_coverage();
+    assert_eq!((c.not_found, c.problems.len(), c.fetches_left), (0, 0, Some(990)), "{c:?}");
+    w.app.dialogue_round(true).await.unwrap();
+    let c = w.app.dialogue_coverage();
+    assert_eq!((c.unreadable, c.read), (0, 3), "{c:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn what_is_meant_is_found_when_it_is_put_another_way() {
     let Ok(model) = std::env::var("SPOOL_TEST_MODEL") else {
         eprintln!("SPOOL_TEST_MODEL not set; skipping");

@@ -62,6 +62,7 @@ const SCHEMA: &str = r#"
     CREATE INDEX passages_to_place ON passages(id) WHERE point IS NULL;
 
     -- Files OpenSubtitles was asked about, so each is asked again only once in a while.
+    -- found: 1 when subtitles that fit were fetched, 0 when it had none, -1 when asking failed.
     CREATE TABLE asked (file_id INTEGER PRIMARY KEY, at INTEGER NOT NULL, found INTEGER NOT NULL);
 "#;
 
@@ -69,6 +70,16 @@ const SCHEMA: &str = r#"
 const KEEP_FOR_HAND: i64 = 10;
 /// How long before OpenSubtitles is asked again about a file it had nothing for.
 const ASK_AGAIN: i64 = 30 * 86400;
+/// How long before a file is asked about again when asking about it failed.
+const TRY_AGAIN: i64 = 86400;
+
+/// What came of asking OpenSubtitles about a file.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Asked {
+    Found = 1,
+    None = 0,
+    Failed = -1,
+}
 /// How alike in meaning a passage must be to what is looked for to be found by that alone.
 const ALIKE: f32 = 0.45;
 
@@ -164,7 +175,8 @@ pub struct Index {
     signs: Mutex<Option<Arc<Signs>>>,
     coverage: Mutex<Coverage>,
     /// When OpenSubtitles should next be asked after it last failed, and why it did.
-    fetch_paused: Mutex<Option<(i64, String)>>,
+    /// With the account it failed with.
+    fetch_paused: Mutex<Option<(i64, String, String)>>,
     /// When each file without subtitles to read was last looked beside for some put there.
     looked_beside: Mutex<HashMap<i64, i64>>,
     /// Set to have the work looked at again now.
@@ -222,15 +234,31 @@ impl Index {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    fn asked(&self) -> Result<HashMap<i64, (i64, bool)>> {
+    fn asked(&self) -> Result<HashMap<i64, (i64, Asked)>> {
         let conn = self.conn.lock();
         let mut q = conn.prepare("SELECT file_id, at, found FROM asked")?;
-        let rows = q.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+        let rows = q.query_map([], |r| {
+            let found = match r.get::<_, i64>(2)? {
+                1 => Asked::Found,
+                0 => Asked::None,
+                _ => Asked::Failed,
+            };
+            Ok((r.get(0)?, (r.get(1)?, found)))
+        })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
-    fn note_asked(&self, file_id: i64, found: bool) -> Result<()> {
-        self.conn.lock().execute("INSERT OR REPLACE INTO asked (file_id, at, found) VALUES (?, ?, ?)", params![file_id, now(), found])?;
+    fn note_asked(&self, file_id: i64, found: Asked) -> Result<()> {
+        self.conn.lock().execute("INSERT OR REPLACE INTO asked (file_id, at, found) VALUES (?, ?, ?)", params![file_id, now(), found as i64])?;
+        Ok(())
+    }
+
+    /// Forget asking about these files, as what went wrong was nothing to do with them.
+    fn unask(&self, files: &[i64]) -> Result<()> {
+        let conn = self.conn.lock();
+        for f in files {
+            conn.execute("DELETE FROM asked WHERE file_id = ?", [f])?;
+        }
         Ok(())
     }
 
@@ -722,11 +750,23 @@ impl App {
         let g = self.settings.general();
         let can_fetch = !g.opensubtitles_api_key.is_empty() && !household.is_empty();
         let to_fetch: Vec<&Want> = {
-            let mut list: Vec<&Want> = wants.iter().filter(|w| w.source.is_none() && !w.away && w.can_take && asked.get(&w.file_id).is_none_or(|(at, _)| now() - at > ASK_AGAIN)).collect();
+            let mut list: Vec<&Want> = wants.iter().filter(|w| w.source.is_none() && !w.away && w.can_take && asked.get(&w.file_id).is_none_or(|(at, found)| now() - at > if *found == Asked::Failed { TRY_AGAIN } else { ASK_AGAIN })).collect();
             // The newest first, as what was just added is likeliest to be looked for.
             list.sort_by_key(|w| std::cmp::Reverse(w.file_id));
             list
         };
+        // A pause after failing is lifted when what OpenSubtitles is reached with changes.
+        let account = format!("{}\n{}\n{}\n{}", g.opensubtitles_username, g.opensubtitles_password, g.opensubtitles_api_key, g.opensubtitles_url);
+        let paused = {
+            let mut p = self.dialogue.fetch_paused.lock();
+            if p.as_ref().is_some_and(|(until, _, was)| now() >= *until || *was != account) {
+                *p = None;
+            }
+            p.as_ref().map(|(_, why, _)| why.clone())
+        };
+        if can_fetch {
+            problems.extend(paused.clone());
+        }
         self.dialogue_tell(&wants, can_fetch, &problems)?;
         let mut more = false;
 
@@ -801,16 +841,13 @@ impl App {
         }
 
         // Fetch subtitles for what has none to read.
-        if fetch && can_fetch && !to_fetch.is_empty() {
-            let paused = self.dialogue.fetch_paused.lock().clone().filter(|(until, _)| now() < *until);
+        if fetch && can_fetch && paused.is_none() && !to_fetch.is_empty() {
             let spent = (*self.subtitle_allowance.lock()).filter(|(left, resets)| *left <= KEEP_FOR_HAND && now() < *resets);
-            if let Some((_, why)) = paused {
-                problems.push(why);
-            } else if let Some((_, resets)) = spent {
+            if let Some((_, resets)) = spent {
                 problems.push(format!("today's subtitles from OpenSubtitles are spent; more can be fetched from {}", chrono::DateTime::from_timestamp(resets, 0).map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string()).unwrap_or_default()));
             } else {
                 let began = Instant::now();
-                let mut failed = 0;
+                let mut failed = vec![];
                 for want in to_fetch {
                     if began.elapsed() > Duration::from_secs(600) || !self.playing_now().is_empty() || crate::clips::any_making() {
                         more = true;
@@ -829,20 +866,22 @@ impl App {
                     }
                     match self.auto_subtitle(want.file_id, &household, KEEP_FOR_HAND).await {
                         Ok(found) => {
-                            failed = 0;
-                            self.dialogue.note_asked(want.file_id, found.is_some())?;
+                            failed.clear();
+                            self.dialogue.note_asked(want.file_id, if found.is_some() { Asked::Found } else { Asked::None })?;
                             more |= found.is_some();
                         }
                         Err(e) => {
                             tracing::info!(file = want.file_id, error = %format!("{e:#}"), "subtitles could not be fetched for the index");
-                            self.dialogue.note_asked(want.file_id, false)?;
-                            failed += 1;
-                            // Several in a row is something in the way of every file alike:
-                            // looked at again in a while.
-                            if failed >= 3 {
+                            self.dialogue.note_asked(want.file_id, Asked::Failed)?;
+                            failed.push(want.file_id);
+                            // Several in a row is something in the way of every file alike, such
+                            // as signing in: looked at again in a while, or when the account
+                            // changes, with those files asked about again then.
+                            if failed.len() >= 3 {
+                                self.dialogue.unask(&failed)?;
                                 let why = format!("subtitles could not be fetched from OpenSubtitles: {e:#}");
                                 tracing::warn!("{why}");
-                                *self.dialogue.fetch_paused.lock() = Some((now() + 3600, why.clone()));
+                                *self.dialogue.fetch_paused.lock() = Some((now() + 3600, why.clone(), account.clone()));
                                 problems.push(why);
                                 break;
                             }
@@ -868,7 +907,7 @@ impl App {
             placed,
             passages,
             unreadable: unreadable.len(),
-            not_found: unreadable.iter().filter(|w| asked.get(&w.file_id).is_some_and(|(_, found)| !found)).count(),
+            not_found: unreadable.iter().filter(|w| asked.get(&w.file_id).is_some_and(|(_, found)| *found == Asked::None)).count(),
             away: wants.iter().filter(|w| w.away).count(),
             can_fetch,
             fetches_left: None,
