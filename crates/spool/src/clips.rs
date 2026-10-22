@@ -190,12 +190,16 @@ fn out_size(width: u32, height: u32) -> (u32, u32) {
     }
 }
 
-/// How a clip is drawn as a GIF: smaller and with fewer pictures a second the longer it runs,
-/// so that a long one is still a file that can be sent, in colours chosen for it.
-fn gif_filter(seconds: f64, width: u32) -> String {
-    let (wide, fps) = if seconds <= 15.0 { (480, 15) } else if seconds <= 45.0 { (400, 12) } else { (320, 10) };
-    let wide = if width > 0 { wide.min(width) } else { wide };
-    format!("fps={fps},scale={wide}:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
+/// How a clip is drawn as a GIF: with fewer pictures a second the longer it runs, and as large
+/// as keeps it to about 10 MB, so that it is still a file that can be sent; in colours chosen for it.
+fn gif_filter(seconds: f64, width: u32, height: u32) -> String {
+    let fps = if seconds <= 10.0 { 15 } else if seconds <= 20.0 { 12 } else { 10 };
+    // About two thirds of a byte for each point of each picture, as GIFs of films come out.
+    const POINTS: f64 = 16_000_000.0;
+    let tall = if width > 0 && height > 0 { height as f64 / width as f64 } else { 9.0 / 16.0 };
+    let wide = (POINTS / (seconds.max(1.0) * fps as f64) / tall).sqrt();
+    let wide = (wide.clamp(240.0, 480.0) as u32).min(if width > 0 { width } else { u32::MAX }) / 2 * 2;
+    format!("fps={fps},scale={wide}:-2:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
 }
 
 /// What to hand ffmpeg to cut a clip.
@@ -276,7 +280,7 @@ impl App {
         let made = tokio::process::Command::new(&tool)
             .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i"])
             .arg(self.clip_video(c.id))
-            .args(["-vf", &gif_filter(c.seconds, c.width), "-loop", "0", "-f", "gif"])
+            .args(["-vf", &gif_filter(c.seconds, c.width, c.height), "-loop", "0", "-f", "gif"])
             .arg(&part)
             .kill_on_drop(true)
             .output()
@@ -581,10 +585,11 @@ mod tests {
 
     #[test]
     fn a_long_clip_makes_a_smaller_gif() {
-        assert!(gif_filter(10.0, 1920).starts_with("fps=15,scale=480:-1"));
-        assert!(gif_filter(30.0, 1920).starts_with("fps=12,scale=400:-1"));
-        assert!(gif_filter(120.0, 1920).starts_with("fps=10,scale=320:-1"));
-        assert!(gif_filter(10.0, 300).starts_with("fps=15,scale=300:-1"), "never larger than the clip");
+        assert!(gif_filter(5.0, 1920, 1080).starts_with("fps=15,scale=480:-2"));
+        assert!(gif_filter(10.0, 1920, 1080).starts_with("fps=15,scale=434:-2"));
+        assert!(gif_filter(30.0, 1920, 1080).starts_with("fps=10,scale=306:-2"));
+        assert!(gif_filter(120.0, 1920, 1080).starts_with("fps=10,scale=240:-2"));
+        assert!(gif_filter(5.0, 300, 200).starts_with("fps=15,scale=300:-2"), "never larger than the clip");
     }
 
     #[test]
