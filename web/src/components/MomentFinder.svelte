@@ -130,6 +130,7 @@
             {coverage.unreadable} have no subtitles to read: with an OpenSubtitles account set in Settings, they are fetched for them.
           {/if}
         {/if}
+        {#if coverage.can_fetch && coverage.fetches_left != null}{coverage.fetches_left.toLocaleString()} subtitle downloads left today at OpenSubtitles.{/if}
         {#if coverage.passages > coverage.placed}Still working out what {(coverage.passages - coverage.placed).toLocaleString()} passages mean.{/if}
       {:else}
         The library is being read for what is said in it.

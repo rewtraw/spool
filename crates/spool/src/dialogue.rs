@@ -91,6 +91,8 @@ pub struct Coverage {
     pub away: usize,
     /// Whether subtitles can be fetched for the files without: an OpenSubtitles key is set.
     pub can_fetch: bool,
+    /// How many more subtitles OpenSubtitles will hand over today, as it last said.
+    pub fetches_left: Option<i64>,
     /// What it is doing, in words; empty when it is idle.
     pub doing: String,
     /// What is in the way, if anything: of searching by meaning, of fetching subtitles.
@@ -869,10 +871,18 @@ impl App {
             not_found: unreadable.iter().filter(|w| asked.get(&w.file_id).is_some_and(|(_, found)| !found)).count(),
             away: wants.iter().filter(|w| w.away).count(),
             can_fetch,
+            fetches_left: None,
             doing: String::new(),
             problems: problems.to_vec(),
         };
         Ok(())
+    }
+
+    /// What the index covers, with how many subtitles may still be fetched today.
+    pub fn dialogue_coverage(&self) -> Coverage {
+        let mut c = self.dialogue.coverage();
+        c.fetches_left = (*self.subtitle_allowance.lock()).filter(|(_, resets)| now() < *resets).map(|(left, _)| left);
+        c
     }
 
     fn dialogue_label(&self, want: &Want) -> String {
@@ -959,7 +969,7 @@ impl App {
             let episode = episode_id.and_then(|e| self.db.episode(e).ok().flatten());
             moments.push(Moment { title_id, episode_id, from: crate::clips::cut_from(title, episode.as_ref()), file_id, start, end, lines, before, after, score: (score * 100.0).round() / 100.0, words });
         }
-        Ok(Found { moments, by_meaning, coverage: self.dialogue.coverage() })
+        Ok(Found { moments, by_meaning, coverage: self.dialogue_coverage() })
     }
 }
 

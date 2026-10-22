@@ -73,7 +73,7 @@ pub(super) async fn dialogue_lines(State(app): State<App>, Query(b): Query<Betwe
 
 /// How much of the library can be searched by what is said, and what is being done about the rest.
 pub(super) async fn dialogue_coverage(State(app): State<App>) -> R<Value> {
-    Ok(Json(json!(app.dialogue.coverage())))
+    Ok(Json(json!(app.dialogue_coverage())))
 }
 
 /// A name a clip can be saved as: its own, without what a file name cannot hold.

@@ -153,6 +153,7 @@ export interface Coverage {
   not_found: number;
   away: number;
   can_fetch: boolean;
+  fetches_left: number | null;
   doing: string;
   problems: string[];
 }
