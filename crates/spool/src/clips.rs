@@ -85,6 +85,11 @@ pub struct Wanted {
 /// How far each clip being made has got, in thousandths of a second, and whether to stop it.
 static MAKING: LazyLock<Mutex<HashMap<i64, Making>>> = LazyLock::new(Default::default);
 type Making = (Arc<AtomicU64>, Arc<AtomicBool>);
+/// Whether a clip is being made or waits to be, for work that would slow it to stand aside.
+pub fn any_making() -> bool {
+    !MAKING.lock().is_empty()
+}
+
 /// One clip at a time.
 static ONE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
@@ -432,7 +437,7 @@ impl App {
             Some(c) => match &c.source {
                 crate::captions::Source::Picture(index) => Some(Over::Picture(*index)),
                 source => {
-                    let cues = crate::captions::cues(&tool, &src, source, clip.start, clip.seconds, &stop).await?;
+                    let cues = crate::captions::cues(&tool, &src, source, &crate::captions::streams_of(&info), clip.start, clip.seconds, &stop).await?;
                     let (w, h) = out_size(info.width, info.height);
                     let (dir, seconds, halt) = (drawing.0.clone(), clip.seconds, stop.clone());
                     tokio::task::spawn_blocking(move || crate::captions::render(&cues, seconds, w, h, &dir, &halt)).await??.map(Over::Drawn)

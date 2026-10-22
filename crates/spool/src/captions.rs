@@ -107,14 +107,23 @@ pub fn clean(text: &str) -> String {
 
 /// The lines of a clip's stretch of time, timed from the start of the clip. Stops, and says
 /// so, when `stop` is set.
-pub async fn cues(tool: &Path, src: &Path, source: &Source, start: f64, seconds: f64, stop: &AtomicBool) -> Result<Vec<Cue>> {
+/// `streams` are the file's streams, as [`crate::mkv::track`] takes them.
+pub async fn cues(tool: &Path, src: &Path, source: &Source, streams: &[(u32, String, String)], start: f64, seconds: f64, stop: &AtomicBool) -> Result<Vec<Cue>> {
     let all: Vec<Cue> = match source {
         Source::Text(index) => {
-            // Read from a little before the clip, with the file's own times: ffmpeg's times
-            // counted from where it was asked to begin shift when a line is up at that moment.
-            let from = (start - 10.0).max(0.0);
-            let window = ["-ss".to_string(), format!("{from:.3}"), "-t".to_string(), format!("{:.3}", seconds + (start - from))];
-            read_track(tool, src, *index, &window, stop).await?
+            // The whole track where the file says where its lines are: seconds, where ffmpeg
+            // can read on through the film looking for the next line after the clip.
+            let (path, i, all) = (src.to_path_buf(), *index, streams.to_vec());
+            match tokio::task::spawn_blocking(move || crate::mkv::track(&path, i, &all)).await? {
+                Some(cues) => cues,
+                None => {
+                    // Read from a little before the clip, with the file's own times: ffmpeg's times
+                    // counted from where it was asked to begin shift when a line is up at that moment.
+                    let from = (start - 10.0).max(0.0);
+                    let window = ["-ss".to_string(), format!("{from:.3}"), "-t".to_string(), format!("{:.3}", seconds + (start - from))];
+                    read_track(tool, src, *index, &window, stop).await?
+                }
+            }
         }
         Source::Beside(path) => crate::subs::parse_srt(&crate::subs::decode(&tokio::fs::read(path).await?)),
         Source::Picture(_) => return Ok(vec![]),

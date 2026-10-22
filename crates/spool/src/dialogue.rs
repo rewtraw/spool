@@ -689,9 +689,10 @@ impl App {
         if household.is_empty() {
             problems.push("no household language is set, so there are no subtitles to read".to_string());
         }
-        // Reading whole files is put off while anyone is watching, so it does not get in the way.
-        if !self.playing_now().is_empty() {
-            self.dialogue.doing("Waiting while something is played");
+        // Reading whole files is put off while anyone is watching or a clip is being made, so
+        // it does not get in the way.
+        if !self.playing_now().is_empty() || crate::clips::any_making() {
+            self.dialogue.doing(if crate::clips::any_making() { "Waiting while clips are made" } else { "Waiting while something is played" });
             tokio::time::sleep(Duration::from_secs(60)).await;
             return Ok(true);
         }
@@ -721,17 +722,36 @@ impl App {
 
         // Read what has changed, for a few minutes at most before the rest gets a turn.
         let began = Instant::now();
-        let never = AtomicBool::new(false);
         if let Some(tool) = self.ffmpeg_path() {
             for want in &to_read {
-                if began.elapsed() > Duration::from_secs(300) || !self.playing_now().is_empty() {
+                if began.elapsed() > Duration::from_secs(300) || !self.playing_now().is_empty() || crate::clips::any_making() {
                     more = true;
                     break;
                 }
                 let Some(source) = &want.source else { continue };
                 self.dialogue.doing(&format!("Reading what is said in {}", self.dialogue_label(want)));
+                // A file being read whole is let go of the moment a clip is asked for or
+                // something is played, and read again later.
+                let stop = Arc::new(AtomicBool::new(false));
+                let watch = {
+                    let (app, stop) = (self.clone(), stop.clone());
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            if crate::clips::any_making() || !app.playing_now().is_empty() {
+                                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                                return;
+                            }
+                        }
+                    })
+                };
                 // A share that stops answering does not hold everything up.
-                let read = tokio::time::timeout(Duration::from_secs(1200), crate::captions::every_line(&tool, &want.path, source, &want.streams, &never)).await.unwrap_or_else(|_| Err(anyhow!("reading it took too long")));
+                let read = tokio::time::timeout(Duration::from_secs(1200), crate::captions::every_line(&tool, &want.path, source, &want.streams, &stop)).await.unwrap_or_else(|_| Err(anyhow!("reading it took too long")));
+                watch.abort();
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    more = true;
+                    break;
+                }
                 match read {
                     Ok(cues) => self.dialogue.put(want, &tidy(cues))?,
                     Err(e) => {
@@ -782,7 +802,7 @@ impl App {
                 let began = Instant::now();
                 let mut failed = 0;
                 for want in to_fetch {
-                    if began.elapsed() > Duration::from_secs(600) || !self.playing_now().is_empty() {
+                    if began.elapsed() > Duration::from_secs(600) || !self.playing_now().is_empty() || crate::clips::any_making() {
                         more = true;
                         break;
                     }

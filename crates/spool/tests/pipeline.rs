@@ -4815,12 +4815,12 @@ async fn subtitles_inside_a_file_are_read_for_the_clip_in_their_own_time() {
     let stop = std::sync::atomic::AtomicBool::new(false);
     let tool = spool::subs::ffmpeg_installed().unwrap();
     // From a second in, for half a second: the line already up is there from the start, the next where it falls.
-    let cues = spool::captions::cues(&tool, &with, &spool::captions::Source::Text(2), 1.0, 0.95, &stop).await.unwrap();
+    let cues = spool::captions::cues(&tool, &with, &spool::captions::Source::Text(2), &[], 1.0, 0.95, &stop).await.unwrap();
     let got: Vec<(i64, i64, &str)> = cues.iter().map(|c| ((c.start * 100.0).round() as i64, (c.end * 100.0).round() as i64, c.text.as_str())).collect();
     assert_eq!(got, [(0, 60, "Already up"), (70, 90, "Next")]);
     // Called off, it stops.
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    assert!(spool::captions::cues(&tool, &with, &spool::captions::Source::Text(2), 1.0, 0.95, &stop).await.is_err());
+    assert!(spool::captions::cues(&tool, &with, &spool::captions::Source::Text(2), &[], 1.0, 0.95, &stop).await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
