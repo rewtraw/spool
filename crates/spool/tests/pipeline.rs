@@ -4955,16 +4955,26 @@ async fn subtitles_that_cannot_be_fetched_for_the_index_are_not_taken_as_missing
         .route(
             "/login",
             post(move |axum::Json(b): axum::Json<serde_json::Value>| async move {
-                tries.fetch_add(1, Ordering::SeqCst);
+                let n = tries.fetch_add(1, Ordering::SeqCst) + 1;
                 if b["password"] == "right" {
-                    (axum::http::StatusCode::OK, axum::Json(json!({"token": "t"})))
+                    (axum::http::StatusCode::OK, axum::Json(json!({"token": format!("t{n}")})))
                 } else {
                     (axum::http::StatusCode::UNAUTHORIZED, axum::Json(json!({"message": "Error, invalid username/password"})))
                 }
             }),
         )
         .route("/subtitles", get(|| async { axum::Json(json!({"data": [{"attributes": {"language": "en", "release": "x", "moviehash_match": true, "files": [{"file_id": 7}]}}]})) }))
-        .route("/download", post(move || async move { axum::Json(json!({"link": format!("http://{addr}/file.srt"), "remaining": 990, "reset_time_utc": "2099-01-01T00:00:00Z"})) }))
+        // The first token it hands out it stops taking at once, as it does when it ends a
+        // sign-in early.
+        .route(
+            "/download",
+            post(move |h: axum::http::HeaderMap| async move {
+                if h.get("authorization").and_then(|v| v.to_str().ok()) == Some("Bearer t2") {
+                    return (axum::http::StatusCode::UNAUTHORIZED, axum::Json(json!({"message": "invalid token"})));
+                }
+                (axum::http::StatusCode::OK, axum::Json(json!({"link": format!("http://{addr}/file.srt"), "remaining": 990, "reset_time_utc": "2099-01-01T00:00:00Z"})))
+            }),
+        )
         .route("/file.srt", get(move || async move { srt }));
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut g = w.app.settings.general();
@@ -4993,12 +5003,14 @@ async fn subtitles_that_cannot_be_fetched_for_the_index_are_not_taken_as_missing
     assert_eq!(logins.load(Ordering::SeqCst), 1);
 
     // Put right, it is tried at once: each gets its subtitles, which are read in the next round,
-    // and how many more may be fetched today is said.
+    // and how many more may be fetched today is said. The token turned away is dropped and
+    // signed in for afresh, once.
     g.opensubtitles_password = "right".into();
     w.app.settings.set_general(&g).unwrap();
     w.app.dialogue_round(true).await.unwrap();
     let c = w.app.dialogue_coverage();
     assert_eq!((c.not_found, c.problems.len(), c.fetches_left), (0, 0, Some(990)), "{c:?}");
+    assert_eq!(logins.load(Ordering::SeqCst), 3);
     w.app.dialogue_round(true).await.unwrap();
     let c = w.app.dialogue_coverage();
     assert_eq!((c.unreadable, c.read), (0, 3), "{c:?}");

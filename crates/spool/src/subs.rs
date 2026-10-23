@@ -899,15 +899,32 @@ impl App {
 
     /// Fetch one subtitle file from OpenSubtitles. Each fetch counts against the account's
     /// daily allowance.
+    /// A sign-in OpenSubtitles has stopped taking is dropped, and signed in afresh once.
     async fn fetch_subtitle(&self, provider_file_id: i64) -> Result<Vec<u8>> {
-        let token = self.opensubtitles_token().await?;
-        let mut req = self.opensubtitles(reqwest::Method::POST, "/download")?.json(&serde_json::json!({"file_id": provider_file_id, "sub_format": "srt"}));
-        if let Some(t) = token {
-            req = req.bearer_auth(t);
-        }
-        let resp = req.send().await.map_err(|e| at_opensubtitles(format!("OpenSubtitles: {}", e.without_url())))?;
-        let status = resp.status();
-        let body: serde_json::Value = resp.json().await.unwrap_or_default();
+        let mut again = true;
+        let (status, body) = loop {
+            let token = self.opensubtitles_token().await?;
+            let mut req = self.opensubtitles(reqwest::Method::POST, "/download")?.json(&serde_json::json!({"file_id": provider_file_id, "sub_format": "srt"}));
+            if let Some(t) = &token {
+                req = req.bearer_auth(t);
+            }
+            let resp = req.send().await.map_err(|e| at_opensubtitles(format!("OpenSubtitles: {}", e.without_url())))?;
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            let refused = status == reqwest::StatusCode::UNAUTHORIZED || body["message"].as_str().is_some_and(|m| m.to_lowercase().contains("token"));
+            if refused && again {
+                if let Some(t) = token {
+                    let mut login = self.subtitle_login.lock();
+                    if matches!(&*login, Some((Ok(held), _)) if *held == t) {
+                        *login = None;
+                    }
+                    drop(login);
+                    again = false;
+                    continue;
+                }
+            }
+            break (status, body);
+        };
         // How many more may be fetched today, said with each answer, given or refused.
         if let Some(left) = body["remaining"].as_i64() {
             let resets = body["reset_time_utc"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).map(|t| t.timestamp()).unwrap_or_else(|| now() + 86400);
