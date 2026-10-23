@@ -1,10 +1,11 @@
 <script lang="ts">
-  // Find moments across the library by what is said in them, and make clips of those chosen.
+  // Find moments by what is said in them, across the library or in one title, and make clips
+  // of those chosen.
   import { api, type Coverage, type Found, type Moment, type SaidLine } from '../lib/api';
   import { toast } from '../lib/state.svelte';
   import { clock } from '../lib/format';
 
-  let { onmade }: { onmade: () => void } = $props();
+  let { onmade = () => {}, titleId = 0, onclose }: { onmade?: () => void; titleId?: number; onclose?: () => void } = $props();
 
   let query = $state('');
   let found = $state<Found | null>(null);
@@ -60,6 +61,7 @@
     coverage = await api.get('/dialogue/coverage').catch(() => coverage);
   }
   $effect(() => {
+    if (titleId) return;
     loadCoverage();
     const timer = setInterval(loadCoverage, 15000);
     return () => clearInterval(timer);
@@ -71,8 +73,8 @@
     looking = true;
     error = '';
     try {
-      found = await api.get(`/dialogue?q=${encodeURIComponent(query.trim())}&limit=60`);
-      coverage = found!.coverage;
+      found = await api.get(`/dialogue?q=${encodeURIComponent(query.trim())}&limit=60${titleId ? `&title_id=${titleId}` : ''}`);
+      if (!titleId) coverage = found!.coverage;
       picked = {};
       opened = {};
       spans = {};
@@ -105,7 +107,7 @@
         failed.push(`${m.from}: ${err.message}`);
       }
     }
-    if (made) toast(`Making ${made === 1 ? 'one clip' : `${made} clips`}. They appear below as each is ready.`);
+    if (made) toast(`Making ${made === 1 ? 'one clip' : `${made} clips`}. ${titleId ? 'They appear under Clips' : 'They appear below'} as each is ready.`);
     if (failed.length) toast(`Not made: ${failed.join('; ')}`, 'error');
     picked = {};
     onmade();
@@ -114,9 +116,15 @@
   const share = (c: Coverage) => (c.files ? Math.round((c.read / c.files) * 100) : 0);
 </script>
 
-<section class="card finder">
+<section class="card finder" class:within={titleId}>
+  {#if onclose}
+    <div class="top">
+      <b>Find what is said</b>
+      <button type="button" class="btn small ghost" onclick={onclose}>Close</button>
+    </div>
+  {/if}
   <form class="row look" onsubmit={look}>
-    <input class="input grow" bind:value={query} placeholder="What is said: wake up; don't go to sleep" aria-label="What is said" autocomplete="off" spellcheck="false" />
+    <input class="input grow" bind:value={query} placeholder={titleId ? 'What is said in it: wake up; the bone' : "What is said: wake up; don't go to sleep"} aria-label="What is said" autocomplete="off" spellcheck="false" />
     <button class="btn primary" type="submit" disabled={looking || !query.trim()}>{looking ? 'Looking…' : 'Find'}</button>
   </form>
   {#if coverage}
@@ -144,7 +152,7 @@
 
   {#if found}
     {#if !found.moments.length}
-      <p class="muted">Nothing like that is said in what can be searched yet.</p>
+      <p class="muted">{titleId ? 'Nothing like that is said in it, or its subtitles have not been read yet.' : 'Nothing like that is said in what can be searched yet.'}</p>
     {:else}
       <div class="row wrap tools">
         <span class="muted small">{found.moments.length} found{found.by_meaning ? '' : ', by the words alone'}</span>
@@ -162,7 +170,7 @@
               <input class="tick" type="checkbox" bind:checked={picked[key(m)]} aria-label="Make a clip of {m.from} at {clock(m.start)}" />
               <div class="grow said">
                 <div class="row wrap where">
-                  <a class="link" href="#/title/{m.title_id}">{m.from}</a>
+                  {#if titleId}<span>{m.from}</span>{:else}<a class="link" href="#/title/{m.title_id}">{m.from}</a>{/if}
                   <span class="faint mono">{clock(m.start)}</span>
                   {#if m.words}<span class="chip accent">the words</span>{/if}
                 </div>
@@ -231,6 +239,14 @@
     gap: 8px;
     padding: 14px 16px;
     margin-bottom: 18px;
+  }
+  .finder.within {
+    margin: 6px 0 0;
+  }
+  .top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
   .look {
     gap: 8px;

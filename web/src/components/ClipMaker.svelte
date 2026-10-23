@@ -2,10 +2,12 @@
   // Cut a clip from a film, or from one episode of a series.
   import { api, type Episode, type Watched } from '../lib/api';
   import { clock } from '../lib/format';
+  import MomentFinder from './MomentFinder.svelte';
 
   let { titleId, kind, episodes = [], watched = {}, filmPosition = 0 }: { titleId: number; kind: 'movie' | 'series'; episodes?: Episode[]; watched?: Record<number, Watched>; filmPosition?: number } = $props();
 
   let open = $state(false);
+  let finding = $state(false);
   let start = $state('');
   let seconds = $state(30);
   let name = $state('');
@@ -41,8 +43,13 @@
   }
 </script>
 
-{#if !open}
-  <button class="btn small ghost" onclick={() => (open = true)} aria-expanded="false">Make a clip</button>
+{#if finding}
+  <MomentFinder {titleId} onclose={() => (finding = false)} />
+{:else if !open}
+  <div class="row wrap">
+    <button class="btn small ghost" onclick={() => (open = true)} aria-expanded="false">Make a clip</button>
+    <button class="btn small ghost" onclick={() => (finding = true)} aria-expanded="false">Find what is said</button>
+  </div>
 {:else}
   <form class="card maker" onsubmit={make}>
     <div class="top">
