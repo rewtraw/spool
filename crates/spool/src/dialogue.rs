@@ -490,6 +490,19 @@ impl Index {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// Everything said in a film or an episode, in order: from the file of it read for the most
+    /// lines, when there are several. None when none of it has been read.
+    pub fn transcript(&self, title_id: i64, episode_id: Option<i64>) -> Result<Option<(i64, Vec<Line>)>> {
+        let conn = self.conn.lock();
+        let file: Option<i64> = conn
+            .query_row("SELECT file_id FROM files WHERE title_id = ? AND episode_id IS ? AND lines > 0 ORDER BY lines DESC LIMIT 1", params![title_id, episode_id], |r| r.get(0))
+            .optional()?;
+        let Some(file) = file else { return Ok(None) };
+        let mut q = conn.prepare("SELECT start, end, text FROM lines WHERE file_id = ? ORDER BY start")?;
+        let rows = q.query_map([file], |r| Ok(Line { start: r.get(0)?, end: r.get(1)?, text: r.get(2)? }))?;
+        Ok(Some((file, rows.collect::<rusqlite::Result<_>>()?)))
+    }
+
     fn files_of_title(&self, title_id: i64) -> Result<HashSet<i64>> {
         let conn = self.conn.lock();
         let mut q = conn.prepare("SELECT file_id FROM files WHERE title_id = ?")?;

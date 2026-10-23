@@ -4915,6 +4915,12 @@ async fn what_is_said_across_the_library_is_found_with_the_lines_around_it() {
     assert_eq!(said, ["Wake up.", "They come when you sleep.", "Shell Beach."]);
     let (status, _) = call(&api, "GET", &format!("/api/dialogue/lines?file_id={city_file_id}&from=0&to=99999"), Value::Null).await;
     assert_eq!(status, 400);
+    // All of it, to choose from without searching; nothing for a film not read.
+    let (status, whole) = call(&api, "GET", &format!("/api/dialogue/transcript?title_id={}", city.id), Value::Null).await;
+    let said: Vec<&str> = whole["lines"].as_array().unwrap().iter().map(|l| l["text"].as_str().unwrap()).collect();
+    assert_eq!((status, said.len(), said[0], whole["file_id"].as_i64()), (200, 5, "Where am I?", Some(city_file_id)), "{whole}");
+    let (_, none) = call(&api, "GET", "/api/dialogue/transcript?title_id=99999", Value::Null).await;
+    assert_eq!(none["lines"].as_array().map(Vec::len), Some(0));
 
     // Subtitles taken away are forgotten; a title gone from the library goes from the index.
     std::fs::remove_file(&beside).unwrap();

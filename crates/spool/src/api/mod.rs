@@ -394,6 +394,7 @@ fn api_routes() -> Router<App> {
         .route("/api/dialogue", get(search_dialogue))
         .route("/api/dialogue/coverage", get(dialogue_coverage))
         .route("/api/dialogue/lines", get(dialogue_lines))
+        .route("/api/dialogue/transcript", get(dialogue_transcript))
         .route("/clip/{file}", get(shared_clip))
         .route("/api/accounts", get(accounts).post(account_add))
         .route("/api/accounts/{id}", put(account_change).delete(account_remove))

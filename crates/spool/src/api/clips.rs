@@ -71,6 +71,20 @@ pub(super) async fn dialogue_lines(State(app): State<App>, Query(b): Query<Betwe
     Ok(Json(json!(app.dialogue.lines_between(b.file_id, b.from, b.to)?)))
 }
 
+#[derive(Deserialize)]
+pub(super) struct Whole {
+    title_id: i64,
+    episode_id: Option<i64>,
+}
+
+/// Everything said in a film or an episode, to choose a clip from.
+pub(super) async fn dialogue_transcript(State(app): State<App>, Query(w): Query<Whole>) -> R<Value> {
+    Ok(Json(match app.dialogue.transcript(w.title_id, w.episode_id)? {
+        Some((file_id, lines)) => json!({"file_id": file_id, "lines": lines}),
+        None => json!({"file_id": null, "lines": []}),
+    }))
+}
+
 /// How much of the library can be searched by what is said, and what is being done about the rest.
 pub(super) async fn dialogue_coverage(State(app): State<App>) -> R<Value> {
     Ok(Json(json!(app.dialogue_coverage())))
