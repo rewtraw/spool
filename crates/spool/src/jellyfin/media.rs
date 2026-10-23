@@ -26,20 +26,15 @@ pub async fn stream(app: &App, id: &str, source: Option<&str>, headers: &HeaderM
         lib.extra_path(id).filter(|_| !compact).map(|p| (p, false)).or_else(|| lib.file_for(id, source.and_then(Id::parse)).map(|(t, f)| (t.file_path(f), f.compact_of.is_some())))
     });
     let Some((path, is_compact)) = found else { return StatusCode::NOT_FOUND.into_response() };
-    // A player on Tailscale is placed by where it is really reached, which is what says
-    // whether it can reach the other machine too.
-    // It is known by both addresses: one named by its Tailscale address is sent wherever it is.
-    let really = match player {
-        Some(ip) => crate::link::tailnet::really(ip).await,
-        None => None,
-    };
-    let known: Vec<std::net::IpAddr> = really.into_iter().chain(player).collect();
+    // A player is sent the way it came: one that came over Tailscale takes the file over
+    // Tailscale too, even at home, where it may not reach home addresses (through an exit
+    // node, say), and Tailscale goes straight across the home network anyway.
     // Sent there only if the file opens there now: a disk asleep or a share gone would
     // otherwise leave the player with nothing, when it could have had the file from here.
     // An account held to compact versions away from home is never sent to another machine
     // for an original, at home either: what it would be handed there is good for hours, and
     // would go on opening the original after it had left.
-    let sent = match app.play_direct(&path, &known).filter(|_| !held || is_compact) {
+    let sent = match app.play_direct(&path, player.as_slice()).filter(|_| !held || is_compact) {
         Some((name, there)) if app.opens_there(&path, &there).await => Some((name, there)),
         _ => None,
     };

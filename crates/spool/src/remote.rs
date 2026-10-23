@@ -1160,8 +1160,7 @@ impl App {
 
     /// Where a player can take a file from the machine that holds it, if there is a link to
     /// that machine that hands files out and the player is one of those sent there.
-    /// `player` is every address the player is known by: the one it came from, and the one
-    /// it is really at when it came over Tailscale. Returns the machine's name and the address.
+    /// `player` is the address the player came from. Returns the machine's name and the address.
     pub fn play_direct(&self, file: &Path, player: &[IpAddr]) -> Option<(String, String)> {
         self.remotes().iter().find_map(|r| Some((r.conf.name.clone(), r.direct(file, player)?)))
     }
