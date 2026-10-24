@@ -230,6 +230,13 @@ fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'
         } else if !p.episode_numbers.is_empty() {
             covered = tc.episodes.iter().filter(|e| e.season == season && p.episode_numbers.contains(&e.episode)).collect();
             covers = format!("S{season:02}{}", p.episode_numbers.iter().map(|n| format!("E{n:02}")).collect::<String>());
+            // Numbered in an order of its own, and the episode's title given after the number.
+            if let [n] = p.episode_numbers[..] {
+                if let Some(e) = crate::names::retitled(&release.title, season, n, &tc.episodes) {
+                    covered = vec![e];
+                    covers = format!("S{:02}E{:02}", e.season, e.episode);
+                }
+            }
             if covered.len() != p.episode_numbers.len() {
                 wrong = Some(rej("unknown_episode", format!("{covers} is not in the episode list")));
             }

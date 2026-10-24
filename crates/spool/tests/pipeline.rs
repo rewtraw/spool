@@ -1861,6 +1861,144 @@ async fn a_later_season_posted_under_its_own_name_and_numbered_from_one_lands_in
     assert_eq!(eps.len(), 3);
 }
 
+/// Released in an order of its own, each episode with its title after the number: the title says
+/// which it is, when choosing it and when filing it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_episode_released_by_another_order_is_known_by_its_title() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (show, _) = w.series("Example World", 296762, &[(1, 12, "Trick or Treat"), (1, 13, "Trouble with Money"), (1, 14, "Double Dare")]);
+    for name in ["Example.World.S01E12.Double.Dare.1080p.WEBRip.x264-PoF", "Example.World.S01E10.Trick.or.Treat.1080p.WEBRip.x264-PoF", "Example.World.S01E13.Trouble.with.Money.1080p.WEBRip.x264-PoF"] {
+        w.release(name, &[(&format!("{name}.mkv"), &video)]);
+    }
+    let outcome = w.app.search(show.id, Scope::Season(1), true, true).await.unwrap();
+    let covers: HashMap<&str, &str> = outcome.decisions.iter().map(|d| (d.release.title.as_str(), d.covers.as_str())).collect();
+    assert_eq!(
+        (covers["Example.World.S01E12.Double.Dare.1080p.WEBRip.x264-PoF"], covers["Example.World.S01E10.Trick.or.Treat.1080p.WEBRip.x264-PoF"], covers["Example.World.S01E13.Trouble.with.Money.1080p.WEBRip.x264-PoF"]),
+        ("S01E14", "S01E12", "S01E13"),
+        "{:?}",
+        outcome.decisions.iter().map(|d| (&d.release.title, &d.rejections)).collect::<Vec<_>>()
+    );
+    assert_eq!(outcome.grabbed.len(), 3, "{}", outcome.message);
+    for _ in 0..150 {
+        if w.app.db.episodes(show.id).unwrap().iter().all(|e| e.file_id.is_some()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    let files: HashMap<i64, MediaFile> = w.app.db.files(show.id).unwrap().into_iter().map(|f| (f.id, f)).collect();
+    let held: Vec<(u32, String)> = w.app.db.episodes(show.id).unwrap().iter().map(|e| (e.episode, e.file_id.and_then(|f| files.get(&f)).and_then(|f| f.scene_name.clone()).unwrap_or_default())).collect();
+    assert_eq!(
+        held,
+        [(12, "Example.World.S01E10.Trick.or.Treat.1080p.WEBRip.x264-PoF".to_string()), (13, "Example.World.S01E13.Trouble.with.Money.1080p.WEBRip.x264-PoF".into()), (14, "Example.World.S01E12.Double.Dare.1080p.WEBRip.x264-PoF".into())]
+    );
+    let names: Vec<String> = files.values().map(|f| f.rel_path.clone()).collect();
+    assert!(names.iter().any(|n| n.contains("S01E14 - Double Dare")) && names.iter().any(|n| n.contains("S01E12 - Trick or Treat")), "{names:?}");
+}
+
+/// Files already filed by such a release's numbers are filed again by their titles when the
+/// folder is looked through: files that trade places, one to an episode that had none, and the
+/// subtitles beside them going with them.
+#[tokio::test(flavor = "multi_thread")]
+async fn episodes_filed_by_a_release_of_another_order_are_filed_again_by_title() {
+    use serde_json::json;
+    let w = World::new(Mode::Active).await;
+    let (mut show, _) = w.series("Example World", 296762, &[(1, 1, "Trouble at School"), (1, 10, "The Sitter"), (1, 12, "Trick or Treat"), (1, 14, "Double Dare"), (1, 16, "Slumber Party"), (1, 25, "The Homework Hassle"), (1, 30, "Lost Kite"), (1, 31, "Lost Boat"), (1, 32, "Lost Dog")]);
+    show.path = w.root.join("TV/Example World").to_string_lossy().to_string();
+    w.app.db.save_title(&mut show).unwrap();
+    let root = PathBuf::from(&show.path);
+    std::fs::create_dir_all(root.join("Season 1")).unwrap();
+    let rel = |n: u32, t: &str| format!("Season 1/Example World - S01E{n:02} - {t} WEBRip-1080p.mkv");
+    // (filed as, the name it has, what it really is, by its release)
+    // The last three would each move on to the next, but the last episode's file is its own:
+    // neither moves, as neither would have anywhere to go.
+    let filed = [
+        (1, "Trouble at School", "S01E01.Trouble.at.School"),
+        (10, "The Sitter", "S01E10.Trick.or.Treat"),
+        (12, "Trick or Treat", "S01E12.Double.Dare"),
+        (14, "Double Dare", "S01E14.The.Sitter"),
+        (16, "Slumber Party", "S01E16.The.Homework.Hassle"),
+        (30, "Lost Kite", "S01E30.Lost.Boat"),
+        (31, "Lost Boat", "S01E31.Lost.Dog"),
+        (32, "Lost Dog", "S01E32.Lost.Dog"),
+    ];
+    let episodes = w.app.db.episodes(show.id).unwrap();
+    for (n, name, said) in filed {
+        let path = rel(n, name);
+        std::fs::write(root.join(&path), said.as_bytes()).unwrap();
+        let mut file = json!({"title_id": show.id, "rel_path": path, "size": said.len(), "quality": {"quality": "webrip-1080p"}, "scene_name": format!("Example.World.{said}.1080p.WEBRip.x265-PoF")});
+        if n == 12 {
+            let sub = path.replace(".mkv", ".en.srt");
+            std::fs::write(root.join(&sub), "1\n00:00:01,000 --> 00:00:02,000\nI double dare you\n").unwrap();
+            file["subtitles"] = json!([{"language": "en", "rel_path": sub, "source": "found"}]);
+        }
+        let file: MediaFile = serde_json::from_value(file).unwrap();
+        let e = episodes.iter().find(|e| e.episode == n).unwrap().id;
+        w.app.db.with(|c| {
+            c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, ?2, ?3, ?4)", rusqlite::params![show.id, file.rel_path, file.size as i64, serde_json::to_string(&file).unwrap()])?;
+            c.execute("UPDATE episodes SET file_id = last_insert_rowid() WHERE id = ?1", [e])
+        })
+        .unwrap();
+    }
+
+    // Something already where a subtitle would go: it stops there, with nothing lost, and
+    // the next look through the folder finishes once it is gone.
+    // First where it would be stepped aside, then where it would end up.
+    let dare_id = w.app.db.files(show.id).unwrap().iter().find(|f| f.rel_path == rel(12, "Trick or Treat")).unwrap().id;
+    let aside = root.join(rel(12, "Trick or Treat").replace(".mkv", &format!(".spool-refile-{dare_id}.en.srt")));
+    let stray = root.join(rel(14, "Double Dare").replace(".mkv", ".en.srt"));
+    for (i, in_the_way) in [vec![aside.clone(), stray.clone()], vec![stray.clone()]].into_iter().enumerate() {
+        for p in &in_the_way {
+            std::fs::write(p, "someone's own").unwrap();
+        }
+        let mut report = spool::catalog::ScanReport::default();
+        w.app.scan_title(show.id, &mut report).await.unwrap();
+        assert!(report.refiled < 4, "time {i}: {report:?}");
+        for p in &in_the_way {
+            assert_eq!(std::fs::read_to_string(p).unwrap(), "someone's own");
+            std::fs::remove_file(p).unwrap();
+        }
+        for f in w.app.db.files(show.id).unwrap() {
+            assert!(root.join(&f.rel_path).exists(), "time {i}: {} is where it is recorded", f.rel_path);
+            for sub in &f.subtitles {
+                assert!(root.join(&sub.rel_path).exists(), "time {i}: {} is where it is recorded", sub.rel_path);
+            }
+        }
+    }
+    let mut report = spool::catalog::ScanReport::default();
+    w.app.scan_title(show.id, &mut report).await.unwrap();
+    assert_eq!((report.files_missing, report.files_added), (0, 0), "{report:?}");
+    let files: HashMap<i64, MediaFile> = w.app.db.files(show.id).unwrap().into_iter().map(|f| (f.id, f)).collect();
+    let said: Vec<(u32, String)> = w.app.db.episodes(show.id).unwrap().iter().map(|e| (e.episode, e.file_id.map(|f| std::fs::read_to_string(root.join(&files[&f].rel_path)).unwrap()).unwrap_or_default())).collect();
+    assert_eq!(
+        said,
+        [
+            (1, "S01E01.Trouble.at.School".to_string()),
+            (10, "S01E14.The.Sitter".into()),
+            (12, "S01E10.Trick.or.Treat".into()),
+            (14, "S01E12.Double.Dare".into()),
+            (16, String::new()),
+            (25, "S01E16.The.Homework.Hassle".into()),
+            (30, "S01E30.Lost.Boat".into()),
+            (31, "S01E31.Lost.Dog".into()),
+            (32, "S01E32.Lost.Dog".into()),
+        ]
+    );
+    for e in w.app.db.episodes(show.id).unwrap().iter().filter(|e| e.file_id.is_some()) {
+        assert_eq!(files[&e.file_id.unwrap()].rel_path, rel(e.episode, &e.title), "named for the episode it is");
+    }
+    let dare = files.values().find(|f| f.rel_path == rel(14, "Double Dare")).unwrap();
+    assert_eq!(dare.subtitles[0].rel_path, rel(14, "Double Dare").replace(".mkv", ".en.srt"));
+    assert!(std::fs::read_to_string(root.join(&dare.subtitles[0].rel_path)).unwrap().contains("double dare"));
+    let left: Vec<String> = std::fs::read_dir(root.join("Season 1")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).filter(|n| n.contains("spool-refile") || (n.contains("S01E12") && n.ends_with(".srt"))).collect();
+    assert!(left.is_empty(), "{left:?}");
+
+    // Once right, nothing more is done.
+    let mut again = spool::catalog::ScanReport::default();
+    w.app.scan_title(show.id, &mut again).await.unwrap();
+    assert_eq!((again.refiled, again.files_missing, again.files_added), (0, 0, 0), "{again:?}");
+}
+
 async fn call(router: &axum::Router, method: &str, uri: &str, body: serde_json::Value) -> (u16, serde_json::Value) {
     call_as(router, None, method, uri, body).await
 }

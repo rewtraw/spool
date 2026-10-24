@@ -339,7 +339,14 @@ impl App {
                 for (path, size) in &vids {
                     let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
                     let parsed = parse_episode_path(&format!("{}/{}", acq.release.title, rel)).or_else(|| parse_episode_path(&rel));
+                    // A file that names its episode by title, after a number of its own order.
+                    let retitled = |p: &spool_core::parser::ParsedEpisodeInfo| match p.episode_numbers[..] {
+                        [n] => crate::names::retitled(&rel, p.season_number(), n, &episodes).or_else(|| crate::names::retitled(&acq.release.title, p.season_number(), n, &episodes)),
+                        _ => None,
+                    };
+                    let named = parsed.as_ref().and_then(retitled);
                     let mut eps: Vec<Episode> = match &parsed {
+                        _ if named.is_some() => named.into_iter().cloned().collect(),
                         Some(p) if !p.episode_numbers.is_empty() => episodes.iter().filter(|e| e.season == p.season_number() && p.episode_numbers.contains(&e.episode)).cloned().collect(),
                         Some(p) if p.air_date.is_some() => episodes.iter().filter(|e| e.air_date == p.air_date).cloned().collect(),
                         Some(p) if p.is_absolute() => episodes_by_absolute(&episodes, &p.absolute_episode_numbers).map(|f| f.into_iter().cloned().collect()).unwrap_or_default(),

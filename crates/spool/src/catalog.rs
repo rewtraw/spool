@@ -5,7 +5,8 @@ use crate::db::now;
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};
 use spool_core::parser::{parse_episode_path, parse_movie_path};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, serde::Serialize)]
 pub struct ScanReport {
@@ -19,6 +20,18 @@ pub struct ScanReport {
     /// Titles whose folders could not be looked through to the end, so nothing was
     /// concluded about them this time.
     pub put_off: Vec<String>,
+    /// Episode files found filed as another episode than the one their release named by
+    /// title, and filed again as that one.
+    pub refiled: usize,
+}
+
+/// A path without its extension, and the extension with its dot.
+fn stem(rel: &str) -> String {
+    rel.rfind('.').map(|i| rel[..i].to_string()).unwrap_or_else(|| rel.to_string())
+}
+
+fn extension(rel: &str) -> String {
+    rel.rfind('.').map(|i| rel[i..].to_string()).unwrap_or_default()
 }
 
 impl App {
@@ -290,6 +303,11 @@ impl App {
     /// other locations. Never writes to the media volume. A folder that cannot be reached is
     /// passed over: files that cannot be seen are not files that have gone.
     pub async fn scan_title(&self, id: i64, report: &mut ScanReport) -> Result<()> {
+        // One look through a title's folders at a time: what one finds gone may be a file
+        // the other is in the middle of renaming.
+        static LOOKING: std::sync::LazyLock<parking_lot::Mutex<std::collections::HashMap<i64, std::sync::Arc<tokio::sync::Mutex<()>>>>> = std::sync::LazyLock::new(Default::default);
+        let turn = LOOKING.lock().entry(id).or_default().clone();
+        let _held = turn.lock().await;
         let title = self.db.title(id)?.ok_or_else(|| anyhow!("no such title"))?;
         report.titles += 1;
         if title.path.is_empty() {
@@ -298,6 +316,17 @@ impl App {
         let places = self.placement();
         if places.online(&title) {
             self.scan_folder(&title, None, report).await?;
+            // Filing again that cannot be finished now is tried again next time; it does not
+            // stop the folder being looked through.
+            if title.kind == Kind::Series {
+                match self.refile_by_titles(&title).await {
+                    Ok(n) => report.refiled += n,
+                    Err(e) => {
+                        tracing::warn!(title = %title.title, error = %format!("{e:#}"), "episodes could not all be filed again by their titles");
+                        self.db.add_history(Some(id), "refile_stopped", serde_json::json!({"error": format!("{e:#}")}))?;
+                    }
+                }
+            }
         }
         for folder in title.also.iter().filter(|f| places.online_at(f)) {
             self.scan_folder(&title, Some(folder), report).await?;
@@ -519,6 +548,151 @@ impl App {
         }
         self.emit(Event::Title { id: 0 });
         Ok(report)
+    }
+
+    /// Put right episode files filed by a release's own numbering when the release named its
+    /// episode by title, "Show.S01E12.Double.Dare": each is made the file of the episode of that
+    /// title and renamed for it, with the subtitles beside it. A file is only moved onto an
+    /// episode that has no file or whose file is moving away too, and each is first stepped
+    /// aside, so files that trade places do not meet. Nothing is moved onto a name already
+    /// there, nor through a link out of the title's folder. Each move is written down as it is
+    /// made, and an episode is given its file once the file has its name, so that if this
+    /// stops part way the next look through the folder takes it up again.
+    /// Returns how many were filed again.
+    async fn refile_by_titles(&self, title: &Title) -> Result<usize> {
+        // Not while it is being moved, nor while something is being imported into it; it is
+        // done the next time its folder is looked through instead.
+        if self.moving(title.id) {
+            return Ok(0);
+        }
+        let turn = self.title_imports.lock().entry(title.id).or_default().clone();
+        let Ok(_held) = turn.try_lock() else { return Ok(0) };
+        let episodes = self.db.episodes(title.id)?;
+        let all = self.db.files(title.id)?;
+        // A file with a compact version made from it is left, so the two keep one name.
+        let files: Vec<MediaFile> = all.iter().filter(|f| f.base.is_none() && f.compact_of.is_none() && !f.extra && !all.iter().any(|c| c.compact_of == Some(f.id))).cloned().collect();
+        let mut moves: Vec<(MediaFile, Episode)> = vec![];
+        for f in &files {
+            let Some(scene) = f.scene_name.as_deref() else { continue };
+            let Some(p) = crate::names::episode(scene) else { continue };
+            let [n] = p.episode_numbers[..] else { continue };
+            let Some(named) = crate::names::retitled(scene, p.season_number(), n, &episodes) else { continue };
+            let held: Vec<i64> = episodes.iter().filter(|e| e.file_id == Some(f.id)).map(|e| e.id).collect();
+            // A file found to hold two episodes was filed by more than its name.
+            if held.len() > 1 {
+                continue;
+            }
+            let named_right = f.rel_path == self.library_rel_path(title, std::slice::from_ref(named), f, &extension(&f.rel_path));
+            if held != [named.id] || !named_right {
+                moves.push((f.clone(), named.clone()));
+            }
+        }
+        // Onto an episode with no file, or one whose file is moving too; one file to an
+        // episode. Leaving one out may leave another with nowhere to go, so until none changes.
+        loop {
+            let leaving: HashSet<i64> = moves.iter().map(|(f, _)| f.id).collect();
+            let mut taken: HashSet<i64> = HashSet::new();
+            let before = moves.len();
+            moves.retain(|(f, e)| e.file_id.is_none_or(|g| g == f.id || leaving.contains(&g)) && taken.insert(e.id));
+            if moves.len() == before {
+                break;
+            }
+        }
+        if moves.is_empty() {
+            return Ok(0);
+        }
+        let root = PathBuf::from(&title.path);
+        let home = std::fs::canonicalize(&root)?;
+        let renamed = |f: &MediaFile, to: &str| -> MediaFile {
+            let (from_stem, to_stem) = (stem(&f.rel_path), stem(to));
+            let mut g = f.clone();
+            g.rel_path = to.to_string();
+            // A subtitle goes by the video's name, or by the name it was stepped aside under
+            // when a time that stopped part way moved the video on without it.
+            let mark = format!(".spool-refile-{}", f.id);
+            for s in &mut g.subtitles {
+                let rest = s.rel_path.find(&format!("{mark}.")).map(|i| &s.rel_path[i + mark.len()..]).or_else(|| s.rel_path.strip_prefix(&from_stem));
+                if let Some(rest) = rest {
+                    s.rel_path = format!("{to_stem}{rest}");
+                }
+            }
+            g
+        };
+        let mut aside = vec![];
+        for (f, e) in &moves {
+            // Its own name for the while, by its number, which no other file shares, and still
+            // a video's name, so it is known for what it is if it is left there. One left there
+            // by a time that stopped part way is already aside.
+            let mark = format!(".spool-refile-{}", f.id);
+            let step = if stem(&f.rel_path).ends_with(&mark) { f.clone() } else { renamed(f, &format!("{}{mark}{}", stem(&f.rel_path), extension(&f.rel_path))) };
+            self.shift(&root, &home, f, &step).await?;
+            aside.push((step, e.clone()));
+        }
+        let mut done = 0;
+        for (f, e) in &aside {
+            let to = self.library_rel_path(title, std::slice::from_ref(e), f, &extension(&f.rel_path));
+            self.shift(&root, &home, f, &renamed(f, &to)).await?;
+            self.db.tx(|tx| {
+                tx.execute("UPDATE episodes SET file_id = NULL WHERE title_id = ?1 AND file_id = ?2", rusqlite::params![title.id, f.id])?;
+                tx.execute("UPDATE episodes SET file_id = ?2 WHERE id = ?1", rusqlite::params![e.id, f.id])?;
+                Ok(())
+            })?;
+            self.db.add_history(Some(title.id), "refiled", serde_json::json!({"release": f.scene_name, "as": format!("S{:02}E{:02}", e.season, e.episode), "path": to}))?;
+            self.emit(Event::Title { id: title.id });
+            done += 1;
+        }
+        Ok(done)
+    }
+
+    /// Move a video and the subtitles beside it from the names one record gives to those
+    /// another gives, writing each down as it goes. Nothing is put where something already is,
+    /// and nothing is moved through a link out of the title's folder. The subtitles go first:
+    /// while the video keeps its name, those that went are known by theirs, and those that did
+    /// not by the video's.
+    async fn shift(&self, root: &Path, home: &Path, from: &MediaFile, to: &MediaFile) -> Result<()> {
+        let (app, root, home, from, to) = (self.clone(), root.to_path_buf(), home.to_path_buf(), from.clone(), to.clone());
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let inside = |rel: &str| -> Result<PathBuf> {
+                let p = root.join(rel);
+                let parent = p.parent().ok_or_else(|| anyhow!("{rel} has no folder"))?;
+                if Path::new(rel).components().any(|c| !matches!(c, std::path::Component::Normal(_))) || !std::fs::canonicalize(parent)?.starts_with(&home) {
+                    bail!("{rel} is not inside the title's folder");
+                }
+                Ok(p)
+            };
+            let mut now = from.clone();
+            for (sa, sb) in from.subtitles.iter().zip(&to.subtitles) {
+                if sa.rel_path == sb.rel_path {
+                    continue;
+                }
+                let (a, b) = (inside(&sa.rel_path)?, inside(&sb.rel_path)?);
+                // Gone since it was found: it is forgotten, as looking beside the video would.
+                if !a.exists() && !b.exists() {
+                    now.subtitles.retain(|s| s.rel_path != sa.rel_path);
+                    app.db.save_file(&now)?;
+                    continue;
+                }
+                if b.exists() {
+                    bail!("{} is there already; {} is left as it is", sb.rel_path, sa.rel_path);
+                }
+                app.file_move(&a, &b)?;
+                for s in now.subtitles.iter_mut().filter(|s| s.rel_path == sa.rel_path) {
+                    s.rel_path = sb.rel_path.clone();
+                }
+                app.db.save_file(&now)?;
+            }
+            let (a, b) = (inside(&from.rel_path)?, inside(&to.rel_path)?);
+            if a != b {
+                if b.exists() {
+                    bail!("{} is there already; {} is left as it is", to.rel_path, from.rel_path);
+                }
+                app.file_move(&a, &b)?;
+                now.rel_path = to.rel_path.clone();
+                app.db.save_file(&now)?;
+            }
+            Ok(())
+        })
+        .await?
     }
 
     /// For every library file, compare where it is with where Spool would put it.

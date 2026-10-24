@@ -451,6 +451,10 @@ impl App {
     }
 
     async fn move_one(&self, id: i64, location: u32) -> Result<String> {
+        // Not while the title's files are being imported or filed again, which would change
+        // them under the copy; given up before the folder is looked through at the end.
+        let turn = self.title_imports.lock().entry(id).or_default().clone();
+        let held = turn.lock().await;
         let title = self.db.title(id)?.ok_or_else(|| anyhow!("the title was removed"))?;
         let target = self.move_target(&title, location)?;
         let places = self.placement();
@@ -594,6 +598,7 @@ impl App {
                 self.db.save_title(&mut moved)?;
             }
         }
+        drop(held);
         let mut report = crate::catalog::ScanReport::default();
         self.scan_title(id, &mut report).await?;
         for folder in [from.to_string_lossy().to_string(), moved.path.clone()] {

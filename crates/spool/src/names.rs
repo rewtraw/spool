@@ -43,9 +43,63 @@ pub fn movie(name: &str) -> Option<ParsedMovieInfo> {
     remembered(&KEPT, name, || spool_core::parser::parse_movie_title(name, false))
 }
 
+/// The episode a name says it is by its title, when that is not the one its number says.
+/// Some releases number a series in an order of their own and give each episode its title
+/// after the number, "Show.S01E12.Double.Dare.1080p": the title is believed. Only a title
+/// that is one episode's whole name, word for word from just after the number, is taken,
+/// and only when the episode numbered says something else.
+pub fn retitled<'a>(name: &str, season: u32, number: u32, episodes: &'a [crate::models::Episode]) -> Option<&'a crate::models::Episode> {
+    let words: Vec<String> = name.split(['.', ' ', '_', '-', '/']).filter(|w| !w.is_empty()).map(plain).collect();
+    let at = words.iter().position(|w| {
+        let w = w.as_bytes();
+        w.len() >= 4 && w[0] == b's' && w.iter().skip(1).take_while(|c| c.is_ascii_digit()).count() > 0 && w.contains(&b'e')
+    })?;
+    let after = &words[at + 1..];
+    // What follows the number at once is the release's own words, not a title.
+    const RELEASE_WORDS: &[&str] = &["web", "webdl", "webrip", "bluray", "bdrip", "brrip", "hdtv", "dvdrip", "dvd", "remux", "proper", "repack", "real", "internal", "multi", "dual", "x264", "x265", "h264", "h265", "hevc", "avc", "aac", "aac20", "ddp", "dd", "ac3", "flac", "hdr", "sdr", "uhd", "amzn", "nf", "dsnp", "hmax", "atvp", "cr", "hulu", "pcok", "itunes", "subbed", "dubbed", "complete", "extended", "uncut"];
+    if after.first().is_none_or(|w| RELEASE_WORDS.contains(&w.as_str()) || w.ends_with('p') && w[..w.len() - 1].chars().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
+    // Each episode whose title the words after the number begin with, longest title first.
+    let says = |e: &crate::models::Episode| {
+        let t = plain(&e.title);
+        let mut joined = String::new();
+        t.len() >= 3 && after.iter().any(|w| {
+            joined.push_str(w);
+            joined == t
+        })
+    };
+    let numbered = episodes.iter().find(|e| e.season == season && e.episode == number);
+    if numbered.is_some_and(says) {
+        return None;
+    }
+    let mut named = episodes.iter().filter(|e| says(e));
+    match (named.next(), named.next()) {
+        (Some(e), None) => Some(e),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_episode_named_by_its_title_is_the_one_with_that_title() {
+        let ep = |season: u32, episode: u32, title: &str| -> crate::models::Episode { serde_json::from_value(serde_json::json!({"title_id": 1, "season": season, "episode": episode, "title": title})).unwrap() };
+        let list = [ep(1, 12, "Trick or Treat"), ep(1, 14, "Double Dare"), ep(1, 9, "The Week at Grandma's"), ep(1, 11, "Too Much TV"), ep(2, 1, "Go")];
+        let at = |name: &str, s, n| retitled(name, s, n, &list).map(|e| (e.season, e.episode));
+        assert_eq!(at("The.Berenstain.Bears.2003.S01E12.Double.Dare.AAC2.0.1080p.WEBRip.x265-PoF", 1, 12), Some((1, 14)));
+        assert_eq!(at("The.Berenstain.Bears.2003.S01E10.Trick.or.Treat.AAC2.0.1080p.WEBRip.x265-PoF", 1, 10), Some((1, 12)));
+        assert_eq!(at("The.Berenstain.Bears.2003.S01E06.The.Week.at.Grandmas.1080p.WEBRip-PoF", 1, 6), Some((1, 9)));
+        assert_eq!(at("The.Berenstain.Bears.S01E12.Trick.or.Treat.1080p", 1, 12), None, "the number and the title agree");
+        assert_eq!(at("The.Berenstain.Bears.S01E12.1080p.WEBRip.x265-PoF", 1, 12), None, "no title");
+        assert_eq!(at("The.Berenstain.Bears.S01E12.Double.Trouble.1080p", 1, 12), None, "only a whole title");
+        assert_eq!(at("The.Berenstain.Bears.S01E12.Go.Fishing.1080p", 1, 12), None, "too short to say");
+        let web = [ep(1, 12, "Trick or Treat"), ep(1, 3, "Web"), ep(1, 4, "1080p Dreams")];
+        assert_eq!(retitled("Show.S01E12.WEB-DL.1080p-GRP", 1, 12, &web).map(|e| e.episode), None, "the release's own words are not a title");
+        assert_eq!(retitled("Show.S01E12.1080p.Dreams.WEB-GRP", 1, 12, &web).map(|e| e.episode), None);
+    }
 
     #[test]
     fn a_name_read_twice_says_the_same_and_spellings_compare_equal() {
