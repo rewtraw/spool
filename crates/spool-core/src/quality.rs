@@ -288,6 +288,24 @@ pub fn quality_for_extension(ext: &str, flavor: Flavor) -> Quality {
     }
 }
 
+/// Quality for a video whose name says nothing of it, from the video itself: the source its
+/// extension implies, at the resolution it has. The extension alone would call every TV .mkv
+/// HDTV-720p, a LaserDisc rip included.
+pub fn quality_for_video(name: &str, width: u32, height: u32, flavor: Flavor) -> Quality {
+    let guess = quality_for_extension(path_extension(name), flavor);
+    let resolution = match (width, height) {
+        (w, h) if w >= 3200 || h >= 1800 => 2160,
+        (w, h) if w >= 1800 || h >= 1000 => 1080,
+        (w, h) if w >= 1200 || h >= 700 => 720,
+        (_, h) if h > 0 => 480,
+        _ => return guess,
+    };
+    match guess.source() {
+        Source::Unknown => guess,
+        source => Quality::find(source, resolution, Modifier::None),
+    }
+}
+
 fn path_extension(name: &str) -> &str {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     match base.rfind('.') {
@@ -570,4 +588,20 @@ pub fn parse_quality_name(name: &str, flavor: Flavor) -> QualityModel {
         }
     }
     done(Quality::Unknown)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_video_its_name_says_nothing_of_is_known_by_its_resolution() {
+        assert_eq!(quality_for_video("01. Johnnie.mkv", 640, 480, Flavor::Tv), Quality::Sdtv);
+        assert_eq!(quality_for_video("01. Johnnie.mkv", 1280, 720, Flavor::Tv), Quality::Hdtv720p);
+        assert_eq!(quality_for_video("01. Johnnie.mkv", 1920, 800, Flavor::Tv), Quality::Hdtv1080p);
+        assert_eq!(quality_for_video("film.mkv", 1920, 1080, Flavor::Movie), Quality::Webdl1080p);
+        // Nothing known of the picture: the extension's guess stands.
+        assert_eq!(quality_for_video("01. Johnnie.mkv", 0, 0, Flavor::Tv), Quality::Hdtv720p);
+        assert_eq!(quality_for_video("01. Johnnie.webm", 640, 480, Flavor::Tv), Quality::Unknown);
+    }
 }

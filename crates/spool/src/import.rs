@@ -398,7 +398,7 @@ impl App {
             let ext = file_name.rfind('.').map(|i| file_name[i..].to_lowercase()).unwrap_or_default();
             // The release name is the better witness for quality; a file inside a pack may say more.
             let from_file = parse_quality_name(&file_name, flavor);
-            let quality: QualityModel = if vids.len() > 1 && from_file.quality != Quality::Unknown { from_file } else if acq.quality.quality != Quality::Unknown { acq.quality } else { spool_core::quality::parse_quality(&file_name, flavor) };
+            let mut quality: QualityModel = if vids.len() > 1 && from_file.quality != Quality::Unknown { from_file } else if acq.quality.quality != Quality::Unknown { acq.quality } else { from_file };
             let parsed_movie = if flavor == Flavor::Movie { crate::names::movie(&acq.release.title) } else { None };
             let release_group = parsed_movie
                 .as_ref()
@@ -409,6 +409,13 @@ impl App {
                 Ok(mi) => mi,
                 Err(e) => return Err(Blocked::Needs(format!("{file_name} is not playable video: {e}"))),
             };
+            // Nothing in the names says: what the video is says, before a guess from its extension.
+            if quality.quality == Quality::Unknown {
+                quality.quality = match &media_info {
+                    Some(m) => spool_core::quality::quality_for_video(&file_name, m.width, m.height, flavor),
+                    None => spool_core::quality::parse_quality(&file_name, flavor).quality,
+                };
+            }
             // Does the video run as long as what its name says it is? See shape.rs.
             let video = crate::shape::Video { path: &path, name: &file_name, ran: media_info.as_ref().map(|m| m.runtime_secs).unwrap_or(0.0) };
             match title.kind {
