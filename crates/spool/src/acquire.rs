@@ -193,7 +193,30 @@ fn an_episode_of_it(t: &Title, release: &Release) -> Option<Rejection> {
 /// when the name cannot be read at all.
 fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'a>> {
     let t = &tc.title;
-    let mut p = crate::names::episode(&release.title)?;
+    let parsed = crate::names::episode(&release.title);
+    // Named by the series' title and year and nothing more, it is the whole series, however
+    // the year was read: as no number at all, or "1988" as season 19, episode 88.
+    let year_read = parsed.as_ref().is_none_or(|p| {
+        let y = t.year;
+        (p.season_numbers == [y / 100] && p.episode_numbers == [y % 100]) || (p.episode_numbers.is_empty() && p.absolute_episode_numbers == [y])
+    });
+    if year_read && names_whole_series(t, &release.title) {
+        let flavor = spool_core::Flavor::Tv;
+        let covered: Vec<&Episode> = tc.episodes.iter().filter(|e| e.season > 0).collect();
+        let seasons: HashSet<u32> = covered.iter().map(|e| e.season).collect();
+        let wrong = covered.is_empty().then(|| rej("unknown_episode", "the episode list is empty"));
+        return Some(Named {
+            quality: spool_core::quality::parse_quality(&release.title, flavor),
+            languages: spool_core::parser::parse_languages(&release.title),
+            group: spool_core::parser::parse_release_group(&release.title, flavor),
+            covered,
+            covers: "The whole series".into(),
+            full_season: true,
+            multi_season: seasons.len() > 1,
+            wrong,
+        });
+    }
+    let mut p = parsed?;
     let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id;
     // A later season posted under its own name and numbered from one.
     let named = season_named(&p.series_title, t, &tc.seasons);
@@ -1318,6 +1341,30 @@ fn names_film_without_year(t: &Title, release: &str) -> bool {
         })
 }
 
+/// Whether a release names a series by its title and then its year, the way a post of a whole
+/// series often does: "[Group] Show (1988) [480p]", "Show.1988.480p-GRP". One that goes on to
+/// name a season or an episode, "Show.2016.S20E16", is not the whole of it.
+fn names_whole_series(t: &Title, release: &str) -> bool {
+    // A group's tag in front is not part of the name.
+    let name = match release.trim_start().strip_prefix('[') {
+        Some(rest) => rest.split_once(']').map_or(rest, |(_, after)| after),
+        None => release,
+    };
+    let words: Vec<String> = name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(plain).collect();
+    let Some(at) = words.iter().position(|w| t.year > 0 && *w == t.year.to_string()) else { return false };
+    let before = words[..at].concat();
+    let marked = words[at + 1..].iter().any(|w| {
+        let b = w.as_bytes();
+        let digits = |from: usize| b[from.min(b.len())..].iter().take_while(|c| c.is_ascii_digit()).count();
+        let n = digits(1);
+        // S2, S20E16, E05, 1x05
+        (matches!(b.first(), Some(b's' | b'e')) && n > 0 && (1 + n == b.len() || b[1 + n] == b'e'))
+            || (digits(0) > 0 && b.get(digits(0)) == Some(&b'x') && digits(digits(0) + 1) > 0)
+            || matches!(w.as_str(), "season" | "episode")
+    });
+    !before.is_empty() && !marked && std::iter::once(&t.title).chain(t.alt_titles.iter()).any(|title| plain(title) == before)
+}
+
 /// Choose what to grab from a judged batch.
 ///
 /// A movie gets its single best release. For a series the aim is a season from as few sources
@@ -1387,7 +1434,7 @@ pub struct SearchOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{names_an_episode, season_marker, season_named, SeasonName};
+    use super::{names_an_episode, names_whole_series, season_marker, season_named, SeasonName};
     use crate::models::Title;
 
     #[test]
@@ -1408,6 +1455,30 @@ mod tests {
         assert_eq!(season_named("Shingeki no Rei", &show, &seasons), None);
         assert_eq!(season_named("Another Show Season 2", &show, &seasons), None);
         assert_eq!(season_marker("Space Station"), None);
+    }
+
+    #[test]
+    fn a_whole_series_is_named_by_its_title_and_year_alone() {
+        let show: Title = serde_json::from_value(serde_json::json!({"kind": "series", "title": "Starship Troopers", "year": 1988, "alt_titles": ["Uchuu no Senshi"]})).unwrap();
+        for name in [
+            "Starship.Troopers.1988.p.AC.3+AAC.English.Subtitles-FATCATOFALLTIME",
+            "[Fatcatofalltime] Starship Troopers (1988) [OVA] [480p] [English Subtitles] [LaserDisc] [1/6] - \"[Fatcatofalltime] Starship Troopers (1988).7z\"",
+            "Uchuu no Senshi (1988) [DVD 480p]",
+        ] {
+            assert!(names_whole_series(&show, name), "{name}");
+        }
+        for name in [
+            "Starship.Troopers.1988.S01E02.480p-GRP",
+            "Starship.Troopers.1988.S01.480p-GRP",
+            "Starship.Troopers.1988.E05.480p-GRP",
+            "Starship.Troopers.1988.1x05.480p-GRP",
+            "Starship Troopers (1988) Episode 3",
+            "Starship.Troopers.1997.1080p.BluRay-GRP",
+            "Starship.Troopers.Invasion.1988.1080p-GRP",
+            "Starship.Troopers.480p-GRP",
+        ] {
+            assert!(!names_whole_series(&show, name), "{name}");
+        }
     }
 
     #[test]

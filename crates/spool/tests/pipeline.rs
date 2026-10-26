@@ -260,6 +260,29 @@ macro_rules! video_or_skip {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_release_named_by_the_series_title_and_year_alone_is_the_whole_series() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (show, _) = w.series("Example World", 296762, &[(1, 1, "The Original"), (1, 2, "Chestnut")]);
+    // Posted whole, the year read as season 20, episode 16, and its files numbered and nothing more.
+    w.release("Example.World.2016.1080p.BluRay.x264-PACK", &[("02. Second.mkv", &video), ("01. First.mkv", &video)]);
+    // The same with no number read at all; and another show of that year.
+    w.release("[FanSub] Example World (2016) [720p] [BluRay] [English Subtitles]", &[("ew.mkv", &video)]);
+    w.release("[FanSub] Other World (2016) [1080p] [BluRay]", &[("ow.mkv", &video)]);
+
+    let outcome = w.app.search(show.id, Scope::Missing, false, true).await.unwrap();
+    let reasons: HashMap<String, Vec<String>> = outcome.decisions.iter().map(|d| (d.release.title.clone(), d.rejections.iter().map(|r| r.code.clone()).collect())).collect();
+    assert_eq!(reasons["[FanSub] Example World (2016) [720p] [BluRay] [English Subtitles]"], ["quality_not_wanted"], "read as the whole series, judged on its quality");
+    assert_eq!(reasons["[FanSub] Other World (2016) [1080p] [BluRay]"], ["unparseable"]);
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    assert_eq!(outcome.grabbed[0].release.title, "Example.World.2016.1080p.BluRay.x264-PACK");
+    assert_eq!(outcome.grabbed[0].episode_ids.len(), 2);
+    w.wait_state(show.id, AcqState::Imported).await;
+    let filed: std::collections::HashSet<Option<i64>> = w.app.db.episodes(show.id).unwrap().iter().map(|e| e.file_id).collect();
+    assert!(filed.len() == 2 && !filed.contains(&None), "{filed:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn movie_goes_from_search_to_library() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;

@@ -352,6 +352,16 @@ impl App {
                         Some(p) if p.is_absolute() => episodes_by_absolute(&episodes, &p.absolute_episode_numbers).map(|f| f.into_iter().cloned().collect()).unwrap_or_default(),
                         _ => vec![],
                     };
+                    // A file a pack names by its number alone, "01. Johnnie.mkv": that episode of the
+                    // one season the release was taken for.
+                    if eps.is_empty() {
+                        if let Some(n) = leading_number(&stem_of(path)) {
+                            let taken: Vec<&Episode> = episodes.iter().filter(|e| wanted.contains(&e.id)).collect();
+                            if taken.windows(2).all(|w| w[0].season == w[1].season) {
+                                eps = taken.into_iter().filter(|e| e.episode == n).cloned().collect();
+                            }
+                        }
+                    }
                     // One video for a release that names its episodes: trust the release over the file name.
                     if (eps.is_empty() || forced_episodes.is_some()) && vids.len() == 1 && !wanted.is_empty() {
                         eps = episodes.iter().filter(|e| wanted.contains(&e.id)).cloned().collect();
@@ -776,6 +786,15 @@ impl App {
 
 /// A short name that tells one version of a film from another: its cut if it has one, else its
 /// resolution.
+/// The number a file name begins with, when that is all it says of its episode: "01. Johnnie",
+/// "02 - Hendrick", "3". Not a resolution or a year: at most three digits, then a break.
+fn leading_number(stem: &str) -> Option<u32> {
+    let digits: String = stem.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let rest = &stem[digits.len()..];
+    let ends = rest.is_empty() || rest.starts_with(['.', ' ', '-', '_']);
+    (!digits.is_empty() && digits.len() <= 3 && ends).then(|| digits.parse().ok()).flatten()
+}
+
 fn version_label(file: &MediaFile, flavor: Flavor) -> String {
     let label = if !file.edition.trim().is_empty() {
         file.edition.trim().to_string()
