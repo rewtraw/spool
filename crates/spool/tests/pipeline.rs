@@ -1759,6 +1759,56 @@ async fn files_that_hold_more_or_less_than_their_name_says_are_noticed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_series_only_tmdb_lists_is_found_added_and_refreshed_from_tmdb() {
+    let source = details_source().await;
+    let w = World::with_sources(Mode::Shadow, Some((&source, &source))).await;
+    let mut g = w.app.settings.general();
+    g.tmdb_api_key = "key".into();
+    w.app.settings.set_general(&g).unwrap();
+
+    // TVmaze has never heard of it; TMDB has.
+    let found = w.app.discover("Space Soldiers").await.unwrap();
+    let listed = &found["series"][0];
+    assert_eq!((listed["title"].as_str(), listed["tmdb_id"].as_u64(), listed["tvmaze_id"].as_u64()), (Some("Space Soldiers"), Some(990), None), "{found}");
+
+    let show = w.app.add_title(Kind::Series, Some(990), None, w.profile("tv"), true, false).await.unwrap();
+    assert_eq!((show.tmdb_id, show.tvmaze_id, show.tvdb_id, show.imdb_id.as_deref()), (Some(990), None, Some(9900), Some("tt0000990")));
+    assert!(show.alt_titles.iter().any(|a| a == "Uchuu no Heishi"), "{:?}", show.alt_titles);
+    assert!(show.people_from_tmdb() && show.people[0].name == "A Voice");
+    let episodes = w.app.db.episodes(show.id).unwrap();
+    assert_eq!(episodes.iter().filter(|e| e.season == 1).count(), 6);
+    assert_eq!(episodes[2].title, "Soldier 3");
+
+    // A refresh asks TVmaze again, hears it still has none, and reads TMDB.
+    let mut stale = show.clone();
+    stale.overview = "old".into();
+    w.app.db.save_title(&mut stale).unwrap();
+    w.app.refresh_title(show.id).await.unwrap();
+    let now = w.app.db.title(show.id).unwrap().unwrap();
+    assert_eq!((now.tvmaze_id, now.overview.as_str()), (None, ""));
+    assert_eq!(w.app.db.episodes(show.id).unwrap().len(), 6);
+
+    // A show both list is listed once, and comes from TVmaze however it is added.
+    let found = w.app.discover("Example World").await.unwrap();
+    assert_eq!(found["series"].as_array().unwrap().len(), 1, "{found}");
+    assert_eq!(found["series"][0]["tvmaze_id"], 77);
+    let both = w.app.add_title(Kind::Series, Some(777), None, w.profile("tv"), true, false).await.unwrap();
+    assert_eq!((both.tvmaze_id, both.tmdb_id, both.tvdb_id, both.from_tmdb), (Some(77), Some(777), Some(296762), false));
+    assert!(!both.people_from_tmdb());
+    // Asked for by either id, it is the one show already here.
+    assert!(w.app.add_title(Kind::Series, Some(777), None, w.profile("tv"), true, false).await.is_err());
+    assert!(w.app.add_title(Kind::Series, None, Some(77), w.profile("tv"), true, false).await.is_err());
+
+    // Once TVmaze lists the OVA too, it stays with TMDB, whose numbering its files were filed by.
+    let mut moved = w.app.db.title(show.id).unwrap().unwrap();
+    moved.imdb_id = Some("tt0000080".into());
+    w.app.db.save_title(&mut moved).unwrap();
+    w.app.refresh_title(show.id).await.unwrap();
+    let kept = w.app.db.title(show.id).unwrap().unwrap();
+    assert_eq!((kept.tvmaze_id, kept.from_tmdb, kept.title.as_str()), (None, true, "Space Soldiers"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn anime_is_known_by_its_own_source_and_its_series_and_films_make_a_collection() {
     let source = details_source().await;
     let w = World::with_sources(Mode::Shadow, Some((&source, &source))).await;
@@ -2761,6 +2811,14 @@ async fn details_source() -> String {
     fn show() -> Value {
         json!({"id": 77, "name": "Example World", "premiered": "2016-10-02", "status": "Ended", "externals": {"thetvdb": 296762}})
     }
+    fn tmdb_shows() -> Vec<Value> {
+        vec![
+            json!({"id": 777, "name": "Example World", "first_air_date": "2016-10-02", "external_ids": {"tvdb_id": 296762}}),
+            json!({"id": 990, "name": "Space Soldiers", "original_name": "宇宙の兵士", "first_air_date": "1988-10-25", "status": "Ended", "episode_run_time": [25], "original_language": "ja",
+                "external_ids": {"tvdb_id": 9900, "imdb_id": "tt0000990"}, "alternative_titles": {"results": [{"iso_3166_1": "JP", "title": "Uchuu no Heishi", "type": "Romanization"}]},
+                "aggregate_credits": {"cast": [{"id": 5, "name": "A Voice", "roles": [{"character": "Johnny"}]}]}}),
+        ]
+    }
     fn ova() -> Value {
         json!({"id": 88, "name": "Pocket Robot War", "premiered": "1989-03-25", "status": "Ended", "externals": {"thetvdb": 8088, "imdb": "tt0000080"}})
     }
@@ -2778,7 +2836,38 @@ async fn details_source() -> String {
             "/collection/500",
             get(|| async { axum::Json(json!({"id": 500, "name": "Saga Collection", "parts": [{"id": 301, "title": "Saga One", "release_date": "2001-05-01"}, {"id": 302, "title": "Saga Two", "release_date": "2003-05-01"}, {"id": 303, "title": "Saga Three", "release_date": "2005-05-01"}]})) }),
         )
-        .route("/find/{imdb}", get(|AxPath(imdb): AxPath<String>| async move { axum::Json(json!({"movie_results": films().into_iter().filter(|f| f["imdb_id"] == imdb.as_str()).collect::<Vec<_>>()})) }))
+        .route(
+            "/find/{id}",
+            get(|AxPath(id): AxPath<String>, Query(q): Query<HashMap<String, String>>| async move {
+                let by_tvdb = q.get("external_source").is_some_and(|s| s == "tvdb_id");
+                let shows: Vec<Value> = tmdb_shows().into_iter().filter(|s| if by_tvdb { s["external_ids"]["tvdb_id"].to_string() == id } else { s["external_ids"]["imdb_id"] == id.as_str() }).collect();
+                let films: Vec<Value> = if by_tvdb { vec![] } else { films().into_iter().filter(|f| f["imdb_id"] == id.as_str()).collect() };
+                axum::Json(json!({"movie_results": films, "tv_results": shows}))
+            }),
+        )
+        // TMDB's series: one TVmaze lists too, and one only TMDB lists, an OVA of six episodes.
+        .route(
+            "/search/tv",
+            get(|Query(q): Query<HashMap<String, String>>| async move {
+                let want = q.get("query").cloned().unwrap_or_default().to_lowercase();
+                axum::Json(json!({"results": tmdb_shows().into_iter().filter(|s| s["name"].as_str().unwrap().to_lowercase() == want).collect::<Vec<_>>()}))
+            }),
+        )
+        .route(
+            "/tv/{id}/external_ids",
+            get(|AxPath(id): AxPath<u64>| async move { tmdb_shows().into_iter().find(|s| s["id"] == id).map(|s| axum::Json(s["external_ids"].clone())).ok_or(axum::http::StatusCode::NOT_FOUND) }),
+        )
+        .route(
+            "/tv/{id}",
+            get(|AxPath(id): AxPath<u64>, Query(q): Query<HashMap<String, String>>| async move {
+                let mut show = tmdb_shows().into_iter().find(|s| s["id"] == id).ok_or(axum::http::StatusCode::NOT_FOUND)?;
+                show["seasons"] = json!([{"season_number": 1}]);
+                if q.get("append_to_response").is_some_and(|a| a.split(',').any(|x| x == "season/1")) {
+                    show["season/1"] = json!({"episodes": (1..=6).map(|n| json!({"season_number": 1, "episode_number": n, "name": format!("Soldier {n}"), "air_date": "1988-10-25", "runtime": 25})).collect::<Vec<_>>()});
+                }
+                Ok::<_, axum::http::StatusCode>(axum::Json(show))
+            }),
+        )
         .route(
             "/search/shows",
             get(|Query(q): Query<HashMap<String, String>>| async move {
@@ -2792,6 +2881,8 @@ async fn details_source() -> String {
             get(|Query(q): Query<HashMap<String, String>>| async move {
                 if q.get("imdb").is_some_and(|i| i == "tt0000080") || q.get("thetvdb").is_some_and(|i| i == "8088") {
                     Ok(axum::Json(ova()))
+                } else if q.get("thetvdb").is_some_and(|i| i == "296762") {
+                    Ok(axum::Json(show()))
                 } else {
                     Err(axum::http::StatusCode::NOT_FOUND)
                 }

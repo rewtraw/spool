@@ -70,5 +70,5 @@
         {/if}
       {/if}
     </fieldset>
-    <p class="faint small">Spool {app.status?.version}. Movie details and artwork come from TMDB; series details come from TVmaze; anime formats and relations come from AniList. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+    <p class="faint small">Spool {app.status?.version}. Movie details and artwork come from TMDB; series details come from TVmaze, or from TMDB for a series TVmaze does not list; anime formats and relations come from AniList. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
   </div>

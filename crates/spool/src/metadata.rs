@@ -1,4 +1,5 @@
-//! Title metadata: TMDB for movies, TVmaze for television.
+//! Title metadata: TMDB for movies; TVmaze for television, and TMDB for a series TVmaze
+//! does not list.
 
 use crate::models::{Collection, Episode, Kind, Person, SeasonInfo, SeriesTwin, Title};
 use anyhow::{anyhow, bail, Result};
@@ -7,6 +8,30 @@ use serde_json::Value;
 const TMDB: &str = "https://api.themoviedb.org/3";
 const TVMAZE: &str = "https://api.tvmaze.com";
 const TMDB_IMG: &str = "https://image.tmdb.org/t/p";
+
+/// The ids a series may be known by. It is read from TVmaze when TVmaze lists it, and from
+/// TMDB when it does not: old anime OVAs, say, that TVmaze has never listed.
+#[derive(Clone, Debug, Default)]
+pub struct SeriesIds {
+    pub tvmaze: Option<u32>,
+    pub tmdb: Option<u32>,
+    pub tvdb: Option<u32>,
+    pub imdb: Option<String>,
+}
+
+impl SeriesIds {
+    pub fn of(t: &Title) -> SeriesIds {
+        SeriesIds { tvmaze: t.tvmaze_id, tmdb: t.tmdb_id, tvdb: t.tvdb_id, imdb: t.imdb_id.clone() }
+    }
+
+    pub fn tvdb(id: u32) -> SeriesIds {
+        SeriesIds { tvdb: Some(id), ..Default::default() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tvmaze.is_none() && self.tmdb.is_none() && self.tvdb.is_none() && self.imdb.is_none()
+    }
+}
 
 #[derive(Clone)]
 pub struct Metadata {
@@ -185,12 +210,18 @@ impl Metadata {
     }
 
     /// A series as a search would list it, found by its TVDB id.
-    pub async fn series_listing_by_tvdb(&self, tvdb_id: u32) -> Result<Title> {
-        let show = self.get(&format!("{}/lookup/shows?thetvdb={tvdb_id}", self.tvmaze_base)).await?;
-        if show.get("id").is_none() {
+    pub async fn series_listing_by_tvdb(&self, key: &str, tvdb_id: u32) -> Result<Title> {
+        if let Some(show) = self.tvmaze_show(&format!("thetvdb={tvdb_id}")).await? {
+            return Ok(self.series_from(&show));
+        }
+        if key.is_empty() {
             bail!("not found");
         }
-        Ok(self.series_from(&show))
+        let v = self.get(&format!("{}/find/{tvdb_id}?external_source=tvdb_id&api_key={key}", self.tmdb_base)).await?;
+        let show = v.get("tv_results").and_then(|r| r.as_array()).and_then(|r| r.first()).ok_or_else(|| anyhow!("not found"))?;
+        let mut t = self.tv_from(show);
+        t.tvdb_id = Some(tvdb_id);
+        Ok(t)
     }
 
     /// A film collection, whole: every film TMDB puts in it.
@@ -298,16 +329,97 @@ impl Metadata {
         }
     }
 
-    pub async fn search_series(&self, query: &str) -> Result<Vec<Title>> {
+    /// Series by name, from TVmaze and TMDB together. A show TVmaze lists comes from TVmaze;
+    /// one only TMDB lists takes the place TMDB ranks it at.
+    pub async fn search_series(&self, key: &str, query: &str) -> Result<Vec<Title>> {
+        use crate::names::plain;
         if let Some(id) = query.trim().strip_prefix("tvdb:").and_then(|i| i.trim().parse::<u32>().ok()) {
-            return Ok(vec![self.series_by_tvdb(id).await?.0]);
+            return Ok(vec![self.series(key, &SeriesIds::tvdb(id)).await?.0]);
         }
-        let v = self.get(&format!("{}/search/shows?q={}", self.tvmaze_base, urlencoding::encode(query.trim()))).await?;
-        Ok(v.as_array().map(|a| a.iter().take(20).filter_map(|r| r.get("show")).map(|sh| self.series_from(sh)).collect()).unwrap_or_default())
+        let q = urlencoding::encode(query.trim());
+        let tvmaze = async {
+            let v = self.get(&format!("{}/search/shows?q={q}", self.tvmaze_base)).await?;
+            Ok::<_, anyhow::Error>(v.as_array().map(|a| a.iter().take(20).filter_map(|r| r.get("show")).map(|sh| self.series_from(sh)).collect::<Vec<_>>()).unwrap_or_default())
+        };
+        let tmdb = async {
+            if key.is_empty() {
+                return Ok(vec![]);
+            }
+            let v = self.get(&format!("{}/search/tv?api_key={key}&query={q}", self.tmdb_base)).await?;
+            Ok::<_, anyhow::Error>(v["results"].as_array().map(|a| a.iter().take(20).map(|sh| self.tv_from(sh)).collect::<Vec<_>>()).unwrap_or_default())
+        };
+        let (tvmaze, tmdb) = tokio::join!(tvmaze, tmdb);
+        let tmdb = tmdb.unwrap_or_else(|e| {
+            tracing::debug!(error = %e, "TMDB could not be searched for series");
+            vec![]
+        });
+        let mut found = match tvmaze {
+            Ok(found) => found,
+            Err(_) if !tmdb.is_empty() => vec![],
+            Err(e) => return Err(e),
+        };
+        let listed = |t: &Title, by: &[Title]| by.iter().any(|f| plain(&f.title) == plain(&t.title) && f.year.abs_diff(t.year) <= 1);
+        let extra: Vec<(usize, Title)> = tmdb.into_iter().enumerate().filter(|(_, t)| !listed(t, &found)).collect();
+        for (rank, t) in extra {
+            found.insert(rank.min(found.len()), t);
+        }
+        Ok(found)
     }
 
-    /// Series details and every episode, specials included.
-    pub async fn series(&self, tvmaze_id: u32) -> Result<(Title, Vec<Episode>)> {
+    /// A series' details and every episode, specials included, from whichever source lists it:
+    /// TVmaze when it does, TMDB otherwise. Only a source's saying it has no such show passes
+    /// the question on; one that cannot be reached is an error.
+    /// This is how a series is first read; once in the library it stays with the source it
+    /// came from (`Title::from_tmdb`), since the two can number its episodes differently.
+    pub async fn series(&self, key: &str, ids: &SeriesIds) -> Result<(Title, Vec<Episode>)> {
+        let mut ids = ids.clone();
+        // Known to TMDB alone so far: what TMDB knows it by elsewhere says whether TVmaze lists it too.
+        if let (None, None, None, Some(tmdb), false) = (ids.tvmaze, ids.tvdb, &ids.imdb, ids.tmdb, key.is_empty()) {
+            let v = self.get(&format!("{}/tv/{tmdb}/external_ids?api_key={key}", self.tmdb_base)).await?;
+            ids.tvdb = v.get("tvdb_id").and_then(|x| x.as_u64()).map(|x| x as u32);
+            ids.imdb = opt(&v, "imdb_id");
+        }
+        if let Some((mut title, episodes)) = self.tvmaze_listing(&ids).await? {
+            // The same show, so known by the TMDB id it was asked for by as well.
+            title.tmdb_id = title.tmdb_id.or(ids.tmdb);
+            return Ok((title, episodes));
+        }
+        let tmdb = match ids.tmdb {
+            Some(id) => Some(id),
+            None => self.series_tmdb(key, ids.tvdb, ids.imdb.as_deref()).await?,
+        };
+        match (tmdb, key.is_empty()) {
+            (Some(id), false) => self.tmdb_series(key, id).await,
+            _ => bail!("not found"),
+        }
+    }
+
+    /// A series as TVmaze lists it, by its TVmaze id or looked up by its TVDB or IMDb id;
+    /// `None` when TVmaze lists no such show.
+    pub async fn tvmaze_listing(&self, ids: &SeriesIds) -> Result<Option<(Title, Vec<Episode>)>> {
+        if let Some(id) = ids.tvmaze {
+            return Ok(Some(self.tvmaze_series(id).await?));
+        }
+        let asks = ids.tvdb.map(|id| format!("thetvdb={id}")).into_iter().chain(ids.imdb.as_ref().map(|id| format!("imdb={id}")));
+        for ask in asks {
+            if let Some(id) = self.tvmaze_show(&ask).await?.and_then(|show| show.get("id").and_then(|x| x.as_u64())) {
+                return Ok(Some(self.tvmaze_series(id as u32).await?));
+            }
+        }
+        Ok(None)
+    }
+
+    /// TVmaze's show for a lookup such as "thetvdb=81189"; `None` when it lists none.
+    async fn tvmaze_show(&self, lookup: &str) -> Result<Option<Value>> {
+        match self.get(&format!("{}/lookup/shows?{lookup}", self.tvmaze_base)).await {
+            Ok(v) if v.get("id").is_some() => Ok(Some(v)),
+            Ok(_) => Ok(None),
+            Err(e) if e.to_string() == "not found" => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn tvmaze_series(&self, tvmaze_id: u32) -> Result<(Title, Vec<Episode>)> {
         let show = self.get(&format!("{}/shows/{tvmaze_id}?embed[]=cast&embed[]=images", self.tvmaze_base)).await?;
         let eps = self.get(&format!("{}/shows/{tvmaze_id}/episodes?specials=1", self.tvmaze_base)).await?;
         let aka = self.get(&format!("{}/shows/{tvmaze_id}/akas", self.tvmaze_base)).await.unwrap_or(Value::Null);
@@ -393,10 +505,93 @@ impl Metadata {
         Ok(Some(SeriesTwin { tvmaze_id: id as u32, title: self::s(&show, "name"), episodes: eps.len() as u32, minutes }))
     }
 
-    pub async fn series_by_tvdb(&self, tvdb_id: u32) -> Result<(Title, Vec<Episode>)> {
-        let show = self.get(&format!("{}/lookup/shows?thetvdb={tvdb_id}", self.tvmaze_base)).await?;
-        let id = show.get("id").and_then(|x| x.as_u64()).ok_or_else(|| anyhow!("not found"))? as u32;
-        self.series(id).await
+    /// A series as TMDB lists it: its details, as a search result or in full.
+    fn tv_from(&self, show: &Value) -> Title {
+        let first = opt(show, "first_air_date");
+        let mut t = Title {
+            kind: Kind::Series,
+            title: s(show, "name"),
+            year: first.as_deref().and_then(|d| d.get(..4)).and_then(|y| y.parse().ok()).unwrap_or(0),
+            overview: s(show, "overview"),
+            status: match s(show, "status").as_str() {
+                "Ended" | "Canceled" => "ended".into(),
+                "Returning Series" => "continuing".into(),
+                _ => "upcoming".into(),
+            },
+            runtime: show.get("episode_run_time").and_then(|r| r.as_array()).and_then(|r| r.first()).and_then(|x| x.as_u64()).unwrap_or(0) as u32,
+            tmdb_id: show.get("id").and_then(|x| x.as_u64()).map(|x| x as u32),
+            tvdb_id: show.get("external_ids").and_then(|e| e.get("tvdb_id")).and_then(|x| x.as_u64()).map(|x| x as u32),
+            imdb_id: show.get("external_ids").and_then(|e| opt(e, "imdb_id")),
+            poster: opt(show, "poster_path").map(|p| format!("{TMDB_IMG}/w500{p}")),
+            fanart: opt(show, "backdrop_path").map(|p| format!("{TMDB_IMG}/w1280{p}")),
+            genres: show.get("genres").and_then(|g| g.as_array()).map(|g| g.iter().map(|x| s(x, "name")).collect()).unwrap_or_default(),
+            monitored: true,
+            minimum_availability: "released".into(),
+            network: show.get("networks").and_then(|n| n.as_array()).and_then(|n| n.first()).and_then(|n| opt(n, "name")),
+            season_folder: true,
+            original_language: spool_core::parser::language_from_iso(&s(show, "original_language")).map(str::to_string),
+            first_aired: first,
+            rating: score(show.get("vote_average")),
+            people: tv_people(show),
+            from_tmdb: true,
+            ..Default::default()
+        };
+        t.certification = show.get("content_ratings").and_then(|c| c.get("results")).and_then(|r| r.as_array()).and_then(|r| r.iter().find(|c| s(c, "iso_3166_1") == "US")).and_then(|c| opt(c, "rating"));
+        // Releases carry an English name or, for anime, the romanised one.
+        let original = s(show, "original_name");
+        let alts = show.get("alternative_titles").and_then(|a| a.get("results")).and_then(|a| a.as_array());
+        let names = std::iter::once(original).chain(alts.into_iter().flatten().filter(|a| matches!(s(a, "iso_3166_1").as_str(), "US" | "GB" | "CA" | "AU") || s(a, "type") == "Romanization").map(|a| s(a, "title")));
+        for name in names {
+            if !name.is_empty() && name != t.title && !t.alt_titles.contains(&name) {
+                t.alt_titles.push(name);
+            }
+        }
+        t
+    }
+
+    /// A series and its episodes as TMDB lists them, for one TVmaze does not.
+    pub async fn tmdb_series(&self, key: &str, tmdb_id: u32) -> Result<(Title, Vec<Episode>)> {
+        let base = format!("{}/tv/{tmdb_id}?api_key={key}", self.tmdb_base);
+        let show = self.get(&format!("{base}&append_to_response=external_ids,alternative_titles,content_ratings,aggregate_credits")).await?;
+        let mut title = self.tv_from(&show);
+        title.details_at = crate::db::now();
+        let numbers: Vec<u64> = show.get("seasons").and_then(|s| s.as_array()).into_iter().flatten().filter_map(|s| s.get("season_number").and_then(|x| x.as_u64())).collect();
+        let mut episodes = Vec::new();
+        // TMDB gives at most twenty seasons a call.
+        for some in numbers.chunks(20) {
+            let asked: Vec<String> = some.iter().map(|n| format!("season/{n}")).collect();
+            let v = self.get(&format!("{base}&append_to_response={}", asked.join(","))).await?;
+            for e in asked.iter().filter_map(|a| v.get(a)).filter_map(|season| season.get("episodes").and_then(|e| e.as_array())).flatten() {
+                let (season, number) = (e.get("season_number").and_then(|x| x.as_u64()).unwrap_or(0) as u32, e.get("episode_number").and_then(|x| x.as_u64()).unwrap_or(0) as u32);
+                if number == 0 {
+                    continue;
+                }
+                episodes.push(Episode {
+                    id: 0,
+                    title_id: 0,
+                    season,
+                    episode: number,
+                    absolute: None,
+                    title: s(e, "name"),
+                    overview: s(e, "overview"),
+                    air_date: opt(e, "air_date"),
+                    air_date_utc: None,
+                    runtime: e.get("runtime").and_then(|x| x.as_u64()).unwrap_or(title.runtime as u64) as u32,
+                    monitored: season > 0,
+                    file_id: None,
+                    still: opt(e, "still_path").map(|p| format!("{TMDB_IMG}/w780{p}")),
+                    rating: score(e.get("vote_average")),
+                });
+            }
+        }
+        if title.runtime == 0 {
+            title.runtime = episodes.iter().find(|e| e.season > 0 && e.runtime > 0).map(|e| e.runtime).unwrap_or(0);
+        }
+        let mut seasons: Vec<u32> = episodes.iter().map(|e| e.season).collect();
+        seasons.sort_unstable();
+        seasons.dedup();
+        title.seasons = seasons.into_iter().map(|n| SeasonInfo { number: n, monitored: n > 0 }).collect();
+        Ok((title, episodes))
     }
 }
 
@@ -423,6 +618,18 @@ fn movie_people(m: &Value) -> Vec<Person> {
         if !out.iter().any(|o| o.id == id(p) && o.kind == kind) {
             out.push(Person { id: id(p), name: s(p, "name"), role: s(p, "job"), kind: kind.into(), photo: photo(p) });
         }
+    }
+    out.retain(|p| !p.name.is_empty());
+    out
+}
+
+/// A TMDB series' leading cast.
+fn tv_people(show: &Value) -> Vec<Person> {
+    let cast = show.get("aggregate_credits").and_then(|c| c.get("cast")).and_then(|c| c.as_array());
+    let mut out: Vec<Person> = vec![];
+    for p in cast.into_iter().flatten().take(20) {
+        let role = p.get("roles").and_then(|r| r.as_array()).and_then(|r| r.first()).map(|r| s(r, "character")).unwrap_or_default();
+        out.push(Person { id: p.get("id").and_then(|x| x.as_u64()).unwrap_or(0), name: s(p, "name"), role, kind: "actor".into(), photo: opt(p, "profile_path").map(|path| format!("{TMDB_IMG}/w185{path}")) });
     }
     out.retain(|p| !p.name.is_empty());
     out

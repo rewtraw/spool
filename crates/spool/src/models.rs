@@ -50,7 +50,8 @@ pub struct SeasonInfo {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Person {
-    /// The metadata source's id for the person: TMDB for films, TVmaze for series.
+    /// The id the title's own source gives the person: TVmaze's for a series it lists, TMDB's
+    /// otherwise. See `Title::people_from_tmdb`.
     pub id: u64,
     pub name: String,
     /// The character played, or the job done.
@@ -175,6 +176,10 @@ pub struct Title {
     /// Whether the series source has been asked about this film yet.
     #[serde(default)]
     pub series_checked: bool,
+    /// A series read from TMDB, as TVmaze did not list it when it was added. It stays with
+    /// TMDB: the two sources can number a show's episodes differently.
+    #[serde(default)]
+    pub from_tmdb: bool,
     /// The title's entries on AniList, when it is anime: one for a film, one a season for a
     /// series, first season first.
     #[serde(default)]
@@ -207,6 +212,11 @@ pub struct SeriesTwin {
 }
 
 impl Title {
+    /// Whether its people carry TMDB's ids: a film's do, and a series' read from TMDB.
+    pub fn people_from_tmdb(&self) -> bool {
+        self.kind == Kind::Movie || self.from_tmdb
+    }
+
     /// The folder a file of this title is in: the title's own, or the copy's.
     pub fn folder_of<'a>(&'a self, f: &'a MediaFile) -> &'a str {
         f.base.as_deref().unwrap_or(&self.path)

@@ -50,7 +50,7 @@ The guides are at **[rewtraw.github.io/spool/guide](https://rewtraw.github.io/sp
 
 ## Status
 
-Spool runs one household's library day to day. It is young, and it is built for a single trusted user on a private network. It runs on macOS and Linux, natively or in a container; the test suite runs on both. It supports Usenet only (no torrents), Newznab indexers, TMDB for movies and TVmaze for series.
+Spool runs one household's library day to day. It is young, and it is built for a single trusted user on a private network. It runs on macOS and Linux, natively or in a container; the test suite runs on both. It supports Usenet only (no torrents), Newznab indexers, TMDB for movies, and TVmaze for series with TMDB for those TVmaze does not list.
 
 ## Getting started
 
@@ -156,6 +156,6 @@ The tests run the real application against a fake indexer and a fake Usenet serv
 
 Spool is licensed under the [GNU General Public License v3](LICENSE).
 
-Its release-name parsers are ported from [Radarr](https://github.com/Radarr/Radarr) and [Sonarr](https://github.com/Sonarr/Sonarr), and their parser test cases run as Spool's fixtures. Movie details and artwork come from [TMDB](https://www.themoviedb.org); this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from [TVmaze](https://www.tvmaze.com). Anime formats and relations come from [AniList](https://anilist.co), matched through [Fribb/anime-lists](https://github.com/Fribb/anime-lists).
+Its release-name parsers are ported from [Radarr](https://github.com/Radarr/Radarr) and [Sonarr](https://github.com/Sonarr/Sonarr), and their parser test cases run as Spool's fixtures. Movie details and artwork come from [TMDB](https://www.themoviedb.org); this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from [TVmaze](https://www.tvmaze.com), and from TMDB for a series TVmaze does not list. Anime formats and relations come from [AniList](https://anilist.co), matched through [Fribb/anime-lists](https://github.com/Fribb/anime-lists).
 
 Spool is a tool for managing a media library. You are responsible for what you use it to download and for complying with the terms of the services you connect it to.

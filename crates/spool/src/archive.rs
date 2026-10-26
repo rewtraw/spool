@@ -219,8 +219,8 @@ impl App {
             Kind::Movie => self.add_title(Kind::Movie, n.tmdb_id, None, g.default_movie_profile, false, false).await,
             Kind::Series => {
                 let tvdb = n.tvdb_id.ok_or_else(|| anyhow::anyhow!("this saved release has no TVDB id to look the series up by"))?;
-                let (found, _) = self.meta.series_by_tvdb(tvdb).await?;
-                self.add_title(Kind::Series, None, found.tvmaze_id, g.default_series_profile, false, false).await
+                let found = self.meta.series_listing_by_tvdb(&g.tmdb_api_key, tvdb).await?;
+                self.add_title(Kind::Series, found.tmdb_id, found.tvmaze_id, g.default_series_profile, false, false).await
             }
         }
     }

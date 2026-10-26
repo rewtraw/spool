@@ -94,7 +94,7 @@ pub(super) async fn lookup(State(app): State<App>, Query(q): Query<HashMap<Strin
     let kind = q.get("kind").and_then(|k| Kind::parse(k)).unwrap_or(Kind::Movie);
     let found = match kind {
         Kind::Movie => app.meta.search_movies(&app.settings.general().tmdb_api_key, &query).await?,
-        Kind::Series => app.meta.search_series(&query).await?,
+        Kind::Series => app.meta.search_series(&app.settings.general().tmdb_api_key, &query).await?,
     };
     let mut out = vec![];
     for t in found {

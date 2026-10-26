@@ -16,11 +16,23 @@ const WAITING: usize = 30;
 /// How many lookups one account may have made for it in a minute.
 const LOOKUPS: u32 = 30;
 
-/// The ids a title is asked for by: TMDB's for a film; TVmaze's and TVDB's for a series.
+/// The ids a title is asked for by: TMDB's for a film; for a series TVmaze's, or TMDB's for
+/// one TVmaze does not list, and TVDB's.
 type Ids = (Option<u32>, Option<u32>, Option<u32>);
 
 fn ids(a: &Ask) -> Ids {
     (a.tmdb_id, a.tvmaze_id, a.tvdb_id)
+}
+
+/// The one id something is asked for by, as (TMDB, TVmaze): a film by TMDB's; a series by
+/// TVmaze's when TVmaze lists it, and by TMDB's when only TMDB does.
+fn asked_by(kind: Kind, tmdb: Option<u32>, tvmaze: Option<u32>) -> Option<(Option<u32>, Option<u32>)> {
+    match (kind, tmdb, tvmaze) {
+        (Kind::Movie, Some(_), _) => Some((tmdb, None)),
+        (Kind::Series, _, Some(_)) => Some((None, tvmaze)),
+        (Kind::Series, Some(_), None) => Some((tmdb, None)),
+        _ => None,
+    }
 }
 
 /// The library as an ask is measured against it.
@@ -41,7 +53,7 @@ impl Shelf {
                     && match kind {
                         Kind::Movie => tmdb.is_some() && t.tmdb_id == tmdb,
                         // A series that came from elsewhere is known by one id and not the other.
-                        Kind::Series => tvmaze.is_some() && t.tvmaze_id == tvmaze || tvdb.is_some() && t.tvdb_id == tvdb,
+                        Kind::Series => tvmaze.is_some() && t.tvmaze_id == tvmaze || tmdb.is_some() && t.tmdb_id == tmdb || tvdb.is_some() && t.tvdb_id == tvdb,
                     }
             })
         })
@@ -116,17 +128,15 @@ impl App {
                 let id = |name: &str| v[name].as_u64().map(|n| n as u32);
                 let (tmdb, tvmaze, tvdb) = (id("tmdb_id"), id("tvmaze_id"), id("tvdb_id"));
                 // What cannot be added by its id cannot be asked for.
-                if (kind == Kind::Movie && tmdb.is_none()) || (kind == Kind::Series && tvmaze.is_none()) {
-                    continue;
-                }
-                let same = |a: &&Ask| a.kind == kind && if kind == Kind::Movie { a.tmdb_id == tmdb } else { a.tvmaze_id == tvmaze };
-                let status = match (shelf.title(kind, if kind == Kind::Movie { (tmdb, None, None) } else { (None, tvmaze, tvdb) }, v["library_id"].as_i64()), mine.iter().find(same)) {
+                let Some((tmdb, tvmaze)) = asked_by(kind, tmdb, tvmaze) else { continue };
+                let same = |a: &&Ask| a.kind == kind && a.tmdb_id == tmdb && a.tvmaze_id == tvmaze;
+                let status = match (shelf.title(kind, (tmdb, tvmaze, tvdb.filter(|_| kind == Kind::Series)), v["library_id"].as_i64()), mine.iter().find(same)) {
                     (Some(t), _) => shelf.standing(t).0,
                     (None, Some(a)) if a.state == "declined" => "declined",
                     (None, Some(a)) if a.state == "asked" => "asked",
                     _ => "",
                 };
-                out.push(json!({"kind": kind, "tmdb_id": if kind == Kind::Movie { tmdb } else { None }, "tvmaze_id": if kind == Kind::Series { tvmaze } else { None }, "title": v["title"], "year": v["year"], "poster": v["poster"], "overview": v["overview"], "status": status}));
+                out.push(json!({"kind": kind, "tmdb_id": tmdb, "tvmaze_id": tvmaze, "title": v["title"], "year": v["year"], "poster": v["poster"], "overview": v["overview"], "status": status}));
             }
         }
         Ok(out)
@@ -149,10 +159,10 @@ impl App {
     /// Ask for a title on an account's behalf. What it is called and looks like is read from
     /// where titles are looked up, never taken from whoever asks.
     pub async fn ask_for(&self, account: &Account, kind: Kind, tmdb_id: Option<u32>, tvmaze_id: Option<u32>) -> Result<Value> {
-        let (tmdb_id, tvmaze_id) = match kind {
-            Kind::Movie => (Some(tmdb_id.ok_or_else(|| anyhow!("a film is asked for by its TMDB id"))?), None),
-            Kind::Series => (None, Some(tvmaze_id.ok_or_else(|| anyhow!("a series is asked for by its TVmaze id"))?)),
-        };
+        let (tmdb_id, tvmaze_id) = asked_by(kind, tmdb_id, tvmaze_id).ok_or_else(|| match kind {
+            Kind::Movie => anyhow!("a film is asked for by its TMDB id"),
+            Kind::Series => anyhow!("a series is asked for by its TVmaze or TMDB id"),
+        })?;
         let same = |a: &&Ask| a.kind == kind && a.tmdb_id == tmdb_id && a.tvmaze_id == tvmaze_id;
         // An ask that was turned down, or whose title has since left the library, is over:
         // asked again, it is a new one.
@@ -171,9 +181,16 @@ impl App {
         let g = self.settings.general();
         let listed = match kind {
             Kind::Movie => self.meta.movie(&g.tmdb_api_key, tmdb_id.unwrap_or_default()).await?,
-            Kind::Series => self.meta.series(tvmaze_id.unwrap_or_default()).await?.0,
+            Kind::Series => self.meta.series(&g.tmdb_api_key, &crate::metadata::SeriesIds { tvmaze: tvmaze_id, tmdb: tmdb_id, ..Default::default() }).await?.0,
         };
         let tvdb_id = listed.tvdb_id.filter(|_| kind == Kind::Series);
+        // A series asked for by its TMDB id that TVmaze lists after all is kept by its TVmaze
+        // id, as asking for it that way would be.
+        let (tmdb_id, tvmaze_id) = match kind {
+            Kind::Series if !listed.from_tmdb => (None, listed.tvmaze_id),
+            _ => (tmdb_id, tvmaze_id),
+        };
+        let same = |a: &&Ask| a.kind == kind && a.tmdb_id == tmdb_id && a.tvmaze_id == tvmaze_id;
 
         let _one = self.asking.lock().await;
         let shelf = self.shelf()?;

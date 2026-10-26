@@ -8,6 +8,7 @@
 
 use crate::app::{App, Event};
 use crate::db::now;
+use crate::metadata::SeriesIds;
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -240,8 +241,8 @@ impl App {
                 _ => self.meta.search_movies(&key, &named.name).await,
             },
             Kind::Series => match named.tvdb_id {
-                Some(id) => self.meta.search_series(&format!("tvdb:{id}")).await,
-                None => self.meta.search_series(&named.name).await,
+                Some(id) => self.meta.search_series(&key, &format!("tvdb:{id}")).await,
+                None => self.meta.search_series(&key, &named.name).await,
             },
         };
         let mut candidates = match looked {
@@ -258,7 +259,7 @@ impl App {
             let again = match kind {
                 Kind::Movie if named.year > 0 => self.meta.search_movies(&key, &format!("{retold} ({})", named.year)).await,
                 Kind::Movie => self.meta.search_movies(&key, &retold).await,
-                Kind::Series => self.meta.search_series(&retold).await,
+                Kind::Series => self.meta.search_series(&key, &retold).await,
             };
             if let Ok(more) = again {
                 if !more.is_empty() {
@@ -389,11 +390,13 @@ impl App {
         }
         let (mut title, episodes) = match kind {
             Kind::Movie => (self.meta.movie(&g.tmdb_api_key, m.tmdb_id.ok_or_else(|| anyhow!("no TMDB id"))?).await?, vec![]),
-            Kind::Series => match (m.tvmaze_id, m.tvdb_id) {
-                (Some(id), _) => self.meta.series(id).await?,
-                (_, Some(id)) => self.meta.series_by_tvdb(id).await?,
-                _ => bail!("no TVmaze or TVDB id"),
-            },
+            Kind::Series => {
+                let ids = SeriesIds { tvmaze: m.tvmaze_id, tmdb: m.tmdb_id, tvdb: m.tvdb_id, imdb: None };
+                if ids.is_empty() {
+                    bail!("no TVmaze, TMDB or TVDB id");
+                }
+                self.meta.series(&g.tmdb_api_key, &ids).await?
+            }
         };
         if let Some(mine) = self.db.find_title(kind, title.tmdb_id, title.tvdb_id)? {
             return self.known_here(mine, folder).await;

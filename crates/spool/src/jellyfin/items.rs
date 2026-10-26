@@ -540,7 +540,7 @@ impl Library {
                     put!("ProviderIds", Value::Object(ids));
                 }
                 if fields.has("people") {
-                    let source = if movie { 1 } else { 2 };
+                    let source = person_source(t);
                     put!(
                         "People",
                         json!(t
@@ -845,7 +845,7 @@ impl Library {
         let people: Vec<Id> = split("personids").iter().filter_map(|i| Id::parse(i)).collect();
         if !people.is_empty() {
             nodes.retain(|n| match n {
-                Node::Movie(t) | Node::Series(t) => t.people.iter().any(|p| people.contains(&Id::Person(if t.kind == Kind::Movie { 1 } else { 2 }, p.id))),
+                Node::Movie(t) | Node::Series(t) => t.people.iter().any(|p| people.contains(&Id::Person(person_source(t), p.id))),
                 _ => false,
             });
         }
@@ -1009,7 +1009,7 @@ impl Library {
         let mut seen = HashSet::new();
         let mut out = vec![];
         for t in &self.titles {
-            let source = if t.kind == Kind::Movie { 1 } else { 2 };
+            let source = person_source(t);
             for p in &t.people {
                 let id = Id::Person(source, p.id);
                 if seen.insert(id) {
@@ -1443,6 +1443,16 @@ fn summary_with(info: &MediaInfo, video: String) -> Vec<Stream> {
         });
     }
     out
+}
+
+
+/// The id space a title's people are numbered in: 1 TMDB's, 2 TVmaze's.
+fn person_source(t: &Title) -> u8 {
+    if t.people_from_tmdb() {
+        1
+    } else {
+        2
+    }
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 
 use crate::app::{App, Event};
 use crate::db::{json, now};
+use crate::metadata::SeriesIds;
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};
 use rusqlite::params;
@@ -394,7 +395,7 @@ impl App {
         let g = self.settings.general();
         let (mut title, episodes) = match item.kind {
             Kind::Movie => (self.meta.movie(&g.tmdb_api_key, item.tmdb_id.ok_or_else(|| anyhow!("Plex has no TMDB id for this item"))?).await?, vec![]),
-            Kind::Series => self.meta.series_by_tvdb(item.tvdb_id.ok_or_else(|| anyhow!("Plex has no TVDB id for this item"))?).await?,
+            Kind::Series => self.meta.series(&g.tmdb_api_key, &SeriesIds::tvdb(item.tvdb_id.ok_or_else(|| anyhow!("Plex has no TVDB id for this item"))?)).await?,
         };
         if title.kind == Kind::Series && title.tvdb_id.is_none() {
             title.tvdb_id = item.tvdb_id;

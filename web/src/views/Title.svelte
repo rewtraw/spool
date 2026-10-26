@@ -570,7 +570,7 @@
         {#if artSummary.length}
           <div class="group">
             <div class="label">Artwork</div>
-            <div class="line">{artSummary.join(', ')}.{#if L.art.some((a: any) => (a.kind === 'poster' || a.kind === 'backdrop') && a.season == null && !a.of)} The folder's own poster and backdrop are shown in place of the ones from {t.kind === 'movie' ? 'TMDB' : 'TVmaze'}.{/if}</div>
+            <div class="line">{artSummary.join(', ')}.{#if L.art.some((a: any) => (a.kind === 'poster' || a.kind === 'backdrop') && a.season == null && !a.of)} The folder's own poster and backdrop are shown in place of the ones from {t.kind === 'series' && t.tvmaze_id ? 'TVmaze' : 'TMDB'}.{/if}</div>
           </div>
         {/if}
         {#if L.themes.length}

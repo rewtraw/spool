@@ -2,6 +2,7 @@
 
 use crate::app::{App, Event};
 use crate::db::now;
+use crate::metadata::SeriesIds;
 use crate::models::*;
 use anyhow::{anyhow, bail, Result};
 use spool_core::parser::{parse_episode_path, parse_movie_path};
@@ -46,7 +47,8 @@ impl App {
         let g = self.settings.general();
         let (mut title, episodes) = match kind {
             Kind::Movie => (self.meta.movie(&g.tmdb_api_key, tmdb_id.ok_or_else(|| anyhow!("a TMDB id is required"))?).await?, vec![]),
-            Kind::Series => self.meta.series(tvmaze_id.ok_or_else(|| anyhow!("a TVmaze id is required"))?).await?,
+            Kind::Series if tvmaze_id.is_none() && tmdb_id.is_none() => bail!("a TVmaze or TMDB id is required"),
+            Kind::Series => self.meta.series(&g.tmdb_api_key, &SeriesIds { tvmaze: tvmaze_id, tmdb: tmdb_id, ..Default::default() }).await?,
         };
         if self.db.find_title(kind, title.tmdb_id, title.tvdb_id)?.is_some() {
             bail!("{} is already in the library", title.title);
@@ -113,7 +115,7 @@ impl App {
                 // series id the anime list has for it.
                 let tvdb = t.anilist.first().and_then(|a| self.anime_ids().and_then(|ids| ids.back.get(a).cloned())).filter(|k| !k.film && k.season >= 1).and_then(|k| k.tvdb);
                 if let (None, Some(tvdb)) = (&twin, tvdb) {
-                    if let Ok((show, episodes)) = self.meta.series_by_tvdb(tvdb).await {
+                    if let Ok((show, episodes)) = self.meta.series(&self.settings.general().tmdb_api_key, &SeriesIds::tvdb(tvdb)).await {
                         let regular: Vec<&Episode> = episodes.iter().filter(|e| e.season > 0).collect();
                         if let (Some(tvmaze_id), true) = (show.tvmaze_id, regular.len() >= 2) {
                             twin = Some(SeriesTwin { tvmaze_id, title: show.title, episodes: regular.len() as u32, minutes: regular.iter().map(|e| e.runtime).sum() });
@@ -149,7 +151,7 @@ impl App {
             bail!("no series called {} was found; add the series from Discover and remove the film", film.title);
         };
         let g = self.settings.general();
-        let (listed, _) = self.meta.series(tvmaze).await?;
+        let (listed, _) = self.meta.series(&g.tmdb_api_key, &SeriesIds { tvmaze: Some(tvmaze), ..Default::default() }).await?;
         let series = match self.db.find_title(Kind::Series, None, listed.tvdb_id)?.filter(|_| listed.tvdb_id.is_some()) {
             Some(have) => have,
             None => self.add_title(Kind::Series, None, Some(tvmaze), self.profile_for_new(Kind::Series, g.new_titles_location), film.monitored, false).await?,
@@ -237,12 +239,20 @@ impl App {
                 }
             }
             Kind::Series => {
-                let (m, episodes) = match (t.tvmaze_id, t.tvdb_id) {
-                    (Some(id), _) => self.meta.series(id).await?,
-                    (None, Some(tvdb)) => self.meta.series_by_tvdb(tvdb).await?,
-                    _ => return Ok(()),
+                let key = self.settings.general().tmdb_api_key;
+                let listed = match (t.from_tmdb, t.tmdb_id) {
+                    (true, Some(tmdb)) => Some(self.meta.tmdb_series(&key, tmdb).await?),
+                    (true, None) => None,
+                    (false, _) => self.meta.tvmaze_listing(&SeriesIds::of(&t)).await?,
+                };
+                let Some((m, episodes)) = listed else {
+                    if t.from_tmdb || SeriesIds::of(&t).is_empty() {
+                        return Ok(());
+                    }
+                    bail!("not found");
                 };
                 t.tvmaze_id = m.tvmaze_id.or(t.tvmaze_id);
+                t.tvdb_id = t.tvdb_id.or(m.tvdb_id);
                 t.imdb_id = t.imdb_id.or(m.imdb_id);
                 self.learn_series_tmdb(&mut t).await;
                 t.original_language = m.original_language.or(t.original_language);

@@ -821,7 +821,7 @@ impl App {
                 None => vec![],
             }
         };
-        let (movies, series, anime) = tokio::join!(self.meta.search_movies(&key, query), self.meta.search_series(query), anime);
+        let (movies, series, anime) = tokio::join!(self.meta.search_movies(&key, query), self.meta.search_series(&key, query), anime);
         let movies_error = movies.as_ref().err().map(|e| e.to_string());
         let (mut movies, mut series) = (movies.unwrap_or_default(), series.unwrap_or_default());
         // What AniList says of a result, by the result's id; and films that are posted as a series.
@@ -834,8 +834,12 @@ impl App {
             if let Some(tvdb) = as_series {
                 if !series.iter().any(|s| s.tvdb_id == Some(tvdb)) && asked < 6 {
                     asked += 1;
-                    if let Ok(found) = self.meta.series_listing_by_tvdb(tvdb).await {
-                        series.push(found);
+                    if let Ok(found) = self.meta.series_listing_by_tvdb(&key, tvdb).await {
+                        // TMDB's search gives no TVDB id, so the show it found already learns it here.
+                        match series.iter_mut().find(|s| s.tvmaze_id.is_none() && s.tmdb_id.is_some() && s.tmdb_id == found.tmdb_id) {
+                            Some(same) => same.tvdb_id = found.tvdb_id,
+                            None => series.push(found),
+                        }
                     }
                 }
                 said.entry((Kind::Series, tvdb)).or_insert(note.clone());
@@ -883,9 +887,8 @@ impl App {
         let known = ids.back.get(&anilist_id).ok_or_else(|| anyhow!("the id list does not know this work"))?;
         let g = self.settings.general();
         if let Some(tvdb) = known.tvdb.filter(|_| !known.film && known.season >= 1) {
-            let (listed, _) = self.meta.series_by_tvdb(tvdb).await?;
-            let tvmaze = listed.tvmaze_id.ok_or_else(|| anyhow!("the series source does not list it"))?;
-            return self.add_title(Kind::Series, None, Some(tvmaze), self.profile_for_new(Kind::Series, g.new_titles_location), true, true).await;
+            let listed = self.meta.series_listing_by_tvdb(&g.tmdb_api_key, tvdb).await?;
+            return self.add_title(Kind::Series, listed.tmdb_id, listed.tvmaze_id, self.profile_for_new(Kind::Series, g.new_titles_location), true, true).await;
         }
         let imdb = known.imdb.clone().ok_or_else(|| anyhow!("no film or series id is known for this work"))?;
         let tmdb = self.meta.movie_by_imdb(&g.tmdb_api_key, &imdb).await?.ok_or_else(|| anyhow!("the film source does not list it"))?;

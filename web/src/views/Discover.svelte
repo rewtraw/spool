@@ -134,15 +134,15 @@
   <div class="card empty">Find a film or a series to add to the library.</div>
 {/if}
 
-{#if results.length}<p class="faint source">{kind === 'movie' ? 'Films, from TMDB.' : 'Series, from TVmaze.'} Anime is also looked up on AniList, under any of its names.</p>{/if}
+{#if results.length}<p class="faint source">{kind === 'movie' ? 'Films, from TMDB.' : 'Series, from TVmaze, and from TMDB where TVmaze has none.'} Anime is also looked up on AniList, under any of its names.</p>{/if}
 <div class="results">
-  {#each results as r (r.tmdb_id ?? r.tvmaze_id)}{@render card(r)}{/each}
+  {#each results as r (`${r.tmdb_id}:${r.tvmaze_id}`)}{@render card(r)}{/each}
 </div>
 
 {#if others.length}
   <div class="section-title also">{kind === 'movie' ? 'Series' : 'Films'} with this name</div>
   <div class="results">
-    {#each others.slice(0, 6) as r (r.tmdb_id ?? r.tvmaze_id)}{@render card(r)}{/each}
+    {#each others.slice(0, 6) as r (`${r.tmdb_id}:${r.tvmaze_id}`)}{@render card(r)}{/each}
   </div>
 {/if}
 

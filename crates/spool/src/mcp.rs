@@ -103,8 +103,8 @@ const TOOLS: &[Tool] = &[
         name: "find_title",
         read: true,
         destructive: false,
-        description: "Find a movie or series by name. Returns matches already in the library (with their id) and, with lookup=true, candidates from TMDB/TVmaze that could be added with add_title.",
-        schema: || obj(json!({"query": {"type": "string"}, "kind": {"type": "string", "enum": ["movie", "series"], "description": "Limit to one kind. Needed for lookup; defaults to movie there."}, "lookup": {"type": "boolean", "description": "Also search TMDB (movies) or TVmaze (series) for titles not in the library."}}), &["query"]),
+        description: "Find a movie or series by name. Returns matches already in the library (with their id) and, with lookup=true, candidates from TMDB and TVmaze that could be added with add_title.",
+        schema: || obj(json!({"query": {"type": "string"}, "kind": {"type": "string", "enum": ["movie", "series"], "description": "Limit to one kind. Needed for lookup; defaults to movie there."}, "lookup": {"type": "boolean", "description": "Also search TMDB (movies), or TVmaze and TMDB (series), for titles not in the library."}}), &["query"]),
     },
     Tool {
         name: "title_detail",
@@ -136,7 +136,7 @@ const TOOLS: &[Tool] = &[
         name: "add_title",
         read: false,
         destructive: false,
-        description: "Add a movie or series to the library. Get tmdb_id (movies) or tvmaze_id (series) from find_title with lookup=true. By default it is monitored and a search starts at once, which may begin a download.",
+        description: "Add a movie or series to the library. Get tmdb_id (movies) or tvmaze_id (series) from find_title with lookup=true; a series TVmaze does not list has a tmdb_id instead. By default it is monitored and a search starts at once, which may begin a download.",
         schema: || obj(json!({"kind": {"type": "string", "enum": ["movie", "series"]}, "tmdb_id": {"type": "integer"}, "tvmaze_id": {"type": "integer"}, "monitored": {"type": "boolean", "description": "Default true."}, "search": {"type": "boolean", "description": "Search and download right away. Default true."}, "profile": {"type": "string", "description": "Quality profile name. Defaults to the library default."}}), &["kind"]),
     },
     Tool {
@@ -153,7 +153,7 @@ const TOOLS: &[Tool] = &[
         description: "Remove a title from the library and cancel its downloads. Files stay on disk unless delete_files is true, which also needs confirm=true. Saved releases in the archive are always kept.",
         schema: || obj(json!({"title_id": {"type": "integer"}, "delete_files": {"type": "boolean"}, "confirm": {"type": "boolean"}}), &["title_id"]),
     },
-    Tool { name: "refresh_title", read: false, destructive: false, description: "Re-read a title's details and episode list from TMDB/TVmaze and rescan its folder for files added or removed outside Spool.", schema: || obj(json!({"title_id": {"type": "integer"}}), &["title_id"]) },
+    Tool { name: "refresh_title", read: false, destructive: false, description: "Re-read a title's details and episode list from TMDB or TVmaze and rescan its folder for files added or removed outside Spool.", schema: || obj(json!({"title_id": {"type": "integer"}}), &["title_id"]) },
     Tool {
         name: "search_releases",
         read: false,
@@ -243,7 +243,7 @@ const TOOLS: &[Tool] = &[
     Tool { name: "collections", read: true, destructive: false, description: "The library's collections: a series of films, or an anime's series, films and side stories, each with its members in order of release, what each is to the story (recap, side story, alternative telling, spin-off), which has been watched, what to watch next, and the works of the same story that are not in the library with the ids to add them by.", schema: || obj(json!({}), &[]) },
     Tool { name: "add_missing_work", read: false, destructive: false, description: "Add a work that a collection lacks, monitored and searched for at once. Give the anilist_id of an anime work or the tmdb_id of a film, as collections lists them.", schema: || obj(json!({"anilist_id": {"type": "integer"}, "tmdb_id": {"type": "integer"}}), &[]) },
     Tool { name: "film_to_series", read: false, destructive: false, description: "Turn a film that is posted in episodes into the series it is listed as elsewhere: the film's entry, which must have no file, is replaced by the series with the same monitoring, and a download of the film that turned out to be an episode is filed as that episode. Use when title_detail shows in_episodes with an as_series listing.", schema: || obj(json!({"title_id": {"type": "integer"}}), &["title_id"]) },
-    Tool { name: "discover", read: true, destructive: false, description: "Search for something to add, films and series together, with whether each is already in the library. Anime is also looked up on AniList, so a romanised name finds it and an OVA that is listed as a film is marked as posted in episodes, with the series to add in its place. Gives the tmdb_id or tvmaze_id that add_title takes.", schema: || obj(json!({"query": {"type": "string"}}), &["query"]) },
+    Tool { name: "discover", read: true, destructive: false, description: "Search for something to add, films and series together, with whether each is already in the library. Anime is also looked up on AniList, so a romanised name finds it and an OVA that is listed as a film is marked as posted in episodes, with the series to add in its place. Gives the tmdb_id or tvmaze_id that add_title takes; a series TVmaze does not list comes from TMDB, with a tmdb_id.", schema: || obj(json!({"query": {"type": "string"}}), &["query"]) },
     Tool { name: "profile_fit", read: true, destructive: false, description: "How each quality profile fits the files of the titles that use it, location by location: how many files are in a quality the profile does not allow, how many are over its size target, and how many it would replace. A profile that does not describe what is on disk is harmless while nothing is monitored and will try to change the files once something is.", schema: || obj(json!({}), &[]) },
     Tool {
         name: "make_clip",
