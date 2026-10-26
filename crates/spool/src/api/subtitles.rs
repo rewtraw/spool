@@ -43,14 +43,23 @@ pub(super) async fn delete_file_subtitle(State(app): State<App>, Path(id): Path<
     Ok(Json(json!({"ok": true})))
 }
 
+/// Change what is known of a file: whether it is an extra version, and what quality it is,
+/// by a quality's name, "SDTV" or "Bluray-1080p". A new quality names the file again.
 pub(super) async fn patch_file(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<Value>) -> R<Value> {
+    let quality = match b["quality"].as_str() {
+        Some(name) => Some(spool_core::quality::Quality::from_name(name).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("no quality is called {name}")))?),
+        None => None,
+    };
     let mut f = app.db.file(id)?.ok_or_else(|| not_found("file"))?;
     if let Some(extra) = b["extra"].as_bool() {
         f.extra = extra;
+        app.db.with(|c| c.execute("UPDATE files SET data = ?2 WHERE id = ?1", rusqlite::params![id, serde_json::to_string(&f).unwrap_or_default()]))?;
+        app.emit(Event::Title { id: f.title_id });
     }
-    app.db.with(|c| c.execute("UPDATE files SET data = ?2 WHERE id = ?1", rusqlite::params![id, serde_json::to_string(&f).unwrap_or_default()]))?;
-    app.emit(Event::Title { id: f.title_id });
-    Ok(Json(json!({"ok": true})))
+    if let Some(q) = quality.filter(|q| *q != f.quality.quality) {
+        f = app.set_quality(id, q).await?;
+    }
+    Ok(Json(json!({"ok": true, "file": f})))
 }
 
 pub(super) async fn refresh_title(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {

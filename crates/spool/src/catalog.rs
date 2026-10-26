@@ -654,6 +654,53 @@ impl App {
         Ok(done)
     }
 
+    /// Say what quality a file is, when what it was taken for is wrong: a name that said
+    /// nothing true of it, or a guess made before its picture was looked at. A file named as
+    /// Spool names files is named again for it, with the subtitles beside it; one named
+    /// otherwise, or with a compact version made from it that shares its name, keeps its name.
+    pub async fn set_quality(&self, file_id: i64, quality: spool_core::quality::Quality) -> Result<MediaFile> {
+        let f = self.db.file(file_id)?.ok_or_else(|| anyhow!("no such file"))?;
+        let title = self.db.title(f.title_id)?.ok_or_else(|| anyhow!("no such title"))?;
+        if f.base.is_some() {
+            bail!("this copy is on another location, and Spool does not change it");
+        }
+        if self.moving(title.id) {
+            bail!("{} is being moved; try again when it is done", title.title);
+        }
+        let turn = self.title_imports.lock().entry(title.id).or_default().clone();
+        let Ok(_held) = turn.try_lock() else { bail!("something is being imported into {}; try again when it is done", title.title) };
+        let mut eps: Vec<Episode> = self.db.episodes(title.id)?.into_iter().filter(|e| e.file_id == Some(f.id)).collect();
+        eps.sort_by_key(|e| (e.season, e.episode));
+        let ext = extension(&f.rel_path);
+        let named_by_spool = f.rel_path == self.library_rel_path(&title, &eps, &f, &ext);
+        let shares_name = self.db.files(title.id)?.iter().any(|c| c.compact_of == Some(f.id));
+        let mut g = f.clone();
+        g.quality.quality = quality;
+        // Written down with the first thing moved, so a time that fails before then leaves
+        // the file as it was, to be tried again.
+        if named_by_spool && !shares_name {
+            let to = self.library_rel_path(&title, &eps, &g, &ext);
+            if to != g.rel_path {
+                let (from_stem, to_stem) = (stem(&g.rel_path), stem(&to));
+                let mut moved = g.clone();
+                moved.rel_path = to;
+                for s in &mut moved.subtitles {
+                    if let Some(rest) = s.rel_path.strip_prefix(&from_stem) {
+                        s.rel_path = format!("{to_stem}{rest}");
+                    }
+                }
+                let root = PathBuf::from(&title.path);
+                let home = std::fs::canonicalize(&root)?;
+                self.shift(&root, &home, &g, &moved).await?;
+                g = moved;
+            }
+        }
+        self.db.save_file(&g)?;
+        self.db.add_history(Some(title.id), "quality_set", serde_json::json!({"file": f.id, "from": f.quality.quality.key(), "to": quality.key(), "path": g.rel_path}))?;
+        self.emit(Event::Title { id: title.id });
+        Ok(g)
+    }
+
     /// Move a video and the subtitles beside it from the names one record gives to those
     /// another gives, writing each down as it goes. Nothing is put where something already is,
     /// and nothing is moved through a link out of the title's folder. The subtitles go first:

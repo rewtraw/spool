@@ -328,6 +328,37 @@ async fn movie_goes_from_search_to_library() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_file_said_to_be_another_quality_is_named_again_for_it_with_its_subtitles() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let movie = w.movie("Night of the Example", 2020, "tt1234567");
+    w.release("Night.of.the.Example.2020.1080p.BluRay.x264-GRP", &[("night.mkv", &video)]);
+    w.app.search(movie.id, Scope::Movie, false, true).await.unwrap();
+    w.wait_state(movie.id, AcqState::Imported).await;
+    let folder = w.root.join("Movies/Night of the Example (2020)");
+    let mut f = w.app.db.files(movie.id).unwrap().remove(0);
+    let stem = f.rel_path.trim_end_matches(".mkv").to_string();
+    std::fs::write(folder.join(format!("{stem}.en.srt")), "1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
+    f.subtitles = vec![serde_json::from_value(serde_json::json!({"language": "en", "rel_path": format!("{stem}.en.srt"), "source": "found", "release": "", "hearing_impaired": false, "forced": false, "sync": null})).unwrap()];
+    w.app.db.save_file(&f).unwrap();
+
+    let g = w.app.set_quality(f.id, Quality::Dvd).await.unwrap();
+    assert_eq!(g.quality.quality, Quality::Dvd);
+    assert_eq!(tree(&folder), ["Night of the Example (2020) {imdb-tt1234567} [DVD][AAC 2.0][x264]-GRP.en.srt", "Night of the Example (2020) {imdb-tt1234567} [DVD][AAC 2.0][x264]-GRP.mkv"]);
+    let kept = w.app.db.file(f.id).unwrap().unwrap();
+    assert_eq!((kept.rel_path.as_str(), kept.subtitles[0].rel_path.as_str(), kept.quality.quality), (g.rel_path.as_str(), "Night of the Example (2020) {imdb-tt1234567} [DVD][AAC 2.0][x264]-GRP.en.srt", Quality::Dvd));
+
+    // A file named some other way keeps its name.
+    std::fs::rename(folder.join(&g.rel_path), folder.join("mine.mkv")).unwrap();
+    let mut mine = kept.clone();
+    mine.rel_path = "mine.mkv".into();
+    mine.subtitles.clear();
+    w.app.db.save_file(&mine).unwrap();
+    let h = w.app.set_quality(f.id, Quality::Bluray1080p).await.unwrap();
+    assert_eq!((h.rel_path.as_str(), h.quality.quality), ("mine.mkv", Quality::Bluray1080p));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn season_pack_and_single_episode_import() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;

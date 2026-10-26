@@ -216,6 +216,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool { name: "delete_title_files", read: false, destructive: true, description: "Free space by deleting all of a title's media files. The title stays in the library, unmonitored so it is not fetched again, and its saved releases stay in the archive for a later re-download. Needs confirm=true.", schema: || obj(json!({"title_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["title_id"]) },
     Tool { name: "delete_file", read: false, destructive: true, description: "Delete one media file by file_id (from title_detail). It goes to the recycle folder if recycling is on, otherwise it is gone at once. Needs confirm=true.", schema: || obj(json!({"file_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["file_id"]) },
+    Tool { name: "set_file_quality", read: false, destructive: false, description: "Say what quality one media file (file_id from title_detail) really is, by a quality's name such as SDTV, DVD, WEBDL-480p, Bluray-480p, HDTV-720p or Bluray-1080p, when the one it was taken for is wrong. A file named as Spool names files is renamed to match, with its subtitles. Upgrades are judged by the new quality from then on.", schema: || obj(json!({"file_id": {"type": "integer"}, "quality": {"type": "string"}}), &["file_id", "quality"]) },
     Tool { name: "empty_recycle", read: false, destructive: true, description: "Permanently delete everything in the recycle folder to free disk space. Needs confirm=true.", schema: || obj(json!({"confirm": {"type": "boolean"}}), &[]) },
     Tool { name: "restart_check", read: true, destructive: false, description: "Whether Spool can be restarted or upgraded now without interrupting anything: a download being checked or unpacked, an import, a title being moved, a location being looked through, or someone playing. Downloads still coming down do not count; they resume. Ask this before restarting the service.", schema: || obj(json!({}), &[]) },
     Tool { name: "locations", read: true, destructive: false, description: "The places the library lives: the main one and any further disks or shares, each with whether it can be reached, whether Spool manages it or only reads it, how many titles are on it and how much room is free. Gives the location ids the other location tools take.", schema: || obj(json!({}), &[]) },
@@ -914,6 +915,12 @@ impl Mcp {
                     return Err("deleting a media file needs confirm=true, and only when the person asked for it".into());
                 }
                 self.api(Method::DELETE, &format!("/api/files/{id}"), None).await
+            }
+            "set_file_quality" => {
+                let id = int("file_id")?;
+                let quality = a["quality"].as_str().ok_or("which quality?")?;
+                let r = self.api(Method::PATCH, &format!("/api/files/{id}"), Some(json!({"quality": quality}))).await?;
+                Ok(json!({"path": r["file"]["rel_path"], "quality": r["file"]["quality"]["quality"]}))
             }
             "empty_recycle" => {
                 let info = self.get("/api/recycle").await?;
