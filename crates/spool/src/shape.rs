@@ -113,6 +113,18 @@ pub(crate) fn episodes_held(title: &Title, episodes: &[Episode], eps: Vec<Episod
                 run.push(next.clone());
             }
             if run.len() > 1 && (sum - v.ran).abs() <= v.ran * 0.15 {
+                // Named as one episode, long enough for the next ones too, and those are already
+                // here: more often another show's episode than two of this one in a file.
+                if run[1..].iter().any(|e| e.file_id.is_some()) {
+                    let numbers = run.iter().map(|e| e.episode.to_string()).collect::<Vec<_>>().join(", ");
+                    return Err(Blocked::Needs(format!(
+                        "{} runs {:.0} minutes, as long as episodes {numbers} together, but is named as episode {} alone, and the rest are already in the library. It may be an episode of another show. Import anyway files it as episode {} alone.",
+                        v.name,
+                        v.ran / 60.0,
+                        first.episode,
+                        first.episode
+                    )));
+                }
                 tracing::info!(file = %v.name, episodes = run.len(), "one file holds several episodes");
                 return Ok(run);
             }

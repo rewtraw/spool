@@ -1805,6 +1805,21 @@ async fn files_that_hold_more_or_less_than_their_name_says_are_noticed() {
     assert_eq!(have, [true, true, false]);
     assert!(tree(&w.root.join("TV Shows/Double Show")).iter().any(|f| f.contains("S01E01-02")), "{:?}", tree(&w.root.join("TV Shows/Double Show")));
 
+    // Named as one episode and as long as two, when the next is already here: more likely an
+    // episode of another show with the same name. Asked, and a yes files it as the one it says.
+    let (other, eps) = w.series("Other Show", 504, &[(1, 1, "One"), (1, 2, "Two"), (1, 3, "Three")]);
+    minute_long(&w, &other);
+    w.release("Other.Show.S01E02.1080p.WEB.H264-GRP", &[("o2.mkv", &short)]);
+    w.app.search(other.id, Scope::Episode(eps[1]), true, true).await.unwrap();
+    w.wait_state(other.id, AcqState::Imported).await;
+    w.release("Other.Show.S01E01.1080p.WEB.H264-GRP", &[("o1.mkv", &double)]);
+    w.app.search(other.id, Scope::Episode(eps[0]), true, true).await.unwrap();
+    let stopped = w.wait_state(other.id, AcqState::ImportBlocked).await;
+    assert!(stopped.error.as_deref().unwrap_or_default().contains("an episode of another show"), "{:?}", stopped.error);
+    w.app.import(stopped.id, Some(stopped.episode_ids.clone())).await.unwrap();
+    let have: Vec<bool> = w.app.db.episodes(other.id).unwrap().iter().map(|e| e.file_id.is_some()).collect();
+    assert_eq!(have, [true, true, false]);
+
     // A whole season run together into one file: all its episodes are not counted without a yes.
     let four = [(1, 1, "One"), (1, 2, "Two"), (1, 3, "Three"), (1, 4, "Four")];
     let (stitched, _) = w.series("Stitched Show", 502, &four);
