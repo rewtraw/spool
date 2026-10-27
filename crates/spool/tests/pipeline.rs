@@ -359,6 +359,20 @@ async fn a_file_said_to_be_another_quality_is_named_again_for_it_with_its_subtit
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_episode_posted_twice_in_its_release_is_imported_once() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (show, eps) = w.series("Example World", 296762, &[(1, 1, "The Original")]);
+    w.release("Example.World.S01E01.1080p.BluRay.x264-TWICE", &[("Example.World.S01E01.1080p.BluRay.x264-TWICE.mkv", &video), ("0001_Example.World.S01E01.1080p.BluRay.x264-TWICE.mkv", &video)]);
+    let outcome = w.app.search(show.id, Scope::Missing, false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    w.wait_state(show.id, AcqState::Imported).await;
+    let files = w.app.db.files(show.id).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(w.app.db.episodes(show.id).unwrap().iter().find(|e| e.id == eps[0]).unwrap().file_id, Some(files[0].id));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn season_pack_and_single_episode_import() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;

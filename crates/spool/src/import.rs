@@ -387,6 +387,11 @@ impl App {
                         target.2 = vec![episode];
                     }
                 }
+                // Several videos for the same episodes: one posted twice in the release, or a
+                // second cut of it. An episode is one file, the largest of them.
+                targets.sort_by_key(|t| std::cmp::Reverse(t.1));
+                let mut held: std::collections::HashSet<Vec<i64>> = std::collections::HashSet::new();
+                targets.retain(|t| held.insert(t.2.iter().map(|e| e.id).collect()));
             }
         }
 
