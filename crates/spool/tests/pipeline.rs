@@ -395,6 +395,10 @@ async fn an_episode_named_by_its_number_in_the_whole_run_is_found_in_its_season(
     assert_eq!(outcome.grabbed[0].episode_ids, [eps[2]]);
     w.wait_state(show.id, AcqState::Imported).await;
     assert!(w.app.db.episodes(show.id).unwrap().iter().find(|e| e.id == eps[2]).unwrap().file_id.is_some());
+    // Counted the same way under season 1's name: "S01E04", past its end, is the fourth of all.
+    w.release("Example.World.S01E04.1080p.WEB.H264-RUN", &[("Example.World.S01E04.1080p.WEB.H264-RUN.mkv", &video)]);
+    let outcome = w.app.search(show.id, Scope::Episode(eps[3]), false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.iter().map(|g| g.episode_ids.clone()).collect::<Vec<_>>(), [vec![eps[3]]], "{}", outcome.message);
 }
 
 #[tokio::test(flavor = "multi_thread")]
