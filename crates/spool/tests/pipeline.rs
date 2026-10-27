@@ -373,6 +373,20 @@ async fn an_episode_posted_twice_in_its_release_is_imported_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_episode_named_by_its_number_in_the_whole_run_is_found_in_its_season() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (show, eps) = w.series("Example World", 296762, &[(1, 1, "One"), (1, 2, "Two"), (2, 1, "Three"), (2, 2, "Four")]);
+    // "E03" with no season: not season 1's third, which does not exist, but the third of all.
+    w.release("Example.World.E03.1080p.WEB.H264-RUN", &[("Example.World.E03.1080p.WEB.H264-RUN.mkv", &video)]);
+    let outcome = w.app.search(show.id, Scope::Episode(eps[2]), false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{} {:?}", outcome.message, outcome.decisions.iter().map(|d| (&d.release.title, &d.rejections)).collect::<Vec<_>>());
+    assert_eq!(outcome.grabbed[0].episode_ids, [eps[2]]);
+    w.wait_state(show.id, AcqState::Imported).await;
+    assert!(w.app.db.episodes(show.id).unwrap().iter().find(|e| e.id == eps[2]).unwrap().file_id.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn season_pack_and_single_episode_import() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;
