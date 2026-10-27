@@ -1910,7 +1910,22 @@ async fn files_that_hold_more_or_less_than_their_name_says_are_noticed() {
     w.app.search(other.id, Scope::Episode(eps[0]), true, true).await.unwrap();
     let stopped = w.wait_state(other.id, AcqState::ImportBlocked).await;
     assert!(stopped.error.as_deref().unwrap_or_default().contains("an episode of another show"), "{:?}", stopped.error);
-    w.app.import(stopped.id, Some(stopped.episode_ids.clone())).await.unwrap();
+    // Tried again, it is checked again, and stopped for the same reason.
+    let api = spool::api::router(w.app.clone());
+    let (status, _) = call(&api, "POST", &format!("/api/activity/{}/retry_import", stopped.id), serde_json::json!({})).await;
+    assert_eq!(status, 200);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let again = w.wait_state(other.id, AcqState::ImportBlocked).await;
+    assert_eq!(again.id, stopped.id);
+    // Imported anyway, it goes in as the one episode it says it is.
+    let (status, _) = call(&api, "POST", &format!("/api/activity/{}/import_anyway", stopped.id), serde_json::json!({})).await;
+    assert_eq!(status, 200);
+    for _ in 0..200 {
+        if w.app.db.episodes(other.id).unwrap()[0].file_id.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let have: Vec<bool> = w.app.db.episodes(other.id).unwrap().iter().map(|e| e.file_id.is_some()).collect();
     assert_eq!(have, [true, true, false]);
 

@@ -71,7 +71,7 @@
   async function resolve(item: any, action: string) {
     const acq = item.item.acquisition_id;
     if (action === 'dismiss' || !acq) await act(() => api.post(`/attention/${item.item.id}/dismiss`));
-    else if (action === 'retry') await act(() => api.post(`/activity/${acq}/retry_import`), 'Trying the import again');
+    else if (action === 'retry') await act(() => api.post(`/activity/${acq}/import_anyway`), 'Importing');
     else if (action === 'series') {
       let made: any;
       const ok = await act(async () => { made = await api.post(`/titles/${item.item.title_id}/to-series`); }, 'Now a series. Looking for its episodes.');

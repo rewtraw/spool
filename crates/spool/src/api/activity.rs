@@ -80,20 +80,23 @@ pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): 
                 app.job_resume(j)?;
             }
         }
-        "retry_import" => {
+        // "retry_import" checks it all again, as when something has been put right since;
+        // "import_anyway" is a person who has read why it was stopped, and is not asked again.
+        "retry_import" | "import_anyway" => {
             let mut a = acq.clone();
             if matches!(a.state, AcqState::ImportBlocked | AcqState::Importing) {
                 a.state = AcqState::Importing;
                 app.db.save_acquisition(&mut a)?;
             }
-            let episodes: Option<Vec<i64>> = body.and_then(|b| b.0["episode_ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()));
-            // This is "Import anyway": the person has read why it was stopped, and is not asked
-            // again. For a series the episodes the release was taken for stand.
-            let force = episodes.clone().or_else(|| Some(if app.db.title(acq.title_id).ok().flatten().is_some_and(|t| t.kind == Kind::Movie) { vec![] } else { acq.episode_ids.clone() }));
+            let force = (action == "import_anyway").then(|| {
+                // The episodes asked for, or for a series the ones the release was taken for.
+                let episodes: Option<Vec<i64>> = body.and_then(|b| b.0["episode_ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()));
+                episodes.unwrap_or_else(|| if app.db.title(acq.title_id).ok().flatten().is_some_and(|t| t.kind == Kind::Movie) { vec![] } else { acq.episode_ids.clone() })
+            });
             // On its own, so a caller that stops waiting does not stop it part way.
             let app2 = app.clone();
             tokio::spawn(async move {
-                if let Err(e) = app2.import(id, if episodes.is_some() || force.is_some() { force } else { None }).await {
+                if let Err(e) = app2.import(id, force).await {
                     tracing::warn!(acquisition = id, error = %e, "import failed");
                 }
             });

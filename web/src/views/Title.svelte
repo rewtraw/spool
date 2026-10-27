@@ -441,7 +441,7 @@
             <div class="row wrap"><span class="chip {a.state === 'import_blocked' ? 'warn' : 'accent'}">{a.state === 'downloading' ? STATE_LABEL[app.jobs[a.job_id]?.state ?? 'queued'] : STATE_LABEL[a.state]}</span><span class="chip">{qualityName(a.quality, t.kind)}</span><span class="mono faint break grow">{a.release.title}</span></div>
             <div style="margin-top:9px"><JobLine job={app.jobs[a.job_id]} state={a.state} error={a.error} size={a.release.size} /></div>
             <div class="row wrap" style="margin-top:10px">
-              {#if a.state === 'import_blocked'}<button class="btn small" onclick={async () => { await act(() => api.post(`/activity/${a.id}/retry_import`)); load(); }}>Import anyway</button>{/if}
+              {#if a.state === 'import_blocked'}<button class="btn small" onclick={async () => { await act(() => api.post(`/activity/${a.id}/import_anyway`)); load(); }}>Import anyway</button>{/if}
               <button class="btn small" onclick={async () => { await act(() => api.post(`/activity/${a.id}/cancel_blocklist`), 'Removed. Looking for another release.'); load(); }}>Remove and find another</button>
               <button class="btn small ghost danger" onclick={async () => { await act(() => api.post(`/activity/${a.id}/cancel`), 'Removed'); load(); }}>Remove</button>
             </div>

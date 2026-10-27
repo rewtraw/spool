@@ -339,7 +339,7 @@
         <div class="buttons">
           {#if a.state === 'downloading' && j && j.state !== 'paused'}<button class="btn small" onclick={() => action(a.id, 'pause')}>Pause</button>{/if}
           {#if j?.state === 'paused'}<button class="btn small" onclick={() => action(a.id, 'resume')}>Resume</button>{/if}
-          {#if a.state === 'import_blocked'}<button class="btn small" onclick={() => action(a.id, 'retry_import', 'Trying the import again')}>Import anyway</button>{/if}
+          {#if a.state === 'import_blocked'}<button class="btn small" onclick={() => action(a.id, 'import_anyway', 'Importing')}>Import anyway</button>{/if}
           <button class="btn small" onclick={() => action(a.id, 'cancel_blocklist', 'Removed. Looking for another release.')}>Remove and find another</button>
           <button class="btn small ghost danger" onclick={() => action(a.id, 'cancel', 'Removed')}>Remove</button>
         </div>
