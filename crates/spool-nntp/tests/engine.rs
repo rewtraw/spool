@@ -648,12 +648,13 @@ async fn a_bad_volume_puts_the_others_back_and_the_job_is_repaired() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unpacking_carries_on_after_a_restart() {
+  for old_style in [false, true] {
     let tmp = tempfile::tempdir().unwrap();
     let movie = bytes(33, 6_000_000);
-    let volumes = spool_nntp::rar::testing::rar5_volumes("movie.mkv", &movie, 250_000);
+    let volumes = if old_style { spool_nntp::rar::testing::rar4_volumes("movie.mkv", &movie, 250_000) } else { spool_nntp::rar::testing::rar5_volumes("movie.mkv", &movie, 250_000) };
     let mut post = Post::new();
     for (i, v) in volumes.iter().enumerate() {
-        post.add_file(&volume_name("movie", false, i), v, 10_000);
+        post.add_file(&volume_name("movie", old_style, i), v, 10_000);
     }
     let server = FakeServer::start(post.articles.clone()).await;
     server.state.lock().delay_ms = 4;
@@ -675,7 +676,7 @@ async fn unpacking_carries_on_after_a_restart() {
     engine.shutdown().await;
     // Some volumes are already unpacked and gone; the rest are still to come.
     let job_dir = std::fs::read_dir(tmp.path().join("incomplete")).unwrap().flatten().next().unwrap().path();
-    let left: Vec<String> = std::fs::read_dir(&job_dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.ends_with(".rar")).collect();
+    let left: Vec<String> = std::fs::read_dir(&job_dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.starts_with("movie.")).collect();
     assert!(left.len() < volumes.len() && job_dir.join("_direct/state.json").exists(), "{left:?}");
 
     let engine = Engine::start(config).await.unwrap();
@@ -684,6 +685,7 @@ async fn unpacking_carries_on_after_a_restart() {
     assert!(done.unpacked_directly);
     assert_eq!(read(&done, "movie.mkv"), movie);
     assert_eq!(server.max_served_per_article(), 1, "nothing is fetched twice");
+  }
 }
 
 /// While a job is being repaired it fetches recovery data, and for that stretch it looks like
@@ -738,4 +740,52 @@ async fn a_job_fetching_recovery_data_is_not_taken_for_a_new_download() {
     assert_eq!(read(&done, "movie.mkv"), data);
     assert_eq!(engine.post_runs(&id), 1, "the job was checked and repaired once");
     assert_eq!(wait_done(&engine, &second).await.state, JobState::Completed);
+}
+
+/// Killed mid-download, without the chance to save its place: whatever was recorded must be on
+/// disk, and the job finishes with the right bytes or fails, never completes with the wrong ones.
+#[test]
+fn a_download_killed_partway_resumes_whole() {
+    for round in 0..12u64 {
+        let tmp = tempfile::tempdir().unwrap();
+        let movie = bytes(40 + round, 6_000_000);
+        let old_style = round % 2 == 1;
+        let volumes = if old_style { spool_nntp::rar::testing::rar4_volumes("movie.mkv", &movie, 250_000) } else { spool_nntp::rar::testing::rar5_volumes("movie.mkv", &movie, 250_000) };
+        let mut post = Post::new();
+        for (i, v) in volumes.iter().enumerate() {
+            post.add_file(&volume_name("movie", old_style, i), v, 10_000);
+        }
+        let main = tokio::runtime::Runtime::new().unwrap();
+        let server = main.block_on(FakeServer::start(post.articles.clone()));
+        server.state.lock().delay_ms = 4;
+        let mut config = cfg(tmp.path(), vec![server.config("main", 0, 4)]);
+        config.sevenzip_path = "/nonexistent/7zz".into();
+
+        // The first engine runs on a runtime of its own, dropped mid-flight like a killed process.
+        let doomed = tokio::runtime::Runtime::new().unwrap();
+        let engine = doomed.block_on(Engine::start(config.clone())).unwrap();
+        let id = engine.add(&post.nzb(), "Stored.Killed", None).unwrap();
+        let stop_at = 10 + (round * 7) % 70; // percent of the download
+        loop {
+            let s = engine.job(&id).unwrap();
+            if s.done_bytes * 100 >= s.total_bytes * stop_at || s.state.is_terminal() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        drop(engine);
+        // Async work stops dead; a blocking call already under way completes, as a system call would.
+        doomed.shutdown_timeout(Duration::from_secs(10));
+
+        let done = main.block_on(async {
+            let engine = Engine::start(config).await.unwrap();
+            wait_done(&engine, &id).await
+        });
+        if done.state == JobState::Completed {
+            assert_eq!(read(&done, "movie.mkv"), movie, "round {round}: completed with the wrong bytes");
+            assert_eq!(names(&done), ["movie.mkv"], "round {round}: a volume already unpacked was fetched again");
+        } else {
+            panic!("round {round} (stopped at {stop_at}%, old_style={old_style}): {:?} {:?}", done.state, done.error);
+        }
+    }
 }

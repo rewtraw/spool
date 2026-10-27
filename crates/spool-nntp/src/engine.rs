@@ -67,6 +67,13 @@ impl JobState {
     }
 }
 
+/// How often a download's progress is saved while it runs. Tests save often, so that a restart
+/// finds a record older than what is on disk, as one does after a crash.
+#[cfg(not(feature = "testing"))]
+const CHECKPOINT_EVERY: Duration = Duration::from_secs(10);
+#[cfg(feature = "testing")]
+const CHECKPOINT_EVERY: Duration = Duration::from_millis(150);
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct FileProgress {
@@ -183,13 +190,17 @@ impl Job {
     }
 
     fn save_record(&self, rec: &JobRecord) -> std::io::Result<()> {
+        // Saves come from the download, the unpacking and shutdown at once; they share one
+        // temporary file, so they take turns.
+        static SAVING: Mutex<()> = Mutex::new(());
+        let _turn = SAVING.lock();
         let tmp = self.dir.join("job.json.tmp");
         std::fs::write(&tmp, serde_json::to_vec(rec)?)?;
         std::fs::rename(tmp, self.dir.join("job.json"))
     }
 
     /// Snapshot progress, make the data it describes durable, then persist the snapshot.
-    fn checkpoint(&self) -> std::io::Result<()> {
+    pub(crate) fn checkpoint(&self) -> std::io::Result<()> {
         let snapshot = self.rec.lock().clone();
         let handles: Vec<Arc<File>> = self.handles.lock().values().cloned().collect();
         for h in handles {
@@ -546,7 +557,7 @@ impl Inner {
                     job.speed.store(smooth as u64, Ordering::Relaxed);
                     (last, last_at) = (done, now);
                     inner.publish(&job);
-                    if last_checkpoint.elapsed() >= Duration::from_secs(10) {
+                    if last_checkpoint.elapsed() >= CHECKPOINT_EVERY {
                         last_checkpoint = Instant::now();
                         let j = job.clone();
                         let _ = tokio::task::spawn_blocking(move || j.checkpoint()).await;
@@ -788,6 +799,18 @@ impl Engine {
                 continue;
             };
 
+            // Alongside the download, a second task unpacks each RAR volume as it completes.
+            let volumes = {
+                let wanted = inner.cfg.read().direct_unpack && {
+                    let r = job.rec.lock();
+                    !r.direct_done && !r.direct_off && r.password.is_none()
+                };
+                wanted.then(|| crate::direct::plan(&job)).flatten()
+            };
+            // Volumes already unpacked and gone are not fetched again.
+            if volumes.is_some() {
+                crate::direct::tidy(&job);
+            }
             let files: Vec<usize> = {
                 let mut r = job.rec.lock();
                 r.state = JobState::Downloading;
@@ -796,18 +819,8 @@ impl Engine {
                 (0..r.files.len()).filter(|i| !r.files[*i].deferred && !r.files[*i].complete()).collect()
             };
             inner.publish(&job);
-            // Alongside the download, a second task unpacks each RAR volume as it completes.
             let (stop, downloaded) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-            let mut unpacker = {
-                let wanted = inner.cfg.read().direct_unpack && {
-                    let r = job.rec.lock();
-                    !r.direct_done && !r.direct_off && r.password.is_none()
-                };
-                wanted.then(|| crate::direct::plan(&job)).flatten().map(|volumes| {
-                    crate::direct::tidy(&job);
-                    tokio::spawn(crate::direct::run(job.clone(), volumes, stop.clone(), downloaded.clone()))
-                })
-            };
+            let mut unpacker = volumes.map(|volumes| tokio::spawn(crate::direct::run(job.clone(), volumes, stop.clone(), downloaded.clone())));
             let fetched = inner.fetch_files(&job, &files).await;
             if fetched != FetchOutcome::Complete {
                 // Paused, stopped or cut off: the unpacker finishes the volume in hand and saves its place.

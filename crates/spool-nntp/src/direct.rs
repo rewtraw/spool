@@ -251,9 +251,15 @@ fn take_volume(dir: &Path, state: &mut State, file_name: &str) -> Result<(), Str
     state.removed.push(Removed { name: file_name.to_string(), pieces });
     state.done += 1;
     // Saved before the volume goes: after a crash the state says it is done, and it is deleted then.
-    save(dir, state).map_err(io)?;
-    std::fs::remove_file(&path).map_err(io)?;
-    Ok(())
+    save(dir, state).map_err(io)
+}
+
+/// Delete a volume that has been taken. The job's own record is saved first, so that after a
+/// crash it knows the volume was whole and does not fetch it again into a file the unpacking
+/// has already passed.
+fn let_go(job: &Job, file_name: &str) -> Result<(), String> {
+    job.checkpoint().map_err(|e| format!("saving progress before removing {file_name}: {e}"))?;
+    std::fs::remove_file(job.dir.join(file_name)).map_err(|e| format!("removing {file_name}: {e}"))
 }
 
 /// Put every deleted volume back, byte for byte, and remove the working folder.
@@ -347,20 +353,35 @@ pub(crate) async fn run(job: Arc<Job>, volumes: Vec<usize>, stop: Arc<AtomicBool
             continue;
         };
         // A crash between saving the state and deleting the volume leaves a handled volume behind.
-        let d = dir.clone();
+        let (d, j) = (dir.clone(), job.clone());
         let mut s = state.clone();
-        let taken = tokio::task::spawn_blocking(move || take_volume(&d, &mut s, &name).map(|()| s)).await.unwrap_or_else(|e| Err(e.to_string()));
+        let taken = tokio::task::spawn_blocking(move || {
+            take_volume(&d, &mut s, &name)?;
+            let_go(&j, &name).map(|()| s)
+        })
+        .await
+        .unwrap_or_else(|e| Err(e.to_string()));
         match taken {
             Ok(s) => state = s,
-            Err(why) => return give_up(state, why).await,
+            // The state on disk may already count the volume; carry on from there next time.
+            Err(why) => return give_up(load(&dir), why).await,
         }
     }
 }
 
-/// Clear away a handled volume that a crash left on disk, so a resumed job is consistent.
+/// Clear away a handled volume that a crash left on disk, and count every handled volume as
+/// downloaded, whatever an older record of the job says, so a resumed job is consistent.
 pub(crate) fn tidy(job: &Job) {
     let state = load(&job.dir);
-    for r in &state.removed {
-        let _ = std::fs::remove_file(job.dir.join(&r.name));
+    let mut r = job.rec.lock();
+    for gone in &state.removed {
+        let _ = std::fs::remove_file(job.dir.join(&gone.name));
+        let named = |i: usize| r.files[i].name.as_deref() == Some(gone.name.as_str()) || (r.files[i].name.is_none() && job.nzb.files[i].subject_filename().as_deref() == Some(gone.name.as_str()));
+        let Some(i) = (0..r.files.len()).find(|i| named(*i)) else { continue };
+        let fresh: u64 = r.files[i].done.iter().zip(&job.nzb.files[i].segments).filter(|(d, _)| !**d).map(|(_, s)| s.bytes).sum();
+        let f = &mut r.files[i];
+        f.name = Some(gone.name.clone());
+        f.done.iter_mut().for_each(|d| *d = true);
+        r.done_bytes += fresh;
     }
 }
