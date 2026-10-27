@@ -228,12 +228,12 @@ impl App {
                 std::fs::rename(old, aside(old))?;
             }
         }
-        if src.exists() {
+        if src.try_exists().with_context(|| format!("looking for {}", src.display()))? {
             // Where something is still there it is not a file Spool is replacing. That is
             // known where the move is made: seen from here across a share, a file just moved
             // away by the disk's helper can look as if it were there yet.
             self.file_move(src, dst)?;
-        } else if !dst.exists() {
+        } else if !dst.try_exists().with_context(|| format!("looking for {}", dst.display()))? {
             bail!("neither the downloaded file nor its destination exists");
         }
         for (_, old, recycle) in &op.replaces {
@@ -574,8 +574,16 @@ impl App {
             Ok(())
         };
 
-        if !root.exists() {
-            return block(self, &mut acq, "the downloaded files are no longer on disk".into());
+        // Gone is gone; a share that does not answer in time is tried again later.
+        match root.try_exists() {
+            Ok(true) => {}
+            Ok(false) => return block(self, &mut acq, "the downloaded files are no longer on disk".into()),
+            // Left importing, it is taken up again with the imports a restart cut short.
+            Err(e) => {
+                acq.error = Some(format!("the downloaded files could not be reached ({e}); the import will be retried"));
+                self.db.save_acquisition(&mut acq)?;
+                return Ok(());
+            }
         }
         if let Err(e) = self.ensure_title_path(&mut title) {
             return block(self, &mut acq, e.to_string());
