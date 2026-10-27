@@ -73,6 +73,9 @@ struct IndexerState {
 
 type Shared = Arc<Mutex<IndexerState>>;
 
+/// The test indexer's key: in every download link it hands out, and needed to fetch one.
+const INDEXER_KEY: &str = "0123456789abcdef0123";
+
 async fn feed(State(s): State<Shared>, headers: axum::http::HeaderMap, axum::extract::RawQuery(query): axum::extract::RawQuery) -> String {
     let host = headers.get("host").and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
     let query = query.unwrap_or_default();
@@ -90,7 +93,7 @@ async fn feed(State(s): State<Shared>, headers: axum::http::HeaderMap, axum::ext
         .filter(|(_, (title, _, _))| !(by_id && st.untagged.contains(title)))
         .map(|(i, (title, size, _))| {
             format!(
-                "<item><title>{title}</title><guid>guid-{i}-{title}</guid><pubDate>{}</pubDate><enclosure url=\"http://{host}/nzb/{i}\" length=\"{size}\" type=\"application/x-nzb\"/><newznab:attr name=\"size\" value=\"{size}\"/></item>",
+                "<item><title>{title}</title><guid>guid-{i}-{title}</guid><pubDate>{}</pubDate><enclosure url=\"http://{host}/nzb/{i}?r={INDEXER_KEY}\" length=\"{size}\" type=\"application/x-nzb\"/><newznab:attr name=\"size\" value=\"{size}\"/></item>",
                 (chrono::Utc::now() - chrono::Duration::days(3)).to_rfc2822()
             )
         })
@@ -98,7 +101,10 @@ async fn feed(State(s): State<Shared>, headers: axum::http::HeaderMap, axum::ext
     format!("<?xml version=\"1.0\"?><rss xmlns:newznab=\"http://www.newznab.com/DTD/2010/feeds/attributes/\"><channel>{items}</channel></rss>")
 }
 
-async fn nzb(State(s): State<Shared>, AxPath(i): AxPath<usize>) -> Vec<u8> {
+async fn nzb(State(s): State<Shared>, AxPath(i): AxPath<usize>, axum::extract::RawQuery(query): axum::extract::RawQuery) -> Vec<u8> {
+    if query.as_deref() != Some(&format!("r={INDEXER_KEY}")) {
+        return vec![];
+    }
     s.lock().releases.get(i).map(|r| r.2.clone()).unwrap_or_default()
 }
 
@@ -140,7 +146,7 @@ impl World {
         app.settings.set_general(&g).unwrap();
         app.settings.set_servers(&[usenet.config("main", 0, 4)]).unwrap();
         app.apply_engine_config();
-        let mut ix: Indexer = serde_json::from_value(serde_json::json!({"name": "Fake", "url": format!("http://{addr}"), "api_key": "k"})).unwrap();
+        let mut ix: Indexer = serde_json::from_value(serde_json::json!({"name": "Fake", "url": format!("http://{addr}"), "api_key": INDEXER_KEY})).unwrap();
         app.db.save_indexer(&mut ix).unwrap();
         for kind in ["movie", "tv"] {
             app.db.save_profile(&mut QualityProfile::default_hd(kind)).unwrap();
@@ -414,7 +420,9 @@ async fn a_download_lost_by_the_downloader_is_taken_again_not_blocklisted() {
     let outcome = w.app.search(show.id, Scope::Episode(eps[0]), false, true).await.unwrap();
     assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
     // The downloader restarts and cannot read its record of the job: it is simply gone.
-    let job = w.app.db.acquisition(outcome.grabbed[0].id).unwrap().unwrap().job_id.unwrap();
+    let acq = w.app.db.acquisition(outcome.grabbed[0].id).unwrap().unwrap();
+    assert!(!acq.release.link.contains(INDEXER_KEY) && acq.release.link.contains("{apikey}"), "the indexer's key is not kept: {}", acq.release.link);
+    let job = acq.job_id.unwrap();
     w.app.engine.remove(&job, true).unwrap();
     w.app.reconcile_all().await.unwrap();
     w.app.engine.resume_all();

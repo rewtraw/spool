@@ -324,6 +324,12 @@ pub async fn read_at_most(mut resp: reqwest::Response, most: usize) -> std::resu
 impl App {
     /// The client to fetch an indexer's NZB link with. An indexer on this network, such as a
     /// local aggregator, hands out links on this network; one out on the internet does not.
+    /// A release's download link as fetched: with its indexer's key, kept out of what is stored.
+    pub fn nzb_link(&self, release: &crate::models::Release) -> String {
+        let ix = self.db.indexers().ok().and_then(|all| all.into_iter().find(|i| i.id == release.indexer_id));
+        crate::newznab::with_key(&release.link, ix.as_ref())
+    }
+
     pub fn nzb_client(&self, indexer_id: i64, link: &str) -> std::result::Result<&reqwest::Client, String> {
         let at = self.db.indexers().ok().and_then(|all| all.into_iter().find(|i| i.id == indexer_id)).and_then(|i| reqwest::Url::parse(&i.url).ok());
         // Told by how the indexer was written down, never by what its name looks up to: an

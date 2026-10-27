@@ -1187,7 +1187,7 @@ impl App {
                 }
             };
             let fetched = async {
-                let resp = client.get(&d.release.link).timeout(std::time::Duration::from_secs(150)).send().await?;
+                let resp = client.get(self.nzb_link(&d.release)).timeout(std::time::Duration::from_secs(150)).send().await?;
                 if !resp.status().is_success() {
                     return Ok(Err(format!("{} answered HTTP {} for the NZB", d.release.indexer, resp.status().as_u16())));
                 }

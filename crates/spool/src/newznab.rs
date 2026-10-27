@@ -52,6 +52,27 @@ pub fn build_url(ix: &Indexer, q: &Query) -> String {
     format!("{base}?{params}&extended=1&limit=100&apikey={}", enc(&ix.api_key))
 }
 
+/// Where an indexer's key stands in a download link that is kept. The key is put back only
+/// to fetch, so what is stored, shown or logged never carries it.
+pub const KEY_MARK: &str = "{apikey}";
+
+/// A download link with the indexer's key taken out.
+pub fn without_key(link: &str, ix: &Indexer) -> String {
+    if ix.api_key.len() < 8 {
+        return link.to_string();
+    }
+    let encoded = urlencoding::encode(&ix.api_key);
+    link.replace(&ix.api_key, KEY_MARK).replace(encoded.as_ref(), KEY_MARK)
+}
+
+/// The link to fetch, with the indexer's key back where it was.
+pub fn with_key(link: &str, ix: Option<&Indexer>) -> String {
+    match ix {
+        Some(ix) if link.contains(KEY_MARK) => link.replace(KEY_MARK, &urlencoding::encode(&ix.api_key)),
+        _ => link.to_string(),
+    }
+}
+
 /// Parse a Newznab RSS response.
 pub fn parse_feed(xml: &str, ix: &Indexer) -> Result<Vec<Release>> {
     let mut reader = Reader::from_str(xml);
@@ -70,7 +91,7 @@ pub fn parse_feed(xml: &str, ix: &Indexer) -> Result<Vec<Release>> {
             b"enclosure" => {
                 if let Some(r) = cur.as_mut() {
                     if let Some(u) = attr(e, b"url") {
-                        r.link = u;
+                        r.link = without_key(&u, ix);
                     }
                     if r.size == 0 {
                         r.size = attr(e, b"length").and_then(|l| l.parse().ok()).unwrap_or(0);
@@ -153,7 +174,7 @@ pub fn parse_feed(xml: &str, ix: &Indexer) -> Result<Vec<Release>> {
                     match name.as_str() {
                         "title" => r.title = unscramble(&v),
                         "guid" => r.guid = v.to_string(),
-                        "link" if r.link.is_empty() => r.link = v.to_string(),
+                        "link" if r.link.is_empty() => r.link = without_key(v, ix),
                         "comments" => r.info_url = v.to_string(),
                         "pubDate" if r.published == 0 => {
                             if let Ok(d) = chrono::DateTime::parse_from_rfc2822(v) {
@@ -273,6 +294,16 @@ mod tests {
         assert!(build_url(&i, &Query::Movie { imdb_id: None, title: "A & B".into(), year: 2001 }).contains("t=search&cat=2000,2010,2020,2030,2040,2045,2050,2060&q=A%20%26%20B%202001"));
         assert!(build_url(&i, &Query::Episode { tvdb_id: Some(296762), title: "Westworld".into(), season: 1, episode: 2 }).contains("t=tvsearch&cat=5030,5040&tvdbid=296762&season=1&ep=2"));
         assert!(build_url(&i, &Query::Season { tvdb_id: None, title: "Westworld".into(), season: 2 }).contains("q=Westworld&season=2"));
+    }
+
+    #[test]
+    fn a_link_is_kept_without_the_key_and_fetched_with_it() {
+        let ix: Indexer = serde_json::from_value(serde_json::json!({"id": 3, "name": "Test", "url": "https://indexer.test/", "api_key": "0123456789abcdef"})).unwrap();
+        let fetched = "https://indexer.test/getnzb/abc.nzb&i=1&r=0123456789abcdef";
+        let kept = without_key(fetched, &ix);
+        assert_eq!(kept, "https://indexer.test/getnzb/abc.nzb&i=1&r={apikey}");
+        assert_eq!(with_key(&kept, Some(&ix)), fetched);
+        assert_eq!(with_key("https://elsewhere.test/a.nzb", Some(&ix)), "https://elsewhere.test/a.nzb");
     }
 
     #[test]

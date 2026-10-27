@@ -257,7 +257,7 @@ impl App {
                 let _ = app.db.count_indexer(d.release.indexer_id, 0, 1);
                 let Ok(client) = app.nzb_client(d.release.indexer_id, &d.release.link) else { continue };
                 let fetched = async {
-                    let resp = client.get(&d.release.link).timeout(std::time::Duration::from_secs(150)).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.without_url().to_string())?;
+                    let resp = client.get(app.nzb_link(&d.release)).timeout(std::time::Duration::from_secs(150)).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.without_url().to_string())?;
                     crate::app::read_at_most(resp, crate::app::NZB_MOST).await
                 }
                 .await;

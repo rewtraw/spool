@@ -518,6 +518,15 @@ const MIGRATIONS: &[&str] = &[
         data TEXT NOT NULL
     );
     "#,
+    r#"
+    -- Download links are kept without the indexer's key, which is put back only to fetch.
+    UPDATE acquisitions SET data = json_set(data, '$.release.link', replace(json_extract(data, '$.release.link'),
+            (SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(acquisitions.data, '$.release.indexer_id')), '{apikey}'))
+        WHERE length(COALESCE((SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(acquisitions.data, '$.release.indexer_id')), '')) >= 8;
+    UPDATE decisions SET data = json_set(data, '$.release.link', replace(json_extract(data, '$.release.link'),
+            (SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(decisions.data, '$.release.indexer_id')), '{apikey}'))
+        WHERE length(COALESCE((SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(decisions.data, '$.release.indexer_id')), '')) >= 8;
+    "#,
 ];
 
 impl Db {
