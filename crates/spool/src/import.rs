@@ -344,7 +344,7 @@ impl App {
                 let wanted: Vec<i64> = forced_episodes.map(|f| f.to_vec()).unwrap_or_else(|| acq.episode_ids.clone());
                 for (path, size) in &vids {
                     let rel = path.strip_prefix(root).unwrap_or(path).to_string_lossy().to_string();
-                    let parsed = parse_episode_path(&format!("{}/{}", acq.release.title, rel)).or_else(|| parse_episode_path(&rel));
+                    let parsed = parse_episode_path(&format!("{}/{}", acq.release.title, rel)).or_else(|| parse_episode_path(&rel)).map(|p| crate::names::title_keeps_its_number(p, title));
                     // A file that names its episode by title, after a number of its own order.
                     let retitled = |p: &spool_core::parser::ParsedEpisodeInfo| match p.episode_numbers[..] {
                         [n] => crate::names::retitled(&rel, p.season_number(), n, &episodes).or_else(|| crate::names::retitled(&acq.release.title, p.season_number(), n, &episodes)),

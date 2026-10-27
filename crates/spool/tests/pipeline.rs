@@ -387,6 +387,19 @@ async fn an_episode_named_by_its_number_in_the_whole_run_is_found_in_its_season(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_number_in_the_series_title_is_not_taken_for_its_season() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (show, eps) = w.series("Blue Example No. 6", 296763, &[(1, 1, "Blues"), (1, 2, "Pilots")]);
+    w.release("Blue.Example.No.6.E02.1080p.BluRay.x264-GRP", &[("Blue.Example.No.6.E02.1080p.BluRay.x264-GRP.mkv", &video)]);
+    let outcome = w.app.search(show.id, Scope::Episode(eps[1]), false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{} {:?}", outcome.message, outcome.decisions.iter().map(|d| (&d.release.title, &d.rejections)).collect::<Vec<_>>());
+    assert_eq!(outcome.grabbed[0].episode_ids, [eps[1]]);
+    w.wait_state(show.id, AcqState::Imported).await;
+    assert!(w.app.db.episodes(show.id).unwrap().iter().find(|e| e.id == eps[1]).unwrap().file_id.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn season_pack_and_single_episode_import() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;

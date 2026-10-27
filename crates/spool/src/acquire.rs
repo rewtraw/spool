@@ -193,7 +193,7 @@ fn an_episode_of_it(t: &Title, release: &Release) -> Option<Rejection> {
 /// when the name cannot be read at all.
 fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'a>> {
     let t = &tc.title;
-    let parsed = crate::names::episode(&release.title);
+    let parsed = crate::names::episode(&release.title).map(|p| crate::names::title_keeps_its_number(p, t));
     // Named by the series' title and year and nothing more, it is the whole series, however
     // the year was read: as no number at all, or "1988" as season 19, episode 88.
     let year_read = parsed.as_ref().is_none_or(|p| {

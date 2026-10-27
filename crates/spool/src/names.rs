@@ -37,6 +37,20 @@ pub fn episode(name: &str) -> Option<ParsedEpisodeInfo> {
     remembered(&KEPT, name, || spool_core::parser::parse_episode_title(name))
 }
 
+/// A number at the end of a series' own title read as its season: "Blue.Submarine.No.6.E01"
+/// is episode 1 of Blue Submarine No. 6, not season 6 of Blue Submarine No.
+pub fn title_keeps_its_number(mut p: ParsedEpisodeInfo, t: &crate::models::Title) -> ParsedEpisodeInfo {
+    if let [season] = p.season_numbers[..] {
+        let whole = format!("{} {season}", p.series_title);
+        if std::iter::once(&t.title).chain(t.alt_titles.iter()).any(|n| plain(n) == plain(&whole)) {
+            p.series_title_without_year = whole.clone();
+            p.series_title = whole;
+            p.season_numbers = vec![1];
+        }
+    }
+    p
+}
+
 /// What a release's name says, read as a film's.
 pub fn movie(name: &str) -> Option<ParsedMovieInfo> {
     static KEPT: LazyLock<Mutex<HashMap<String, Option<ParsedMovieInfo>>>> = LazyLock::new(Default::default);
