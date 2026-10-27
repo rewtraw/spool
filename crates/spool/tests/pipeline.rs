@@ -418,6 +418,24 @@ async fn a_download_lost_by_the_downloader_is_taken_again_not_blocklisted() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_empty_subtitle_file_is_taken_as_none() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (show, eps) = w.series("Example World", 296762, &[(1, 1, "The Original")]);
+    w.release("Example.World.S01E01.1080p.BluRay.x264-GRP", &[("Example.World.S01E01.1080p.BluRay.x264-GRP.mkv", &video)]);
+    w.app.search(show.id, Scope::Episode(eps[0]), false, true).await.unwrap();
+    w.wait_state(show.id, AcqState::Imported).await;
+    let f = w.app.db.files(show.id).unwrap().remove(0);
+    let title = w.app.db.title(show.id).unwrap().unwrap();
+    let srt = title.file_path(&f).with_extension("en.srt");
+    // Left empty by a write cut short: no subtitle, so one is still looked for.
+    std::fs::write(&srt, b"").unwrap();
+    assert!(w.app.find_sidecars(f.id).unwrap().is_empty());
+    std::fs::write(&srt, b"1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
+    assert_eq!(w.app.find_sidecars(f.id).unwrap().iter().map(|s| s.language.as_str()).collect::<Vec<_>>(), ["en"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn season_pack_and_single_episode_import() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;
@@ -3948,12 +3966,22 @@ async fn a_helper_moves_a_title_between_its_own_folders_and_touches_nothing_else
         ("/link/work/v1/fs/remove", json!({"path": nas.join("films/Alpha (2001)")}), 403, "not a finished download"),
         ("/link/work/v1/fs/remove", json!({"path": nas.join("downloads/complete")}), 403, "not a finished download"),
         ("/link/work/v1/fs/remove", json!({"path": nas.join("films")}), 403, "outside the folders"),
+        // A subtitle is written only as a subtitle, only into the library, and never over a film.
+        ("/link/work/v1/fs/subtitle", json!({"path": film, "text": "1\n"}), 403, "not a subtitle file"),
+        ("/link/work/v1/fs/subtitle", json!({"path": nas.join("downloads/complete/x.srt"), "text": "1\n"}), 403, "downloads folder"),
+        ("/link/work/v1/fs/subtitle", json!({"path": outside.join("Elsewhere (1999).en.srt"), "text": "1\n"}), 403, "outside the folders"),
+        ("/link/work/v1/fs/subtitle", json!({"path": kept.join("Alpha (2001).fr.srt"), "text": "1\n"}), 403, "only reads"),
     ] {
         let (got, said) = ask(KEY, path, body.clone()).await;
         assert!(got == status && said.contains(why), "{path} {body}: {got} {said}");
     }
     assert!(outside.join("Elsewhere (1999).mkv").exists() && film.exists() && kept.join("Alpha (2001).mkv").exists() && nas.join("films/Neighbour (1990)/Neighbour (1990).mkv").exists() && nas.join("films/.spool-moving-7/Odd (1980).mkv").exists(), "and nothing was touched by any of it");
     assert_eq!(ask(KEY, "/link/work/v1/fs/stat", json!({"path": film})).await.1.contains(r#""exists":true"#), true);
+    // Beside a film in the library, the helper writes it whole.
+    let beside = nas.join("films/Alpha (2001)/Alpha (2001).de.srt");
+    assert_eq!(ask(KEY, "/link/work/v1/fs/subtitle", json!({"path": beside, "text": "1\n00:00:01,000 --> 00:00:02,000\nHallo\n"})).await.0, 200);
+    assert_eq!(std::fs::read_to_string(&beside).unwrap(), "1\n00:00:01,000 --> 00:00:02,000\nHallo\n");
+    std::fs::remove_file(&beside).unwrap();
     std::fs::remove_file(nas.join("films/Escape")).unwrap();
 
     // Off the helper's disks altogether, a move is Spool's own to carry out, as before.

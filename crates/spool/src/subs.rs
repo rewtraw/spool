@@ -320,6 +320,24 @@ pub fn align(shape: &[f32], cues: &[Cue]) -> SyncReport {
 
 /// The checksum OpenSubtitles knows files by: the size plus the first and last 64 KiB read as
 /// 64-bit numbers. A match means subtitles timed against this very file.
+/// The most a subtitle file is taken to hold; a film's worth is rarely a tenth of it.
+pub const LARGEST_SUBTITLE: usize = 4 << 20;
+
+/// Write a file whole or not at all: to a name of its own beside it, then over it.
+pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp = path.with_file_name(format!(".{}.spool-partial", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
+    let written = (|| -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        std::io::Write::write_all(&mut f, bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written.with_context(|| format!("writing {}", path.display()))
+}
+
 pub fn movie_hash(path: &Path) -> Result<String> {
     use std::io::{Read, Seek, SeekFrom};
     const CHUNK: u64 = 65536;
@@ -599,6 +617,11 @@ impl App {
             if !is_srt(&p) || !s.starts_with(&name) {
                 continue;
             }
+            // An empty file, left by a write that was cut short, is no subtitle: it is looked
+            // for again, and what is found is written over it.
+            if entry.metadata().is_ok_and(|m| m.len() == 0) {
+                continue;
+            }
             let rel = p.strip_prefix(&title.path).unwrap_or(&p).to_string_lossy().to_string();
             let (language, hearing_impaired, forced) = read_tags(&s[name.len()..]);
             let known = file.subtitles.iter().find(|k| k.rel_path == rel).cloned();
@@ -772,7 +795,7 @@ impl App {
             let fixed = retime(&cues, report.rate, report.offset);
             // Only keep the correction if the corrected file then checks out.
             if self.judge_timing(r, &fixed).await.verdict == Verdict::InSync {
-                std::fs::write(&path, write_srt(&fixed))?;
+                self.subtitle_write(&path, &write_srt(&fixed)).await?;
                 report.corrected = true;
                 tracing::info!(file = %rel_path, offset = report.offset, rate = report.rate, by = %report.method, "corrected subtitle timing");
             }
@@ -954,7 +977,7 @@ impl App {
         let tag = if c.hearing_impaired { format!("{}.sdh", c.language) } else { c.language.clone() };
         let path = video.with_file_name(format!("{}.{tag}.srt", stem(&video)));
         // Written out as clean UTF-8 whatever it arrived as.
-        std::fs::write(&path, write_srt(&cues))?;
+        self.subtitle_write(&path, &write_srt(&cues)).await?;
         let rel = path.strip_prefix(&title.path).unwrap_or(&path).to_string_lossy().to_string();
         file.subtitles.retain(|s| s.rel_path != rel);
         let side = Sidecar { language: c.language.clone(), rel_path: rel.clone(), source: "opensubtitles".into(), release: c.release.clone(), hearing_impaired: c.hearing_impaired, forced: false, sync: None };

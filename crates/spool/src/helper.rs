@@ -464,6 +464,7 @@ impl Helper {
             .route("/link/work/v1/marks/clear", post(marks_clear))
             .route("/link/work/v1/fs/stat", post(stat))
             .route("/link/work/v1/fs/move", post(file_move))
+            .route("/link/work/v1/fs/subtitle", post(subtitle_write))
             .route("/link/work/v1/fs/remove", post(output_remove))
             .route("/link/work/v1/moves", post(move_start))
             .route("/link/work/v1/moves/{id}", get(move_state))
@@ -1048,6 +1049,29 @@ async fn file_move(State(h): State<Helper>, Json(b): Json<FromTo>) -> R {
     h.0.filing.fetch_sub(1, Ordering::Relaxed);
     moved??;
     h.0.filed.fetch_add(1, Ordering::Relaxed);
+    Ok(Json(json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+struct SubtitleText {
+    path: String,
+    text: String,
+}
+
+/// Put a subtitle file beside a video in the library, written whole or not at all. Only a
+/// subtitle, only into the library, and never over a file of another kind.
+async fn subtitle_write(State(h): State<Helper>, Json(b): Json<SubtitleText>) -> R {
+    let p = h.allowed(&b.path, true)?;
+    if h.0.conf.downloads == p || under(&p, &h.0.conf.downloads) {
+        return Err(Refused(StatusCode::FORBIDDEN, "subtitles are not written into the downloads folder".into()));
+    }
+    if !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("srt")) {
+        return Err(Refused(StatusCode::FORBIDDEN, format!("{} is not a subtitle file", p.display())));
+    }
+    if b.text.len() > crate::subs::LARGEST_SUBTITLE {
+        return Err(Refused(StatusCode::PAYLOAD_TOO_LARGE, "that is too large to be a subtitle file".into()));
+    }
+    tokio::task::spawn_blocking(move || crate::subs::write_whole(&p, b.text.as_bytes())).await??;
     Ok(Json(json!({"ok": true})))
 }
 

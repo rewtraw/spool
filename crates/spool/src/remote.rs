@@ -481,6 +481,10 @@ impl Remote {
         Ok(self.post("/link/work/v1/fs/move", json!({"from": from, "to": to}), Duration::from_secs(4 * 3600)).await.map(|_| ())?)
     }
 
+    pub async fn subtitle_write(&self, there: &Path, text: &str) -> Result<()> {
+        Ok(self.post("/link/work/v1/fs/subtitle", json!({"path": there, "text": text}), Duration::from_secs(120)).await.map(|_| ())?)
+    }
+
     /// Clear away the folder a finished download left.
     pub async fn remove_output(&self, there: &Path) -> Result<()> {
         Ok(self.post("/link/work/v1/fs/remove", json!({"path": there}), Duration::from_secs(120)).await.map(|_| ())?)
@@ -1129,6 +1133,21 @@ impl App {
             }
         }
         crate::import::move_file(src, dst)
+    }
+
+    /// Put a subtitle file beside a video. On a helper's disks the helper writes it, so a slow
+    /// share cannot leave half a file there.
+    pub async fn subtitle_write(&self, path: &Path, text: &str) -> Result<()> {
+        if let Some(r) = self.remotes().into_iter().find(|r| r.covers(path)) {
+            if !r.seen().usable {
+                bail!("{}'s helper cannot be reached, and the subtitle goes on its disks", r.conf.name);
+            }
+            if let Some(there) = r.there(path) {
+                return r.subtitle_write(&there, text).await;
+            }
+        }
+        let (path, text) = (path.to_path_buf(), text.to_string());
+        tokio::task::spawn_blocking(move || crate::subs::write_whole(&path, text.as_bytes())).await?
     }
 
     /// Look through a folder: asked of the linked Spool whose disks it is on, where there
