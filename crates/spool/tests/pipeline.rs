@@ -67,6 +67,8 @@ struct IndexerState {
     untagged: std::collections::HashSet<String>,
     /// Every query string received.
     queries: Vec<String>,
+    /// An error the indexer answers every query with, as when it no longer takes the key.
+    refuses: Option<String>,
 }
 
 type Shared = Arc<Mutex<IndexerState>>;
@@ -78,6 +80,9 @@ async fn feed(State(s): State<Shared>, headers: axum::http::HeaderMap, axum::ext
     let mut st = s.lock();
     st.hits += 1;
     st.queries.push(query);
+    if let Some(why) = &st.refuses {
+        return format!("<?xml version=\"1.0\"?><error code=\"100\" description=\"{why}\"/>");
+    }
     let items: String = st
         .releases
         .iter()
@@ -433,6 +438,24 @@ async fn an_empty_subtitle_file_is_taken_as_none() {
     assert!(w.app.find_sidecars(f.id).unwrap().is_empty());
     std::fs::write(&srt, b"1\n00:00:01,000 --> 00:00:02,000\nHello\n").unwrap();
     assert_eq!(w.app.find_sidecars(f.id).unwrap().iter().map(|s| s.language.as_str()).collect::<Vec<_>>(), ["en"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_indexer_that_keeps_refusing_is_said_once_and_unsaid_when_it_answers() {
+    let w = World::new(Mode::Active).await;
+    let (show, _) = w.series("Example World", 296762, &[(1, 1, "The Original")]);
+    w.indexer.lock().refuses = Some("Invalid API Key".into());
+    let open = |w: &World| w.app.db.attention(false).unwrap().into_iter().filter(|a| a.kind.starts_with("indexer:")).map(|a| a.message).collect::<Vec<_>>();
+    for _ in 0..4 {
+        // Searches a person starts are not held back by the pause after a failure.
+        w.app.search(show.id, Scope::Missing, true, false).await.unwrap();
+    }
+    let said = open(&w);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("Invalid API Key"), "{said:?}");
+    w.indexer.lock().refuses = None;
+    w.app.search(show.id, Scope::Missing, true, false).await.unwrap();
+    assert!(open(&w).is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]

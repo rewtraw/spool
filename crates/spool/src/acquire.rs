@@ -665,6 +665,7 @@ impl App {
         match newznab::fetch(&self.http, ix, q).await {
             Ok((r, limits)) => {
                 self.indexer_backoff.lock().remove(&ix.id);
+                self.indexer_trouble(ix, None);
                 if let Some(l) = limits {
                     self.note_indexer_limits(ix.id, l);
                 }
@@ -677,8 +678,21 @@ impl App {
                 let limited = msg.to_lowercase().contains("limit");
                 let minutes: u64 = if limited { 180 } else { [5, 15, 60, 180, 360][(failures as usize - 1).min(4)] };
                 b.insert(ix.id, (failures, std::time::Instant::now() + std::time::Duration::from_secs(minutes * 60), msg.clone()));
+                drop(b);
+                // Once is a hiccup. Three in a row is something to put right, such as a key the
+                // indexer no longer takes, and it is said once rather than on every search.
+                if failures >= 3 {
+                    self.indexer_trouble(ix, Some(&format!("{} has failed its last {failures} searches: {msg}. Spool keeps trying it; this goes away once it answers.", ix.name)));
+                }
                 Err(e)
             }
+        }
+    }
+
+    /// Say, or stop saying, that an indexer is failing.
+    fn indexer_trouble(&self, ix: &Indexer, message: Option<&str>) {
+        if self.db.set_standing_attention(&format!("indexer:{}", ix.id), message, serde_json::json!({"indexer": ix.name})).unwrap_or(false) {
+            self.emit(Event::Attention);
         }
     }
 
