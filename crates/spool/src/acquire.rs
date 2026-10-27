@@ -217,7 +217,9 @@ fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'
         });
     }
     let mut p = parsed?;
-    let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id;
+    // The indexer's id covers a name the library does not know, but not a name with nothing of
+    // the title in it: indexers mislabel ("De La Calle" filed under Fujiko Mine's id).
+    let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id && shares_a_name(&p.series_title, t);
     // A later season posted under its own name and numbered from one.
     let named = season_named(&p.series_title, t, &tc.seasons);
     if let Some((season, offset)) = named {
@@ -414,6 +416,18 @@ pub struct SeasonName {
 
 /// A season said at the end of a series' name in a release: "Show Season 2", "Show S2",
 /// "Show 2nd Season". Gives the name without it, and the season.
+/// Whether a release's series name has any of the title in it: one holds the other, or they
+/// share a word of four letters or more.
+fn shares_a_name(series_title: &str, t: &Title) -> bool {
+    let words = |s: &str| -> Vec<String> { s.split(|c: char| !c.is_alphanumeric()).filter(|w| w.chars().count() >= 4).map(str::to_lowercase).collect() };
+    let said = plain(series_title);
+    let theirs = words(series_title);
+    std::iter::once(&t.title).chain(t.alt_titles.iter()).any(|n| {
+        let ours = plain(n);
+        (!said.is_empty() && !ours.is_empty() && (ours.contains(&said) || said.contains(&ours))) || words(n).iter().any(|w| theirs.contains(w))
+    })
+}
+
 fn season_marker(title: &str) -> Option<(String, u32)> {
     let words: Vec<String> = title.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
     let number = |w: &str| w.parse::<u32>().ok().filter(|n| (1..=30).contains(n));
@@ -1434,7 +1448,7 @@ pub struct SearchOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{names_an_episode, names_whole_series, season_marker, season_named, SeasonName};
+    use super::{names_an_episode, names_whole_series, season_marker, season_named, shares_a_name, SeasonName};
     use crate::models::Title;
 
     #[test]
@@ -1455,6 +1469,17 @@ mod tests {
         assert_eq!(season_named("Shingeki no Rei", &show, &seasons), None);
         assert_eq!(season_named("Another Show Season 2", &show, &seasons), None);
         assert_eq!(season_marker("Space Station"), None);
+    }
+
+    #[test]
+    fn an_indexer_id_is_believed_only_for_a_name_with_some_of_the_title_in_it() {
+        let show: Title = serde_json::from_value(serde_json::json!({"kind": "series", "title": "Lupin the Third: Mine Fujiko to Iu Onna", "year": 2012, "alt_titles": ["Lupin the Third: The Woman Called Fujiko Mine"]})).unwrap();
+        for name in ["Lupin the Third", "Lupin III", "The Woman Called Fujiko Mine", "Fujiko Mine", "LupinTheThirdMineFujikoToIuOnna"] {
+            assert!(shares_a_name(name, &show), "{name}");
+        }
+        for name in ["De La Calle", "Breaking Bad"] {
+            assert!(!shares_a_name(name, &show), "{name}");
+        }
     }
 
     #[test]
