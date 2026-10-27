@@ -31,6 +31,7 @@ pub struct ParsedEpisodeInfo {
     pub is_season_extra: bool,
     pub special: bool,
     pub is_split_episode: bool,
+    /// No season was named ("Show.E84"), and season 1 is only assumed.
     pub is_mini_series: bool,
     pub quality: Option<QualityModel>,
     pub release_group: Option<String>,
@@ -403,4 +404,20 @@ pub fn parse_episode_path(path: &str) -> Option<ParsedEpisodeInfo> {
     result
         .or_else(|| parse_episode_title(&format!("{dir} {file_name}")))
         .or_else(|| parse_episode_title(&format!("{dir}{ext}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_episode_title;
+
+    #[test]
+    fn a_season_only_assumed_is_told_from_one_named() {
+        for name in ["Legend.of.the.Galactic.Heroes.E84.1080p.WEB.H264.URANIME", "Show.E05.x264-GRP"] {
+            let p = parse_episode_title(name).unwrap();
+            assert!(p.is_mini_series && p.season_numbers == [1], "{name}");
+        }
+        for name in ["Show.S03E04.1080p.WEB-GRP", "Show.3x04.720p.HDTV-GRP", "Show.S01E05.x264-GRP"] {
+            assert!(!parse_episode_title(name).unwrap().is_mini_series, "{name}");
+        }
+    }
 }

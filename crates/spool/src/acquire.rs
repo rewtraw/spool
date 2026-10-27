@@ -253,21 +253,16 @@ fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'
                 wrong = Some(rej("unknown_episode", format!("season {season} is not in the episode list")));
             }
         } else if !p.episode_numbers.is_empty() {
-            covered = tc.episodes.iter().filter(|e| e.season == season && p.episode_numbers.contains(&e.episode)).collect();
-            covers = format!("S{season:02}{}", p.episode_numbers.iter().map(|n| format!("E{n:02}")).collect::<String>());
+            covered = episodes_numbered(&tc.episodes, &p);
+            covers = match covered.first() {
+                Some(e) if e.season != season => covered.iter().map(|e| format!("S{:02}E{:02}", e.season, e.episode)).collect::<Vec<_>>().join(" "),
+                _ => format!("S{season:02}{}", p.episode_numbers.iter().map(|n| format!("E{n:02}")).collect::<String>()),
+            };
             // Numbered in an order of its own, and the episode's title given after the number.
             if let [n] = p.episode_numbers[..] {
                 if let Some(e) = crate::names::retitled(&release.title, season, n, &tc.episodes) {
                     covered = vec![e];
                     covers = format!("S{:02}E{:02}", e.season, e.episode);
-                }
-            }
-            // "Show.E84" names no season, and is read as season 1. Where season 1 has no such
-            // episode, it is the 84th of the whole run.
-            if covered.len() != p.episode_numbers.len() && season == 1 && !names_a_season(&release.title) {
-                if let Some(found) = episodes_by_absolute(&tc.episodes, &p.episode_numbers) {
-                    covers = found.iter().map(|e| format!("S{:02}E{:02}", e.season, e.episode)).collect::<Vec<_>>().join(" ");
-                    covered = found;
                 }
             }
             if covered.len() != p.episode_numbers.len() {
@@ -424,21 +419,6 @@ pub struct SeasonName {
 
 /// A season said at the end of a series' name in a release: "Show Season 2", "Show S2",
 /// "Show 2nd Season". Gives the name without it, and the season.
-/// Whether a release's name says which season it is: "S03E04", "3x04", "Season 3".
-fn names_a_season(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
-    words.iter().enumerate().any(|(i, w)| {
-        let sxe = w.strip_prefix('s').is_some_and(|rest| {
-            let (season, episode) = rest.split_once('e').unwrap_or((rest, "0"));
-            digits(season) && digits(episode.split('e').next().unwrap_or(""))
-        });
-        let nxn = w.split_once('x').is_some_and(|(a, b)| digits(a) && digits(b) && a.len() <= 2);
-        sxe || nxn || (*w == "season" && words.get(i + 1).is_some_and(|n| digits(n)))
-    })
-}
-
 /// Whether a release's series name has any of the title in it: one holds the other, or they
 /// share a word of four letters or more.
 fn shares_a_name(series_title: &str, t: &Title) -> bool {
@@ -1471,7 +1451,7 @@ pub struct SearchOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{names_a_season, names_an_episode, names_whole_series, season_marker, season_named, shares_a_name, SeasonName};
+    use super::{names_an_episode, names_whole_series, season_marker, season_named, shares_a_name, SeasonName};
     use crate::models::Title;
 
     #[test]
@@ -1492,16 +1472,6 @@ mod tests {
         assert_eq!(season_named("Shingeki no Rei", &show, &seasons), None);
         assert_eq!(season_named("Another Show Season 2", &show, &seasons), None);
         assert_eq!(season_marker("Space Station"), None);
-    }
-
-    #[test]
-    fn a_season_is_told_from_a_bare_episode_number() {
-        for name in ["Show.S03E04.1080p", "Show S03 1080p", "Show.3x04.720p", "Show Season 3 Complete", "Show.S01E01E02.WEB"] {
-            assert!(names_a_season(name), "{name}");
-        }
-        for name in ["Legend.of.the.Galactic.Heroes.E84.1080p.WEB.H264.URANIME", "[Group] Show - 84 [1080p]", "Show.E05.x264-GRP", "Show.1080p.x265-GRP"] {
-            assert!(!names_a_season(name), "{name}");
-        }
     }
 
     #[test]

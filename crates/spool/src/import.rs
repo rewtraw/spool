@@ -353,7 +353,7 @@ impl App {
                     let named = parsed.as_ref().and_then(retitled);
                     let mut eps: Vec<Episode> = match &parsed {
                         _ if named.is_some() => named.into_iter().cloned().collect(),
-                        Some(p) if !p.episode_numbers.is_empty() => episodes.iter().filter(|e| e.season == p.season_number() && p.episode_numbers.contains(&e.episode)).cloned().collect(),
+                        Some(p) if !p.episode_numbers.is_empty() => crate::models::episodes_numbered(&episodes, p).into_iter().cloned().collect(),
                         Some(p) if p.air_date.is_some() => episodes.iter().filter(|e| e.air_date == p.air_date).cloned().collect(),
                         Some(p) if p.is_absolute() => episodes_by_absolute(&episodes, &p.absolute_episode_numbers).map(|f| f.into_iter().cloned().collect()).unwrap_or_default(),
                         _ => vec![],

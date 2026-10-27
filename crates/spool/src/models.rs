@@ -692,6 +692,17 @@ pub struct HistoryEntry {
     pub data: serde_json::Value,
 }
 
+/// The episodes a name gives by season and number. With no season named, "Show.E84" is read
+/// as season 1, and where season 1 has no such episode it is the 84th of the whole run.
+pub fn episodes_numbered<'a>(episodes: &'a [Episode], p: &spool_core::parser::ParsedEpisodeInfo) -> Vec<&'a Episode> {
+    let season = p.season_number();
+    let found: Vec<&Episode> = episodes.iter().filter(|e| e.season == season && p.episode_numbers.contains(&e.episode)).collect();
+    if found.len() == p.episode_numbers.len() || !p.is_mini_series {
+        return found;
+    }
+    episodes_by_absolute(episodes, &p.episode_numbers).unwrap_or(found)
+}
+
 /// Episodes for absolute numbers ("Show - 27"), counting regular episodes across seasons in
 /// order, as anime releases do. None unless every number maps to an episode.
 pub fn episodes_by_absolute<'a>(episodes: &'a [Episode], numbers: &[u32]) -> Option<Vec<&'a Episode>> {
