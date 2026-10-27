@@ -371,16 +371,15 @@ pub(crate) async fn run(job: Arc<Job>, volumes: Vec<usize>, stop: Arc<AtomicBool
 
 /// Clear away a handled volume that a crash left on disk, and count every handled volume as
 /// downloaded, whatever an older record of the job says, so a resumed job is consistent.
-pub(crate) fn tidy(job: &Job) {
+/// Volumes are taken in the order of the plan, so the first ones in it are those handled.
+pub(crate) fn tidy(job: &Job, volumes: &[usize]) {
     let state = load(&job.dir);
     let mut r = job.rec.lock();
-    for gone in &state.removed {
+    for (gone, &i) in state.removed.iter().zip(volumes) {
         let _ = std::fs::remove_file(job.dir.join(&gone.name));
-        let named = |i: usize| r.files[i].name.as_deref() == Some(gone.name.as_str()) || (r.files[i].name.is_none() && job.nzb.files[i].subject_filename().as_deref() == Some(gone.name.as_str()));
-        let Some(i) = (0..r.files.len()).find(|i| named(*i)) else { continue };
         let fresh: u64 = r.files[i].done.iter().zip(&job.nzb.files[i].segments).filter(|(d, _)| !**d).map(|(_, s)| s.bytes).sum();
         let f = &mut r.files[i];
-        f.name = Some(gone.name.clone());
+        f.name.get_or_insert_with(|| gone.name.clone());
         f.done.iter_mut().for_each(|d| *d = true);
         r.done_bytes += fresh;
     }

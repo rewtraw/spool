@@ -144,6 +144,8 @@ pub(crate) struct Job {
     pub nzb: Nzb,
     pub rec: Mutex<JobRecord>,
     handles: Mutex<HashMap<usize, Arc<File>>>,
+    /// Held from taking a snapshot of the record to writing it; see `save_record`.
+    saving: Mutex<()>,
     cancel: AtomicBool,
     speed: AtomicU64,
     /// Bytes actually received, for speed. Progress also counts segments given up on.
@@ -185,15 +187,15 @@ impl Job {
     }
 
     pub fn save(&self) -> std::io::Result<()> {
+        let _turn = self.saving.lock();
         let snapshot = self.rec.lock().clone();
         self.save_record(&snapshot)
     }
 
+    /// Saves come from the download, the unpacking and shutdown at once. Each takes its
+    /// snapshot and writes it in its turn, so an older snapshot never lands after a newer one,
+    /// and the temporary file they share is never written by two at once.
     fn save_record(&self, rec: &JobRecord) -> std::io::Result<()> {
-        // Saves come from the download, the unpacking and shutdown at once; they share one
-        // temporary file, so they take turns.
-        static SAVING: Mutex<()> = Mutex::new(());
-        let _turn = SAVING.lock();
         let tmp = self.dir.join("job.json.tmp");
         std::fs::write(&tmp, serde_json::to_vec(rec)?)?;
         std::fs::rename(tmp, self.dir.join("job.json"))
@@ -201,6 +203,7 @@ impl Job {
 
     /// Snapshot progress, make the data it describes durable, then persist the snapshot.
     pub(crate) fn checkpoint(&self) -> std::io::Result<()> {
+        let _turn = self.saving.lock();
         let snapshot = self.rec.lock().clone();
         let handles: Vec<Arc<File>> = self.handles.lock().values().cloned().collect();
         for h in handles {
@@ -772,7 +775,7 @@ impl Engine {
                 rec.state = JobState::Queued;
                 rec.message = "Resuming after restart".into();
             }
-            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) }));
+            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), saving: Mutex::new(()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) }));
         }
         loaded.sort_by_key(|j| j.rec.lock().added_at);
         *inner.jobs.lock() = loaded;
@@ -808,8 +811,8 @@ impl Engine {
                 wanted.then(|| crate::direct::plan(&job)).flatten()
             };
             // Volumes already unpacked and gone are not fetched again.
-            if volumes.is_some() {
-                crate::direct::tidy(&job);
+            if let Some(v) = &volumes {
+                crate::direct::tidy(&job, v);
             }
             let files: Vec<usize> = {
                 let mut r = job.rec.lock();
@@ -932,7 +935,7 @@ impl Engine {
             direct_done: false,
             direct_off: false,
         };
-        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) });
+        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), saving: Mutex::new(()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) });
         job.save()?;
         self.0.jobs.lock().push(job.clone());
         self.0.publish(&job);

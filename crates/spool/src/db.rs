@@ -520,12 +520,19 @@ const MIGRATIONS: &[&str] = &[
     "#,
     r#"
     -- Download links are kept without the indexer's key, which is put back only to fetch.
-    UPDATE acquisitions SET data = json_set(data, '$.release.link', replace(json_extract(data, '$.release.link'),
-            (SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(acquisitions.data, '$.release.indexer_id')), '{apikey}'))
-        WHERE length(COALESCE((SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(acquisitions.data, '$.release.indexer_id')), '')) >= 8;
-    UPDATE decisions SET data = json_set(data, '$.release.link', replace(json_extract(data, '$.release.link'),
-            (SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(decisions.data, '$.release.indexer_id')), '{apikey}'))
-        WHERE length(COALESCE((SELECT json_extract(i.data, '$.api_key') FROM indexers i WHERE i.id = json_extract(decisions.data, '$.release.indexer_id')), '')) >= 8;
+    -- The key may stand as it is or encoded for a URL; keys use letters, digits and at most
+    -- the three marks of base64 that encoding changes.
+    CREATE TEMP TABLE link_keys AS SELECT id,
+        json_extract(data, '$.api_key') AS raw,
+        replace(replace(replace(json_extract(data, '$.api_key'), '+', '%2B'), '/', '%2F'), '=', '%3D') AS encoded
+        FROM indexers WHERE length(COALESCE(json_extract(data, '$.api_key'), '')) >= 8;
+    UPDATE acquisitions SET data = json_set(data, '$.release.link',
+            (SELECT replace(replace(json_extract(acquisitions.data, '$.release.link'), k.raw, '{apikey}'), k.encoded, '{apikey}') FROM link_keys k WHERE k.id = json_extract(acquisitions.data, '$.release.indexer_id')))
+        WHERE json_type(data, '$.release.link') = 'text' AND json_extract(data, '$.release.indexer_id') IN (SELECT id FROM link_keys);
+    UPDATE decisions SET data = json_set(data, '$.release.link',
+            (SELECT replace(replace(json_extract(decisions.data, '$.release.link'), k.raw, '{apikey}'), k.encoded, '{apikey}') FROM link_keys k WHERE k.id = json_extract(decisions.data, '$.release.indexer_id')))
+        WHERE json_type(data, '$.release.link') = 'text' AND json_extract(data, '$.release.indexer_id') IN (SELECT id FROM link_keys);
+    DROP TABLE link_keys;
     "#,
 ];
 

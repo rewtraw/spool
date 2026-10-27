@@ -327,7 +327,12 @@ pub const LARGEST_SUBTITLE: usize = 4 << 20;
 pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_file_name(format!(".{}.spool-partial", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
     let written = (|| -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
+        // Made new, never opened where it stands: a link left at that name is removed, not
+        // followed, and anything that appears there meanwhile is an error, not overwritten.
+        if std::fs::symlink_metadata(&tmp).is_ok() {
+            std::fs::remove_file(&tmp)?;
+        }
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         std::io::Write::write_all(&mut f, bytes)?;
         f.sync_all()?;
         std::fs::rename(&tmp, path)
@@ -1090,6 +1095,19 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_subtitle_is_never_written_through_a_link_left_at_its_temporary_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let film = dir.path().join("Film (2001).mkv");
+        std::fs::write(&film, b"the film").unwrap();
+        let srt = dir.path().join("Film (2001).en.srt");
+        std::os::unix::fs::symlink(&film, dir.path().join(".Film (2001).en.srt.spool-partial")).unwrap();
+        write_whole(&srt, b"1\n00:00:01,000 --> 00:00:02,000\nHi\n").unwrap();
+        assert_eq!(std::fs::read(&film).unwrap(), b"the film");
+        assert_eq!(std::fs::read_to_string(&srt).unwrap(), "1\n00:00:01,000 --> 00:00:02,000\nHi\n");
+    }
 
     #[test]
     fn reads_and_writes_subrip() {
