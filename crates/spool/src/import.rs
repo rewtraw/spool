@@ -73,7 +73,11 @@ pub fn video_files(root: &Path) -> Vec<(PathBuf, u64)> {
     vids
 }
 
+/// Move a file, never over another: a file already at `dst` is an error, and stays.
 pub(crate) fn move_file(src: &Path, dst: &Path) -> Result<()> {
+    if dst.symlink_metadata().is_ok() {
+        bail!("{} already exists and is not a file Spool is replacing", dst.display());
+    }
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
@@ -225,9 +229,9 @@ impl App {
             }
         }
         if src.exists() {
-            if dst.exists() {
-                bail!("{} already exists and is not a file Spool is replacing", dst.display());
-            }
+            // Where something is still there it is not a file Spool is replacing. That is
+            // known where the move is made: seen from here across a share, a file just moved
+            // away by the disk's helper can look as if it were there yet.
             self.file_move(src, dst)?;
         } else if !dst.exists() {
             bail!("neither the downloaded file nor its destination exists");
@@ -843,5 +847,25 @@ pub async fn probe_with(tool: &Path, path: &Path, scene_name: &str) -> Result<Me
     match MediaInfo::from_ffprobe(&probe, scene_name) {
         Some(mi) => Ok(mi),
         None => bail!("the file has no video stream"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_move_never_goes_over_another_file() {
+        let dir = std::env::temp_dir().join(format!("spool-move-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (a, b) = (dir.join("a.mkv"), dir.join("b.mkv"));
+        std::fs::write(&a, b"new").unwrap();
+        std::fs::write(&b, b"kept").unwrap();
+        assert!(move_file(&a, &b).unwrap_err().to_string().contains("already exists"));
+        assert_eq!((std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap()), (b"new".to_vec(), b"kept".to_vec()));
+        std::fs::remove_file(&b).unwrap();
+        move_file(&a, &b).unwrap();
+        assert!(!a.exists() && std::fs::read(&b).unwrap() == b"new");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
