@@ -158,7 +158,7 @@ const TOOLS: &[Tool] = &[
         name: "search_releases",
         read: false,
         destructive: false,
-        description: "Ask the indexers (and the archive) for releases of a title and judge them. Acceptable releases are listed best first, in the order Spool would choose them: a release that can be heard in the household language (in_household_language) goes before a better one that cannot. With grab=false it only reports; with grab=true the best acceptable release starts downloading. For a series give season, or season and episode; neither means everything missing. Uses indexer request allowance.",
+        description: "Ask the indexers (and the archive) for releases of a title and judge them. Acceptable releases are listed best first, in the order Spool would choose them: a release that can be heard in the household language (in_household_language) goes before a better one that cannot. With grab=false it only reports; with grab=true the best acceptable release starts downloading, and a search that takes long carries on after answering that it is still searching. For a series give season, or season and episode; neither means everything missing. Uses indexer request allowance.",
         schema: || obj(json!({"title_id": {"type": "integer"}, "season": {"type": "integer"}, "episode": {"type": "integer"}, "grab": {"type": "boolean", "description": "Default false."}, "smaller": {"type": "boolean", "description": "Look for smaller copies of files that are over the profile's size target, accepting equal or lower quality that fits it. With grab=true the chosen copy replaces the file on disk once imported."}, "contains": {"type": "string", "description": "Only list releases whose name contains this, ignoring case (a group, \"remux\", \"dual\"). Does not narrow what is asked or grabbed."}, "limit": {"type": "integer", "description": "How many acceptable and how many rejected releases to list (default 15, at most 100)."}}), &["title_id"]),
     },
     Tool {
@@ -866,7 +866,21 @@ impl Mcp {
                     (None, Some(_)) => return Err("give season along with episode".into()),
                     _ => {}
                 }
-                let r = self.post(&format!("/api/titles/{id}/search"), body).await?;
+                // A search that grabs checks each release is still on the servers, which can take
+                // minutes. It runs on its own, so a client that stops waiting does not cut it short
+                // before it has started anything.
+                let grab = body["grab"] == true;
+                let (me, path) = (self.clone(), format!("/api/titles/{id}/search"));
+                let mut search = tokio::spawn(async move { me.post(&path, body).await });
+                let r = match tokio::time::timeout(std::time::Duration::from_secs(if grab { 25 } else { 600 }), &mut search).await {
+                    Ok(done) => done.map_err(|e| e.to_string())??,
+                    Err(_) => {
+                        return Ok(json!({
+                            "result": "still searching; it carries on, and what it starts appears in activity",
+                            "started": [],
+                        }))
+                    }
+                };
                 let limit = a["limit"].as_u64().unwrap_or(15).clamp(1, 100) as usize;
                 let contains = a["contains"].as_str().unwrap_or("").to_lowercase();
                 let decisions: Vec<&Value> = r["decisions"].as_array().into_iter().flatten().filter(|d| d["release"]["title"].as_str().is_some_and(|n| n.to_lowercase().contains(&contains))).collect();
