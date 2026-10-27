@@ -214,8 +214,10 @@ impl App {
                 continue;
             }
             if !recycle.is_empty() {
+                // By the helper of the disk it is on, where there is one, as the download is
+                // moved: from here, across a share, a rename that fails becomes a copy.
                 if old != dst || src.exists() {
-                    move_file(old, Path::new(recycle)).with_context(|| format!("recycling {}", old.display()))?;
+                    self.file_move(old, Path::new(recycle)).with_context(|| format!("recycling {}", old.display()))?;
                 }
             } else if old == dst && src.exists() {
                 // Same name as the file it replaces: step it aside until the new one has landed.
@@ -694,7 +696,7 @@ impl App {
             if recycle.as_os_str().is_empty() {
                 std::fs::remove_file(&abs).with_context(|| format!("deleting {}", abs.display()))?;
             } else {
-                move_file(&abs, &recycle)?;
+                self.file_move(&abs, &recycle)?;
             }
             // Leave no empty folder behind for Plex to show.
             if let Some(parent) = abs.parent() {
