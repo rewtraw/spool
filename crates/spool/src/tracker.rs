@@ -13,6 +13,8 @@ impl App {
             return Ok(());
         }
         match job {
+            // Most often a downloader that restarted and could not read its record. The release
+            // is not at fault: it stays choosable, and the search may well take it again.
             None => self.fail_acquisition(acq, "the download disappeared from the queue", false).await,
             Some(j) if j.state == JobState::Failed => {
                 let why = j.error.unwrap_or_else(|| "the download failed".into());
@@ -47,17 +49,19 @@ impl App {
         }
     }
 
-    /// Record a failed download, keep the release from being chosen again, and look for another.
-    pub async fn fail_acquisition(&self, acq: &mut Acquisition, why: &str, search_again: bool) -> Result<()> {
+    /// Record a failed download and look for another. A release at fault is kept from being chosen again.
+    pub async fn fail_acquisition(&self, acq: &mut Acquisition, why: &str, release_at_fault: bool) -> Result<()> {
         acq.state = AcqState::Failed;
         acq.error = Some(why.to_string());
         self.db.save_acquisition(acq)?;
-        self.db.add_blocklist(acq.title_id, &acq.release.guid, &acq.release.title, why)?;
+        if release_at_fault {
+            self.db.add_blocklist(acq.title_id, &acq.release.guid, &acq.release.title, why)?;
+        }
         self.db.add_history(Some(acq.title_id), "download_failed", serde_json::json!({"release": acq.release.title, "indexer": acq.release.indexer, "reason": why}))?;
         self.emit(Event::Acquisition { id: acq.id, title_id: acq.title_id, state: acq.state.as_str().into() });
         tracing::warn!(release = %acq.release.title, reason = %why, "download failed");
 
-        if search_again && self.is_active() && !acq.release.guid.starts_with("manual:") {
+        if self.is_active() && !acq.release.guid.starts_with("manual:") {
             let (app, title_id, episodes) = (self.clone(), acq.title_id, acq.episode_ids.clone());
             let (release, reason) = (acq.release.title.clone(), why.to_string());
             tokio::spawn(async move {

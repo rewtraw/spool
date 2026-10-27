@@ -400,6 +400,24 @@ async fn a_number_in_the_series_title_is_not_taken_for_its_season() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_download_lost_by_the_downloader_is_taken_again_not_blocklisted() {
+    let video = video_or_skip!();
+    let mut w = World::new(Mode::Active).await;
+    let (show, eps) = w.series("Example World", 296762, &[(1, 1, "The Original")]);
+    w.release("Example.World.S01E01.1080p.BluRay.x264-GRP", &[("Example.World.S01E01.1080p.BluRay.x264-GRP.mkv", &video)]);
+    w.app.engine.pause_all();
+    let outcome = w.app.search(show.id, Scope::Episode(eps[0]), false, true).await.unwrap();
+    assert_eq!(outcome.grabbed.len(), 1, "{}", outcome.message);
+    // The downloader restarts and cannot read its record of the job: it is simply gone.
+    let job = w.app.db.acquisition(outcome.grabbed[0].id).unwrap().unwrap().job_id.unwrap();
+    w.app.engine.remove(&job, true).unwrap();
+    w.app.reconcile_all().await.unwrap();
+    w.app.engine.resume_all();
+    w.wait_state(show.id, AcqState::Imported).await;
+    assert!(w.app.db.blocklisted(show.id).unwrap().is_empty(), "the release was not at fault");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn season_pack_and_single_episode_import() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Active).await;
