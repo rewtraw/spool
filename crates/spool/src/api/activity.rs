@@ -90,7 +90,13 @@ pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): 
             // This is "Import anyway": the person has read why it was stopped, and is not asked
             // again. For a series the episodes the release was taken for stand.
             let force = episodes.clone().or_else(|| Some(if app.db.title(acq.title_id).ok().flatten().is_some_and(|t| t.kind == Kind::Movie) { vec![] } else { acq.episode_ids.clone() }));
-            app.import(id, if episodes.is_some() || force.is_some() { force } else { None }).await?;
+            // On its own, so a caller that stops waiting does not stop it part way.
+            let app2 = app.clone();
+            tokio::spawn(async move {
+                if let Err(e) = app2.import(id, if episodes.is_some() || force.is_some() { force } else { None }).await {
+                    tracing::warn!(acquisition = id, error = %e, "import failed");
+                }
+            });
         }
         _ => return Err(ApiError(StatusCode::BAD_REQUEST, "unknown action".into())),
     }
