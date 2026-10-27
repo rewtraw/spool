@@ -320,6 +320,11 @@ fn move_tree(from: &Path, to: &Path) -> std::io::Result<()> {
 fn extract(tool: Option<&Path>, dir: &Path, password: Option<&str>) -> Result<bool, String> {
     let archives = find_archives(dir);
     if archives.is_empty() {
+        // Volumes of an archive whose first is gone cannot be unpacked, and passing them on
+        // would call a download with no video in it complete.
+        if job_dir_files(dir).iter().any(|p| file_name(p).to_lowercase().rsplit_once('.').is_some_and(|(_, e)| e.len() == 3 && e.starts_with(['r', 's']) && e[1..].chars().all(|c| c.is_ascii_digit()))) {
+            return Err("the archive's first volume is missing".into());
+        }
         return Ok(false);
     }
     for a in archives {
@@ -637,6 +642,20 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn volumes_without_their_first_are_not_passed_on_as_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        for n in ["film.r12", "film.r13"] {
+            std::fs::write(dir.path().join(n), b"Rar!").unwrap();
+        }
+        assert_eq!(extract(None, dir.path(), None), Err("the archive's first volume is missing".to_string()));
+        // A plain download with nothing to unpack is fine as it is.
+        let plain = tempfile::tempdir().unwrap();
+        std::fs::write(plain.path().join("film.mkv"), b"film").unwrap();
+        std::fs::write(plain.path().join("film.nfo"), b"nfo").unwrap();
+        assert_eq!(extract(None, plain.path(), None), Ok(false));
+    }
 
     #[cfg(unix)]
     #[test]
