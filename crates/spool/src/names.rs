@@ -51,6 +51,15 @@ pub fn title_keeps_its_number(mut p: ParsedEpisodeInfo, t: &crate::models::Title
     p
 }
 
+/// A stretch of time as people say it: "hour", "3 hours", "90 minutes".
+pub fn span_minutes(m: i64) -> String {
+    match m {
+        60 => "hour".into(),
+        m if m % 60 == 0 => format!("{} hours", m / 60),
+        m => format!("{m} minutes"),
+    }
+}
+
 /// What a release's name says, read as a film's.
 pub fn movie(name: &str) -> Option<ParsedMovieInfo> {
     static KEPT: LazyLock<Mutex<HashMap<String, Option<ParsedMovieInfo>>>> = LazyLock::new(Default::default);

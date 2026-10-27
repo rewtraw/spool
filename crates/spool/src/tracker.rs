@@ -86,7 +86,8 @@ impl App {
                         let why = if o.message.starts_with("Could not start") {
                             format!("{what} failed. Replacements were found, but: {}.{}", lower_first(&o.message), if o.message.contains("free space") { " Spool tries again on its next search for missing titles." } else { "" })
                         } else {
-                            format!("{what} failed and no other acceptable release was found")
+                            let every = app.settings.general().backlog_interval_minutes.max(60);
+                            format!("{what} failed and no other acceptable release was found. Spool keeps looking in its search for what is missing, every {}", crate::names::span_minutes(every as i64))
                         };
                         let _ = app.db.add_attention("download_failed", Some(title_id), None, &why, serde_json::json!({"release": release, "reason": reason, "episode_ids": episodes}));
                         app.emit(Event::Attention);
