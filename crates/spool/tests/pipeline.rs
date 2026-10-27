@@ -2164,6 +2164,32 @@ async fn the_app_answers_only_its_own_pages_and_reads_only_its_own_subtitles() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn the_library_in_brief_is_narrowed_by_kind_genre_name_and_age() {
+    let w = World::new(Mode::Active).await;
+    let mut old = w.movie("Akira", 1988, "tt0094625");
+    old.genres = vec!["Animation".into(), "Science Fiction".into()];
+    old.added_at = spool::db::now() - 40 * 86_400;
+    w.app.db.save_title(&mut old).unwrap();
+    let mut film = w.movie("Heat", 1995, "tt0113277");
+    film.genres = vec!["Crime".into()];
+    w.app.db.save_title(&mut film).unwrap();
+    let (mut show, _) = w.series("Trigun", 1001, &[(1, 1, "2016-01-01")]);
+    show.genres = vec!["Action".into(), "Anime".into()];
+    show.added_at = spool::db::now();
+    w.app.db.save_title(&mut show).unwrap();
+    let router = spool::api::router(w.app.clone());
+    let names = |r: &serde_json::Value| r["titles"].as_array().unwrap().iter().map(|t| t["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+
+    let (status, all) = call(&router, "GET", "/api/titles/brief?sort=title", serde_json::Value::Null).await;
+    assert_eq!((status, names(&all)), (200, vec!["Akira".to_string(), "Heat".into(), "Trigun".into()]));
+    assert_eq!(names(&call(&router, "GET", "/api/titles/brief?genre=anime,animation", serde_json::Value::Null).await.1), ["Trigun", "Akira"], "either genre, newest first");
+    assert_eq!(names(&call(&router, "GET", "/api/titles/brief?genre=anime,animation&days=30", serde_json::Value::Null).await.1), ["Trigun"]);
+    assert_eq!(names(&call(&router, "GET", "/api/titles/brief?kind=movie&q=hea", serde_json::Value::Null).await.1), ["Heat"]);
+    let (_, one) = call(&router, "GET", "/api/titles/brief?kind=series", serde_json::Value::Null).await;
+    assert_eq!((one["total"].as_u64(), one["titles"][0]["episodes_aired"].as_u64()), (Some(1), Some(1)));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn bulk_actions_cover_many_titles_and_respect_kind() {
     use serde_json::json;
     let w = World::new(Mode::Active).await;

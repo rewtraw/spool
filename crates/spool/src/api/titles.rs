@@ -106,6 +106,59 @@ pub(super) async fn list_titles(State(app): State<App>, who: Option<axum::Extens
     Ok(Json(json!({"revision": revision, "full": false, "titles": titles, "removed": removed})))
 }
 
+/// The library in brief, to look through rather than to draw: each title's name, year, kind,
+/// genres, when it was added, how much of it is here and whether it has been watched in Plex.
+/// Narrowed by `kind`, by `genre` (any of several, comma separated, each matching part of a
+/// genre's name), by `q` (part of a name), by `days` (added within that many), and `watched`
+/// (true or false, by Plex); newest first, or by name with `sort=title`, at most `limit`.
+pub(super) async fn library_brief(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
+    let kind = q.get("kind").and_then(|k| Kind::parse(k));
+    let genres: Vec<String> = q.get("genre").map(|g| g.split(',').map(|w| w.trim().to_lowercase()).filter(|w| !w.is_empty()).collect()).unwrap_or_default();
+    let name = q.get("q").map(|n| crate::names::plain(n)).filter(|n| !n.is_empty());
+    let since = q.get("days").and_then(|d| d.parse::<i64>().ok()).map(|d| crate::db::now() - d * 86_400);
+    let watched = q.get("watched").and_then(|w| w.parse::<bool>().ok());
+    let limit = q.get("limit").and_then(|l| l.parse::<usize>().ok()).unwrap_or(200);
+    let (files, eps) = (app.db.file_counts()?, app.db.episode_counts()?);
+    let plex = app.settings.general().plex_ready().then(|| app.plex_index().ok()).flatten();
+    let mut rows: Vec<(&Title, Option<bool>)> = vec![];
+    let titles = app.db.titles(None)?;
+    for t in &titles {
+        let count = files.get(&t.id).map_or(0, |f| f.0);
+        let seen = plex.as_ref().and_then(|p| p.find(t)).map(|i| i.fully_watched() && (t.kind == Kind::Movie || i.items >= count));
+        let keep = kind.is_none_or(|k| t.kind == k)
+            && (genres.is_empty() || t.genres.iter().any(|g| genres.iter().any(|w| g.to_lowercase().contains(w.as_str()))))
+            && name.as_ref().is_none_or(|n| crate::names::plain(&t.title).contains(n.as_str()) || t.alt_titles.iter().any(|a| crate::names::plain(a).contains(n.as_str())))
+            && since.is_none_or(|s| t.added_at >= s)
+            && watched.is_none_or(|w| seen.unwrap_or(false) == w);
+        if keep {
+            rows.push((t, seen));
+        }
+    }
+    if q.get("sort").is_some_and(|s| s == "title") {
+        rows.sort_by_cached_key(|(t, _)| crate::store::sort_title(&t.title));
+    } else {
+        rows.sort_by_key(|(t, _)| std::cmp::Reverse(t.added_at));
+    }
+    let total = rows.len();
+    let list: Vec<Value> = rows
+        .into_iter()
+        .take(limit)
+        .map(|(t, seen)| {
+            let mut v = json!({"id": t.id, "kind": t.kind, "title": t.title, "year": t.year, "genres": t.genres, "added_at": t.added_at, "monitored": t.monitored, "files": files.get(&t.id).map_or(0, |f| f.0)});
+            if t.kind == Kind::Series {
+                let (aired, have) = eps.get(&t.id).copied().unwrap_or((0, 0));
+                v["episodes_aired"] = json!(aired);
+                v["episodes_have"] = json!(have);
+            }
+            if plex.is_some() {
+                v["watched"] = json!(seen);
+            }
+            v
+        })
+        .collect();
+    Ok(Json(json!({"total": total, "titles": list})))
+}
+
 /// What changed in the library after `since`, oldest first, for anything that keeps a copy.
 pub(super) async fn changes(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
     let since = q.get("since").and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);

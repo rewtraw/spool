@@ -386,6 +386,7 @@ fn api_routes() -> Router<App> {
         .route("/api/busy", get(busy))
         .route("/api/titles", get(list_titles).post(add_title))
         .route("/api/titles/bulk", post(bulk_titles))
+        .route("/api/titles/brief", get(library_brief))
         .route("/api/clips", get(list_clips).post(add_clip))
         .route("/api/clips/{id}", get(get_clip).delete(delete_clip))
         .route("/api/clips/{id}/video", get(clip_video))

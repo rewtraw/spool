@@ -216,6 +216,13 @@ const TOOLS: &[Tool] = &[
     },
     Tool { name: "delete_title_files", read: false, destructive: true, description: "Free space by deleting all of a title's media files. The title stays in the library, unmonitored so it is not fetched again, and its saved releases stay in the archive for a later re-download. Needs confirm=true.", schema: || obj(json!({"title_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["title_id"]) },
     Tool { name: "delete_file", read: false, destructive: true, description: "Delete one media file by file_id (from title_detail). It goes to the recycle folder if recycling is on, otherwise it is gone at once. Needs confirm=true.", schema: || obj(json!({"file_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["file_id"]) },
+    Tool {
+        name: "library",
+        read: true,
+        destructive: false,
+        description: "Look through what is in the library: each title's id, name, year, kind, genres, when it was added, how much of it is here, and whether it has been watched in Plex. Narrow it by kind, genre (several comma separated, any matching, e.g. \"anime,animation\"), part of a name, added within the last days, or watched; newest first, or by name. Use it to see what someone has before suggesting more.",
+        schema: || obj(json!({"kind": {"type": "string", "enum": ["movie", "series"]}, "genre": {"type": "string"}, "query": {"type": "string"}, "added_within_days": {"type": "integer", "minimum": 1}, "watched": {"type": "boolean"}, "sort": {"type": "string", "enum": ["added", "title"]}, "limit": {"type": "integer", "minimum": 1, "description": "Default 200."}}), &[]),
+    },
     Tool { name: "set_file_quality", read: false, destructive: false, description: "Say what quality one media file (file_id from title_detail) really is, by a quality's name such as SDTV, DVD, WEBDL-480p, Bluray-480p, HDTV-720p or Bluray-1080p, when the one it was taken for is wrong. A file named as Spool names files is renamed to match, with its subtitles. Upgrades are judged by the new quality from then on.", schema: || obj(json!({"file_id": {"type": "integer"}, "quality": {"type": "string"}}), &["file_id", "quality"]) },
     Tool { name: "empty_recycle", read: false, destructive: true, description: "Permanently delete everything in the recycle folder to free disk space. Needs confirm=true.", schema: || obj(json!({"confirm": {"type": "boolean"}}), &[]) },
     Tool { name: "restart_check", read: true, destructive: false, description: "Whether Spool can be restarted or upgraded now without interrupting anything: a download being checked or unpacked, an import, a title being moved, a location being looked through, or someone playing. Downloads still coming down do not count; they resume. Ask this before restarting the service.", schema: || obj(json!({}), &[]) },
@@ -915,6 +922,32 @@ impl Mcp {
                     return Err("deleting a media file needs confirm=true, and only when the person asked for it".into());
                 }
                 self.api(Method::DELETE, &format!("/api/files/{id}"), None).await
+            }
+            "library" => {
+                let mut query = vec![];
+                for (from, to) in [("kind", "kind"), ("genre", "genre"), ("query", "q"), ("added_within_days", "days"), ("watched", "watched"), ("sort", "sort"), ("limit", "limit")] {
+                    let v = match &a[from] {
+                        Value::String(s) => s.clone(),
+                        Value::Number(n) => n.to_string(),
+                        Value::Bool(b) => b.to_string(),
+                        _ => continue,
+                    };
+                    query.push(format!("{to}={}", urlencoding::encode(&v)));
+                }
+                let r = self.get(&format!("/api/titles/brief?{}", query.join("&"))).await?;
+                Ok(json!({
+                    "total": r["total"],
+                    "titles": r["titles"].as_array().into_iter().flatten().map(|t| {
+                        let mut v = json!({"title_id": t["id"], "title": t["title"], "year": t["year"], "kind": t["kind"], "genres": t["genres"], "added": when(&t["added_at"]), "monitored": t["monitored"], "files": t["files"]});
+                        if t["kind"] == "series" {
+                            v["episodes"] = json!(format!("{} of {}", t["episodes_have"], t["episodes_aired"]));
+                        }
+                        if t.get("watched").is_some() {
+                            v["watched_in_plex"] = t["watched"].clone();
+                        }
+                        v
+                    }).collect::<Vec<_>>(),
+                }))
             }
             "set_file_quality" => {
                 let id = int("file_id")?;
