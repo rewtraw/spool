@@ -534,6 +534,11 @@ const MIGRATIONS: &[&str] = &[
         WHERE json_type(data, '$.release.link') = 'text' AND json_extract(data, '$.release.indexer_id') IN (SELECT id FROM link_keys);
     DROP TABLE link_keys;
     "#,
+    r#"
+    -- What is said in a clip is now put back into sentences: worked out again, from the
+    -- index, for every clip whose film or episode is still in the library.
+    UPDATE clips SET data = json_remove(data, '$.said') WHERE title_id IS NOT NULL;
+    "#,
 ];
 
 impl Db {

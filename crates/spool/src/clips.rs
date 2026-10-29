@@ -475,7 +475,7 @@ impl App {
             return None;
         }
         let lines = self.dialogue.lines_between(file_id, start, start + seconds).ok()?;
-        Some(lines.into_iter().map(|l| Said { at: (l.start - start).max(0.0), text: l.text }).collect())
+        Some(sentences(&lines).into_iter().map(|(at, text)| Said { at: (at - start).max(0.0), text }).collect())
     }
 
     /// Fill in what is said in clips made before their film or episode was read. Returns
@@ -617,8 +617,80 @@ impl App {
     }
 }
 
+/// Subtitle cues put back together into what was said. A cue left open, ending on a comma or
+/// on no mark at all, runs on into the next, unless that one starts with a dash, which is how
+/// subtitles show another speaker, or comes after a pause of more than a few seconds.
+/// Returns each sentence with when it starts.
+fn sentences(lines: &[crate::dialogue::Line]) -> Vec<(f64, String)> {
+    const PAUSE: f64 = 3.0;
+    let closed = |t: &str| t.trim_end().ends_with(['.', '?', '!', '…', '♪', '"', '”', ')', ']']) && !t.trim_end().ends_with("...") && !t.trim_end().ends_with('…');
+    let trailing = |t: &str| t.trim_end().ends_with("...") || t.trim_end().ends_with('…');
+    let another_speaker = |t: &str| t.trim_start().starts_with(['-', '–', '—']);
+    let goes_on = |t: &str| t.trim_start().starts_with(|c: char| c.is_lowercase()) || t.trim_start().starts_with("...") || t.trim_start().starts_with('…');
+    let mut out: Vec<(f64, String, f64)> = vec![];
+    for l in lines {
+        let text = l.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if text.is_empty() {
+            continue;
+        }
+        let joins = out.last().is_some_and(|(_, prev, end)| {
+            !another_speaker(&text) && l.start - end <= PAUSE && (!closed(prev) && (!trailing(prev) || goes_on(&text)))
+        });
+        match out.last_mut() {
+            Some((_, prev, end)) if joins => {
+                // "It's just..." then "...too much." is said once with its pause.
+                let rest = if trailing(prev) { text.trim_start_matches(['.', '…']).trim_start() } else { text.as_str() };
+                prev.push(' ');
+                prev.push_str(rest);
+                *end = l.end;
+            }
+            _ => out.push((l.start, text, l.end)),
+        }
+    }
+    out.into_iter().map(|(at, text, _)| (at, text)).collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn subtitle_cues_are_put_back_into_sentences() {
+        let cues = [
+            (0.0, 1.0, "He's still fighting you."),
+            (1.2, 2.0, "- No, my friend."),
+            (2.2, 3.0, "Arnold didn't know"),
+            (3.1, 4.0, "how to save you."),
+            (4.5, 5.0, "And now,"),
+            (5.1, 6.0, "it is time to say goodbye,"),
+            (6.1, 7.0, "old friend."),
+            (7.2, 8.0, "I was going to"),
+            (8.1, 9.0, "- Don't."),
+            (9.5, 10.0, "Wait for"),
+            (20.0, 21.0, "Another time."),
+            (21.2, 22.0, "I thought..."),
+            (22.1, 23.0, "Never mind."),
+            (23.2, 24.0, "It's just..."),
+            (24.1, 25.0, "...too much."),
+        ];
+        let lines: Vec<crate::dialogue::Line> = cues.iter().map(|(s, e, t)| crate::dialogue::Line { start: *s, end: *e, text: t.to_string() }).collect();
+        let said: Vec<String> = super::sentences(&lines).into_iter().map(|(_, t)| t).collect();
+        assert_eq!(
+            said,
+            [
+                "He's still fighting you.",
+                "- No, my friend.",
+                "Arnold didn't know how to save you.",
+                "And now, it is time to say goodbye, old friend.",
+                "I was going to",
+                "- Don't.",
+                "Wait for",
+                "Another time.",
+                "I thought...",
+                "Never mind.",
+                "It's just... too much.",
+            ]
+        );
+        assert_eq!(super::sentences(&lines)[2].0, 2.2, "a sentence starts when its first part does");
+    }
     use super::*;
     use serde_json::json;
 
