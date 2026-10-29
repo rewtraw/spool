@@ -20,11 +20,14 @@ fn names(app: &App) -> HashMap<i64, String> {
 pub(super) async fn list_clips(State(app): State<App>, who: Option<axum::Extension<Who>>) -> R<Value> {
     let who = Who::of(who);
     let names = names(&app);
-    Ok(Json(json!(app.db.clips()?.iter().map(|c| shown(&app, c, who, &names)).collect::<Vec<_>>())))
+    let mut clips = app.db.clips()?;
+    app.fill_clips_said(&mut clips);
+    Ok(Json(json!(clips.iter().map(|c| shown(&app, c, who, &names)).collect::<Vec<_>>())))
 }
 
 pub(super) async fn get_clip(State(app): State<App>, who: Option<axum::Extension<Who>>, Path(id): Path<i64>) -> R<Value> {
-    let c = app.db.clip(id)?.ok_or_else(|| not_found("clip"))?;
+    let mut c = app.db.clip(id)?.ok_or_else(|| not_found("clip"))?;
+    app.fill_clips_said(std::slice::from_mut(&mut c));
     Ok(Json(shown(&app, &c, Who::of(who), &names(&app))))
 }
 

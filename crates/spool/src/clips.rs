@@ -61,6 +61,17 @@ pub struct Clip {
     pub subtitles: String,
     /// The language of the subtitles drawn into it, in words; empty for none.
     pub subtitles_shown: String,
+    /// What is said in it, from the dialogue index, timed from the clip's own start. None
+    /// until the file it was cut from has been read.
+    pub said: Option<Vec<Said>>,
+}
+
+/// A line said in a clip.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Said {
+    /// Seconds from the start of the clip.
+    pub at: f64,
+    pub text: String,
 }
 
 /// What a clip is asked for with.
@@ -436,7 +447,9 @@ impl App {
             };
             format!("{short} at {}", clock(start))
         });
+        let said = self.said_between(file.id, start, seconds);
         let mut clip = Clip {
+            said,
             title_id: Some(title.id),
             episode_id: episode.map(|e| e.id),
             account_id: account,
@@ -453,6 +466,33 @@ impl App {
         clip.id = self.db.add_clip(&clip)?;
         self.make_clip_later(clip.id);
         Ok(clip)
+    }
+
+    /// What is said in a file between two times, timed from the first; None while the file
+    /// has not been read.
+    fn said_between(&self, file_id: i64, start: f64, seconds: f64) -> Option<Vec<Said>> {
+        if !self.dialogue.has_read(file_id).unwrap_or(false) {
+            return None;
+        }
+        let lines = self.dialogue.lines_between(file_id, start, start + seconds).ok()?;
+        Some(lines.into_iter().map(|l| Said { at: (l.start - start).max(0.0), text: l.text }).collect())
+    }
+
+    /// Fill in what is said in clips made before their film or episode was read. Returns
+    /// whether any changed.
+    pub fn fill_clips_said(&self, clips: &mut [Clip]) -> bool {
+        let mut changed = false;
+        for c in clips.iter_mut().filter(|c| c.said.is_none()) {
+            let Some(title) = c.title_id.and_then(|id| self.db.title(id).ok().flatten()) else { continue };
+            let file_id = match c.episode_id {
+                Some(e) => self.db.episode(e).ok().flatten().and_then(|e| e.file_id),
+                None => self.film_file(&title).ok().flatten().map(|f| f.id),
+            };
+            let Some(said) = file_id.and_then(|f| self.said_between(f, c.start, c.seconds)) else { continue };
+            c.said = Some(said);
+            changed |= self.db.save_clip(c).is_ok();
+        }
+        changed
     }
 
     fn make_clip_later(&self, id: i64) {

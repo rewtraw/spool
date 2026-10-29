@@ -5192,6 +5192,21 @@ async fn a_clip_is_cut_from_a_film_or_an_episode_and_can_be_played_saved_and_rem
     let foot = |f: &[u8]| f[200 * 320..230 * 320].iter().filter(|p| **p > 235).count();
     assert!(foot(&during) > foot(&before) + 20, "white letters appear: {} then {}", foot(&before), foot(&during));
     assert!(!w.app.data_dir.join(format!("clips/.{}-subtitles", with_words.id)).exists(), "the drawings are cleared away");
+    // Made before the film was read, what is said in it is filled in once it has been, timed
+    // from the clip's own start.
+    assert!(with_words.said.is_none());
+    w.app.dialogue_round(false).await.unwrap();
+    let (_, listed) = call(&api, "GET", "/api/clips", Value::Null).await;
+    let said = listed.as_array().unwrap().iter().find(|c| c["id"] == with_words.id).unwrap()["said"].clone();
+    assert_eq!(said[0]["text"], "Hello there", "{said}");
+    assert!((said[0]["at"].as_f64().unwrap() - 0.6).abs() < 0.05, "{said}");
+    assert!(w.app.db.clip(with_words.id).unwrap().unwrap().said.is_some(), "and kept with the clip");
+    // A clip made once it has been read has it from the start.
+    let (_, again) = call(&api, "POST", "/api/clips", json!({"title_id": heat.id, "start": 0.5, "seconds": 1})).await;
+    assert_eq!(again["said"][0]["text"], "Hello there", "{again}");
+    assert!((again["said"][0]["at"].as_f64().unwrap() - 0.1).abs() < 0.05, "{again}");
+    ready(again["id"].as_i64().unwrap()).await;
+    call(&api, "DELETE", &format!("/api/clips/{}", again["id"]), Value::Null).await;
     call(&api, "DELETE", &format!("/api/clips/{}", with_words.id), Value::Null).await;
 
     // What cannot be cut is refused with the reason.

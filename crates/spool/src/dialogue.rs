@@ -482,6 +482,12 @@ impl Index {
         Ok(Some(Passage { file, before, lines, after, title, episode }))
     }
 
+    /// Whether a file's words have been read into the index.
+    pub fn has_read(&self, file_id: i64) -> Result<bool> {
+        let conn = self.conn.lock();
+        Ok(conn.query_row("SELECT lines > 0 FROM files WHERE file_id = ?", [file_id], |r| r.get(0)).optional()?.unwrap_or(false))
+    }
+
     /// The lines of a file shown between two times, in order.
     pub fn lines_between(&self, file_id: i64, from: f64, to: f64) -> Result<Vec<Line>> {
         let conn = self.conn.lock();

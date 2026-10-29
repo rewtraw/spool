@@ -445,6 +445,7 @@ impl Mcp {
             "clip_id": c.id, "name": c.name, "from": c.from, "starts_at": crate::clips::clock(c.start), "seconds": (c.seconds * 10.0).round() / 10.0, "state": c.state,
             "error": if c.error.is_empty() { Value::Null } else { json!(c.error) }, "size_mb": (c.size as f64 / 1e5).round() / 10.0, "size": format!("{}x{}", c.width, c.height),
             "subtitles": if c.subtitles_shown.is_empty() { Value::Null } else { json!(c.subtitles_shown) },
+            "said": c.said.as_ref().map(|lines| lines.iter().map(|l| format!("{} {}", crate::clips::clock(l.at), l.text)).collect::<Vec<_>>()),
             "file": if c.state == "ready" { json!(self.app.clip_video(c.id)) } else { Value::Null }, "made": when(&json!(c.created_at)),
         })
     }

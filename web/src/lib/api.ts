@@ -190,6 +190,8 @@ export interface Clip {
   by: string | null;
   /** Whether whoever is signed in may remove it. */
   yours: boolean;
+  /** What is said in it, timed from its start; null until its film or episode has been read. */
+  said: { at: number; text: string }[] | null;
 }
 
 export interface Watched {

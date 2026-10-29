@@ -21,6 +21,15 @@
     return () => clearInterval(timer);
   });
 
+  // Each clip's player, to go to a line of what is said.
+  let players = $state<Record<number, HTMLVideoElement>>({});
+  function playFrom(c: Clip, at: number) {
+    const v = players[c.id];
+    if (!v) return;
+    v.currentTime = at;
+    v.play().catch(() => {});
+  }
+
   // What is being fetched to save, and a file fetched but not yet handed over, by clip.
   let saving = $state<Record<number, string>>({});
   let ready = $state<Record<number, File>>({});
@@ -126,7 +135,7 @@
         <div class="frame">
           {#if c.state === 'ready'}
             <!-- svelte-ignore a11y_media_has_caption -->
-            <video src="/api/clips/{c.id}/video" poster="/api/clips/{c.id}/still" controls playsinline preload="none"></video>
+            <video bind:this={players[c.id]} src="/api/clips/{c.id}/video" poster="/api/clips/{c.id}/still" controls playsinline preload="none"></video>
           {:else if c.state === 'making'}
             <div class="placeholder">
               <span>{c.progress ? `Making it… ${Math.round(pct(c.progress, 1))}%` : 'Waiting to be made…'}</span>
@@ -142,6 +151,23 @@
             {#if c.title_id}<a class="link" href="#/title/{c.title_id}">{c.from}</a>{:else}{c.from}{/if}
           </div>
           <div class="faint small">From {clock(c.start)} for {clock(c.seconds)}{c.state === 'ready' ? ` · ${size(c)}` : ''} · {c.by ? `${c.by}, ` : ''}{ago(c.created_at)}</div>
+          {#if c.said?.length}
+            <details class="said">
+              <summary class="small">What is said</summary>
+              <ol>
+                {#each c.said as line}
+                  <li>
+                    <button class="line" disabled={c.state !== 'ready'} onclick={() => playFrom(c, line.at)}>
+                      <span class="at faint">{clock(line.at)}</span>
+                      <span>{line.text}</span>
+                    </button>
+                  </li>
+                {/each}
+              </ol>
+            </details>
+          {:else if c.said}
+            <div class="faint small">Nothing is said in it.</div>
+          {/if}
         </div>
         <div class="row wrap actions">
           {#if c.state === 'ready'}
@@ -229,5 +255,42 @@
   .actions {
     padding: 8px 14px 14px;
     margin-top: auto;
+  }
+  .said {
+    margin-top: 6px;
+  }
+  .said summary {
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .said ol {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .line {
+    display: grid;
+    grid-template-columns: 3.2em 1fr;
+    gap: 8px;
+    width: 100%;
+    padding: 3px 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .line:disabled {
+    cursor: default;
+  }
+  .line:not(:disabled):hover span:last-child {
+    text-decoration: underline;
+  }
+  .at {
+    font-variant-numeric: tabular-nums;
   }
 </style>
