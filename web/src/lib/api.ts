@@ -207,6 +207,8 @@ export interface Title {
   /** Where the person signed in stands with it; absent when untouched. */
   watched?: Watched;
   original_language?: string | null;
+  /** The AniList entries it is, when it is anime; empty when it is not. */
+  anilist?: number[];
   id: number;
   kind: Kind;
   title: string;

@@ -6,7 +6,7 @@
   import Tile from '../components/Tile.svelte';
 
   const saved = JSON.parse(localStorage.getItem('spool.library') ?? '{}');
-  let kind = $state<'all' | 'movie' | 'series'>(saved.kind ?? 'all');
+  let kind = $state<'all' | 'movie' | 'series' | 'anime'>(saved.kind ?? 'all');
   let show = $state<'all' | 'have' | 'missing' | 'incomplete' | 'compact' | 'nocompact' | 'monitored' | 'unmonitored' | 'unwatched' | 'watching' | 'watched'>(saved.show ?? 'all');
   let sort = $state<'title' | 'added' | 'year' | 'size'>(saved.sort ?? 'title');
   let layout = $state<'grid' | 'table'>(saved.layout ?? 'grid');
@@ -15,6 +15,8 @@
   /** Only what is kept on this location, as its home or as a copy; empty for everywhere. */
   let place = $state<string>(saved.place ?? '');
   const placeNames = $derived([...new Set(app.titles.flatMap((t) => [t.location, ...(t.also_on ?? [])]).filter(Boolean) as string[])].sort());
+  /** Anime, films and series alike: what AniList has an entry for. */
+  const isAnime = (t: Title) => !!t.anilist?.length;
   const onPlace = (t: Title, name: string) => t.location === name || (t.also_on ?? []).includes(name);
   let query = $state('');
   let limit = $state(120);
@@ -45,7 +47,7 @@
   const filtered = $derived.by(() => {
     const q = query.trim().toLowerCase();
     let list = app.titles.filter((t) => {
-      if (kind !== 'all' && t.kind !== kind) return false;
+      if (kind === 'anime' ? !isAnime(t) : kind !== 'all' && t.kind !== kind) return false;
       if (place && placeNames.includes(place) && !onPlace(t, place)) return false;
       if (show === 'have' && !(t.kind === 'movie' ? t.file_count > 0 : t.episodes_have > 0)) return false;
       if (show === 'missing' && (have(t) || !t.monitored || !t.available)) return false;
@@ -200,6 +202,7 @@
     all: inPlace.length,
     movie: inPlace.filter((t) => t.kind === 'movie').length,
     series: inPlace.filter((t) => t.kind === 'series').length,
+    anime: inPlace.filter(isAnime).length,
   });
 </script>
 
@@ -215,7 +218,7 @@
 
 <div class="bar">
   <div class="seg" role="tablist" aria-label="Type">
-    {#each [['all', 'All'], ['movie', 'Movies'], ['series', 'Series']] as [k, label]}
+    {#each [['all', 'All'], ['movie', 'Movies'], ['series', 'Series'], ['anime', 'Anime']] as [k, label]}
       <button role="tab" aria-selected={kind === k} class:on={kind === k} onclick={() => (kind = k as any)}>{label} <small>{counts[k as 'all']}</small></button>
     {/each}
   </div>
