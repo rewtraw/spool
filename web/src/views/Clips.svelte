@@ -3,6 +3,7 @@
   import { app, act, toast } from '../lib/state.svelte';
   import { ago, bytes, clock, pct } from '../lib/format';
   import MomentFinder from '../components/MomentFinder.svelte';
+  import { drawTerminalCard } from '../lib/terminal-card';
 
   let clips = $state<Clip[] | null>(null);
   let confirming = $state<number | null>(null);
@@ -50,12 +51,24 @@
     }
   }
 
-  /** Save a clip, as its video or as a GIF: to Photos through the share sheet where there is
-   * one, and as a download where there is not. */
+  /** Hand a file over: to Photos through the share sheet where there is one, and as a
+   * download where there is not. */
+  async function deliver(c: Clip, file: File) {
+    if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) {
+      await share(c, file);
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(file);
+      a.download = file.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    }
+  }
+
+  /** Save a clip, as its video or as a GIF. */
   async function save(c: Clip, kind: 'mp4' | 'gif') {
     const url = kind === 'gif' ? `/api/clips/${c.id}/gif` : `/api/clips/${c.id}/video`;
-    const sheet = typeof navigator.canShare === 'function';
-    if (!sheet && kind === 'mp4') {
+    if (typeof navigator.canShare !== 'function' && kind === 'mp4') {
       location.href = `${url}?download`;
       return;
     }
@@ -63,21 +76,40 @@
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `It could not be fetched (${res.status})`);
-      const file = new File([await res.blob()], fileName(c, kind), { type: kind === 'gif' ? 'image/gif' : 'video/mp4' });
-      if (sheet && navigator.canShare({ files: [file] })) {
-        await share(c, file);
-      } else {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(file);
-        a.download = file.name;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-      }
+      await deliver(c, new File([await res.blob()], fileName(c, kind), { type: kind === 'gif' ? 'image/gif' : 'video/mp4' }));
     } catch (err: any) {
       toast(err.message, 'error');
     } finally {
       delete saving[c.id];
     }
+  }
+
+  // Lines of what is said chosen for a picture: one clip at a time, by their place in it.
+  let choosing = $state<number | null>(null);
+  let chosen = $state<number[]>([]);
+  let card = $state<HTMLCanvasElement | null>(null);
+  const chosenText = (c: Clip) => (c.said ?? []).filter((_, i) => chosen.includes(i)).map((l) => l.text);
+
+  function choose(c: Clip) {
+    choosing = choosing === c.id ? null : c.id;
+    chosen = [];
+  }
+  function pick(i: number) {
+    chosen = chosen.includes(i) ? chosen.filter((x) => x !== i) : [...chosen, i].sort((a, b) => a - b);
+  }
+  // The picture is drawn as the lines are chosen, so what is saved is what is seen.
+  $effect(() => {
+    const c = clips?.find((x) => x.id === choosing);
+    if (card && c && chosen.length) drawTerminalCard(card, chosenText(c), c.from);
+  });
+
+  /** Save the chosen lines as a picture in the terminal style, without times. */
+  async function saveCard(c: Clip) {
+    if (!card || !chosen.length) return;
+    drawTerminalCard(card, chosenText(c), c.from);
+    const blob = await new Promise<Blob | null>((done) => card!.toBlob(done, 'image/png'));
+    if (!blob) return toast('The picture could not be made', 'error');
+    await deliver(c, new File([blob], fileName(c, 'png'), { type: 'image/png' }));
   }
 
   const linkOf = (c: Clip) => `${location.origin}/clip/${c.link}.mp4`;
@@ -154,16 +186,44 @@
           {#if c.said?.length}
             <details class="said">
               <summary class="small">What is said</summary>
+              <div class="row wrap tools">
+                <button class="btn small ghost" onclick={() => choose(c)}>{choosing === c.id ? 'Done choosing' : 'Choose lines for a picture'}</button>
+                {#if choosing === c.id}
+                  <button class="btn small ghost" onclick={() => (chosen = c.said!.map((_, i) => i))}>All</button>
+                  <button class="btn small ghost" disabled={!chosen.length} onclick={() => (chosen = [])}>None</button>
+                {/if}
+              </div>
               <ol>
-                {#each c.said as line}
+                {#each c.said as line, i}
                   <li>
-                    <button class="line" disabled={c.state !== 'ready'} onclick={() => playFrom(c, line.at)}>
-                      <span class="at faint">{clock(line.at)}</span>
-                      <span>{line.text}</span>
-                    </button>
+                    {#if choosing === c.id}
+                      <label class="line pick" class:on={chosen.includes(i)}>
+                        <input type="checkbox" checked={chosen.includes(i)} onchange={() => pick(i)} />
+                        <span>{line.text}</span>
+                      </label>
+                    {:else}
+                      <button class="line" disabled={c.state !== 'ready'} onclick={() => playFrom(c, line.at)}>
+                        <span class="at faint">{clock(line.at)}</span>
+                        <span>{line.text}</span>
+                      </button>
+                    {/if}
                   </li>
                 {/each}
               </ol>
+              {#if choosing === c.id}
+                {#if chosen.length}
+                  <canvas class="card-preview" bind:this={card} aria-label="The picture of the chosen lines"></canvas>
+                  <div class="row wrap tools">
+                    {#if ready[c.id]?.type === 'image/png'}
+                      <button class="btn small primary" onclick={() => share(c, ready[c.id])}>Save the picture now</button>
+                    {:else}
+                      <button class="btn small primary" onclick={() => saveCard(c)}>Save as picture</button>
+                    {/if}
+                  </div>
+                {:else}
+                  <div class="faint small">Tick the lines to put in the picture.</div>
+                {/if}
+              {/if}
             </details>
           {:else if c.said}
             <div class="faint small">Nothing is said in it.</div>
@@ -292,5 +352,26 @@
   }
   .at {
     font-variant-numeric: tabular-nums;
+  }
+  .tools {
+    margin: 6px 0 2px;
+    gap: 6px;
+  }
+  .pick {
+    grid-template-columns: 1.6em 1fr;
+    align-items: start;
+  }
+  .pick input {
+    margin: 2px 0 0;
+  }
+  .pick.on span {
+    color: var(--text);
+  }
+  .card-preview {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-top: 8px;
+    border-radius: 6px;
   }
 </style>
