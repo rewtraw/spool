@@ -11,7 +11,7 @@
   let start = $state('');
   let seconds = $state(30);
   let name = $state('');
-  let subtitles = $state('auto');
+  let subtitles = $state('on');
   let error = $state('');
   let made = $state<{ name: string } | null>(null);
 
