@@ -20,6 +20,7 @@ const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS: &str = "Spool finds, downloads and files movies and TV for one household, replacing Radarr, Sonarr and SABnzbd. \
 Start with `status` for the overall picture or `find_title` to get a title's id; most other tools take that id. \
+Books: `find_book`, then `add_book`; `books` shows them and the Anna's Archive index. \
 `diagnose` answers \"why has this not downloaded\" in one call. Sizes are in GB. \
 Disk space is tight: check `status` before starting large downloads. \
 `make_clip` cuts a short shareable MP4 from a film or episode and gives its file path. \
@@ -186,6 +187,42 @@ const TOOLS: &[Tool] = &[
         description: "Start a background task: rss (read indexer feeds), backlog (search a few missing titles), refresh (update details), scan (rescan library folders), housekeeping (backup and tidy), plex (read Plex), smaller (look for smaller copies of the few titles furthest over their size target; replaces files when they arrive), subtitles (find subtitles for a few files that lack them and check each is in time with the film).",
         schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime", "books", "book_index"]}}), &["name"]),
     },
+    Tool { name: "books", read: true, destructive: false, description: "The books side: the Anna's Archive index (how many books, which snapshot, any build in progress), today's download allowance, whether Florilegium is set up, and every book added with its state (wanted, choose, fetching, sending, have) and what it waits for.", schema: || obj(json!({}), &[]) },
+    Tool {
+        name: "find_book",
+        read: true,
+        destructive: false,
+        description: "Search Open Library's catalogue for a book by title and/or author. Returns works with their ol_work id for add_book, and book_id when it is already added.",
+        schema: || obj(json!({"query": {"type": "string"}}), &["query"]),
+    },
+    Tool {
+        name: "book_detail",
+        read: true,
+        destructive: false,
+        description: "One book: its state and note, the files in the index that could be it (candidates, with md5, size and how sure the match is), the one chosen, files turned down and why, the EPUB kept, and whether Florilegium took it.",
+        schema: || obj(json!({"book_id": {"type": "integer"}}), &["book_id"]),
+    },
+    Tool {
+        name: "add_book",
+        read: false,
+        destructive: false,
+        description: "Want a book, by Open Library work id from find_book. Spool looks for it in the Anna's Archive index, downloads the EPUB, checks it is the book, and sends it to Florilegium.",
+        schema: || obj(json!({"ol_work": {"type": "string", "description": "Such as OL45804W."}, "language": {"type": "string", "description": "Two-letter language it is wanted in; defaults to the first in settings."}}), &["ol_work"]),
+    },
+    Tool {
+        name: "manage_book",
+        read: false,
+        destructive: false,
+        description: "Act on a book: choose (download the candidate with this md5, when the book waits for a choice or the person prefers another file); retry (look for it again now, forgetting files turned down); send (send the kept EPUB to Florilegium again).",
+        schema: || obj(json!({"book_id": {"type": "integer"}, "action": {"type": "string", "enum": ["choose", "retry", "send"]}, "md5": {"type": "string"}}), &["book_id", "action"]),
+    },
+    Tool {
+        name: "remove_book",
+        read: false,
+        destructive: true,
+        description: "Take a book out of Spool. The EPUB kept in Spool stays unless delete_file is true, which needs confirm=true. Florilegium's copy is never touched.",
+        schema: || obj(json!({"book_id": {"type": "integer"}, "delete_file": {"type": "boolean"}, "confirm": {"type": "boolean"}}), &["book_id"]),
+    },
     Tool {
         name: "bulk_titles",
         read: false,
@@ -277,6 +314,10 @@ const TOOLS: &[Tool] = &[
     Tool { name: "clips", read: true, destructive: false, description: "The clips that have been cut, newest first: what each is from, where it starts and how long it runs, its size, whether it is ready, and its file's path on the machine Spool runs on.", schema: || obj(json!({}), &[]) },
     Tool { name: "delete_clip", read: false, destructive: true, description: "Remove a clip and its file. Needs confirm=true.", schema: || obj(json!({"clip_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["clip_id"]) },
 ];
+
+fn book_row(b: &Value) -> Value {
+    json!({"book_id": b["id"], "title": b["title"], "authors": b["authors"], "year": b["year"], "state": b["state"], "note": if b["note"] == "" { Value::Null } else { b["note"].clone() }, "added": when(&b["added_at"])})
+}
 
 fn gb(bytes: &Value) -> Value {
     json!((bytes.as_f64().unwrap_or(0.0) / 1e9 * 10.0).round() / 10.0)
@@ -925,6 +966,50 @@ impl Mcp {
             "plex_track" => {
                 let t = self.post("/api/plex/track", json!({"rating_key": a["rating_key"].as_str().ok_or("rating_key is required")?})).await?;
                 Ok(json!({"tracking": t["title"], "title_id": t["id"], "path": t["path"], "monitored": t["monitored"]}))
+            }
+            "books" => {
+                let all = self.get("/api/books").await?;
+                let s = &all["status"];
+                Ok(json!({
+                    "index": {"books": s["index_books"], "snapshot": s["index"]["snapshot"], "built": when(&s["index"]["built_at"]), "building": s["index"]["building"], "phase": s["index"]["phase"], "part": s["index"]["part"], "parts": s["index"]["parts"], "error": s["index"]["error"]},
+                    "allowance": s["allowance"], "has_key": s["has_key"], "florilegium": s["florilegium"], "languages": s["languages"], "counts": s["counts"],
+                    "books": all["books"].as_array().into_iter().flatten().map(book_row).collect::<Vec<_>>(),
+                }))
+            }
+            "find_book" => {
+                let q = a["query"].as_str().unwrap_or("").trim();
+                let found = self.get(&format!("/api/books/lookup?q={}", urlencoding::encode(q))).await?;
+                Ok(json!(found.as_array().into_iter().flatten().map(|w| json!({"ol_work": w["ol_work"], "title": w["title"], "subtitle": w["subtitle"], "authors": w["authors"], "year": w["year"], "editions": w["editions"], "book_id": w["book_id"]})).collect::<Vec<_>>()))
+            }
+            "book_detail" => {
+                let b = self.get(&format!("/api/books/{}", int("book_id")?)).await?;
+                let mut row = book_row(&b);
+                for k in ["subtitle", "description", "language", "isbns", "candidates", "chosen", "turned_down", "file", "opened_title", "receipt"] {
+                    row[k] = b[k].clone();
+                }
+                Ok(row)
+            }
+            "add_book" => {
+                let b = self.post("/api/books", json!({"ol_work": a["ol_work"].as_str().ok_or("ol_work is required")?, "language": a["language"]})).await?;
+                Ok(book_row(&b))
+            }
+            "manage_book" => {
+                let id = int("book_id")?;
+                let b = match a["action"].as_str().unwrap_or("") {
+                    "choose" => self.post(&format!("/api/books/{id}/choose"), json!({"md5": a["md5"].as_str().ok_or("md5 is required to choose")?})).await?,
+                    "retry" => self.post(&format!("/api/books/{id}/retry"), json!({})).await?,
+                    "send" => self.post(&format!("/api/books/{id}/send"), json!({})).await?,
+                    other => return Err(format!("unknown action {other:?}")),
+                };
+                Ok(book_row(&b))
+            }
+            "remove_book" => {
+                let id = int("book_id")?;
+                let delete_file = a["delete_file"].as_bool() == Some(true);
+                if delete_file && !confirmed {
+                    return Err("deleting the EPUB needs confirm=true, and only when the person asked for it".into());
+                }
+                self.api(Method::DELETE, &format!("/api/books/{id}?delete_file={delete_file}"), None).await
             }
             "run_task" => {
                 let name = a["name"].as_str().ok_or("name is required")?;
