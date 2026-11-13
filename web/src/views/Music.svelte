@@ -13,6 +13,59 @@
   let openId = $state<number | null>(null);
   let opened = $state<any>(null);
 
+  // Albums wanted: found in MusicBrainz, then looked for, downloaded and filed by Spool.
+  let tab = $state<'library' | 'wanted'>('library');
+  let wants = $state<any[]>([]);
+  let find = $state('');
+  let found = $state<any[] | null>(null);
+  let finding = $state(false);
+
+  async function loadWants() {
+    if (!app.manages) return;
+    const r = await api.get<{ wants: any[] }>('/music/wants').catch(() => null);
+    if (r) wants = r.wants;
+  }
+  loadWants();
+
+  // Something is under way: look again every few seconds until it settles.
+  $effect(() => {
+    if (tab !== 'wanted' || !wants.some((w) => w.want.state !== 'have')) return;
+    const t = setInterval(loadWants, 5000);
+    return () => clearInterval(t);
+  });
+
+  async function look(e: Event) {
+    e.preventDefault();
+    if (find.trim().length < 2) return;
+    finding = true;
+    found = await api.get<any[]>(`/music/find?q=${encodeURIComponent(find.trim())}`).catch((e) => (toast(e.message), []));
+    finding = false;
+  }
+
+  async function want(r: any) {
+    try {
+      const w = await api.post<any>('/music/wants', { mbid: r.group.mbid });
+      r.want_id = w.want.id;
+      r.state = w.want.state;
+      await loadWants();
+    } catch (e: any) {
+      toast(e.message);
+    }
+  }
+
+  async function again(id: number) {
+    await api.post(`/music/wants/${id}/search`, {}).catch((e) => toast(e.message));
+    loadWants();
+  }
+
+  async function unwant(id: number) {
+    await api.del(`/music/wants/${id}`).catch((e) => toast(e.message));
+    if (found) found = found.map((r) => (r.want_id === id ? { ...r, want_id: null, state: null } : r));
+    loadWants();
+  }
+
+  const WANT_LABEL: Record<string, string> = { wanted: 'Wanted', downloading: 'Downloading', have: 'Here' };
+
   // What is playing: the album's tracks in order, and which one.
   let queue = $state<any[]>([]);
   let at = $state(0);
@@ -137,6 +190,64 @@
   </div>
 {/if}
 
+{#if app.manages}
+  <div class="tabs" role="tablist">
+    <button class="btn small" class:primary={tab === 'library'} role="tab" aria-selected={tab === 'library'} onclick={() => (tab = 'library')}>Library</button>
+    <button class="btn small" class:primary={tab === 'wanted'} role="tab" aria-selected={tab === 'wanted'} onclick={() => (tab = 'wanted')}>Wanted{wants.filter((w) => w.want.state !== 'have').length ? ` · ${wants.filter((w) => w.want.state !== 'have').length}` : ''}</button>
+  </div>
+{/if}
+
+{#if tab === 'wanted'}
+  <form class="bar row" onsubmit={look}>
+    <input class="input grow" type="search" placeholder="Find an album: artist, album or both" bind:value={find} aria-label="Find an album" />
+    <button class="btn primary" disabled={finding || find.trim().length < 2}>{finding ? 'Looking…' : 'Find'}</button>
+  </form>
+  {#if found}
+    <div class="card list">
+      {#each found as r (r.group.mbid)}
+        <div class="line">
+          <img class="thumb" src={r.cover} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')} />
+          <div class="grow">
+            <div class="clamp"><b>{r.group.title}</b></div>
+            <div class="muted small clamp">{r.group.artist}</div>
+            <div class="faint small">{[r.group.year || '', r.group.kind].filter(Boolean).join(' · ')}</div>
+          </div>
+          {#if r.have}<span class="chip ok">In the library</span>
+          {:else if r.want_id}<span class="chip">{WANT_LABEL[r.state] ?? 'Wanted'}</span>
+          {:else}<button class="btn small primary" onclick={() => want(r)}>Want</button>{/if}
+        </div>
+      {:else}
+        <div class="faint">Nothing found in MusicBrainz.</div>
+      {/each}
+    </div>
+  {/if}
+
+  <div class="section-title">Wanted albums</div>
+  {#if !wants.length}
+    <div class="card empty">Nothing wanted yet. Find an album above. Spool looks for a FLAC copy, or 320k when there is none, and files it in the music folder.</div>
+  {:else}
+    <div class="card list">
+      {#each wants as { want: w, cover } (w.id)}
+        <div class="line">
+          <img class="thumb" src={cover} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')} />
+          <div class="grow">
+            <div class="clamp"><b>{w.title}</b> <span class="muted">{w.artist}{w.year ? ` · ${w.year}` : ''}</span></div>
+            {#if w.release}<div class="mono faint small clamp">{w.release.title}</div>{/if}
+            {#if w.state === 'have' && w.folder}<div class="mono faint small clamp">{w.folder}</div>{/if}
+            {#if w.note}<div class="small" class:warn={w.state === 'wanted' && !/^Looking/.test(w.note)}>{w.note}</div>{/if}
+            <div class="faint small">Wanted {ago(w.added_at)}{w.tracks ? ` · ${w.tracks[0] === w.tracks[1] ? w.tracks[0] : `${w.tracks[0]}–${w.tracks[1]}`} tracks` : ''}</div>
+          </div>
+          <span class="chip" class:ok={w.state === 'have'}>{WANT_LABEL[w.state]}</span>
+          <div class="buttons">
+            {#if w.state === 'wanted'}<button class="btn small" onclick={() => again(w.id)}>Look now</button>{/if}
+            <button class="btn small ghost danger" onclick={() => unwant(w.id)}>{w.state === 'have' ? 'Clear' : 'Remove'}</button>
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
+  <div class="spacer"></div>
+{:else}
 {#if albums.length}
   <div class="bar">
     <input class="input" type="search" placeholder="Filter by album, artist, year or genre" bind:value={filter} aria-label="Filter albums" />
@@ -191,6 +302,7 @@
     {/each}
   </div>
 {/if}
+{/if}
 
 <audio
   bind:this={audio}
@@ -234,6 +346,60 @@
   }
   .bar .input {
     width: 100%;
+  }
+  .bar.row {
+    display: flex;
+    gap: 8px;
+  }
+  .tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .section-title {
+    margin: 22px 0 10px;
+  }
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .spacer {
+    height: 96px;
+  }
+  .line {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+  }
+  .line:first-child {
+    border-top: 0;
+  }
+  .thumb {
+    width: 52px;
+    height: 52px;
+    flex: none;
+    border-radius: 4px;
+    object-fit: cover;
+    background: var(--raised);
+  }
+  .buttons {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+  @media (max-width: 560px) {
+    .line {
+      flex-wrap: wrap;
+    }
+    .line .buttons {
+      width: 100%;
+    }
   }
   .grid {
     display: grid;

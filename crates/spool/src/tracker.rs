@@ -243,6 +243,9 @@ impl App {
                         tracing::warn!(error = %e, "could not finish a download");
                     }
                 });
+            } else {
+                // Not a film's or an episode's: perhaps an album's.
+                self.music_job_done(&job);
             }
         }
     }

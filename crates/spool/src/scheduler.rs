@@ -31,6 +31,7 @@ impl App {
             "books" => self.books_task().await,
             "book_index" => self.book_index_task(false).await,
             "music" => self.music_scan().await,
+            "music_wants" => self.music_wants_task().await,
             "plex" if !self.settings.general().plex_ready() => Ok("skipped: Plex is not set up, or is turned off".into()),
             "plex" => self.plex_sync().await,
             other => Err(anyhow::anyhow!("unknown task {other}")),
@@ -278,13 +279,14 @@ impl App {
                     ("books", 15),
                     ("book_index", 24 * 60),
                     ("music", 6 * 60),
+                    ("music_wants", 15),
                 ] {
                     if name == "subtitles" && !g.subtitles_auto {
                         continue;
                     }
                     if due(name, every, &last) {
                         last.insert(name, now());
-                        if name == "book_index" || name == "books" || name == "music" {
+                        if name == "book_index" || name == "books" || name == "music" || name == "music_wants" {
                             // Building the book index takes hours and fetching books minutes:
                             // neither holds up the rest.
                             let app = app.clone();

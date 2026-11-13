@@ -32,6 +32,10 @@ fn ext(p: &Path) -> String {
     p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
 }
 
+pub fn is_audio(p: &Path) -> bool {
+    AUDIO.contains(&ext(p).as_str())
+}
+
 fn hidden(p: &Path) -> bool {
     p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.') || n.starts_with("._"))
 }

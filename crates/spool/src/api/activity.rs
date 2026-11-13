@@ -47,7 +47,17 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
         .map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "title_id": h.title_id, "title": h.title_id.and_then(|id| titles.get(&id)).map(|t| t.title.clone()), "data": h.data}))
         .collect();
     let known: Vec<&str> = recent.iter().filter_map(|a| a.job_id.as_deref()).collect();
-    let orphans: Vec<&spool_nntp::JobStatus> = jobs.iter().filter(|j| !known.contains(&j.id.as_str())).collect();
+    // Downloads of no title's: an album's, or ones added by hand.
+    let albums: Vec<(String, String)> = app.db.music_wants()?.into_iter().filter_map(|w| Some((w.job_id?, format!("{} \u{2014} {}", w.artist, w.title)))).collect();
+    let orphans: Vec<Value> = jobs
+        .iter()
+        .filter(|j| !known.contains(&j.id.as_str()))
+        .map(|j| {
+            let mut v = json!(j);
+            v["album"] = json!(albums.iter().find(|(id, _)| *id == j.id).map(|(_, name)| name));
+            v
+        })
+        .collect();
     Ok(Json(json!({"items": rows, "orphan_jobs": orphans, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}, "moves": app.moves_shown(), "compact": app.compacts_shown(), "playing": app.playing_now(), "done": done})))
 }
 

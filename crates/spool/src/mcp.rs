@@ -21,6 +21,7 @@ const PROTOCOLS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const INSTRUCTIONS: &str = "Spool finds, downloads and files movies and TV for one household, replacing Radarr, Sonarr and SABnzbd. \
 Start with `status` for the overall picture or `find_title` to get a title's id; most other tools take that id. \
 Books: `find_book`, then `add_book`; `books` shows them and the Anna's Archive index. \
+Music: `find_album`, then `want_album`; `music` shows the library and the albums wanted. \
 `diagnose` answers \"why has this not downloaded\" in one call. Sizes are in GB. \
 Disk space is tight: check `status` before starting large downloads. \
 `make_clip` cuts a short shareable MP4 from a film or episode and gives its file path. \
@@ -185,7 +186,7 @@ const TOOLS: &[Tool] = &[
         read: false,
         destructive: false,
         description: "Start a background task: rss (read indexer feeds), backlog (search a few missing titles), refresh (update details), scan (rescan library folders), housekeeping (backup and tidy), plex (read Plex), smaller (look for smaller copies of the few titles furthest over their size target; replaces files when they arrive), subtitles (find subtitles for a few files that lack them and check each is in time with the film).",
-        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime", "books", "book_index", "music"]}}), &["name"]),
+        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime", "books", "book_index", "music", "music_wants"]}}), &["name"]),
     },
     Tool { name: "books", read: true, destructive: false, description: "The books side: the Anna's Archive index (how many books, which snapshot, any build in progress), today's download allowance, whether Florilegium is set up, and every book added with its state (wanted, choose, fetching, sending, have) and what it waits for.", schema: || obj(json!({}), &[]) },
     Tool {
@@ -222,6 +223,28 @@ const TOOLS: &[Tool] = &[
         destructive: true,
         description: "Take a book out of Spool. The EPUB kept in Spool stays unless delete_file is true, which needs confirm=true. Florilegium's copy is never touched.",
         schema: || obj(json!({"book_id": {"type": "integer"}, "delete_file": {"type": "boolean"}, "confirm": {"type": "boolean"}}), &["book_id"]),
+    },
+    Tool { name: "music", read: true, destructive: false, description: "The music side: the music folders and how much is in them, the last read of them, and every album wanted with its state (wanted, downloading, have), the release being downloaded, and what it waits for.", schema: || obj(json!({}), &[]) },
+    Tool {
+        name: "find_album",
+        read: true,
+        destructive: false,
+        description: "Search MusicBrainz for an album by artist and/or album name. Returns release groups with their mbid for want_album, whether each is already in the library, and want_id when it is already wanted.",
+        schema: || obj(json!({"query": {"type": "string"}}), &["query"]),
+    },
+    Tool {
+        name: "want_album",
+        read: false,
+        destructive: false,
+        description: "Want an album, by MusicBrainz release group mbid from find_album. Spool searches the indexers' audio categories for FLAC, or 320k when there is none, downloads it, checks the track count against MusicBrainz, and files it in the music folder as \"Artist - Album (Year) [FLAC]\".",
+        schema: || obj(json!({"mbid": {"type": "string"}}), &["mbid"]),
+    },
+    Tool {
+        name: "manage_album",
+        read: false,
+        destructive: false,
+        description: "Act on a wanted album: search (look for it again now); remove (stop wanting it and stop its download; files already filed stay).",
+        schema: || obj(json!({"want_id": {"type": "integer"}, "action": {"type": "string", "enum": ["search", "remove"]}}), &["want_id", "action"]),
     },
     Tool {
         name: "bulk_titles",
@@ -314,6 +337,10 @@ const TOOLS: &[Tool] = &[
     Tool { name: "clips", read: true, destructive: false, description: "The clips that have been cut, newest first: what each is from, where it starts and how long it runs, its size, whether it is ready, and its file's path on the machine Spool runs on.", schema: || obj(json!({}), &[]) },
     Tool { name: "delete_clip", read: false, destructive: true, description: "Remove a clip and its file. Needs confirm=true.", schema: || obj(json!({"clip_id": {"type": "integer"}, "confirm": {"type": "boolean"}}), &["clip_id"]) },
 ];
+
+fn album_row(w: &Value) -> Value {
+    json!({"want_id": w["id"], "artist": w["artist"], "title": w["title"], "year": w["year"], "state": w["state"], "note": w["note"], "tracks": w["tracks"], "release": w["release"]["title"], "folder": w["folder"], "turned_down": w["turned_down"].as_array().map(|t| t.len()).unwrap_or(0)})
+}
 
 fn book_row(b: &Value) -> Value {
     json!({"book_id": b["id"], "title": b["title"], "authors": b["authors"], "year": b["year"], "state": b["state"], "note": if b["note"] == "" { Value::Null } else { b["note"].clone() }, "added": when(&b["added_at"])})
@@ -1010,6 +1037,28 @@ impl Mcp {
                     return Err("deleting the EPUB needs confirm=true, and only when the person asked for it".into());
                 }
                 self.api(Method::DELETE, &format!("/api/books/{id}?delete_file={delete_file}"), None).await
+            }
+            "music" => {
+                let lib = self.get("/api/music").await?;
+                let w = self.get("/api/music/wants").await?;
+                Ok(json!({"library": lib["status"], "wanted": w["wants"].as_array().into_iter().flatten().map(|x| album_row(&x["want"])).collect::<Vec<_>>()}))
+            }
+            "find_album" => {
+                let q = a["query"].as_str().unwrap_or("").trim();
+                let found = self.get(&format!("/api/music/find?q={}", urlencoding::encode(q))).await?;
+                Ok(json!(found.as_array().into_iter().flatten().map(|r| json!({"mbid": r["group"]["mbid"], "title": r["group"]["title"], "artist": r["group"]["artist"], "year": r["group"]["year"], "kind": r["group"]["kind"], "in_library": r["have"], "want_id": r["want_id"]})).collect::<Vec<_>>()))
+            }
+            "want_album" => {
+                let w = self.post("/api/music/wants", json!({"mbid": a["mbid"].as_str().ok_or("mbid is required")?})).await?;
+                Ok(album_row(&w["want"]))
+            }
+            "manage_album" => {
+                let id = int("want_id")?;
+                match a["action"].as_str().unwrap_or("") {
+                    "search" => Ok(album_row(&self.post(&format!("/api/music/wants/{id}/search"), json!({})).await?["want"])),
+                    "remove" => self.api(Method::DELETE, &format!("/api/music/wants/{id}"), None).await,
+                    other => Err(format!("unknown action {other:?}")),
+                }
             }
             "run_task" => {
                 let name = a["name"].as_str().ok_or("name is required")?;

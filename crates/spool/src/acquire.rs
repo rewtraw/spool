@@ -635,7 +635,7 @@ impl App {
     }
 
     /// Ask one indexer, spacing requests so a burst of searches does not hammer it.
-    async fn query_indexer(&self, ix: &Indexer, q: &Query, user: bool) -> Result<Vec<Release>> {
+    pub(crate) async fn query_indexer(&self, ix: &Indexer, q: &Query, user: bool) -> Result<Vec<Release>> {
         // A failing indexer is left alone for a while, longer each time. Many have small daily
         // request allowances, and asking again every few minutes only makes that worse.
         if !user {

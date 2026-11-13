@@ -679,6 +679,16 @@ const MIGRATIONS: &[&str] = &[
         changed_at INTEGER NOT NULL
     );
     "#,
+    r#"
+    -- Albums wanted, each a release group in MusicBrainz. See music/want.rs.
+    CREATE TABLE music_wants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mbid TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL,
+        added_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+    "#,
 ];
 
 impl Db {

@@ -7,8 +7,10 @@
 //! and file names where the tags say nothing. Ids are kept from one scan to the next: a
 //! track by its path, an album by its folder, an artist by its name.
 
+pub mod musicbrainz;
 pub mod scan;
 pub mod subsonic;
+pub mod want;
 mod xml;
 
 use crate::app::App;
@@ -192,12 +194,14 @@ pub struct Music {
     pub now_playing: subsonic::NowPlaying,
     /// Password hashes are slow on purpose; a few are checked at a time, however many arrive.
     pub checking: tokio::sync::Semaphore,
+    /// Held while a wanted album is moved along, so that one is worked on at a time.
+    pub wanting: tokio::sync::Mutex<()>,
 }
 
 impl Music {
     pub fn new(db: &Db) -> Music {
         let library = db.music_library().unwrap_or_default();
-        Music { library: Mutex::new(Arc::new(library)), scan: Mutex::new(ScanState::default()), signed: Mutex::new(HashMap::new()), now_playing: Default::default(), checking: tokio::sync::Semaphore::new(2) }
+        Music { library: Mutex::new(Arc::new(library)), scan: Mutex::new(ScanState::default()), signed: Mutex::new(HashMap::new()), now_playing: Default::default(), checking: tokio::sync::Semaphore::new(2), wanting: Default::default() }
     }
     pub fn library(&self) -> Arc<Library> {
         self.library.lock().clone()
@@ -322,6 +326,13 @@ impl App {
     pub fn music_roots(&self) -> Vec<(String, bool)> {
         let placement = self.placement();
         placement.0.iter().filter(|(l, _)| !l.music_root.is_empty()).map(|(l, online)| (l.music_root.clone(), *online)).collect()
+    }
+
+    /// The music folders Spool may file albums into: those of locations it manages, and
+    /// that can be reached now.
+    pub fn music_roots_to_file(&self) -> Vec<String> {
+        let placement = self.placement();
+        placement.0.iter().filter(|(l, online)| *online && l.manage && !l.music_root.is_empty()).map(|(l, _)| l.music_root.clone()).collect()
     }
 
     pub fn music_status(&self) -> serde_json::Value {

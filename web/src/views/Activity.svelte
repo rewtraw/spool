@@ -350,7 +350,7 @@
         <div class="grow">
           <div class="row wrap top"><span class="t">{j.name}</span><span class="chip">{STATE_LABEL[j.state] ?? j.state}</span></div>
           <JobLine job={app.jobs[j.id] ?? j} state="downloading" error={j.error} />
-          <div class="faint why">Not linked to a title</div>
+          <div class="faint why">{#if j.album}<a class="link" href="#/music">{j.album}</a>{:else}Not linked to a title{/if}</div>
         </div>
         <div class="buttons"><button class="btn small ghost danger" onclick={async () => { await act(() => api.del(`/jobs/${j.id}`)); load(); }}>Remove</button></div>
       </div>

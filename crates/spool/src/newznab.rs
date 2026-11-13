@@ -18,6 +18,8 @@ pub enum Query {
     /// The same for a film. Anime films are usually filed under television, so that category
     /// is searched along with the movie ones.
     MovieText { text: String },
+    /// An album, by artist and name, in every audio category.
+    Music { text: String },
 }
 
 fn cats(v: &[u32]) -> String {
@@ -40,6 +42,7 @@ pub fn build_url(ix: &Indexer, q: &Query) -> String {
         Query::Episode { title, season, episode, .. } => format!("t=tvsearch&cat={}&q={}&season={season}&ep={episode}", cats(&ix.tv_categories), enc(title)),
         Query::Season { tvdb_id: Some(id), season, .. } => format!("t=tvsearch&cat={}&tvdbid={id}&season={season}", cats(&ix.tv_categories)),
         Query::Season { title, season, .. } => format!("t=tvsearch&cat={}&q={}&season={season}", cats(&ix.tv_categories), enc(title)),
+        Query::Music { text } => format!("t=search&cat=3000&q={}", enc(text)),
         Query::MovieText { text } => format!("t=search&cat={},5070&q={}", cats(&ix.movie_categories), enc(text)),
         // Whole-category numbers (5000) so releases filed under anime or foreign are included.
         Query::TvText { text } => format!("t=search&cat={}&q={}", {
