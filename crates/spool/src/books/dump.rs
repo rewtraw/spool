@@ -302,7 +302,12 @@ impl App {
             return Ok(format!("up to date with {name}"));
         }
         match self.build_book_index(&name, torrent).await {
-            Ok(m) => Ok(m),
+            Ok(m) => {
+                // Books wanted while there was no index, or not in the old one, are looked for
+                // straight away rather than at the next books pass.
+                Box::pin(self.run_task("books")).await;
+                Ok(m)
+            }
             Err(e) => {
                 let why = format!("{e:#}");
                 self.index_state(|s| {
