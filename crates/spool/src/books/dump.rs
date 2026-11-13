@@ -366,11 +366,14 @@ impl App {
                     if st.finished {
                         break;
                     }
-                    if st.progress_bytes > last {
-                        last = st.progress_bytes;
+                    // What has come of this part: the torrent's own count takes in pieces it
+                    // shares with files not asked for.
+                    let have = st.file_progress.get(*idx).copied().unwrap_or(0);
+                    if have > last {
+                        last = have;
                         since = std::time::Instant::now();
                         // Half the bar for downloading a part, half for reading it.
-                        self.books.index_state.lock().read_bytes = base + st.progress_bytes / 2;
+                        self.books.index_state.lock().read_bytes = base + have / 2;
                     } else if since.elapsed() > STALL {
                         bail!("the torrent gave nothing for {} minutes", STALL.as_secs() / 60);
                     }
