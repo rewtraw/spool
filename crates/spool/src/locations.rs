@@ -65,7 +65,12 @@ fn probe(l: &Location) -> Answer {
         }
         return answer(read(&l.volume));
     }
-    let roots: Vec<&String> = [&l.movie_root, &l.series_root, &l.music_root].into_iter().filter(|r| !r.is_empty()).collect();
+    // Films and series decide whether a location is there; a music folder does only when it
+    // is all there is. A music folder that cannot be read is found out when it is scanned.
+    let mut roots: Vec<&String> = [&l.movie_root, &l.series_root].into_iter().filter(|r| !r.is_empty()).collect();
+    if roots.is_empty() && !l.music_root.is_empty() {
+        roots.push(&l.music_root);
+    }
     if roots.is_empty() {
         return Answer::Gone;
     }
@@ -251,14 +256,14 @@ impl App {
         let mut out: Vec<Location> = vec![];
         for mut l in list {
             l.name = l.name.trim().to_string();
-            (l.movie_root, l.series_root, l.volume) = (clean(&l.movie_root), clean(&l.series_root), clean(&l.volume));
+            (l.movie_root, l.series_root, l.music_root, l.volume) = (clean(&l.movie_root), clean(&l.series_root), clean(&l.music_root), clean(&l.volume));
             if l.name.is_empty() {
                 return Err("every location needs a name".into());
             }
-            if l.movie_root.is_empty() && l.series_root.is_empty() {
-                return Err(format!("{} needs a folder for films or for television", l.name));
+            if l.movie_root.is_empty() && l.series_root.is_empty() && l.music_root.is_empty() {
+                return Err(format!("{} needs a folder for films, television or music", l.name));
             }
-            if [&l.movie_root, &l.series_root, &l.volume].into_iter().any(|p| !p.is_empty() && !p.starts_with('/')) {
+            if [&l.movie_root, &l.series_root, &l.music_root, &l.volume].into_iter().any(|p| !p.is_empty() && !p.starts_with('/')) {
                 return Err(format!("the folders of {} must be full paths, starting with /", l.name));
             }
             if l.id == 0 || out.iter().any(|o| o.id == l.id) {
@@ -268,11 +273,11 @@ impl App {
             out.push(l);
         }
         // A folder inside another location's folder would leave its titles belonging to both.
-        let main = Location { id: 0, name: "the main library".into(), movie_root: g.movie_root, series_root: g.series_root, ..Default::default() };
+        let main = Location { id: 0, name: "the main library".into(), movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, ..Default::default() };
         let all: Vec<&Location> = std::iter::once(&main).chain(out.iter()).collect();
         for (i, a) in all.iter().enumerate() {
             for b in all.iter().skip(i + 1) {
-                let roots = |l: &Location| [l.movie_root.clone(), l.series_root.clone()].into_iter().filter(|r| !r.is_empty()).collect::<Vec<_>>();
+                let roots = |l: &Location| [l.movie_root.clone(), l.series_root.clone(), l.music_root.clone()].into_iter().filter(|r| !r.is_empty()).collect::<Vec<_>>();
                 if roots(a).iter().any(|x| roots(b).iter().any(|y| Path::new(x).starts_with(y) || Path::new(y).starts_with(x))) {
                     return Err(format!("{} and {} share a folder; each location needs folders of its own", a.name, b.name));
                 }

@@ -36,18 +36,35 @@ fn hidden(p: &Path) -> bool {
     p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.') || n.starts_with("._"))
 }
 
-/// Every audio file under a folder, with its size and modification time.
-pub fn audio_files(root: &Path) -> Vec<(PathBuf, u64, i64)> {
+/// Every audio file under a folder, with its size and modification time; and the folders
+/// that could not be read through, about whose files nothing can be concluded. Links are
+/// not followed: what is played is what is in the music folder.
+pub fn audio_files(root: &Path) -> (Vec<(PathBuf, u64, i64)>, Vec<PathBuf>) {
     let mut out = vec![];
+    let mut failed = vec![];
     let mut dirs = vec![root.to_path_buf()];
     while let Some(dir) = dirs.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        for e in rd.flatten() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            failed.push(dir);
+            continue;
+        };
+        for e in rd {
+            let Ok(e) = e else {
+                failed.push(dir.clone());
+                break;
+            };
             let p = e.path();
             if hidden(&p) {
                 continue;
             }
-            let Ok(meta) = e.metadata() else { continue };
+            // Without following a link, unlike `metadata`.
+            let Ok(meta) = std::fs::symlink_metadata(&p) else {
+                failed.push(dir.clone());
+                continue;
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
             if meta.is_dir() {
                 dirs.push(p);
             } else if AUDIO.contains(&ext(&p).as_str()) {
@@ -57,7 +74,7 @@ pub fn audio_files(root: &Path) -> Vec<(PathBuf, u64, i64)> {
         }
     }
     out.sort();
-    out
+    (out, failed)
 }
 
 /// "Disc 2", "CD1", "Disk 03": a folder that holds one disc of an album.
@@ -171,6 +188,7 @@ pub fn read_file(path: &Path, size: u64, mtime: i64) -> Read {
             r.mb_album = s(ItemKey::MusicBrainzReleaseId);
         }
     }
+    (r.track.album_tag, r.track.album_artist_tag, r.track.mb_album_tag) = (r.album.clone(), r.album_artist.clone(), r.mb_album.clone());
     r
 }
 
@@ -189,7 +207,12 @@ fn most_common<'a>(values: impl Iterator<Item = &'a str>) -> String {
 /// The picture to show for an album folder: a file named like a cover, any picture, or none.
 pub fn cover_in(folder: &Path) -> String {
     let Ok(rd) = std::fs::read_dir(folder) else { return String::new() };
-    let mut images: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| !hidden(p) && IMAGES.contains(&ext(p).as_str())).collect();
+    let mut images: Vec<PathBuf> = rd
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.path())
+        .filter(|p| !hidden(p) && IMAGES.contains(&ext(p).as_str()))
+        .collect();
     images.sort();
     let named = images.iter().find(|p| p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| COVERS.contains(&s.to_ascii_lowercase().as_str())));
     named.or(images.first()).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
@@ -321,57 +344,61 @@ impl App {
         let roots2 = roots.clone();
         // Folders on a network share can be slow to list and files slow to open: all of it
         // runs on threads of its own.
-        let (reads, read_roots) = tokio::task::spawn_blocking(move || {
+        let (reads, read) = tokio::task::spawn_blocking(move || {
             let mut reads = vec![];
-            let mut read_roots = vec![];
+            let mut read = Seen::default();
             for (root, online) in roots2 {
                 if !online || !crate::locations::listable(Path::new(&root)) {
                     continue;
                 }
-                read_roots.push(root.clone());
-                let files = audio_files(Path::new(&root));
+                let (files, failed) = audio_files(Path::new(&root));
+                // A folder that lists empty where tracks were is more likely a share gone quiet
+                // than music all deleted: nothing under it is taken out.
+                if files.is_empty() && known.keys().any(|p| Path::new(p).starts_with(&root)) {
+                    tracing::warn!(root, "the music folder listed nothing; keeping what was there");
+                    continue;
+                }
+                read.roots.push(root.clone());
+                read.failed.extend(failed);
                 app.music.scan.lock().seen += files.len();
                 let fresh: Vec<_> = files.iter().filter(|(p, size, mtime)| !known.get(&*p.to_string_lossy()).is_some_and(|t| t.size == *size && t.mtime == *mtime)).cloned().collect();
-                let fresh_read = read_many(&fresh, &app);
-                let mut fresh_read: HashMap<String, Read> = fresh_read.into_iter().map(|r| (r.track.path.clone(), r)).collect();
+                let mut fresh_read: HashMap<String, Read> = read_many(&fresh, &app).into_iter().map(|r| (r.track.path.clone(), r)).collect();
                 for (p, _, _) in files {
                     let key = p.to_string_lossy().into_owned();
                     let (_, disc) = album_folder(&p);
-                    let r = match fresh_read.remove(&key) {
-                        Some(r) => r,
-                        None => {
-                            let t = known[&key].clone();
-                            Read { album: String::new(), album_artist: String::new(), mb_album: String::new(), track: t }
-                        }
-                    };
+                    let r = fresh_read.remove(&key).unwrap_or_else(|| {
+                        let t = known[&key].clone();
+                        Read { album: t.album_tag.clone(), album_artist: t.album_artist_tag.clone(), mb_album: t.mb_album_tag.clone(), track: t }
+                    });
                     reads.push((r, disc));
                 }
             }
-            (reads, read_roots)
+            (reads, read)
         })
         .await?;
         let read_count = self.music.scan.lock().read;
-        // Tracks not read again carry no album tags; their album keeps what it was called.
-        let old = self.music.library();
-        let mut gathered = tokio::task::spawn_blocking(move || gather(reads)).await?;
-        for g in &mut gathered {
-            if let Some(a) = old.albums.iter().find(|a| a.folder == g.folder) {
-                let all_known = g.tracks.iter().all(|t| old.tracks.iter().any(|o| o.path == t.path && o.mtime == t.mtime && o.size == t.size));
-                if all_known {
-                    g.title = a.title.clone();
-                    g.artist = a.artist.clone();
-                    g.year = a.year;
-                    g.genre = a.genre.clone();
-                    g.mbid = a.mbid.clone();
-                }
-            }
-        }
+        let gathered = tokio::task::spawn_blocking(move || gather(reads)).await?;
         let (albums, tracks) = (gathered.len(), gathered.iter().map(|g| g.tracks.len()).sum::<usize>());
         let db = self.db.clone();
-        tokio::task::spawn_blocking(move || save(&db, &gathered, &read_roots)).await??;
+        tokio::task::spawn_blocking(move || save(&db, &gathered, &read)).await??;
         let lib = self.db.music_library()?;
         *self.music.library.lock() = Arc::new(lib);
         Ok(format!("{albums} albums, {tracks} tracks; {read_count} files read"))
+    }
+}
+
+/// Which music folders were read through, and the folders inside them that could not be.
+#[derive(Default)]
+pub struct Seen {
+    pub roots: Vec<String>,
+    pub failed: Vec<PathBuf>,
+}
+
+impl Seen {
+    /// Whether a track missing from the scan is known to be gone, rather than unseen.
+    pub fn gone(&self, path: &str) -> bool {
+        let p = Path::new(path);
+        self.roots.iter().any(|r| p.starts_with(r)) && !self.failed.iter().any(|f| p.starts_with(f))
     }
 }
 
@@ -395,7 +422,7 @@ fn read_many(files: &[(PathBuf, u64, i64)], app: &App) -> Vec<Read> {
 
 /// Write what was gathered, keeping the ids of what was there, and take out what is gone
 /// from the folders that were read.
-fn save(db: &crate::db::Db, gathered: &[Gathered], read_roots: &[String]) -> Result<()> {
+fn save(db: &crate::db::Db, gathered: &[Gathered], read: &Seen) -> Result<()> {
     db.with(|c| {
         let tx = c.unchecked_transaction()?;
         let t = now();
@@ -432,11 +459,11 @@ fn save(db: &crate::db::Db, gathered: &[Gathered], read_roots: &[String]) -> Res
             kept_albums.push(album_id);
             for tr in &g.tracks {
                 tx.execute(
-                    "INSERT INTO music_tracks(album_id, path, title, artist, track, disc, year, genre, seconds, size, mtime, suffix, bitrate, sample_rate, bit_depth, channels, added_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                    "INSERT INTO music_tracks(album_id, path, title, artist, track, disc, year, genre, seconds, size, mtime, suffix, bitrate, sample_rate, bit_depth, channels, added_at, album_tag, album_artist_tag, mb_album_tag)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
                      ON CONFLICT(path) DO UPDATE SET album_id = ?1, title = ?3, artist = ?4, track = ?5, disc = ?6, year = ?7, genre = ?8, seconds = ?9, size = ?10, mtime = ?11,
-                       suffix = ?12, bitrate = ?13, sample_rate = ?14, bit_depth = ?15, channels = ?16",
-                    params![album_id, tr.path, tr.title, tr.artist, tr.track, tr.disc, tr.year, tr.genre, tr.seconds, tr.size as i64, tr.mtime, tr.suffix, tr.bitrate, tr.sample_rate, tr.bit_depth, tr.channels, t],
+                       suffix = ?12, bitrate = ?13, sample_rate = ?14, bit_depth = ?15, channels = ?16, album_tag = ?18, album_artist_tag = ?19, mb_album_tag = ?20",
+                    params![album_id, tr.path, tr.title, tr.artist, tr.track, tr.disc, tr.year, tr.genre, tr.seconds, tr.size as i64, tr.mtime, tr.suffix, tr.bitrate, tr.sample_rate, tr.bit_depth, tr.channels, t, tr.album_tag, tr.album_artist_tag, tr.mb_album_tag],
                 )?;
                 kept_tracks.push(tr.path.clone());
             }
@@ -449,7 +476,7 @@ fn save(db: &crate::db::Db, gathered: &[Gathered], read_roots: &[String]) -> Res
             let mut s = tx.prepare("SELECT id, path FROM music_tracks")?;
             for row in s.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))? {
                 let (id, path) = row?;
-                if !kept.contains(path.as_str()) && read_roots.iter().any(|r| Path::new(&path).starts_with(r)) {
+                if !kept.contains(path.as_str()) && read.gone(&path) {
                     gone.push(id);
                 }
             }

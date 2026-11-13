@@ -62,6 +62,14 @@ pub struct Track {
     pub bit_depth: u8,
     pub channels: u8,
     pub added_at: i64,
+    /// What the file's own tags say of its album, kept so an album is named the same whichever
+    /// of its files were read last.
+    #[serde(skip)]
+    pub album_tag: String,
+    #[serde(skip)]
+    pub album_artist_tag: String,
+    #[serde(skip)]
+    pub mb_album_tag: String,
 }
 
 impl Track {
@@ -182,15 +190,25 @@ pub struct Music {
     /// for a password hash each time. Keyed by account, its stored hash and what was given.
     pub signed: Mutex<HashMap<(i64, String, [u8; 32]), std::time::Instant>>,
     pub now_playing: subsonic::NowPlaying,
+    /// Password hashes are slow on purpose; a few are checked at a time, however many arrive.
+    pub checking: tokio::sync::Semaphore,
 }
 
 impl Music {
     pub fn new(db: &Db) -> Music {
         let library = db.music_library().unwrap_or_default();
-        Music { library: Mutex::new(Arc::new(library)), scan: Mutex::new(ScanState::default()), signed: Mutex::new(HashMap::new()), now_playing: Default::default() }
+        Music { library: Mutex::new(Arc::new(library)), scan: Mutex::new(ScanState::default()), signed: Mutex::new(HashMap::new()), now_playing: Default::default(), checking: tokio::sync::Semaphore::new(2) }
     }
     pub fn library(&self) -> Arc<Library> {
         self.library.lock().clone()
+    }
+}
+
+impl App {
+    /// Whether a file Spool is about to send is one of the library's: inside a music folder,
+    /// and not a link to somewhere else.
+    pub fn music_file_ok(&self, path: &std::path::Path) -> bool {
+        self.music_roots().iter().any(|(r, _)| path.starts_with(r)) && std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
     }
 }
 
@@ -210,7 +228,7 @@ impl Db {
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let tracks = c
-                .prepare("SELECT id, album_id, path, title, artist, track, disc, year, genre, seconds, size, mtime, suffix, bitrate, sample_rate, bit_depth, channels, added_at FROM music_tracks")?
+                .prepare("SELECT id, album_id, path, title, artist, track, disc, year, genre, seconds, size, mtime, suffix, bitrate, sample_rate, bit_depth, channels, added_at, album_tag, album_artist_tag, mb_album_tag FROM music_tracks")?
                 .query_map([], track_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(Library::new(artists, albums, tracks))
@@ -293,6 +311,9 @@ pub(crate) fn track_row(r: &rusqlite::Row) -> rusqlite::Result<Track> {
         bit_depth: r.get(15)?,
         channels: r.get(16)?,
         added_at: r.get(17)?,
+        album_tag: r.get(18)?,
+        album_artist_tag: r.get(19)?,
+        mb_album_tag: r.get(20)?,
     })
 }
 

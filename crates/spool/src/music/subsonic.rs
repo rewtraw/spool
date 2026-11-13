@@ -123,11 +123,20 @@ fn failed(p: &Params, f: Fail) -> Response {
     respond(p, m)
 }
 
-async fn handle(State(app): State<App>, Path(method): Path<String>, req: Request) -> Response {
+async fn handle(State(app): State<App>, Path(method): Path<String>, from: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>, req: Request) -> Response {
     let method = method.trim_end_matches(".view").to_string();
     let mut p = Params::default();
     p.add(req.uri().query().unwrap_or(""));
     let headers = req.headers().clone();
+    // As for the web app: a name someone else's web page could point at this machine is refused.
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    if !host.is_empty() && !crate::api::local_name(host) {
+        return (StatusCode::MISDIRECTED_REQUEST, format!("Spool answers to its address or its name on this network, not {host}")).into_response();
+    }
+    // What is offered is said to anyone, before signing in.
+    if method == "getOpenSubsonicExtensions" {
+        return ok(&p, extensions());
+    }
     let head = req.method() == Method::HEAD;
     let form = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("application/x-www-form-urlencoded"));
     if req.method() == Method::POST && form {
@@ -135,7 +144,7 @@ async fn handle(State(app): State<App>, Path(method): Path<String>, req: Request
             p.add(&String::from_utf8_lossy(&bytes));
         }
     }
-    let who = match sign_in(&app, &p).await {
+    let who = match sign_in(&app, &p, &headers, from.map(|c| c.0 .0.ip())).await {
         Ok(a) => a,
         Err(f) => return failed(&p, f),
     };
@@ -150,7 +159,17 @@ async fn handle(State(app): State<App>, Path(method): Path<String>, req: Request
     }
 }
 
-async fn sign_in(app: &App, p: &Params) -> Result<Account, Fail> {
+/// A request a browser made for a page somewhere else. Music apps give no such marks.
+fn from_a_web_page_elsewhere(headers: &HeaderMap) -> bool {
+    let site = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok());
+    if matches!(site, Some("cross-site" | "same-site")) {
+        return true;
+    }
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok()).unwrap_or("");
+    headers.get(header::ORIGIN).and_then(|o| o.to_str().ok()).is_some_and(|o| o.split_once("://").is_none_or(|(_, at)| !at.eq_ignore_ascii_case(host)))
+}
+
+async fn sign_in(app: &App, p: &Params, headers: &HeaderMap, from: Option<std::net::IpAddr>) -> Result<Account, Fail> {
     let name = p.get("u").ok_or(Fail::Missing("u"))?;
     let accounts = app.db.accounts()?;
     let who = accounts.into_iter().find(|a| a.enabled && a.name.eq_ignore_ascii_case(name));
@@ -158,6 +177,10 @@ async fn sign_in(app: &App, p: &Params) -> Result<Account, Fail> {
         return Err(Fail::WrongPassword);
     };
     if who.password.is_empty() {
+        // A name alone is no proof of who sent it; a page elsewhere could send it too.
+        if from_a_web_page_elsewhere(headers) {
+            return Err(Fail::WrongPassword);
+        }
         return Ok(who);
     }
     let given = match (p.get("p"), p.get("t")) {
@@ -173,11 +196,20 @@ async fn sign_in(app: &App, p: &Params) -> Result<Account, Fail> {
     if app.music.signed.lock().get(&key).is_some_and(|at| at.elapsed() < SIGNED_FOR) {
         return Ok(who);
     }
-    let stored = who.password.clone();
-    let right = tokio::task::spawn_blocking(move || crate::settings::verify_password(&stored, &given)).await.unwrap_or(false);
+    // Guesses are counted as at the web app's sign-in, and passwords checked a few at a time.
+    if !app.login_failures.take(from) {
+        return Err(Fail::Other("Too many wrong passwords; wait a minute and try again".into()));
+    }
+    let right = {
+        let _turn = app.music.checking.acquire().await;
+        let stored = who.password.clone();
+        tokio::task::spawn_blocking(move || crate::settings::verify_password(&stored, &given)).await.unwrap_or(false)
+    };
     if !right {
+        tracing::warn!(from = ?from, "wrong name or password from a music player");
         return Err(Fail::WrongPassword);
     }
+    app.login_failures.right(from);
     let mut signed = app.music.signed.lock();
     signed.retain(|_, at| at.elapsed() < SIGNED_FOR);
     signed.insert(key, std::time::Instant::now());
@@ -185,11 +217,17 @@ async fn sign_in(app: &App, p: &Params) -> Result<Account, Fail> {
 }
 
 fn decode_hex(s: &str) -> Option<String> {
-    if s.len() % 2 != 0 {
+    let digit = |b: u8| (b as char).to_digit(16).map(|d| d as u8);
+    let b = s.as_bytes();
+    if b.len() % 2 != 0 {
         return None;
     }
-    let bytes: Option<Vec<u8>> = (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect();
+    let bytes: Option<Vec<u8>> = b.chunks(2).map(|pair| Some(digit(pair[0])? << 4 | digit(pair[1])?)).collect();
     String::from_utf8(bytes?).ok()
+}
+
+fn extensions() -> Value {
+    json!({"openSubsonicExtensions": [{"name": "formPost", "versions": [1]}, {"name": "transcodeOffset", "versions": [1]}]})
 }
 
 /// Ids as players see them: "ar-3", "al-12", "tr-140", "pl-2".
@@ -397,7 +435,7 @@ fn shuffle<T>(v: &mut [T]) {
 }
 
 fn page<T: Clone>(v: &[T], offset: i64, size: i64) -> Vec<T> {
-    v.iter().skip(offset.max(0) as usize).take(size.clamp(0, 500) as usize).cloned().collect()
+    v.iter().skip(offset.max(0) as usize).take(size.max(0) as usize).cloned().collect()
 }
 
 /// Albums in the order getAlbumList asks for.
@@ -442,7 +480,8 @@ fn album_list<'a>(lib: &'a Library, p: &Params, marks: &Marks) -> Result<Vec<&'a
         }
         _ => return Err(Fail::Other(format!("unknown list type {kind}"))),
     }
-    Ok(page(&list, p.num("offset", 0), p.num("size", 10)))
+    // Subsonic caps a list of albums at 500.
+    Ok(page(&list, p.num("offset", 0), p.num("size", 10).min(500)))
 }
 
 fn genres(lib: &Library) -> Vec<Value> {
@@ -493,7 +532,7 @@ async fn answer(app: &App, method: &str, p: &Params, who: &Account, headers: &He
     let v = match method {
         "ping" => json!({}),
         "getLicense" => json!({"license": {"valid": true}}),
-        "getOpenSubsonicExtensions" => json!({"openSubsonicExtensions": [{"name": "formPost", "versions": [1]}, {"name": "transcodeOffset", "versions": [1]}]}),
+        "getOpenSubsonicExtensions" => extensions(),
         "getMusicFolders" => json!({"musicFolders": {"musicFolder": [{"id": 1, "name": "Music"}]}}),
         "getArtists" => json!({"artists": {"ignoredArticles": "The A An El La Los Las Le Les", "index": index(&lib, &marks, false)}}),
         "getIndexes" => json!({"indexes": {"ignoredArticles": "The A An El La Los Las Le Les", "lastModified": app.music.scan.lock().last_at * 1000, "index": index(&lib, &marks, true)}}),
@@ -542,7 +581,7 @@ async fn answer(app: &App, method: &str, p: &Params, who: &Account, headers: &He
             let genre = p.get("genre");
             let mut list: Vec<&Track> = lib.tracks.iter().filter(|t| genre.is_none_or(|g| t.genre.eq_ignore_ascii_case(g)) && (t.year == 0 || (from..=to).contains(&(t.year as i64)))).collect();
             shuffle(&mut list);
-            json!({"randomSongs": {"song": songs(page(&list, 0, p.num("size", 10)))}})
+            json!({"randomSongs": {"song": songs(page(&list, 0, p.num("size", 10).min(500)))}})
         }
         "getSongsByGenre" => {
             let g = need("genre")?;
@@ -737,6 +776,9 @@ async fn answer(app: &App, method: &str, p: &Params, who: &Account, headers: &He
         "getVideos" => json!({"videos": {}}),
         "stream" | "download" => {
             let t = lib.track(want("tr", "song")?).ok_or(Fail::NotFound("song"))?.clone();
+            if !music_file_ok(app, &t.path).await {
+                return Err(Fail::NotFound("song"));
+            }
             if method == "download" {
                 return Ok(send_original(&t, headers, head, true).await);
             }
@@ -777,6 +819,8 @@ fn user(who: &Account) -> Value {
 /// What a player asked to be sent instead of the file as it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transcode {
+    /// The player asked for the file as it is, whatever else it said.
+    pub raw: bool,
     pub format: Option<&'static str>,
     pub kbps: u32,
     pub offset: u32,
@@ -784,17 +828,20 @@ pub struct Transcode {
 
 impl Transcode {
     pub fn asked(format: Option<&str>, max_kbps: i64, offset: i64) -> Transcode {
-        let format = match format {
+        let as_format = match format {
             Some("mp3") => Some("mp3"),
             Some("opus") | Some("ogg") => Some("opus"),
             Some("aac") | Some("m4a") => Some("aac"),
             _ => None,
         };
-        Transcode { format, kbps: max_kbps.clamp(0, 320) as u32, offset: offset.max(0) as u32 }
+        Transcode { raw: format == Some("raw"), format: as_format, kbps: max_kbps.clamp(0, 320) as u32, offset: offset.max(0) as u32 }
     }
 
     /// The format and bit rate to make, or none to send the file as it is.
     pub fn plan(&self, t: &Track) -> Option<(&'static str, u32)> {
+        if self.raw {
+            return None;
+        }
         let lower = self.kbps > 0 && (t.bitrate == 0 || self.kbps < t.bitrate);
         let other = self.format.is_some_and(|f| f != t.suffix.as_str());
         if !lower && !other && self.offset == 0 {
@@ -851,16 +898,31 @@ pub async fn stream(app: &App, t: &Track, ask: Transcode, headers: &HeaderMap, h
             return send_original(t, headers, head, false).await;
         }
     };
-    let Some(mut out) = child.stdout.take() else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
-    let (mut writer, reader) = tokio::io::duplex(256 << 10);
-    // The player hanging up drops the reader; the copy then fails and ffmpeg is stopped.
-    tokio::spawn(async move {
-        let _ = tokio::io::copy(&mut out, &mut writer).await;
-        let _ = child.kill().await;
-    });
-    let mut r = Body::from_stream(tokio_util::io::ReaderStream::new(reader)).into_response();
+    let Some(out) = child.stdout.take() else { return StatusCode::INTERNAL_SERVER_ERROR.into_response() };
+    // The child goes with the body: when the player hangs up the body is dropped and ffmpeg
+    // with it (it was started to be killed on drop), whether or not it was making anything.
+    let body = Converting { _child: child, out: tokio_util::io::ReaderStream::new(out) };
+    let mut r = Body::from_stream(body).into_response();
     r.headers_mut().insert(header::CONTENT_TYPE, mime.parse().unwrap());
     r
+}
+
+/// The output of ffmpeg as a response body, holding ffmpeg itself.
+struct Converting {
+    _child: tokio::process::Child,
+    out: tokio_util::io::ReaderStream<tokio::process::ChildStdout>,
+}
+
+impl futures::Stream for Converting {
+    type Item = std::io::Result<tokio_util::bytes::Bytes>;
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.out).poll_next(cx)
+    }
+}
+
+pub async fn music_file_ok(app: &App, path: &str) -> bool {
+    let (app, path) = (app.clone(), std::path::PathBuf::from(path));
+    tokio::task::spawn_blocking(move || app.music_file_ok(&path)).await.unwrap_or(false)
 }
 
 /// An album's picture: the image file beside it, or the one inside its first track; made
@@ -871,23 +933,25 @@ pub async fn cover(app: &App, album_id: i64, size: u32) -> Response {
     if album.cover.is_empty() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let source = if album.cover == super::scan::EMBEDDED { String::new() } else { album.cover.clone() };
-    let first = lib.tracks_of(album_id).map(|t| t.path.clone()).find(|p| source.is_empty() && has_picture(std::path::Path::new(p))).or_else(|| lib.tracks_of(album_id).next().map(|t| t.path.clone()));
+    let cover = album.cover.clone();
+    let tracks: Vec<String> = lib.tracks_of(album_id).map(|t| t.path.clone()).collect();
     let cache = app.data_dir.join("music-art");
-    let stamp = std::fs::metadata(if source.is_empty() { first.clone().unwrap_or_default() } else { source.clone() })
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let app2 = app.clone();
+    // Everything below can wait on a network share, so none of it runs on the async threads.
     let made = tokio::task::spawn_blocking(move || -> Option<(Vec<u8>, &'static str)> {
+        let embedded = cover == super::scan::EMBEDDED;
+        let source = if embedded { tracks.iter().find(|p| has_picture(std::path::Path::new(p)))?.clone() } else { cover };
+        if !app2.music_file_ok(std::path::Path::new(&source)) {
+            return None;
+        }
+        let stamp = std::fs::metadata(&source).ok().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
         let cached = cache.join(format!("{album_id}-{size}-{stamp}.jpg"));
         if size > 0 {
             if let Ok(b) = std::fs::read(&cached) {
                 return Some((b, "image/jpeg"));
             }
         }
-        let (bytes, mime) = if !source.is_empty() {
+        let (bytes, mime) = if !embedded {
             let mime = match source.rsplit('.').next().map(|e| e.to_ascii_lowercase()).as_deref() {
                 Some("png") => "image/png",
                 Some("webp") => "image/webp",
@@ -895,7 +959,7 @@ pub async fn cover(app: &App, album_id: i64, size: u32) -> Response {
             };
             (std::fs::read(&source).ok()?, mime)
         } else {
-            embedded_picture(std::path::Path::new(&first?))?
+            embedded_picture(std::path::Path::new(&source))?
         };
         if size == 0 {
             return Some((bytes, mime));
@@ -972,6 +1036,7 @@ mod tests {
         assert_eq!(Transcode::asked(None, 128, 0).plan(&track("flac", 900)), Some(("mp3", 128)));
         assert_eq!(Transcode::asked(Some("opus"), 0, 0).plan(&track("flac", 900)), Some(("opus", 160)));
         assert_eq!(Transcode::asked(Some("mp3"), 0, 0).plan(&track("mp3", 320)), None);
+        assert_eq!(Transcode::asked(Some("raw"), 128, 30).plan(&track("flac", 900)), None);
     }
 
     #[test]
@@ -986,6 +1051,8 @@ mod tests {
     fn passwords_can_come_hex_encoded() {
         assert_eq!(decode_hex("736573616d65").as_deref(), Some("sesame"));
         assert_eq!(decode_hex("7"), None);
+        assert_eq!(decode_hex("aéx"), None);
+        assert_eq!(decode_hex("zz"), None);
     }
 
     #[test]

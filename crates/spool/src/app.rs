@@ -740,7 +740,7 @@ pub fn disk_of(folder: &Path) -> Option<PathBuf> {
 /// both are on, when it is one that can be taken away. Worked out from the folders, so
 /// that it is never a thing to be got wrong. When neither folder can be seen just now,
 /// what was known before stands.
-pub fn disk_needed(folders: [&str; 2], known: &str) -> String {
+pub fn disk_needed<const N: usize>(folders: [&str; N], known: &str) -> String {
     let there: Vec<&Path> = folders.iter().filter(|f| !f.is_empty()).map(Path::new).filter(|f| f.is_dir()).collect();
     if there.is_empty() {
         return known.to_string();

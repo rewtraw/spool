@@ -609,6 +609,76 @@ const MIGRATIONS: &[&str] = &[
         changed_at INTEGER NOT NULL
     );
     "#,
+    r#"
+    -- Music ids are never given out twice, so a star, a play or a playlist kept by a player
+    -- never comes to mean another track; and each track keeps what its tags say of its album,
+    -- so an album is named the same whichever of its files were read last. Nothing had been
+    -- read into these tables yet.
+    DROP TABLE music_tracks;
+    DROP TABLE music_albums;
+    DROP TABLE music_artists;
+    DROP TABLE music_marks;
+    DROP TABLE music_playlists;
+    CREATE TABLE music_artists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        key TEXT NOT NULL UNIQUE
+    );
+    CREATE TABLE music_albums (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        folder TEXT NOT NULL UNIQUE,
+        artist_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        year INTEGER NOT NULL DEFAULT 0,
+        genre TEXT NOT NULL DEFAULT '',
+        cover TEXT NOT NULL DEFAULT '',
+        added_at INTEGER NOT NULL,
+        mbid TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE music_tracks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        album_id INTEGER NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        track INTEGER NOT NULL,
+        disc INTEGER NOT NULL,
+        year INTEGER NOT NULL,
+        genre TEXT NOT NULL,
+        seconds REAL NOT NULL,
+        size INTEGER NOT NULL,
+        mtime INTEGER NOT NULL,
+        suffix TEXT NOT NULL,
+        bitrate INTEGER NOT NULL,
+        sample_rate INTEGER NOT NULL,
+        bit_depth INTEGER NOT NULL,
+        channels INTEGER NOT NULL,
+        added_at INTEGER NOT NULL,
+        album_tag TEXT NOT NULL DEFAULT '',
+        album_artist_tag TEXT NOT NULL DEFAULT '',
+        mb_album_tag TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX music_tracks_album ON music_tracks(album_id);
+    CREATE TABLE music_marks (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        item TEXT NOT NULL,
+        starred_at INTEGER NOT NULL DEFAULT 0,
+        rating INTEGER NOT NULL DEFAULT 0,
+        plays INTEGER NOT NULL DEFAULT 0,
+        played_at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, item)
+    );
+    CREATE TABLE music_playlists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        comment TEXT NOT NULL DEFAULT '',
+        public INTEGER NOT NULL DEFAULT 0,
+        tracks TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        changed_at INTEGER NOT NULL
+    );
+    "#,
 ];
 
 impl Db {

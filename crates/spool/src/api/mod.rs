@@ -146,6 +146,7 @@ fn a_viewer_may(method: &axum::http::Method, path: &str) -> bool {
     matches!(
         (read, parts.as_slice()),
         (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching" | "clips" | "dialogue"])
+            | (true, ["music"] | ["music", "albums", _] | ["music", "albums", _, "art"] | ["music", "tracks", _, "play"])
             | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"] | ["clips", ..] | ["dialogue", "coverage" | "lines"])
             | (false, ["logout" | "watched" | "clips"] | ["clips", _])
     )
