@@ -151,11 +151,28 @@ fn pair(url: Option<String>, key: Option<String>) -> Option<(String, String)> {
     }
 }
 
+/// A service started by launchd may have 256 files open at once, and the torrent the book
+/// index is built from opens each of its nine hundred files. Ask for more, up to what the
+/// system allows.
+fn more_open_files() {
+    let mut l = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit and setrlimit only read and write the struct passed.
+    unsafe {
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut l) == 0 && l.rlim_cur < 10240 {
+            l.rlim_cur = l.rlim_max.min(10240);
+            if libc::setrlimit(libc::RLIMIT_NOFILE, &l) != 0 {
+                tracing::warn!("could not raise the number of files Spool may have open");
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let log = LogWriter(own_log_file(&cli).map(|f| std::sync::Arc::new(std::sync::Mutex::new(f))));
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).with_target(false).with_writer(move || log.clone()).init();
+    more_open_files();
     let dir = data_dir(&cli);
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
     // Clipping a file outside the library needs no catalogue.
