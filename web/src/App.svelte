@@ -11,11 +11,13 @@
   import Settings from './views/Settings.svelte';
   import CollectionView from './views/Collection.svelte';
   import Clips from './views/Clips.svelte';
+  import Books from './views/Books.svelte';
 
   const nav = [
     { id: 'home', label: 'Home', icon: 'M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
     { id: 'library', label: 'Library', icon: 'M4 4h4v16H4zM10 4h4v16h-4zM16.5 5.2l3.8-1 3 14.6-3.8 1z' },
     { id: 'discover', label: 'Discover', icon: 'M11 4a7 7 0 1 0 4.4 12.5L20 21l1.4-1.4-4.6-4.6A7 7 0 0 0 11 4zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
+    { id: 'books', label: 'Books', icon: 'M7 2h13v17H7.5a1 1 0 0 0 0 2H20v2H7.5A3.5 3.5 0 0 1 4 19.5V5a3 3 0 0 1 3-3zm0 2a1 1 0 0 0-1 1v12.3c.5-.2 1-.3 1.5-.3H18V4zm2 2h7v2H9z' },
     { id: 'clips', label: 'Clips', icon: 'M9.6 7.2A3.5 3.5 0 1 0 8 8.9L10.6 12 8 15.1a3.5 3.5 0 1 0 1.6 1.7L12 14l7.5 8H22L9.6 7.2zM6.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0 11a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM22 2h-2.5L13.4 9l1.3 1.5z' },
     { id: 'activity', label: 'Activity', icon: 'M12 3v10.6l-3.3-3.3-1.4 1.4L12 16.4l4.7-4.7-1.4-1.4L12 13.6zM5 19h14v2H5z' },
     { id: 'archive', label: 'Archive', icon: 'M3 4h18v5H3zm2 7h14v9H5zm4 2.5v2h6v-2z' },
@@ -113,6 +115,7 @@
       {:else if route.view === 'title'}{#key route.arg}<TitleView id={Number(route.arg)} />{/key}
       {:else if route.view === 'collection'}{#key route.arg}<CollectionView id={Number(route.arg)} />{/key}
       {:else if route.view === 'clips'}<Clips />
+      {:else if route.view === 'books'}<Books />
       {:else if route.view === 'discover'}<Discover />
       {:else if route.view === 'activity'}<Activity />
       {:else if route.view === 'archive'}<Archive />

@@ -164,6 +164,38 @@ export interface Found {
   coverage: Coverage;
 }
 
+/** A file of a book that Anna's Archive holds. */
+export interface Candidate {
+  md5: string;
+  title: string;
+  author: string;
+  lang: string;
+  size: number;
+  year: number;
+  score: number;
+  by_id: boolean;
+}
+
+export interface Book {
+  id: number;
+  ol_work: string;
+  title: string;
+  subtitle: string;
+  authors: string[];
+  year: number;
+  cover: string;
+  description: string;
+  language: string;
+  state: 'wanted' | 'choose' | 'fetching' | 'sending' | 'have';
+  note: string;
+  candidates: Candidate[];
+  chosen: Candidate | null;
+  turned_down: { md5: string; why: string; at: number }[];
+  file: string;
+  receipt: { at: number; status: string; shelf_id: number | null; book_id: number | null } | null;
+  added_at: number;
+}
+
 export interface Clip {
   id: number;
   title_id: number | null;

@@ -25,6 +25,8 @@
     ['housekeeping', 'Back up and tidy', 'Writes a database backup and empties old recycle folders.'],
     ['plex', 'Read Plex', 'Matches Plex\'s films and shows to titles in Spool.'],
     ['anime', 'Read AniList', 'Finds which titles are anime and reads their format, names and relations from AniList. Collections of series and films are built from these.'],
+    ['books', 'Get wanted books', 'Looks for each wanted book in the book index, downloads the file it is sure of from Anna\'s Archive, checks it and sends it to Florilegium.'],
+    ['book_index', 'Update the book index', 'Builds the book index again when Anna\'s Archive has published a newer snapshot of its metadata. Reads about 170 GB, one part at a time.'],
     ['subtitles', 'Find missing subtitles', 'Looks for subtitles in the languages you chose for a few files that lack them, and keeps only ones in time with the film.'],
   ];
   async function runTask(name: string) {

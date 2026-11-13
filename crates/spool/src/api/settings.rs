@@ -8,6 +8,8 @@ pub(super) async fn get_general(State(app): State<App>) -> Json<General> {
     g.plex_token = mask(&g.plex_token);
     g.opensubtitles_api_key = mask(&g.opensubtitles_api_key);
     g.opensubtitles_password = mask(&g.opensubtitles_password);
+    g.books.annas_key = mask(&g.books.annas_key);
+    g.books.florilegium_token = mask(&g.books.florilegium_token);
     for h in &mut g.links {
         h.key = mask(&h.key);
     }
@@ -20,6 +22,8 @@ pub(super) async fn put_general(State(app): State<App>, Json(mut g): Json<Genera
     g.plex_token = unmask(g.plex_token, &old.plex_token);
     g.opensubtitles_api_key = unmask(g.opensubtitles_api_key, &old.opensubtitles_api_key);
     g.opensubtitles_password = unmask(g.opensubtitles_password, &old.opensubtitles_password);
+    g.books.annas_key = unmask(g.books.annas_key, &old.books.annas_key);
+    g.books.florilegium_token = unmask(g.books.florilegium_token, &old.books.florilegium_token);
     if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password {
         *app.subtitle_login.lock() = None;
     }
@@ -221,7 +225,7 @@ pub(super) async fn test_indexer(State(app): State<App>, Path(id): Path<i64>) ->
 }
 
 pub(super) async fn run_task(State(app): State<App>, Path(name): Path<String>) -> R<Value> {
-    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime"].contains(&name.as_str()) {
+    if !["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime", "books", "book_index"].contains(&name.as_str()) {
         return Err(not_found("task"));
     }
     let app2 = app.clone();

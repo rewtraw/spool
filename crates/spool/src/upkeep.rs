@@ -197,6 +197,10 @@ impl App {
         if self.adoption.lock().as_ref().is_some_and(|a| a.running) {
             reasons.push("a location is being looked through or added from".into());
         }
+        // A build of the book index cut short starts again from the beginning: hours lost.
+        if self.books.index_state.lock().building {
+            reasons.push("the book index is being built".into());
+        }
         let played = now() - self.last_playing.load(Ordering::Relaxed);
         if played < 120 {
             reasons.push(format!("a player was playing {played} seconds ago"));

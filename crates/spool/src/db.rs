@@ -539,6 +539,16 @@ const MIGRATIONS: &[&str] = &[
     -- index, for every clip whose film or episode is still in the library.
     UPDATE clips SET data = json_remove(data, '$.said') WHERE title_id IS NOT NULL;
     "#,
+    r#"
+    -- Books, each a work in Open Library's catalogue, wanted or got. See books/mod.rs.
+    CREATE TABLE books (
+        id INTEGER PRIMARY KEY,
+        ol_work TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL,
+        added_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+    "#,
 ];
 
 impl Db {

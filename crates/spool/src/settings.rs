@@ -168,6 +168,8 @@ pub struct General {
     pub link_seq: u32,
     /// How compact versions are made.
     pub compact: crate::compact::Compact,
+    /// How books are got and where they go.
+    pub books: crate::books::BookSettings,
 }
 
 impl Default for General {
@@ -214,6 +216,7 @@ impl Default for General {
             links: vec![],
             link_seq: 0,
             compact: Default::default(),
+            books: Default::default(),
         }
     }
 }

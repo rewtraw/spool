@@ -34,6 +34,7 @@ mod collections;
 mod locations;
 mod compact;
 mod players;
+mod books;
 mod clips;
 use titles::*;
 use subtitles::*;
@@ -44,6 +45,7 @@ use upkeep::*;
 use collections::*;
 use locations::*;
 use compact::*;
+use books::*;
 use clips::*;
 
 #[derive(rust_embed::RustEmbed)]
@@ -387,6 +389,14 @@ fn api_routes() -> Router<App> {
         .route("/api/titles", get(list_titles).post(add_title))
         .route("/api/titles/bulk", post(bulk_titles))
         .route("/api/titles/brief", get(library_brief))
+        .route("/api/books", get(list_books).post(add_book))
+        .route("/api/books/lookup", get(book_lookup))
+        .route("/api/books/index", post(build_book_index))
+        .route("/api/books/{id}", get(get_book).delete(delete_book))
+        .route("/api/books/{id}/choose", post(choose_book))
+        .route("/api/books/{id}/retry", post(retry_book))
+        .route("/api/books/{id}/send", post(resend_book))
+        .route("/api/books/{id}/file", get(book_file))
         .route("/api/clips", get(list_clips).post(add_clip))
         .route("/api/clips/{id}", get(get_clip).delete(delete_clip))
         .route("/api/clips/{id}/video", get(clip_video))

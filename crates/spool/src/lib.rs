@@ -3,6 +3,7 @@
 pub mod acquire;
 pub mod adopt;
 pub mod anime;
+pub mod books;
 pub mod api;
 pub mod app;
 pub mod archive;

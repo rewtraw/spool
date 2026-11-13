@@ -28,6 +28,8 @@ impl App {
             "smaller" => self.smaller_copies().await,
             "subtitles" => self.subtitle_sweep().await,
             "anime" => self.anime_sweep().await,
+            "books" => self.books_task().await,
+            "book_index" => self.book_index_task(false).await,
             "plex" if !self.settings.general().plex_ready() => Ok("skipped: Plex is not set up, or is turned off".into()),
             "plex" => self.plex_sync().await,
             other => Err(anyhow::anyhow!("unknown task {other}")),
@@ -272,13 +274,22 @@ impl App {
                     ("plex", 60),
                     ("subtitles", 6 * 60),
                     ("anime", 24 * 60),
+                    ("books", 15),
+                    ("book_index", 24 * 60),
                 ] {
                     if name == "subtitles" && !g.subtitles_auto {
                         continue;
                     }
                     if due(name, every, &last) {
                         last.insert(name, now());
-                        if name == "refresh" {
+                        if name == "book_index" || name == "books" {
+                            // Building the book index takes hours and fetching books minutes:
+                            // neither holds up the rest.
+                            let app = app.clone();
+                            tokio::spawn(async move {
+                                app.run_task(name).await;
+                            });
+                        } else if name == "refresh" {
                             if app.task_start("refresh", "Running") {
                                 let m = app.refresh_due(false).await.unwrap_or_else(|e| format!("Failed: {e}"));
                                 app.task_end("refresh", &m);

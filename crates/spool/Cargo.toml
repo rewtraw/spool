@@ -12,7 +12,7 @@ axum = { version = "0.8", features = ["multipart"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["compression-gzip"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "multipart", "stream"] }
 quick-xml = "0.38"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -43,6 +43,14 @@ candle-core = "0.11"
 candle-nn = "0.11"
 candle-transformers = "0.11"
 unicode-normalization = "0.1"
+# Books: the search index of Anna's Archive, the torrent its metadata comes in, and reading EPUBs.
+tantivy = "0.22"
+librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+deunicode = "1.6"
+strsim = "0.11"
+md-5 = "0.10"
+memchr = "2"
 
 # On a Mac the model for finding what is said runs on the graphics chip.
 [target.'cfg(target_os = "macos")'.dependencies]

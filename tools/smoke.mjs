@@ -130,6 +130,7 @@ const pages = [
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
   ['clips', '#/clips', ['Clips', 'Make a clip', 'Find'], true],
+  ['books', '#/books', ['Books', 'Your books'], true],
   ['archive', '#/archive', ['Archive'], true],
   ['settings-general', '#/settings/general', ['Mode', 'Downloads', 'Connections'], false],
   ['settings-players', '#/settings/players', ['People', 'Asked for', 'Lately'], true],
@@ -141,6 +142,7 @@ const pages = [
   ['settings-plex', '#/settings/plex', [/Library match|Plex is not set up|Plex is turned off/], true],
   ['settings-compact', '#/settings/compact', ['How they are made', 'The library'], true],
   ['settings-space', '#/settings/space', ['Free'], true],
+  ['settings-books', '#/settings/books', ["Anna's Archive", 'Florilegium'], false],
   ['settings-maintenance', '#/settings/maintenance', ['Read indexer feeds', 'Recycled files'], true],
 ];
 const film = titles.find((t) => t.kind === 'movie' && t.file_count > 0) ?? titles[0];

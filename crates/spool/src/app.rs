@@ -214,6 +214,8 @@ pub struct Inner {
     pub waiting_for_space: Mutex<HashSet<String>>,
     /// Limits how many artwork downloads run at once.
     pub art_fetches: tokio::sync::Semaphore,
+    /// Books: their index, and what is being done with them. See [`crate::books`].
+    pub books: crate::books::Books,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -457,6 +459,7 @@ impl App {
             (meta.anilist_base, meta.anime_ids_url) = (format!("{tvmaze}/anilist"), format!("{tvmaze}/anime-ids.json"));
         }
         let (events, _) = broadcast::channel(1024);
+        let books = crate::books::Books::new(data_dir, &db);
         let app = App(Arc::new(Inner {
             db,
             settings,
@@ -504,6 +507,7 @@ impl App {
             grabbing: Mutex::new(HashSet::new()),
             waiting_for_space: Mutex::new(HashSet::new()),
             art_fetches: tokio::sync::Semaphore::new(6),
+            books,
         }));
         app.reload_players();
         Ok(app)

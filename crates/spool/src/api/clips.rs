@@ -134,7 +134,7 @@ async fn send_clip(app: &App, c: Clip, uri: Uri, req: axum::extract::Request) ->
 
 /// Mark a response as a file to save by this name: as plain letters for old browsers, and in
 /// full for the rest.
-fn to_save(response: &mut Response, name: &str) {
+pub(super) fn to_save(response: &mut Response, name: &str) {
     let plain: String = name.chars().map(|ch| if ch.is_ascii() { ch } else { '_' }).collect();
     let full: String = name.bytes().map(|b| if b.is_ascii_alphanumeric() || b".-_".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
     if let Ok(v) = format!("attachment; filename=\"{plain}\"; filename*=UTF-8''{full}").parse() {
