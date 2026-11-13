@@ -549,6 +549,66 @@ const MIGRATIONS: &[&str] = &[
         data TEXT NOT NULL
     );
     "#,
+    r#"
+    -- Music: the albums in the locations' music folders, and what people do with them. See
+    -- music/mod.rs.
+    CREATE TABLE music_artists (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        key TEXT NOT NULL UNIQUE
+    );
+    CREATE TABLE music_albums (
+        id INTEGER PRIMARY KEY,
+        folder TEXT NOT NULL UNIQUE,
+        artist_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        year INTEGER NOT NULL DEFAULT 0,
+        genre TEXT NOT NULL DEFAULT '',
+        cover TEXT NOT NULL DEFAULT '',
+        added_at INTEGER NOT NULL,
+        mbid TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE music_tracks (
+        id INTEGER PRIMARY KEY,
+        album_id INTEGER NOT NULL,
+        path TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        track INTEGER NOT NULL,
+        disc INTEGER NOT NULL,
+        year INTEGER NOT NULL,
+        genre TEXT NOT NULL,
+        seconds REAL NOT NULL,
+        size INTEGER NOT NULL,
+        mtime INTEGER NOT NULL,
+        suffix TEXT NOT NULL,
+        bitrate INTEGER NOT NULL,
+        sample_rate INTEGER NOT NULL,
+        bit_depth INTEGER NOT NULL,
+        channels INTEGER NOT NULL,
+        added_at INTEGER NOT NULL
+    );
+    CREATE INDEX music_tracks_album ON music_tracks(album_id);
+    CREATE TABLE music_marks (
+        account_id INTEGER NOT NULL,
+        item TEXT NOT NULL,
+        starred_at INTEGER NOT NULL DEFAULT 0,
+        rating INTEGER NOT NULL DEFAULT 0,
+        plays INTEGER NOT NULL DEFAULT 0,
+        played_at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (account_id, item)
+    );
+    CREATE TABLE music_playlists (
+        id INTEGER PRIMARY KEY,
+        account_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        comment TEXT NOT NULL DEFAULT '',
+        public INTEGER NOT NULL DEFAULT 0,
+        tracks TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        changed_at INTEGER NOT NULL
+    );
+    "#,
 ];
 
 impl Db {

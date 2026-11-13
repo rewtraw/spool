@@ -185,7 +185,7 @@ const TOOLS: &[Tool] = &[
         read: false,
         destructive: false,
         description: "Start a background task: rss (read indexer feeds), backlog (search a few missing titles), refresh (update details), scan (rescan library folders), housekeeping (backup and tidy), plex (read Plex), smaller (look for smaller copies of the few titles furthest over their size target; replaces files when they arrive), subtitles (find subtitles for a few files that lack them and check each is in time with the film).",
-        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime", "books", "book_index"]}}), &["name"]),
+        schema: || obj(json!({"name": {"type": "string", "enum": ["rss", "backlog", "refresh", "scan", "housekeeping", "plex", "smaller", "subtitles", "anime", "books", "book_index", "music"]}}), &["name"]),
     },
     Tool { name: "books", read: true, destructive: false, description: "The books side: the Anna's Archive index (how many books, which snapshot, any build in progress), today's download allowance, whether Florilegium is set up, and every book added with its state (wanted, choose, fetching, sending, have) and what it waits for.", schema: || obj(json!({}), &[]) },
     Tool {

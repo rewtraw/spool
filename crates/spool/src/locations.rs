@@ -65,7 +65,7 @@ fn probe(l: &Location) -> Answer {
         }
         return answer(read(&l.volume));
     }
-    let roots: Vec<&String> = [&l.movie_root, &l.series_root].into_iter().filter(|r| !r.is_empty()).collect();
+    let roots: Vec<&String> = [&l.movie_root, &l.series_root, &l.music_root].into_iter().filter(|r| !r.is_empty()).collect();
     if roots.is_empty() {
         return Answer::Gone;
     }
@@ -138,7 +138,7 @@ impl App {
     pub fn locations(&self) -> Vec<Location> {
         let g = self.settings.general();
         let name = Path::new(&g.required_volume).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Library".into());
-        let mut all = vec![Location { id: 0, name, movie_root: g.movie_root, series_root: g.series_root, volume: g.required_volume, manage: true, movie_profile: 0, series_profile: 0 }];
+        let mut all = vec![Location { id: 0, name, movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, volume: g.required_volume, manage: true, movie_profile: 0, series_profile: 0 }];
         all.extend(g.locations.into_iter().filter(|l| l.id != 0));
         all
     }
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn a_missing_folder_is_gone_and_a_present_one_there() {
         let dir = tempfile::tempdir().unwrap();
-        let at = |root: &Path| Location { id: 1, name: "Shelf".into(), movie_root: root.to_string_lossy().to_string(), series_root: String::new(), volume: String::new(), manage: true, movie_profile: 0, series_profile: 0 };
+        let at = |root: &Path| Location { id: 1, name: "Shelf".into(), movie_root: root.to_string_lossy().to_string(), series_root: String::new(), music_root: String::new(), volume: String::new(), manage: true, movie_profile: 0, series_profile: 0 };
         assert_eq!(probe(&at(dir.path())), Answer::There);
         assert_eq!(probe(&at(&dir.path().join("nowhere"))), Answer::Gone);
     }

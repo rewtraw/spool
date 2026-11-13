@@ -216,6 +216,8 @@ pub struct Inner {
     pub art_fetches: tokio::sync::Semaphore,
     /// Books: their index, and what is being done with them. See [`crate::books`].
     pub books: crate::books::Books,
+    /// Music: the library as last read, and its scan. See [`crate::music`].
+    pub music: crate::music::Music,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -460,6 +462,7 @@ impl App {
         }
         let (events, _) = broadcast::channel(1024);
         let books = crate::books::Books::new(data_dir, &db);
+        let music = crate::music::Music::new(&db);
         let app = App(Arc::new(Inner {
             db,
             settings,
@@ -508,6 +511,7 @@ impl App {
             waiting_for_space: Mutex::new(HashSet::new()),
             art_fetches: tokio::sync::Semaphore::new(6),
             books,
+            music,
         }));
         app.reload_players();
         Ok(app)

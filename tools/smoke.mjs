@@ -130,6 +130,7 @@ const pages = [
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
   ['clips', '#/clips', ['Clips', 'Make a clip', 'Find'], true],
+  ['music', '#/music', ['Music'], true],
   ['books', '#/books', ['Books', 'Your books'], true],
   ['archive', '#/archive', ['Archive'], true],
   ['settings-general', '#/settings/general', ['Mode', 'Downloads', 'Connections'], false],

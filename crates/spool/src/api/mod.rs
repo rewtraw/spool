@@ -36,6 +36,7 @@ mod compact;
 mod players;
 mod books;
 mod clips;
+mod music;
 use titles::*;
 use subtitles::*;
 use activity::*;
@@ -47,6 +48,7 @@ use locations::*;
 use compact::*;
 use books::*;
 use clips::*;
+use music::*;
 
 #[derive(rust_embed::RustEmbed)]
 #[folder = "../../web/dist"]
@@ -397,6 +399,11 @@ fn api_routes() -> Router<App> {
         .route("/api/books/{id}/retry", post(retry_book))
         .route("/api/books/{id}/send", post(resend_book))
         .route("/api/books/{id}/file", get(book_file))
+        .route("/api/music", get(music))
+        .route("/api/music/scan", post(music_scan))
+        .route("/api/music/albums/{id}", get(music_album))
+        .route("/api/music/albums/{id}/art", get(music_art))
+        .route("/api/music/tracks/{id}/play", get(music_stream))
         .route("/api/clips", get(list_clips).post(add_clip))
         .route("/api/clips/{id}", get(get_clip).delete(delete_clip))
         .route("/api/clips/{id}/video", get(clip_video))
@@ -536,6 +543,8 @@ pub fn router(app: App) -> Router {
         .merge(mcp)
         .layer(tower_http::compression::CompressionLayer::new())
         // A linked machine comes with a ticket, not the key to the app, and a film is sent as it is.
+        // Music players sign in with each request, as Subsonic has them do.
+        .merge(crate::music::subsonic::routes(app.clone()))
         .merge(Router::new().route("/link/source/{link}", get(link_source)).with_state(app))
 }
 
