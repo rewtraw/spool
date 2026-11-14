@@ -101,6 +101,20 @@
       if (j?.state === 'paused') waiting++;
       count++;
     }
+    // Downloads no title is waiting on, albums among them.
+    for (const o of data.orphan_jobs ?? []) {
+      const j = app.jobs[o.id] ?? o;
+      const size = j.total_bytes || 0;
+      total += size;
+      if (!['queued', 'downloading', 'paused'].includes(j.state)) {
+        done += size;
+        arrived++;
+        continue;
+      }
+      done += Math.min(j.done_bytes ?? 0, size);
+      if (j.state === 'paused') waiting++;
+      count++;
+    }
     const left = total - done;
     return { total, done, left, waiting, count, arrived, eta: totalSpeed > 0 && left > 0 ? left / totalSpeed : null };
   });
@@ -329,7 +343,7 @@
       {/if}
     </div>
   {/if}
-  {#if !queue.length && loaded}
+  {#if !queue.length && !data.orphan_jobs?.length && loaded}
     <div class="card empty">Nothing is downloading.</div>
   {/if}
   {#if queue.length > 1}

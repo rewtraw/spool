@@ -485,11 +485,19 @@ impl App {
 
     /// Take an album as far as it can go now.
     pub async fn advance_want(&self, id: i64) -> Result<()> {
-        // Its turn first, then the album itself, so a removal never waits behind the queue.
-        let _turn = self.music.wanting.lock().await;
-        let _held = self.want_lock(id).lock_owned().await;
+        // Searches take turns; following and filing a download do not wait for them. A turn is
+        // taken before the album itself, so a removal never waits behind the queue.
+        let searching = |w: &Option<Want>| w.as_ref().is_some_and(|w| w.state == WantState::Wanted);
+        let mut turn = if searching(&self.db.music_want(id)?) { Some(self.music.wanting.lock().await) } else { None };
+        let mut held = self.want_lock(id).lock_owned().await;
         for _ in 0..4 {
             let Some(mut w) = self.db.music_want(id)? else { return Ok(()) };
+            if w.state == WantState::Wanted && turn.is_none() {
+                drop(held);
+                turn = Some(self.music.wanting.lock().await);
+                held = self.want_lock(id).lock_owned().await;
+                continue;
+            }
             let rev = w.rev;
             let before = (w.state, w.note.clone());
             let job_before = w.job_id.clone();
