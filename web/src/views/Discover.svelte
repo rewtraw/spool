@@ -136,10 +136,15 @@
     }
   }
 
-  async function addBook(w: any) {
-    const b = await act(() => api.post<any>('/books', { ol_work: w.ol_work }), `Added ${w.title}`);
-    if (b) w.book_id = b.id;
+  /** Want a book as an EPUB, an audiobook or both; a book already added gains the other. */
+  async function addBook(w: any, formats: string[]) {
+    const b = await act(() => api.post<any>('/books', { ol_work: w.ol_work, formats }), formats.includes('audiobook') && formats.includes('epub') ? `Wanted ${w.title}, the EPUB and the audiobook` : formats.includes('audiobook') ? `Wanted the audiobook of ${w.title}` : `Added ${w.title}`);
+    if (b) {
+      w.book_id = b.id;
+      w.formats = [...(b.epub ? ['epub'] : []), ...(b.audio ? ['audiobook'] : [])];
+    }
   }
+
 
   const WANT_LABEL: Record<string, string> = { wanted: 'Wanted', downloading: 'Downloading', have: 'Here' };
   const nothing = $derived(!found.movies.length && !found.series.length && !albums.length && !books.length);
@@ -232,7 +237,7 @@
       <div class="muted">{(w.authors ?? []).join(', ')}</div>
       {#if w.subtitle || w.editions}<div class="faint meta">{[w.subtitle, w.editions ? `${w.editions} editions` : ''].filter(Boolean).join(' · ')}</div>{/if}
       <div class="row">
-        {#if w.book_id}<a class="btn small" href="#/book/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}
+        {@render bookActs(w)}
       </div>
     </div>
   </div>
@@ -248,6 +253,14 @@
       <div>{@render action()}</div>
     </div>
   </div>
+{/snippet}
+
+{#snippet bookActs(w: any)}
+  {@const has = w.formats ?? []}
+  <span class="acts">
+    {#if has.includes('epub')}<a class="btn small" href="#/book/{w.book_id}">EPUB wanted</a>{:else}<button class="btn small primary" onclick={() => addBook(w, ['epub'])}>EPUB</button>{/if}
+    {#if has.includes('audiobook')}<a class="btn small" href="#/book/{w.book_id}">Audiobook wanted</a>{:else}<button class="btn small" class:primary={!has.length} onclick={() => addBook(w, ['audiobook'])}>Audiobook</button>{/if}
+  </span>
 {/snippet}
 
 {#snippet more(k: Scope, n: number, label: string)}
@@ -289,7 +302,7 @@
     <div class="section-title">Books</div>
     <div class="minis">
       {#each books.slice(0, FEW) as w (w.ol_work)}
-        {#snippet act()}{#if w.book_id}<a class="btn small" href="#/book/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}{/snippet}
+        {#snippet act()}{@render bookActs(w)}{/snippet}
         {@render mini(w.cover, false, w.title, [(w.authors ?? []).join(', '), w.year || ''].filter(Boolean).join(' · '), act)}
       {/each}
     </div>
@@ -315,7 +328,7 @@
   {#if partErrors.books}<div class="card empty">{partErrors.books}</div>
   {:else if !books.length}<div class="card empty">Open Library has nothing for “{query.trim()}”.</div>
   {:else}
-    <p class="faint source">Books, from Open Library. Spool finds an EPUB in its index of Anna's Archive and sends it to Florilegium.</p>
+    <p class="faint source">Books, from Open Library. The EPUB comes from Spool's index of Anna's Archive and goes to Florilegium; the audiobook comes from the indexers and goes to the audiobooks folder.</p>
     <div class="results">{#each books as w (w.ol_work)}{@render book(w)}{/each}</div>
   {/if}
 {:else}
@@ -420,6 +433,11 @@
   }
   .more {
     margin-top: 10px;
+  }
+  .acts {
+    display: inline-flex;
+    gap: 6px;
+    flex-wrap: wrap;
   }
   .artist {
     display: flex;

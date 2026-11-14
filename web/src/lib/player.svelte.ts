@@ -22,6 +22,11 @@ export const player = $state({
   volume: null as number | null,
   /** What went wrong on that player, in words. */
   error: '',
+  /** An audiobook being listened to, in place of an album: its files and chapters. */
+  book: null as null | { id: number; title: string; authors: string[]; cover: string; files: { seconds: number }[]; chapters: { title: string; start: number }[]; seconds: number },
+  /** How fast it is read, and when the sleep timer stops it (ms since 1970), or 0. */
+  rate: 1,
+  sleepAt: 0,
 });
 
 try {
@@ -88,6 +93,7 @@ function stopFollowing() {
 }
 
 export async function playFrom(album: any, tracks: any[], i: number) {
+  if (player.book) stopBook();
   const mine = ++turn;
   player.queue = tracks;
   player.album = album;
@@ -127,9 +133,9 @@ export function step(by = 1) {
 }
 
 export function toggle() {
-  if (player.on) return void act(player.paused ? 'play' : 'pause');
+  if (player.on && !player.book) return void act(player.paused ? 'play' : 'pause');
   const a = player.audio;
-  if (!a || !player.queue.length) return;
+  if (!a || (!player.queue.length && !player.book)) return;
   if (a.paused) a.play().catch(() => {});
   else a.pause();
 }
@@ -208,4 +214,175 @@ export async function resume() {
     heard(s);
     follow();
   }
+}
+
+// ---- audiobooks: one book's files played end to end, with the place kept per person
+
+/** Where in the book a file begins. */
+const fileStart = (n: number) => (player.book?.files ?? []).slice(0, n).reduce((t, f) => t + f.seconds, 0);
+
+/** The file, and the moment in it, that a place in the book falls in. */
+function locate(at: number): [number, number] {
+  const files = player.book?.files ?? [];
+  let start = 0;
+  for (let n = 0; n < files.length; n++) {
+    if (at < start + files[n].seconds || n === files.length - 1) return [n, Math.max(0, at - start)];
+    start += files[n].seconds;
+  }
+  return [0, 0];
+}
+
+let bookFile = 0;
+let saving: ReturnType<typeof setInterval> | null = null;
+/** Counts each book started, seek and stop, so that what was asked for before is let go. */
+let bookTurn = 0;
+/** Set once a book has found its place; until then nothing is saved for it. */
+let bookReady = false;
+let pendingLoad: (() => void) | null = null;
+
+/** The chapter a place in the book is in. */
+export function chapterAt(at: number) {
+  const ch = player.book?.chapters ?? [];
+  let i = 0;
+  while (i + 1 < ch.length && ch[i + 1].start <= at + 0.5) i++;
+  return i;
+}
+
+function saveBook() {
+  if (!player.book || !bookReady) return;
+  void api.put(`/books/${player.book.id}/listen`, { position: player.now, rate: player.rate }).catch(() => {});
+}
+
+function loadBookAt(at: number, play: boolean) {
+  const a = player.audio;
+  if (!a || !player.book) return;
+  const [n, off] = locate(at);
+  bookFile = n;
+  const mine = ++bookTurn;
+  // A load still waiting for its file is overtaken by this one.
+  if (pendingLoad) a.removeEventListener('loadedmetadata', pendingLoad);
+  pendingLoad = null;
+  const src = `/api/books/${player.book.id}/audio/${n}`;
+  if (!a.src.endsWith(src)) {
+    const ready = () => {
+      pendingLoad = null;
+      if (mine !== bookTurn || !player.book) return;
+      a.currentTime = off;
+      a.playbackRate = player.rate;
+      if (play) a.play().catch(() => {});
+    };
+    pendingLoad = ready;
+    a.addEventListener('loadedmetadata', ready, { once: true });
+    a.src = src;
+  } else {
+    a.currentTime = off;
+    if (play) a.play().catch(() => {});
+  }
+  player.now = at;
+}
+
+/** Listen to an audiobook from where whoever is signed in left off, or from `at`. */
+export async function playBook(book: any, at?: number) {
+  if (player.on) {
+    // Players in the house take albums for now; an audiobook plays here.
+    toast(`Audiobooks play on this device for now, not on ${player.on.name}.`);
+  }
+  turn++;
+  stopFollowing();
+  // The book being left keeps its place before anything about it changes.
+  if (player.book) {
+    saveBook();
+    player.audio?.pause();
+  }
+  bookReady = false;
+  const mine = ++bookTurn;
+  const a = book.audio;
+  player.queue = [];
+  player.album = null;
+  player.book = { id: book.id, title: book.title, authors: book.authors ?? [], cover: book.cover, files: a.files, chapters: a.chapters, seconds: a.seconds };
+  const kept = at == null ? await api.get<{ position: number; rate: number }>(`/books/${book.id}/listen`).catch(() => null) : null;
+  // Another book, or a stop, came while this one was being looked up.
+  if (mine !== bookTurn || player.book?.id !== book.id) return;
+  player.rate = kept?.rate ?? player.rate;
+  player.length = a.seconds;
+  // Within a few seconds of the end is finished: start again.
+  const from = at ?? (kept && kept.position < a.seconds - 10 ? kept.position : 0);
+  loadBookAt(from, true);
+  bookReady = true;
+  if (!saving) saving = setInterval(() => !player.paused && saveBook(), 10_000);
+}
+
+/** The audio element reached the end of a file: on to the next, or done. */
+export function bookEnded() {
+  if (!player.book) return;
+  if (bookFile + 1 < player.book.files.length) loadBookAt(fileStart(bookFile + 1), true);
+  else {
+    player.paused = true;
+    saveBook();
+  }
+}
+
+/** The audio element moved on: where that is in the book, and the sleep timer. */
+export function bookTime() {
+  // Only once the book's own file is loaded; until then the element may still be the last book's.
+  if (!player.book || !player.audio || pendingLoad || !player.audio.src.includes(`/api/books/${player.book.id}/audio/`)) return;
+  player.now = fileStart(bookFile) + player.audio.currentTime;
+  if (player.sleepAt && Date.now() >= player.sleepAt) {
+    player.sleepAt = 0;
+    player.audio.pause();
+    saveBook();
+  }
+}
+
+export function bookSeek(to: number) {
+  if (!player.book) return;
+  loadBookAt(Math.max(0, Math.min(to, player.book.seconds - 1)), !player.paused);
+}
+
+export function bookSkip(by: number) {
+  bookSeek(player.now + by);
+}
+
+export function bookChapter(by: number) {
+  if (!player.book) return;
+  const ch = player.book.chapters;
+  const i = chapterAt(player.now);
+  // Back goes to the start of this chapter first, unless just past it.
+  const to = by < 0 && player.now - (ch[i]?.start ?? 0) > 3 ? i : Math.max(0, Math.min(ch.length - 1, i + by));
+  bookSeek(ch[to]?.start ?? 0);
+}
+
+export function setRate(r: number) {
+  player.rate = r;
+  if (player.audio) player.audio.playbackRate = r;
+  saveBook();
+}
+
+/** Stop after so many minutes, or at the end of this chapter (0). Null turns it off. */
+export function sleepIn(minutes: number | null) {
+  if (minutes == null) return void (player.sleepAt = 0);
+  if (minutes === 0 && player.book) {
+    const ch = player.book.chapters;
+    const next = ch[chapterAt(player.now) + 1]?.start ?? player.book.seconds;
+    player.sleepAt = Date.now() + ((next - player.now) / player.rate) * 1000;
+  } else player.sleepAt = Date.now() + minutes * 60_000;
+}
+
+export function stopBook() {
+  saveBook();
+  bookTurn++;
+  bookReady = false;
+  if (pendingLoad) player.audio?.removeEventListener('loadedmetadata', pendingLoad);
+  pendingLoad = null;
+  player.audio?.pause();
+  player.book = null;
+  player.sleepAt = 0;
+  if (saving) clearInterval(saving);
+  saving = null;
+}
+
+if (typeof window !== 'undefined') {
+  // Keep the place when the page is put away or closed.
+  window.addEventListener('pagehide', () => saveBook());
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && saveBook());
 }

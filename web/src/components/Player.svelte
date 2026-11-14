@@ -1,6 +1,6 @@
 <script lang="ts">
   // The bar along the bottom while music plays, whatever page is open.
-  import { player, step, toggle, seek, stop, setVolume, resume } from '../lib/player.svelte';
+  import { player, step, toggle, seek, stop, setVolume, resume, bookEnded, bookTime, bookSeek, bookSkip, bookChapter, setRate, sleepIn, stopBook, chapterAt } from '../lib/player.svelte';
   import { clock } from '../lib/format';
   import PlayOn from './PlayOn.svelte';
 
@@ -14,14 +14,51 @@
 <!-- Playing here. While music plays on a player in the house, that player is listened to instead. -->
 <audio
   bind:this={player.audio}
-  onplay={() => !player.on && (player.paused = false)}
-  onpause={() => !player.on && (player.paused = true)}
-  onended={() => !player.on && step(1)}
-  ontimeupdate={() => !player.on && (player.now = player.audio?.currentTime ?? 0)}
-  ondurationchange={() => !player.on && (player.length = player.audio && isFinite(player.audio.duration) ? player.audio.duration : (playing?.seconds ?? 0))}
+  onplay={() => (player.book || !player.on) && (player.paused = false)}
+  onpause={() => (player.book || !player.on) && (player.paused = true)}
+  onended={() => (player.book ? bookEnded() : !player.on && step(1))}
+  ontimeupdate={() => (player.book ? bookTime() : !player.on && (player.now = player.audio?.currentTime ?? 0))}
+  ondurationchange={() => !player.book && !player.on && (player.length = player.audio && isFinite(player.audio.duration) ? player.audio.duration : (playing?.seconds ?? 0))}
 ></audio>
 
-{#if playing}
+{#if player.book}
+  {@const b = player.book}
+  {@const ch = b.chapters[chapterAt(player.now)]}
+  <!-- An audiobook: the whole book on the bar, chapter by chapter. -->
+  <div class="player card" role="region" aria-label="Listening">
+    <a href="#/book/{b.id}" class="cover tall" aria-label="Open {b.title}">{#if b.cover}<img src={b.cover} alt="" />{/if}</a>
+    <div class="info">
+      <div class="clamp"><b>{b.title}</b></div>
+      <div class="muted small clamp">{ch?.title ?? b.authors.join(', ')}{player.sleepAt ? ` · stops at ${new Date(player.sleepAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}</div>
+    </div>
+    <div class="seek">
+      <input type="range" min="0" max={b.seconds} step="1" value={player.now} oninput={(e) => bookSeek(Number(e.currentTarget.value))} aria-label="Place in the book" />
+      <span class="faint small mono time">{clock(player.now)} / {clock(b.seconds)}</span>
+    </div>
+    <div class="controls">
+      <button class="btn small" onclick={() => bookChapter(-1)} aria-label="Previous chapter">⏮</button>
+      <button class="btn small" onclick={() => bookSkip(-30)} aria-label="Back 30 seconds">−30</button>
+      <button class="btn small primary" onclick={toggle} aria-label={player.paused ? 'Play' : 'Pause'}>{player.paused ? '▶' : '❚❚'}</button>
+      <button class="btn small" onclick={() => bookSkip(30)} aria-label="Forward 30 seconds">+30</button>
+      <button class="btn small" onclick={() => bookChapter(1)} aria-label="Next chapter">⏭</button>
+      <span class="push"></span>
+      <select class="input mini" value={String(player.rate)} onchange={(e) => setRate(Number(e.currentTarget.value))} aria-label="Speed">
+        {#each [0.8, 1, 1.1, 1.2, 1.3, 1.5, 1.75, 2, 2.5] as r}<option value={String(r)}>{r}×</option>{/each}
+      </select>
+      <select class="input mini" value="" onchange={(e) => { const v = e.currentTarget.value; sleepIn(v === 'off' ? null : Number(v)); e.currentTarget.value = ''; }} aria-label="Sleep timer">
+        <option value="">{player.sleepAt ? '☾ on' : '☾'}</option>
+        <option value="15">15 min</option>
+        <option value="30">30 min</option>
+        <option value="60">1 hour</option>
+        <option value="0">End of chapter</option>
+        {#if player.sleepAt}<option value="off">Off</option>{/if}
+      </select>
+      <button class="btn small ghost" onclick={stopBook} aria-label="Stop and close">✕</button>
+    </div>
+  </div>
+{/if}
+
+{#if playing && !player.book}
   <!-- One row on a wide screen; on a phone the track, then where it is in it, then the controls. -->
   <div class="player card" role="region" aria-label="Now playing">
     <a href={player.album ? `#/album/${player.album.id}` : undefined} class="cover" aria-label={player.album ? `Open ${player.album.title}` : undefined}>
@@ -74,6 +111,15 @@
     border-radius: 4px;
     overflow: hidden;
     background: var(--raised);
+  }
+  .cover.tall {
+    height: 64px;
+  }
+  .input.mini {
+    width: auto;
+    height: 30px;
+    padding: 0 6px;
+    font-size: 13px;
   }
   .cover img {
     width: 100%;

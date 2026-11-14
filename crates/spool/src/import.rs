@@ -99,7 +99,7 @@ pub(crate) fn move_file(src: &Path, dst: &Path) -> Result<()> {
 }
 
 impl App {
-    fn ffprobe_path(&self) -> Option<PathBuf> {
+    pub(crate) fn ffprobe_path(&self) -> Option<PathBuf> {
         let configured = self.settings.general().ffprobe_path;
         if !configured.is_empty() {
             return Some(PathBuf::from(configured));

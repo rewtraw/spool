@@ -129,7 +129,10 @@
     for (const b of books) {
       out.push({
         key: `b${b.id}`, type: 'book', label: 'Book', name: b.title, sortName: sortable(b.title), by: b.authors.join(', '), year: b.year, added: b.added_at, size: b.chosen?.size ?? 0,
-        href: `#/book/${b.id}`, cover: b.cover, square: false, have: b.state === 'have', status: BOOK_STATE[b.state] ?? { label: b.state, tone: '' }, state: b.state,
+        href: `#/book/${b.id}`, cover: b.cover, square: false, have: (b.epub && b.state === 'have') || b.audio?.state === 'have',
+        // Wanted as an audiobook alone, the audiobook says how it stands.
+        status: b.epub ? (BOOK_STATE[b.state] ?? { label: b.state, tone: '' }) : b.audio?.state === 'have' ? { label: 'Audiobook', tone: 'ok' } : { label: b.audio?.state === 'downloading' ? 'Downloading' : 'Wanted', tone: b.audio?.state === 'downloading' ? 'accent' : 'warn' },
+        state: b.epub ? b.state : b.audio?.state,
       });
     }
     return out;

@@ -689,6 +689,17 @@ const MIGRATIONS: &[&str] = &[
         data TEXT NOT NULL
     );
     "#,
+    r#"
+    -- Where each person is in each audiobook, and how fast they listen. See books/audio.rs.
+    CREATE TABLE listening (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        book_id INTEGER NOT NULL,
+        position REAL NOT NULL DEFAULT 0,
+        rate REAL NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (account_id, book_id)
+    );
+    "#,
 ];
 
 impl Db {

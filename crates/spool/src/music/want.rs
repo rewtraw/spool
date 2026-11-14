@@ -162,7 +162,7 @@ impl Db {
 }
 
 /// Words as they are compared: lower case, without accents, "&" as "and", punctuation gone.
-fn words(s: &str) -> Vec<String> {
+pub(crate) fn words(s: &str) -> Vec<String> {
     // "Tomorrow's" and "Tomorrows" are the same word.
     let s = deunicode::deunicode(s).to_lowercase().replace('&', " and ").replace('\'', "");
     s.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_string).collect()
@@ -233,7 +233,7 @@ fn names_album_by(n: &[String], artist: &str, album: &str) -> bool {
 
 /// A piece of a bigger post rather than a release: `[05 of 20] "04. Track.flac"`, `(02/21)`,
 /// or a name that ends in a file's, `… - 04-Vein Melter.flac`.
-fn a_piece(name: &str) -> bool {
+pub(crate) fn a_piece(name: &str) -> bool {
     let n = name.to_lowercase();
     // A scene name is dotted throughout ("Artist.Album.2010.FLAC"); a file's has spaces.
     let file = n.trim().contains(' ') && n.trim().rsplit_once('.').is_some_and(|(_, ext)| matches!(ext, "flac" | "mp3" | "m4a" | "wav" | "ogg" | "rar" | "zip" | "par2" | "nfo" | "sfv" | "jpg" | "cue" | "log") || (ext.starts_with('r') && ext[1..].chars().all(|c| c.is_ascii_digit()) && ext.len() == 3));
@@ -269,7 +269,7 @@ fn best<'a>(found: &'a [(Release, Grade)], turned_down: &[TurnedDown]) -> Option
 }
 
 /// A name that can be a folder: no slashes, colons and the like, and not too long.
-fn folder_safe(s: &str) -> String {
+pub(crate) fn folder_safe(s: &str) -> String {
     let s: String = s.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c }).collect();
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     let s = s.trim_matches(['.', ' ']).to_string();
@@ -286,7 +286,7 @@ const KEPT: &[&str] = &["jpg", "jpeg", "png", "webp", "cue", "log", "txt", "pdf"
 
 /// What a download holds that belongs in the album's folder, each with where it goes in it.
 /// Tracks in folders of their own ("CD1", "Disc 2") keep those folders.
-fn album_files(out: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
+pub(crate) fn album_files(out: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
     let (audio, _) = scan::audio_files(out);
     if audio.is_empty() {
         bail!("the download held no audio files");
@@ -327,7 +327,7 @@ fn album_files(out: &Path) -> Result<Vec<(PathBuf, PathBuf)>> {
 }
 
 /// Whether `dest` holds every file with the size it has in the download.
-fn same_files(files: &[(PathBuf, PathBuf)], dest: &Path) -> bool {
+pub(crate) fn same_files(files: &[(PathBuf, PathBuf)], dest: &Path) -> bool {
     files.iter().all(|(from, rel)| match (std::fs::metadata(from), std::fs::metadata(dest.join(rel))) {
         (Ok(a), Ok(b)) => a.len() == b.len(),
         _ => false,
@@ -336,7 +336,7 @@ fn same_files(files: &[(PathBuf, PathBuf)], dest: &Path) -> bool {
 
 /// Copy the album into `dest`, by way of a hidden folder beside it so that a copy cut short
 /// is never taken for the album.
-fn copy_album(files: &[(PathBuf, PathBuf)], dest: &Path) -> Result<()> {
+pub(crate) fn copy_album(files: &[(PathBuf, PathBuf)], dest: &Path) -> Result<()> {
     let parent = dest.parent().ok_or_else(|| anyhow!("no folder to file it in"))?;
     let part = parent.join(format!(".spool-{}", dest.file_name().and_then(|n| n.to_str()).unwrap_or("album")));
     if part.exists() {
@@ -556,7 +556,7 @@ impl App {
             };
             return Ok(());
         };
-        match self.grab_album(&r).await {
+        match self.grab_release(&r).await {
             Ok(job) => {
                 tracing::info!(album = %w.title, release = %r.title, "downloading an album");
                 w.state = WantState::Downloading;
@@ -580,7 +580,7 @@ impl App {
     }
 
     /// Fetch a release's NZB and start it downloading here.
-    async fn grab_album(&self, r: &Release) -> std::result::Result<String, Grab> {
+    pub(crate) async fn grab_release(&self, r: &Release) -> std::result::Result<String, Grab> {
         let later = |s: String| Grab::Later(s);
         if self.settings.servers().iter().all(|s| !s.enabled || s.host.is_empty()) {
             return Err(later("no usenet server is configured".into()));
@@ -741,7 +741,7 @@ impl App {
     }
 }
 
-enum Grab {
+pub(crate) enum Grab {
     /// The release is at fault, and is passed over from now on.
     Release(String),
     /// Something else is, and the release may be tried again.

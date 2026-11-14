@@ -96,10 +96,10 @@
   };
   // A location on a linked machine starts from the first folder that machine shares, so that it is listed under it.
   function addPlaceOn(h: any) {
-    general.locations.push({ id: 0, name: '', movie_root: sharedHere(h)[0] ?? '', series_root: '', music_root: '', volume: '', manage: false });
+    general.locations.push({ id: 0, name: '', movie_root: sharedHere(h)[0] ?? '', series_root: '', music_root: '', audiobook_root: '', volume: '', manage: false });
   }
   function addPlace() {
-    general.locations.push({ id: 0, name: '', movie_root: '', series_root: '', music_root: '', volume: '', manage: false });
+    general.locations.push({ id: 0, name: '', movie_root: '', series_root: '', music_root: '', audiobook_root: '', volume: '', manage: false });
   }
   async function watchFound(id: number) {
     clearTimeout(foundTimer);
@@ -147,7 +147,7 @@
       <b>{main?.name ?? 'Library'}</b>
       {#if main}<span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', 'the main location', general.new_titles_location === 0 ? 'new titles go here' : '', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>{/if}
     </div>
-    {#if general.movie_root || general.series_root || general.music_root}<div class="mono small faint where">{[general.movie_root, general.series_root, general.music_root].filter(Boolean).join(' · ')}</div>{/if}
+    {#if general.movie_root || general.series_root || general.music_root || general.audiobook_root}<div class="mono small faint where">{[general.movie_root, general.series_root, general.music_root, general.audiobook_root].filter(Boolean).join(' · ')}</div>{/if}
     <details open={!general.movie_root && !general.series_root}>
     <summary class="small">Folders</summary>
     <div class="cols">
@@ -155,6 +155,7 @@
       <label class="field">Series<input class="input mono" bind:value={general.series_root} placeholder="/Volumes/Media/TV Shows" /></label>
     </div>
     <label class="field">Music <span class="faint">(optional; a folder for each album)</span><input class="input mono" bind:value={general.music_root} placeholder="/Volumes/Media/Music" /></label>
+    <label class="field">Audiobooks <span class="faint">(optional; a folder for each author)</span><input class="input mono" bind:value={general.audiobook_root} placeholder="/Volumes/Media/Audiobooks" /></label>
     <span class="hint">{general.required_volume ? `These are on the disk at ${general.required_volume}. While it is not mounted, Spool pauses instead of writing somewhere else.` : 'Spool works out which disk these are on, and pauses while a disk that can be unplugged is not there.'}</span>
     <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
     </details>
@@ -171,7 +172,7 @@
         <span class="grow"></span>
         {#if p}<button class="btn small" type="button" disabled={!p.online || working} onclick={() => lookThrough(l.id)}>Look for films and shows</button>{/if}
       </div>
-      {#if l.movie_root || l.series_root || l.music_root}<div class="mono small faint where">{[l.movie_root, l.series_root, l.music_root].filter(Boolean).join(' · ')}</div>{/if}
+      {#if l.movie_root || l.series_root || l.music_root || l.audiobook_root}<div class="mono small faint where">{[l.movie_root, l.series_root, l.music_root, l.audiobook_root].filter(Boolean).join(' · ')}</div>{/if}
       <details open={!l.id}>
       <summary class="small">Folders, and what Spool may do here</summary>
       <label class="field">Name<input class="input" bind:value={l.name} placeholder="Goliath" /></label>
@@ -180,6 +181,7 @@
         <label class="field">Series<input class="input mono" bind:value={l.series_root} list={sharedBy(l)} placeholder="/Volumes/Goliath/tv" /></label>
       </div>
       <label class="field">Music <span class="faint">(optional; a folder for each album)</span><input class="input mono" bind:value={l.music_root} list={sharedBy(l)} placeholder="/Volumes/Goliath/music" /></label>
+      <label class="field">Audiobooks <span class="faint">(optional; a folder for each author)</span><input class="input mono" bind:value={l.audiobook_root} list={sharedBy(l)} placeholder="/Volumes/Goliath/audiobooks" /></label>
       <label class="check"><input type="checkbox" bind:checked={l.manage} onchange={() => { if (!l.manage && general.new_titles_location === l.id) general.new_titles_location = 0; }} /> Let Spool change files here</label>
       <span class="hint">Off, Spool lists and plays what is here and changes nothing: no downloads, upgrades, renames, subtitles or deletions. On, it treats this location like the main one.</span>
       <div class="cols">

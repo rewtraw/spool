@@ -196,6 +196,21 @@ export interface Book {
   file: string;
   receipt: { at: number; status: string; shelf_id: number | null; book_id: number | null } | null;
   added_at: number;
+  /** Wanted as an EPUB; a book may be wanted as an audiobook alone. */
+  epub: boolean;
+  audio: Audiobook | null;
+}
+
+export interface Audiobook {
+  state: 'wanted' | 'downloading' | 'have';
+  note: string;
+  release: { title: string; indexer: string; size: number } | null;
+  kind: 'm4b' | 'files';
+  turned_down: { name: string; why: string; at: number }[];
+  folder: string;
+  files: { path: string; seconds: number }[];
+  chapters: { title: string; start: number }[];
+  seconds: number;
 }
 
 export interface Clip {

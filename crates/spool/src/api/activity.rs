@@ -42,12 +42,13 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
         .db
         .history(None, 400)?
         .into_iter()
-        .filter(|h| matches!(h.kind.as_str(), "compact_made" | "compact_failed" | "moved" | "album_filed" | "album_failed" | "book_got" | "book_failed"))
+        .filter(|h| matches!(h.kind.as_str(), "compact_made" | "compact_failed" | "moved" | "album_filed" | "album_failed" | "book_got" | "book_failed" | "audiobook_filed" | "audiobook_failed"))
         .take(25)
         .map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "title_id": h.title_id, "title": h.title_id.and_then(|id| titles.get(&id)).map(|t| t.title.clone()), "data": h.data}))
         .collect();
     let known: Vec<&str> = recent.iter().filter_map(|a| a.job_id.as_deref()).collect();
-    // Downloads of no title's: an album's, or ones added by hand.
+    // Downloads of no title's: an album's, an audiobook's, or ones added by hand.
+    let audiobooks: Vec<(String, Value)> = app.db.books()?.into_iter().filter_map(|b| Some((b.audio.as_ref()?.job_id.clone()?, json!({"id": b.id, "name": format!("{} \u{2014} {}", b.authors.first().cloned().unwrap_or_default(), b.title)})))).collect();
     let albums: Vec<(String, Value)> = app.db.music_wants()?.into_iter().filter_map(|w| Some((w.job_id?, json!({"id": w.id, "name": format!("{} \u{2014} {}", w.artist, w.title)})))).collect();
     let orphans: Vec<Value> = jobs
         .iter()
@@ -55,6 +56,7 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
         .map(|j| {
             let mut v = json!(j);
             v["album"] = albums.iter().find(|(id, _)| *id == j.id).map(|(_, a)| a.clone()).unwrap_or(Value::Null);
+            v["audiobook"] = audiobooks.iter().find(|(id, _)| *id == j.id).map(|(_, a)| a.clone()).unwrap_or(Value::Null);
             v
         })
         .collect();

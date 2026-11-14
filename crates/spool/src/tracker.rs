@@ -244,8 +244,10 @@ impl App {
                     }
                 });
             } else {
-                // Not a film's or an episode's: perhaps an album's.
-                self.music_job_done(&job);
+                // Not a film's or an episode's: perhaps an audiobook's, or an album's.
+                if !self.book_job_done(&id) {
+                    self.music_job_done(&job);
+                }
             }
         }
     }

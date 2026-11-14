@@ -8,6 +8,7 @@
 //! turns out not to do is remembered and passed over, and the next likeliest tried.
 
 pub mod annas;
+pub mod audio;
 pub mod dump;
 pub mod epub;
 pub mod florilegium;
@@ -139,6 +140,15 @@ pub struct Book {
     /// Counts the saves, so that work done on a book that was changed or removed meanwhile
     /// is not saved over the change.
     pub rev: i64,
+    /// Wanted as an EPUB. A book may be wanted as an audiobook alone.
+    #[serde(default = "yes")]
+    pub epub: bool,
+    /// Wanted as an audiobook, and where that stands. See [`audio`].
+    pub audio: Option<audio::Audio>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl Db {
@@ -194,8 +204,29 @@ impl Db {
         Ok(n > 0)
     }
 
+    pub fn listening(&self, account: i64, book: i64) -> Result<serde_json::Value> {
+        self.with(|c| {
+            c.query_row("SELECT position, rate, updated_at FROM listening WHERE account_id = ?1 AND book_id = ?2", params![account, book], |r| Ok(serde_json::json!({"position": r.get::<_, f64>(0)?, "rate": r.get::<_, f64>(1)?, "at": r.get::<_, i64>(2)?})))
+                .optional()
+                .map(|v| v.unwrap_or_else(|| serde_json::json!({"position": 0.0, "rate": 1.0, "at": 0})))
+        })
+    }
+
+    pub fn set_listening(&self, account: i64, book: i64, position: f64, rate: Option<f64>) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO listening(account_id, book_id, position, rate, updated_at) VALUES (?1, ?2, ?3, COALESCE(?4, 1), ?5) ON CONFLICT(account_id, book_id) DO UPDATE SET position = ?3, rate = COALESCE(?4, rate), updated_at = ?5",
+                params![account, book, position, rate, now()],
+            )
+        })?;
+        Ok(())
+    }
+
     pub fn delete_book(&self, id: i64) -> Result<()> {
-        self.with(|c| c.execute("DELETE FROM books WHERE id = ?1", [id]))?;
+        self.with(|c| {
+            c.execute("DELETE FROM listening WHERE book_id = ?1", [id])?;
+            c.execute("DELETE FROM books WHERE id = ?1", [id])
+        })?;
         Ok(())
     }
 }
@@ -303,17 +334,30 @@ impl App {
         Ok(works
             .into_iter()
             .map(|w| {
-                let have = self.db.book_by_work(&w.ol_work).ok().flatten();
+                let have = self.db.book_by_work(&w.ol_work).ok().flatten().and_then(|id| self.db.book(id).ok().flatten());
                 let mut v = serde_json::json!(w);
-                v["book_id"] = serde_json::json!(have);
+                v["book_id"] = serde_json::json!(have.as_ref().map(|b| b.id));
+                // Which forms of it are already wanted.
+                v["formats"] = serde_json::json!(have.map(|b| [b.epub.then_some("epub"), b.audio.is_some().then_some("audiobook")].into_iter().flatten().collect::<Vec<_>>()));
                 v
             })
             .collect())
     }
 
-    pub async fn add_book(&self, ol_work: &str, language: Option<&str>, account: Option<i64>) -> Result<Book> {
+    /// Want a book: as an EPUB, an audiobook, or both. A book already added gains what it lacked.
+    pub async fn add_book(&self, ol_work: &str, language: Option<&str>, account: Option<i64>, epub: bool, audiobook: bool) -> Result<Book> {
         if let Some(id) = self.db.book_by_work(ol_work)? {
-            return self.db.book(id)?.ok_or_else(|| anyhow::anyhow!("the book went"));
+            let mut b = self.db.book(id)?.ok_or_else(|| anyhow::anyhow!("the book went"))?;
+            let more = (epub && !b.epub) || (audiobook && b.audio.is_none());
+            if more {
+                b.epub |= epub;
+                if audiobook && b.audio.is_none() {
+                    b.audio = Some(audio::Audio::default());
+                }
+                self.db.save_book(&mut b)?;
+                self.nudge_book(id);
+            }
+            return Ok(b);
         }
         let language = language.map(str::to_string).unwrap_or_else(|| self.settings.general().books.languages()[0].clone());
         let d = openlibrary::detail(&self.http, ol_work, &language).await?;
@@ -330,6 +374,8 @@ impl App {
             ol_editions: d.ol_editions,
             added_at: now(),
             account_id: account,
+            epub,
+            audio: audiobook.then(audio::Audio::default),
             ..Default::default()
         };
         self.db.save_book(&mut b)?;
@@ -355,6 +401,9 @@ impl App {
         }
         if let Some(c) = &b.chosen {
             self.drop_partial(&c.md5);
+        }
+        if let Some(job) = b.audio.as_ref().filter(|a| a.state == audio::AudioState::Downloading).and_then(|a| a.job_id.as_deref()) {
+            let _ = self.job_remove(job, true);
         }
         self.db.delete_book(id)
     }
@@ -408,7 +457,8 @@ impl App {
         let mut failed = 0;
         let books = self.db.books()?;
         for b in &books {
-            if matches!(b.state, BookState::Wanted | BookState::Fetching | BookState::Sending) {
+            let audio_due = b.audio.as_ref().is_some_and(|a| a.state != audio::AudioState::Have);
+            if (b.epub && matches!(b.state, BookState::Wanted | BookState::Fetching | BookState::Sending)) || audio_due {
                 // One book's trouble does not hold up the rest.
                 match self.advance_book(b.id).await {
                     Ok(()) => moved += 1,
@@ -447,6 +497,49 @@ impl App {
     /// Take a book as far as it can go now.
     pub async fn advance_book(&self, id: i64) -> Result<()> {
         let _held = self.books.working.lock().await;
+        if self.db.book(id)?.is_some_and(|b| b.epub) {
+            self.advance_epub(id).await?;
+        }
+        // The audiobook goes its own way beside the EPUB.
+        for _ in 0..4 {
+            let Some(mut b) = self.db.book(id)? else { return Ok(()) };
+            let before = b.audio.clone();
+            if before.is_none() {
+                return Ok(());
+            }
+            let rev = b.rev;
+            self.advance_audio(&mut b).await?;
+            let after = b.audio.clone().unwrap_or_default();
+            let job_before = before.as_ref().and_then(|a| a.job_id.clone());
+            if b.audio == before {
+                return Ok(());
+            }
+            if !self.db.save_book_if(&mut b, rev)? {
+                // Changed meanwhile, or removed. A download this pass started would be followed by
+                // nothing, so it goes; a filing is found again on the next pass, as the files are
+                // already in place. Then the book is taken up again as it now is.
+                if after.state == audio::AudioState::Downloading && after.job_id != job_before {
+                    if let Some(job) = &after.job_id {
+                        let _ = self.job_remove(job, true);
+                    }
+                }
+                continue;
+            }
+            // Saved: the finished download it was filed from is cleared away.
+            if let Some((job, out)) = &after.filed_from {
+                let _ = self.job_remove(job, true);
+                self.remove_download_folder(Some(job), out).await;
+            }
+            let moved = after.state != before.as_ref().map(|a| a.state).unwrap_or_default() || before.map(|a| a.note) != Some(after.note.clone());
+            if !moved || after.state != audio::AudioState::Wanted {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Take a book's EPUB as far as it can go now. Called with the book held.
+    async fn advance_epub(&self, id: i64) -> Result<()> {
         for _ in 0..8 {
             let Some(mut b) = self.db.book(id)? else { return Ok(()) };
             let mut rev = b.rev;

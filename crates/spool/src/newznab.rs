@@ -20,6 +20,8 @@ pub enum Query {
     MovieText { text: String },
     /// An album, by artist and name, in every audio category.
     Music { text: String },
+    /// An audiobook, by title and author.
+    Audiobook { text: String },
 }
 
 fn cats(v: &[u32]) -> String {
@@ -43,6 +45,7 @@ pub fn build_url(ix: &Indexer, q: &Query) -> String {
         Query::Season { tvdb_id: Some(id), season, .. } => format!("t=tvsearch&cat={}&tvdbid={id}&season={season}", cats(&ix.tv_categories)),
         Query::Season { title, season, .. } => format!("t=tvsearch&cat={}&q={}&season={season}", cats(&ix.tv_categories), enc(title)),
         Query::Music { text } => format!("t=search&cat=3000&q={}", enc(text)),
+        Query::Audiobook { text } => format!("t=search&cat=3030&q={}", enc(text)),
         Query::MovieText { text } => format!("t=search&cat={},5070&q={}", cats(&ix.movie_categories), enc(text)),
         // Whole-category numbers (5000) so releases filed under anime or foreign are included.
         Query::TvText { text } => format!("t=search&cat={}&q={}", {

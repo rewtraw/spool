@@ -207,15 +207,15 @@ const TOOLS: &[Tool] = &[
         name: "add_book",
         read: false,
         destructive: false,
-        description: "Want a book, by Open Library work id from find_book. Spool looks for it in the Anna's Archive index, downloads the EPUB, checks it is the book, and sends it to Florilegium.",
-        schema: || obj(json!({"ol_work": {"type": "string", "description": "Such as OL45804W."}, "language": {"type": "string", "description": "Two-letter language it is wanted in; defaults to the first in settings."}}), &["ol_work"]),
+        description: "Want a book, by Open Library work id from find_book, as an EPUB, an audiobook or both (formats; the EPUB when not said). The EPUB is looked for in the Anna's Archive index, checked and sent to Florilegium; the audiobook is looked for on the indexers (M4B first, then MP3) and filed in the audiobooks folder as Author/Title (Year). Adding a format to a book already added gives it that format too.",
+        schema: || obj(json!({"ol_work": {"type": "string", "description": "Such as OL45804W."}, "language": {"type": "string", "description": "Two-letter language it is wanted in; defaults to the first in settings."}, "formats": {"type": "array", "items": {"type": "string", "enum": ["epub", "audiobook"]}}}), &["ol_work"]),
     },
     Tool {
         name: "manage_book",
         read: false,
         destructive: false,
-        description: "Act on a book: choose (download the candidate with this md5, when the book waits for a choice or the person prefers another file); retry (look for it again now, forgetting files turned down); send (send the kept EPUB to Florilegium again).",
-        schema: || obj(json!({"book_id": {"type": "integer"}, "action": {"type": "string", "enum": ["choose", "retry", "send"]}, "md5": {"type": "string"}}), &["book_id", "action"]),
+        description: "Act on a book: choose (download the candidate with this md5, when the book waits for a choice or the person prefers another file); retry (look for it again now, forgetting files turned down); send (send the kept EPUB to Florilegium again); want_audiobook (want it as an audiobook too); search_audiobook (look for the audiobook again now); drop_audiobook (stop wanting the audiobook; what was filed stays).",
+        schema: || obj(json!({"book_id": {"type": "integer"}, "action": {"type": "string", "enum": ["choose", "retry", "send", "want_audiobook", "search_audiobook", "drop_audiobook"]}, "md5": {"type": "string"}}), &["book_id", "action"]),
     },
     Tool {
         name: "remove_book",
@@ -343,7 +343,8 @@ fn album_row(w: &Value) -> Value {
 }
 
 fn book_row(b: &Value) -> Value {
-    json!({"book_id": b["id"], "title": b["title"], "authors": b["authors"], "year": b["year"], "state": b["state"], "note": if b["note"] == "" { Value::Null } else { b["note"].clone() }, "added": when(&b["added_at"])})
+    let a = &b["audio"];
+    json!({"book_id": b["id"], "title": b["title"], "authors": b["authors"], "year": b["year"], "epub": if b["epub"] == false { Value::Null } else { b["state"].clone() }, "note": if b["note"] == "" { Value::Null } else { b["note"].clone() }, "audiobook": if a.is_null() { Value::Null } else { json!({"state": a["state"], "note": a["note"], "release": a["release"]["title"], "folder": a["folder"], "hours": a["seconds"].as_f64().map(|s| (s / 360.0).round() / 10.0), "chapters": a["chapters"].as_array().map(|c| c.len())}) }, "added": when(&b["added_at"])})
 }
 
 fn gb(bytes: &Value) -> Value {
@@ -1017,7 +1018,7 @@ impl Mcp {
                 Ok(row)
             }
             "add_book" => {
-                let b = self.post("/api/books", json!({"ol_work": a["ol_work"].as_str().ok_or("ol_work is required")?, "language": a["language"]})).await?;
+                let b = self.post("/api/books", json!({"ol_work": a["ol_work"].as_str().ok_or("ol_work is required")?, "language": a["language"], "formats": a["formats"].as_array().cloned().unwrap_or_default()})).await?;
                 Ok(book_row(&b))
             }
             "manage_book" => {
@@ -1026,6 +1027,9 @@ impl Mcp {
                     "choose" => self.post(&format!("/api/books/{id}/choose"), json!({"md5": a["md5"].as_str().ok_or("md5 is required to choose")?})).await?,
                     "retry" => self.post(&format!("/api/books/{id}/retry"), json!({})).await?,
                     "send" => self.post(&format!("/api/books/{id}/send"), json!({})).await?,
+                    "want_audiobook" => self.post(&format!("/api/books/{id}/audio"), json!({})).await?,
+                    "search_audiobook" => self.post(&format!("/api/books/{id}/audio/search"), json!({})).await?,
+                    "drop_audiobook" => self.api(Method::DELETE, &format!("/api/books/{id}/audio"), None).await?,
                     other => return Err(format!("unknown action {other:?}")),
                 };
                 Ok(book_row(&b))

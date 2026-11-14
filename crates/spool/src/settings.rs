@@ -26,6 +26,9 @@ pub struct Location {
     pub series_root: String,
     /// Where its music is, one folder an album; empty when it holds none. See [`crate::music`].
     pub music_root: String,
+    /// Where its audiobooks are, a folder for each author and in it one for each book; empty
+    /// when it holds none. See [`crate::books::audio`].
+    pub audiobook_root: String,
     /// The volume that must be mounted for the location to count as there. Empty means the
     /// folders only have to be readable.
     pub volume: String,
@@ -105,6 +108,8 @@ pub struct General {
     pub series_root: String,
     /// The main location's music folder; empty when it holds none.
     pub music_root: String,
+    /// The main location's audiobooks folder; empty when it holds none.
+    pub audiobook_root: String,
     /// The volume that must be mounted before Spool reads or writes media. Empty disables the check.
     pub required_volume: String,
     pub downloads_dir: String,
@@ -183,6 +188,7 @@ impl Default for General {
             movie_root: String::new(),
             series_root: String::new(),
             music_root: String::new(),
+            audiobook_root: String::new(),
             required_volume: String::new(),
             downloads_dir: String::new(),
             recycle_days: 7,

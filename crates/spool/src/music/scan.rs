@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const AUDIO: &[&str] = &["flac", "mp3", "m4a", "mp4", "aac", "alac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wv", "ape"];
+const AUDIO: &[&str] = &["flac", "mp3", "m4a", "m4b", "mp4", "aac", "alac", "ogg", "oga", "opus", "wav", "aif", "aiff", "wv", "ape"];
 const COVERS: &[&str] = &["cover", "folder", "front", "album", "albumart", "artwork"];
 const IMAGES: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
