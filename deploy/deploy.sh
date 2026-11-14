@@ -101,7 +101,13 @@ ssh "$HOST" LABEL="$LABEL" sh <<'REMOTE'
     pgrep -f "spool/bin/spool serve" >/dev/null || break
     sleep 1
   done
-  launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/"$LABEL".plist
+  # launchd can still be letting the old one go, and then refuses ("Bootstrap failed: 5");
+  # a moment later it takes it.
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/"$LABEL".plist 2>/dev/null && break
+    [ "$i" = 10 ] && launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/"$LABEL".plist
+    sleep 1
+  done
   # Loading it does not always start it (seen after casper restarted), so it is started too.
   launchctl kickstart "gui/$(id -u)/$LABEL" 2>/dev/null || true
   sleep 3
