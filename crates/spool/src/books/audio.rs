@@ -89,7 +89,7 @@ fn is_audio(p: &Path) -> bool {
 
 /// For each word of a name (as [`words`] splits it), whether a bracket, dash or the like stands
 /// between it and the word before. A dotted scene name is read with its dots as spaces.
-fn separated(name: &str) -> Vec<bool> {
+pub(crate) fn separated(name: &str) -> Vec<bool> {
     let dotted = !name.contains(' ');
     let mut out = vec![];
     let mut sep = false;

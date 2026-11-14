@@ -176,11 +176,15 @@ fn has_all(name: &[String], want: &str) -> bool {
     !needed.is_empty() && needed.iter().all(|w| name.contains(w))
 }
 
-/// Whether an album in the library is the one named. Its title may carry more after the
-/// name: "Diamond-Jubilee - REALISTIK MASTER", "OK Computer (Remastered)".
+/// Whether an album in the library is the one named. Its title may carry more after the name
+/// when it is set off: "Diamond-Jubilee - REALISTIK MASTER", "OK Computer (Remastered)"; but
+/// "Play & Play: B Sides" is not "Play".
 fn same_album(have: &str, want: &str) -> bool {
     let (h, w) = (words(have), words(want));
-    !w.is_empty() && h.starts_with(&w)
+    if w.is_empty() || !h.starts_with(&w) {
+        return false;
+    }
+    h.len() == w.len() || crate::books::audio::separated(have).get(w.len()).copied().unwrap_or(false)
 }
 
 /// What a release would give, or None when it is not the album or not good enough.
@@ -811,6 +815,8 @@ mod tests {
         assert!(same_album("OK Computer", "OK Computer"));
         assert!(!same_album("Kid A", "OK Computer"));
         assert!(!same_album("Untrue", ""));
+        assert!(same_album("OK Computer (Remastered)", "OK Computer"));
+        assert!(!same_album("Play & Play: B Sides", "Play"), "more that runs straight on is another album");
     }
 
     #[test]
