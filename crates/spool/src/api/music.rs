@@ -102,3 +102,52 @@ pub(super) async fn remove_want(State(app): State<App>, Path(id): Path<i64>) -> 
     app.remove_want(id).await?;
     Ok(Json(json!({"removed": id})))
 }
+
+#[derive(Deserialize)]
+pub(super) struct Look {
+    #[serde(default)]
+    look: bool,
+}
+
+/// Players on the network music can be played on, looked for again with `look`.
+pub(super) async fn music_renderers(State(app): State<App>, Query(l): Query<Look>) -> R<Value> {
+    Ok(Json(json!(app.renderers(l.look).await)))
+}
+
+pub(super) async fn music_casts(State(app): State<App>) -> R<Value> {
+    Ok(Json(json!(app.casts().iter().map(|s| app.cast_json(s)).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+pub(super) struct CastAsk {
+    renderer: String,
+    tracks: Vec<i64>,
+    #[serde(default)]
+    at: usize,
+    album_id: Option<i64>,
+}
+
+pub(super) async fn music_cast(State(app): State<App>, Json(c): Json<CastAsk>) -> R<Value> {
+    let s = app.cast(&c.renderer, c.tracks, c.at, c.album_id).await?;
+    Ok(Json(app.cast_json(&s)))
+}
+
+#[derive(Deserialize, Default)]
+pub(super) struct CastAct {
+    seconds: Option<f64>,
+    volume: Option<u32>,
+}
+
+pub(super) async fn music_cast_act(State(app): State<App>, Path((renderer, action)): Path<(String, String)>, body: Option<Json<CastAct>>) -> R<Value> {
+    let a = body.map(|Json(a)| a).unwrap_or_default();
+    Ok(Json(json!(app.cast_act(&renderer, &action, a.seconds, a.volume).await?.map(|s| app.cast_json(&s)))))
+}
+
+pub(super) async fn cast_track(State(app): State<App>, Path((token, file)): Path<(String, String)>, req: axum::extract::Request) -> Response {
+    let head = req.method() == axum::http::Method::HEAD;
+    app.cast_track(&token, &file, req.headers(), head).await
+}
+
+pub(super) async fn cast_art(State(app): State<App>, Path((token, file)): Path<(String, String)>) -> Response {
+    app.cast_art(&token, &file).await
+}

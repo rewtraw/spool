@@ -146,7 +146,9 @@ fn a_viewer_may(method: &axum::http::Method, path: &str) -> bool {
     matches!(
         (read, parts.as_slice()),
         (true, ["session" | "status" | "titles" | "collections" | "qualities" | "profiles" | "events" | "watching" | "clips" | "dialogue"])
-            | (true, ["music"] | ["music", "albums", _] | ["music", "albums", _, "art"] | ["music", "tracks", _, "play"])
+            | (true, ["music"] | ["music", "albums", _] | ["music", "albums", _, "art"] | ["music", "tracks", _, "play"] | ["music", "renderers"] | ["music", "cast"])
+            // Whoever may play music may play it on the players in the house.
+            | (false, ["music", "cast"] | ["music", "cast", _, _])
             | (true, ["titles", _] | ["art", ..] | ["collections", _, "art"] | ["film-part", _, "art"] | ["anime", _, "art"] | ["clips", ..] | ["dialogue", "coverage" | "lines"])
             | (false, ["logout" | "watched" | "clips"] | ["clips", _])
     )
@@ -406,6 +408,9 @@ fn api_routes() -> Router<App> {
         .route("/api/music/albums/{id}/art", get(music_art))
         .route("/api/music/tracks/{id}/play", get(music_stream))
         .route("/api/music/find", get(music_find))
+        .route("/api/music/renderers", get(music_renderers))
+        .route("/api/music/cast", get(music_casts).post(music_cast))
+        .route("/api/music/cast/{renderer}/{action}", post(music_cast_act))
         .route("/api/music/find/artist", get(music_find_artist))
         .route("/api/music/wants", get(music_wants).post(want_album))
         .route("/api/music/wants/{id}", delete(remove_want))
@@ -551,6 +556,9 @@ pub fn router(app: App) -> Router {
         // A linked machine comes with a ticket, not the key to the app, and a film is sent as it is.
         // Music players sign in with each request, as Subsonic has them do.
         .merge(crate::music::subsonic::routes(app.clone()))
+        // A player in the house fetches what it was told to play with a link that names the
+        // track and signs it, having no way to sign in.
+        .merge(Router::new().route("/cast/{token}/{file}", get(cast_track)).route("/cast-art/{token}/{file}", get(cast_art)).with_state(app.clone()))
         .merge(Router::new().route("/link/source/{link}", get(link_source)).with_state(app))
 }
 

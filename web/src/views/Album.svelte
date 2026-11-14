@@ -5,6 +5,7 @@
   import { toast } from '../lib/state.svelte';
   import { bytes, clock } from '../lib/format';
   import { player, playFrom } from '../lib/player.svelte';
+  import PlayOn from '../components/PlayOn.svelte';
 
   let { id }: { id: number } = $props();
   let opened = $state<any>(null);
@@ -43,7 +44,7 @@
       <div class="muted">{a.artist}{a.year ? ` · ${a.year}` : ''}{a.genre ? ` · ${a.genre}` : ''}</div>
       <div class="faint small">{a.tracks} tracks · {minutes(a.seconds)} · {bytes(a.bytes)} · {quality(a)}</div>
       <div class="faint small mono path">{opened.folder}</div>
-      <div><button class="btn primary" onclick={() => playFrom(a, opened.tracks, 0)}>Play</button></div>
+      <div class="row play"><button class="btn primary" onclick={() => playFrom(a, opened.tracks, 0)}>Play</button><PlayOn /></div>
     </div>
   </div>
   <ol class="card tracks">
@@ -93,8 +94,9 @@
   .about h1 {
     margin: 0;
   }
-  .about .btn {
+  .play {
     margin-top: 10px;
+    gap: 8px;
   }
   .path {
     word-break: break-all;
