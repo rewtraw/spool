@@ -163,7 +163,8 @@ impl Db {
 
 /// Words as they are compared: lower case, without accents, "&" as "and", punctuation gone.
 fn words(s: &str) -> Vec<String> {
-    let s = deunicode::deunicode(s).to_lowercase().replace('&', " and ");
+    // "Tomorrow's" and "Tomorrows" are the same word.
+    let s = deunicode::deunicode(s).to_lowercase().replace('&', " and ").replace('\'', "");
     s.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_string).collect()
 }
 
@@ -183,9 +184,39 @@ fn same_album(have: &str, want: &str) -> bool {
 }
 
 /// What a release would give, or None when it is not the album or not good enough.
+/// Whether a release's name says it is this album by this artist: the album's name straight
+/// after the artist's, perhaps with a year between ("Kraftwerk - 1970 - Kraftwerk"), and
+/// "The" left off either. Every word of each somewhere in the name is not enough: every
+/// release of Kraftwerk's has the words of their first album, "Kraftwerk", in it.
+fn names_album(n: &[String], artist: &str, album: &str) -> bool {
+    let bare = |w: Vec<String>| if w.len() > 1 && w[0] == "the" { w[1..].to_vec() } else { w };
+    let (a, t) = (bare(words(artist)), bare(words(album)));
+    if a.is_empty() || t.is_empty() {
+        return false;
+    }
+    let year = |w: &String| w.len() == 4 && (w.starts_with("19") || w.starts_with("20")) && w.chars().all(|c| c.is_ascii_digit());
+    (0..n.len()).filter(|&i| n[i..].starts_with(&a)).any(|i| {
+        let mut rest = &n[i + a.len()..];
+        if rest.first().is_some_and(year) {
+            rest = &rest[1..];
+        }
+        if rest.first().is_some_and(|w| w == "the") && t[0] != "the" {
+            rest = &rest[1..];
+        }
+        rest.starts_with(&t)
+    })
+}
+
+/// A piece of a bigger post rather than a release: `[05 of 20] "04. Track.flac"`, `(02/21)`.
+fn a_piece(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n.contains('"') || n.split(|c: char| !c.is_ascii_alphanumeric() && c != '/').any(|w| w.split_once('/').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty() && a.chars().chain(b.chars()).all(|c| c.is_ascii_digit())))
+        || n.split_whitespace().collect::<Vec<_>>().windows(3).any(|w| w[1] == "of" && w[0].trim_start_matches('[').parse::<u32>().is_ok() && w[2].trim_end_matches(']').parse::<u32>().is_ok())
+}
+
 pub fn grade(name: &str, size: u64, artist: &str, album: &str) -> Option<Grade> {
     let n = words(name);
-    if !has_all(&n, artist) || !has_all(&n, album) {
+    if a_piece(name) || !names_album(&n, artist, album) {
         return None;
     }
     // Everything an artist made, or a box of albums, is not the one album.
@@ -302,26 +333,30 @@ fn copy_album(files: &[(PathBuf, PathBuf)], dest: &Path) -> Result<()> {
 }
 
 impl App {
-    /// Albums matching what was typed, each marked if it is wanted or already here. When
-    /// what was typed is an artist's name, that artist and their own albums come first.
-    pub async fn album_lookup(&self, q: &str) -> Result<serde_json::Value> {
-        let artist = musicbrainz::artist(&self.http, q).await.unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "artists not searched");
-            None
-        });
-        let own = match &artist {
-            Some(a) => musicbrainz::discography(&self.http, &a.mbid).await.unwrap_or_default(),
-            None => vec![],
-        };
+    /// Albums whose names match what was typed, each marked if it is wanted or already here.
+    pub async fn album_lookup(&self, q: &str) -> Result<Vec<serde_json::Value>> {
         let found = musicbrainz::search(&self.http, q).await?;
-        let wants = self.db.music_wants()?;
-        let row = |g: Group| {
-            let want = wants.iter().find(|w| w.mbid == g.mbid);
-            let have = self.album_in_library(&g.artist, &g.title).is_some();
-            serde_json::json!({"cover": g.cover(), "group": g, "want_id": want.map(|w| w.id), "state": want.map(|w| w.state.as_str()), "have": have})
-        };
-        let others: Vec<_> = found.into_iter().filter(|g| !own.iter().any(|o| o.mbid == g.mbid)).map(row).collect();
-        Ok(serde_json::json!({"artist": artist, "albums": own.into_iter().map(row).collect::<Vec<_>>(), "others": others}))
+        Ok(self.album_rows(found))
+    }
+
+    /// The artist named by what was typed, when it names one outright, and their own albums
+    /// and EPs. Asked for beside [`App::album_lookup`], whose answer comes sooner.
+    pub async fn artist_lookup(&self, q: &str) -> Result<serde_json::Value> {
+        let Some(artist) = musicbrainz::artist(&self.http, q).await? else { return Ok(serde_json::json!({"artist": null, "albums": []})) };
+        let own = musicbrainz::discography(&self.http, &artist.mbid).await?;
+        Ok(serde_json::json!({"artist": artist, "albums": self.album_rows(own)}))
+    }
+
+    fn album_rows(&self, found: Vec<Group>) -> Vec<serde_json::Value> {
+        let wants = self.db.music_wants().unwrap_or_default();
+        found
+            .into_iter()
+            .map(|g| {
+                let want = wants.iter().find(|w| w.mbid == g.mbid);
+                let have = self.album_in_library(&g.artist, &g.title).is_some();
+                serde_json::json!({"cover": g.cover(), "group": g, "want_id": want.map(|w| w.id), "state": want.map(|w| w.state.as_str()), "have": have})
+            })
+            .collect()
     }
 
     /// The album in the library by this artist with this name, if there is one.
@@ -445,6 +480,14 @@ impl App {
         }
         // An album not found is looked for again every six hours.
         if now() - w.searched_at < 6 * 3600 {
+            return Ok(());
+        }
+        // Each release that did not do cost a download from an indexer's daily allowance. After
+        // a few in an hour, the rest wait for the next.
+        let lately = w.turned_down.iter().filter(|t| now() - t.at < 3600).count();
+        if lately >= 3 {
+            w.searched_at = now() - 5 * 3600;
+            w.note = format!("{lately} releases did not do in the last hour. The next is tried in an hour.");
             return Ok(());
         }
         if !self.is_active() {
@@ -690,6 +733,24 @@ mod tests {
         assert_eq!(grade("Simon.and.Garfunkel-Bookends-FLAC", 300 * mb, "Simon & Garfunkel", "Bookends"), Some(Grade::Flac));
         assert_eq!(grade("Beatles - Abbey Road FLAC", 400 * mb, "The Beatles", "Abbey Road"), Some(Grade::Flac), "The may be left out");
         assert_eq!(grade("Radiohead - OK Computer FLAC", mb, "Radiohead", "OK Computer"), None, "too small to be it");
+        assert_eq!(grade("Boards.Of.Canada-Tomorrows.Harvest-2013-FLAC", 400 * mb, "Boards of Canada", "Tomorrow’s Harvest"), Some(Grade::Flac));
+        assert_eq!(grade("Boards.Of.Canada-The.Campfire.Headphase-FLAC", 400 * mb, "Boards of Canada", "The Campfire Headphase"), Some(Grade::Flac));
+    }
+
+    #[test]
+    fn a_self_titled_album_is_not_every_album_of_its_artist() {
+        let mb = 1 << 20;
+        let k = |name: &str, album: &str| grade(name, 300 * mb, "Kraftwerk", album);
+        assert_eq!(k("Kraftwerk-Kraftwerk-BOOTLEG.REISSUE-CD-FLAC-1994-401", "Kraftwerk"), Some(Grade::Flac));
+        assert_eq!(k("Kraftwerk - 1970 - Kraftwerk 1 FLAC", "Kraftwerk"), Some(Grade::Flac));
+        assert_eq!(k("Kraftwerk-Greatest Hits [1999] FLAC", "Kraftwerk"), None);
+        assert_eq!(k("Kraftwerk-The.Mix-REMASTERED-2LP-FLAC-2020-BEATOCUL", "Kraftwerk"), None);
+        assert_eq!(k("Kraftwerk-Autobahn-REMASTERED-LP-FLAC-2020-BEATOCUL", "Kraftwerk"), None);
+        assert_eq!(k("Kraftwerk And Organisation-Tone Float-BOOTLEG-CD-FLAC-1996-dL", "Kraftwerk 2"), None);
+        assert_eq!(k("Kraftwerk.-.Minimum-Maximum.2005.24bit.SACD.LOSSLESS.FLAC.Disc.2", "Kraftwerk 2"), None);
+        assert_eq!(k("Kraftwerk - Die Mensch-Maschine (2009 Remaster) (1978) FLAC", "Die Mensch·Maschine"), Some(Grade::Flac));
+        assert_eq!(k(r#"Kraftwerk - 1970 - Kraftwerk 1 (NMR) [05 of 20] "04. Von Himmel Hoch.flac""#, "Kraftwerk"), None, "one file of a post");
+        assert_eq!(k(r#"(02/21) "Kraftwerk-2004-Aerodynamik (EP) FLAC.part01.rar" - 185,29 MB"#, "Aerodynamik"), None);
     }
 
     #[test]

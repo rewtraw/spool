@@ -47,17 +47,17 @@ function markBusy(): () => void {
   };
 }
 
-async function request<T>(method: string, path: string, body?: unknown, raw?: BodyInit): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
   const done = markBusy();
   try {
-    return await send<T>(method, path, body, raw);
+    return await send<T>(method, path, body, raw, signal);
   } finally {
     done();
   }
 }
 
-async function send<T>(method: string, path: string, body?: unknown, raw?: BodyInit): Promise<T> {
-  const init: RequestInit = { method, credentials: 'same-origin', headers: {} };
+async function send<T>(method: string, path: string, body?: unknown, raw?: BodyInit, signal?: AbortSignal): Promise<T> {
+  const init: RequestInit = { method, credentials: 'same-origin', headers: {}, signal };
   if (raw !== undefined) {
     init.body = raw;
   } else if (body !== undefined) {
@@ -67,7 +67,8 @@ async function send<T>(method: string, path: string, body?: unknown, raw?: BodyI
   let res: Response;
   try {
     res = await fetch(`/api${path}`, init);
-  } catch {
+  } catch (e) {
+    if (signal?.aborted) throw e;
     throw new ApiError(0, 'Spool is not reachable');
   }
   const text = await res.text();
@@ -85,7 +86,8 @@ async function send<T>(method: string, path: string, body?: unknown, raw?: BodyI
 }
 
 export const api = {
-  get: <T = any>(p: string) => request<T>('GET', p),
+  /** A request that is given up when `signal` is: a search overtaken by the next. */
+  get: <T = any>(p: string, signal?: AbortSignal) => request<T>('GET', p, undefined, undefined, signal),
   post: <T = any>(p: string, b?: unknown) => request<T>('POST', p, b ?? {}),
   put: <T = any>(p: string, b?: unknown) => request<T>('PUT', p, b ?? {}),
   patch: <T = any>(p: string, b?: unknown) => request<T>('PATCH', p, b ?? {}),

@@ -60,9 +60,17 @@ pub(super) struct Find {
 /// Albums in MusicBrainz matching what was typed, to want.
 pub(super) async fn music_find(State(app): State<App>, Query(f): Query<Find>) -> R<Value> {
     if f.q.trim().len() < 2 {
-        return Ok(Json(json!({"artist": null, "albums": [], "others": []})));
+        return Ok(Json(json!([])));
     }
-    Ok(Json(app.album_lookup(f.q.trim()).await?))
+    Ok(Json(json!(app.album_lookup(f.q.trim()).await?)))
+}
+
+/// The artist named by what was typed, and their own albums.
+pub(super) async fn music_find_artist(State(app): State<App>, Query(f): Query<Find>) -> R<Value> {
+    if f.q.trim().len() < 2 {
+        return Ok(Json(json!({"artist": null, "albums": []})));
+    }
+    Ok(Json(app.artist_lookup(f.q.trim()).await?))
 }
 
 fn want_row(w: &crate::music::want::Want) -> Value {

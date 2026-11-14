@@ -406,6 +406,7 @@ fn api_routes() -> Router<App> {
         .route("/api/music/albums/{id}/art", get(music_art))
         .route("/api/music/tracks/{id}/play", get(music_stream))
         .route("/api/music/find", get(music_find))
+        .route("/api/music/find/artist", get(music_find_artist))
         .route("/api/music/wants", get(music_wants).post(want_album))
         .route("/api/music/wants/{id}", delete(remove_want))
         .route("/api/music/wants/{id}/search", post(search_want))

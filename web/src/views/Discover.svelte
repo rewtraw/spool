@@ -14,10 +14,15 @@
   let query = $state(route.query.get('q') ?? '');
   type Found = Title & { library_id?: number | null; anime?: { format: string; episodes: number; name: string; as_series?: boolean } };
   let found = $state<{ movies: Found[]; series: Found[]; movies_error?: string | null }>({ movies: [], series: [] });
-  // Albums: an artist's own first, when what was typed is their name, then the rest.
-  let albums = $state<any[]>([]);
+  // Albums: an artist's own first, when what was typed is their name, then the rest. The two
+  // are asked for side by side; albums by name come back first, and the artist's slot in above.
+  let named = $state<any[]>([]);
   let artist = $state<{ name: string; disambiguation: string } | null>(null);
-  let ownAlbums = $state(0);
+  let own = $state<any[]>([]);
+  const ownAlbums = $derived(own.length);
+  const albums = $derived([...own, ...named.filter((r) => !own.some((o) => o.group.mbid === r.group.mbid))]);
+  // MusicBrainz answers one request a second, so a search overtaken by the next is given up.
+  let musicAsk: AbortController | null = null;
   let books = $state<any[]>([]);
   let partErrors = $state<{ music?: string; books?: string }>({});
   // The kind asked for first, then what the other kind has under the same name.
@@ -59,9 +64,10 @@
     const mine = ++seq;
     if (!q) {
       found = { movies: [], series: [] };
-      albums = [];
+      musicAsk?.abort();
+      named = [];
+      own = [];
       artist = null;
-      ownAlbums = 0;
       books = [];
       did = {};
       searched = false;
@@ -80,13 +86,24 @@
         ),
       );
     // Album and book searches need two letters or more.
-    if (want('music') && q.length > 1)
+    if (want('music') && q.length > 1) {
+      musicAsk?.abort();
+      const ask = (musicAsk = new AbortController());
+      const enc = encodeURIComponent(q);
+      own = [];
+      artist = null;
       parts.push(
-        api.get<{ artist: any; albums: any[]; others: any[] }>(`/music/find?q=${encodeURIComponent(q)}`).then(
-          (r) => { if (mine === seq) { albums = [...r.albums, ...r.others]; artist = r.artist; ownAlbums = r.albums.length; did.music = q; partErrors.music = ''; } },
-          (e) => { if (mine === seq) { albums = []; artist = null; ownAlbums = 0; partErrors.music = e.message; } },
+        api.get<any[]>(`/music/find?q=${enc}`, ask.signal).then(
+          (r) => { if (mine === seq) { named = r; did.music = q; partErrors.music = ''; } },
+          (e) => { if (mine === seq && !ask.signal.aborted) { named = []; partErrors.music = e.message; } },
         ),
       );
+      // Not waited for: the page shows what it has, and the artist's albums when they come.
+      api.get<{ artist: any; albums: any[] }>(`/music/find/artist?q=${enc}`, ask.signal).then(
+        (r) => { if (mine === seq) { artist = r.artist; own = r.albums; } },
+        () => {},
+      );
+    }
     if (want('books') && q.length > 1)
       parts.push(
         api.get<any[]>(`/books/lookup?q=${encodeURIComponent(q)}`).then(

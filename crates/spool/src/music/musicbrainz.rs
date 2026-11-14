@@ -12,7 +12,29 @@ const AGENT: &str = concat!("Spool/", env!("CARGO_PKG_VERSION"), " ( https://git
 
 static LAST: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
 
+/// What MusicBrainz said, kept an hour: asking again is a second's wait each time, and the
+/// same things are asked for again and again while someone searches and then wants an album.
+static KEPT: std::sync::LazyLock<parking_lot::Mutex<std::collections::HashMap<String, (std::time::Instant, String)>>> = std::sync::LazyLock::new(Default::default);
+const KEEP: std::time::Duration = std::time::Duration::from_secs(3600);
+
 async fn get<T: for<'de> Deserialize<'de>>(http: &reqwest::Client, url: &str) -> Result<T> {
+    let kept = KEPT.lock().get(url).filter(|(at, _)| at.elapsed() < KEEP).map(|(_, body)| body.clone());
+    let body = match kept {
+        Some(b) => b,
+        None => {
+            let b = fetch(http, url).await?;
+            let mut all = KEPT.lock();
+            all.retain(|_, (at, _)| at.elapsed() < KEEP);
+            if all.len() < 500 {
+                all.insert(url.to_string(), (std::time::Instant::now(), b.clone()));
+            }
+            b
+        }
+    };
+    serde_json::from_str(&body).map_err(|e| anyhow!("MusicBrainz sent something unexpected: {e}"))
+}
+
+async fn fetch(http: &reqwest::Client, url: &str) -> Result<String> {
     // It answers 503 when asked too often or when busy; a moment later usually does.
     for _ in 0..2 {
         match get_once(http, url).await {
@@ -25,7 +47,7 @@ async fn get<T: for<'de> Deserialize<'de>>(http: &reqwest::Client, url: &str) ->
 
 struct Busy;
 
-async fn get_once<T: for<'de> Deserialize<'de>>(http: &reqwest::Client, url: &str) -> std::result::Result<Result<T>, Busy> {
+async fn get_once(http: &reqwest::Client, url: &str) -> std::result::Result<Result<String>, Busy> {
     let wait = {
         let mut last = LAST.lock();
         let now = std::time::Instant::now();
@@ -46,7 +68,7 @@ async fn get_once<T: for<'de> Deserialize<'de>>(http: &reqwest::Client, url: &st
     if !resp.status().is_success() {
         return Ok(Err(anyhow!("MusicBrainz answered HTTP {}", resp.status().as_u16())));
     }
-    Ok(resp.json().await.map_err(|e| anyhow!("MusicBrainz sent something unexpected: {}", e.without_url())))
+    Ok(resp.text().await.map_err(|e| anyhow!("MusicBrainz: {}", e.without_url())))
 }
 
 /// An album, as a search finds it.
@@ -175,7 +197,7 @@ fn named(found: &[RawArtist], q: &str) -> Option<Artist> {
 /// An artist's own albums and EPs, oldest first: not live recordings, compilations,
 /// remixes, demos or bootlegs, which have second types.
 pub async fn discography(http: &reqwest::Client, artist_mbid: &str) -> Result<Vec<Group>> {
-    let url = format!("{BASE}/release-group?fmt=json&limit=100&inc=artist-credits&type=album|ep&artist={}", urlencoding::encode(artist_mbid));
+    let url = format!("{BASE}/release-group?fmt=json&limit=100&inc=artist-credits&type=album|ep&release-group-status=website-default&artist={}", urlencoding::encode(artist_mbid));
     let s: Search = get(http, &url).await?;
     let mut out: Vec<Group> = s.release_groups.into_iter().map(Group::from).filter(|g| !g.kind.contains(" · ")).collect();
     // Albums before EPs, and each oldest first; one with no date last.

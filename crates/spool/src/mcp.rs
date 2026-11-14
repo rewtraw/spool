@@ -1045,9 +1045,13 @@ impl Mcp {
             }
             "find_album" => {
                 let q = a["query"].as_str().unwrap_or("").trim();
-                let found = self.get(&format!("/api/music/find?q={}", urlencoding::encode(q))).await?;
-                let rows = |k: &str| found[k].as_array().into_iter().flatten().map(|r| json!({"mbid": r["group"]["mbid"], "title": r["group"]["title"], "artist": r["group"]["artist"], "year": r["group"]["year"], "kind": r["group"]["kind"], "in_library": r["have"], "want_id": r["want_id"]})).collect::<Vec<_>>();
-                Ok(json!({"artist": found["artist"], "artist_albums": rows("albums"), "other_matches": rows("others")}))
+                let q = urlencoding::encode(q);
+                let artist = self.get(&format!("/api/music/find/artist?q={q}")).await?;
+                let found = self.get(&format!("/api/music/find?q={q}")).await?;
+                let row = |r: &Value| json!({"mbid": r["group"]["mbid"], "title": r["group"]["title"], "artist": r["group"]["artist"], "year": r["group"]["year"], "kind": r["group"]["kind"], "in_library": r["have"], "want_id": r["want_id"]});
+                let own: Vec<Value> = artist["albums"].as_array().into_iter().flatten().map(row).collect();
+                let others: Vec<Value> = found.as_array().into_iter().flatten().filter(|r| !own.iter().any(|o| o["mbid"] == r["group"]["mbid"])).map(row).collect();
+                Ok(json!({"artist": artist["artist"], "artist_albums": own, "other_matches": others}))
             }
             "want_album" => {
                 let w = self.post("/api/music/wants", json!({"mbid": a["mbid"].as_str().ok_or("mbid is required")?})).await?;
