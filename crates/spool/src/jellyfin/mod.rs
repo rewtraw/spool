@@ -720,7 +720,9 @@ async fn handle(State(app): State<App>, req: Request) -> Response {
 pub fn router(app: App) -> Router {
     use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
     let text_only = DefaultPredicate::new().and(NotForContentType::new("video/")).and(NotForContentType::new("application/octet-stream"));
-    Router::new().fallback(handle).with_state(app).layer(tower_http::compression::CompressionLayer::new().compress_when(text_only))
+    // Music for a streamer in the house comes this way too (see music::cast::routes).
+    let players = Router::new().fallback(handle).with_state(app.clone()).layer(tower_http::compression::CompressionLayer::new().compress_when(text_only));
+    crate::music::cast::routes(app).merge(players)
 }
 
 /// Keep the players' door in step with the settings: open it, move it or close it as they change.

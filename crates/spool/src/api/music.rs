@@ -142,12 +142,3 @@ pub(super) async fn music_cast_act(State(app): State<App>, Path((renderer, actio
     let a = body.map(|Json(a)| a).unwrap_or_default();
     Ok(Json(json!(app.cast_act(&renderer, &action, a.seconds, a.volume).await?.map(|s| app.cast_json(&s)))))
 }
-
-pub(super) async fn cast_track(State(app): State<App>, Path((token, file)): Path<(String, String)>, req: axum::extract::Request) -> Response {
-    let head = req.method() == axum::http::Method::HEAD;
-    app.cast_track(&token, &file, req.headers(), head).await
-}
-
-pub(super) async fn cast_art(State(app): State<App>, Path((token, file)): Path<(String, String)>) -> Response {
-    app.cast_art(&token, &file).await
-}

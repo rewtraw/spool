@@ -83,6 +83,10 @@ pub struct Session {
     /// The next track was handed over as well, for a device that plays on without a gap.
     #[serde(skip)]
     next_given: Option<i64>,
+    /// The current track was heard to get going. One that stops without ever doing so could
+    /// not be fetched or played, and is not the end of a track to move on from.
+    #[serde(skip)]
+    started: bool,
 }
 
 pub struct Cast {
@@ -179,6 +183,22 @@ fn hhmmss(s: f64) -> String {
 fn seconds(t: &str) -> f64 {
     let parts: Vec<f64> = t.split('.').next().unwrap_or("").split(':').filter_map(|p| p.parse().ok()).collect();
     parts.iter().fold(0.0, |acc, p| acc * 60.0 + p)
+}
+
+/// The routes a device fetches music and pictures by. They are served on the players' door
+/// as well as the app's own port: a machine may let the home network reach only the former
+/// (casper's firewall does), and a device in the house has no other way in.
+pub fn routes(app: App) -> axum::Router {
+    use axum::extract::{Path, Request, State};
+    use axum::routing::get;
+    async fn track(State(app): State<App>, Path((token, file)): Path<(String, String)>, req: Request) -> axum::response::Response {
+        let head = req.method() == axum::http::Method::HEAD;
+        app.cast_track(&token, &file, req.headers(), head).await
+    }
+    async fn art(State(app): State<App>, Path((token, file)): Path<(String, String)>) -> axum::response::Response {
+        app.cast_art(&token, &file).await
+    }
+    axum::Router::new().route("/cast/{token}/{file}", get(track)).route("/cast-art/{token}/{file}", get(art)).with_state(app)
 }
 
 /// The address of this machine that a device at `ip` would reach it on.
@@ -294,7 +314,9 @@ impl App {
     /// What one track is called, for the device's screen, and where it fetches it from.
     fn handed(&self, r: &Renderer, t: &Track) -> Result<(String, String)> {
         let host = own_address(r.ip).ok_or_else(|| anyhow!("no address of this machine reaches {}", r.name))?;
-        let port = self.port.get().copied().unwrap_or(7979);
+        // The players' door when it is open: the home network may be kept from the app's port.
+        let g = self.settings.general();
+        let port = if g.players_enabled { g.players_port as u16 } else { self.port.get().copied().unwrap_or(7979) };
         let host = match host {
             IpAddr::V6(v6) => format!("[{v6}]"),
             v4 => v4.to_string(),
@@ -330,7 +352,7 @@ impl App {
         if at >= tracks.len() {
             bail!("nothing to play");
         }
-        let s = Session { renderer: r.id.clone(), name: r.name.clone(), queue: tracks, at, album_id, state: "loading".into(), position: 0.0, duration: 0.0, volume: None, error: String::new(), held: false, loaded_at: Instant::now(), next_given: None };
+        let s = Session { renderer: r.id.clone(), name: r.name.clone(), queue: tracks, at, album_id, state: "loading".into(), position: 0.0, duration: 0.0, volume: None, error: String::new(), held: false, loaded_at: Instant::now(), next_given: None, started: false };
         self.music.cast.sessions.lock().insert(r.id.clone(), s);
         self.load(&r, at).await?;
         self.follow_casts();
@@ -372,6 +394,7 @@ impl App {
             s.position = 0.0;
             s.duration = t.seconds;
             s.held = false;
+            s.started = false;
             s.loaded_at = Instant::now();
             s.next_given = next_given;
             if volume.is_some() {
@@ -503,6 +526,7 @@ impl App {
                 if s.queue.get(s.at) != Some(&p) && s.queue.get(s.at + 1) == Some(&p) {
                     s.at += 1;
                     s.next_given = None;
+                    s.started = false;
                     give_next = true;
                 }
             }
@@ -522,7 +546,17 @@ impl App {
             // Stopped on the track Spool thinks it is on; one just moved on to is not ended, as
             // the two answers may have been given either side of the change.
             let on_current = playing.is_none_or(|p| s.queue.get(s.at) == Some(&p));
+            if state == "PLAYING" && s.position >= 1.0 {
+                s.started = true;
+            }
             let ended = s.state == "stopped" && !s.held && !give_next && on_current;
+            if ended && !s.started {
+                // Never got going: the player could not fetch it or would not play it. Moving
+                // on would only do the same to every track after it.
+                s.error = format!("{} did not start playing this track. It may not be able to reach Spool on the home network.", s.name);
+                s.held = true;
+                return Ok(());
+            }
             (ended.then_some(s.at + 1).filter(|n| *n < s.queue.len()), give_next.then_some(s.at))
         };
         if let Some(n) = advance {

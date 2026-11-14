@@ -558,7 +558,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::music::subsonic::routes(app.clone()))
         // A player in the house fetches what it was told to play with a link that names the
         // track and signs it, having no way to sign in.
-        .merge(Router::new().route("/cast/{token}/{file}", get(cast_track)).route("/cast-art/{token}/{file}", get(cast_art)).with_state(app.clone()))
+        .merge(crate::music::cast::routes(app.clone()))
         .merge(Router::new().route("/link/source/{link}", get(link_source)).with_state(app))
 }
 
