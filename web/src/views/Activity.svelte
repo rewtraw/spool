@@ -208,7 +208,7 @@
         <div class="muted">{totals.count} {totals.count === 1 ? 'download' : 'downloads'} left{totals.arrived ? `, ${totals.arrived} finished` : ''}{totals.waiting ? `, ${totals.waiting} paused or waiting` : ''}</div>
         {#if totals.left > 0}<div class="muted">{bytes(totals.left)} to go{totals.eta != null ? ` · about ${duration(totals.eta)} at ${bytes(totalSpeed)}/s` : ''}</div>{/if}
         <span class="grow"></span>
-        {#if app.status?.free_bytes != null}<div class="muted" class:low={app.status.free_bytes < totals.left}>{bytes(app.status.free_bytes)} free on disk</div>{/if}
+        {#if app.status?.free_bytes != null}<div class="muted" class:low={app.status.free_bytes < totals.left}>{bytes(app.status.free_bytes)} free on {app.status.free_on ?? 'disk'}</div>{/if}
       </div>
       <div class="progress" role="progressbar" aria-label="Queue progress" aria-valuenow={Math.round(pct(totals.done, totals.total))} aria-valuemin="0" aria-valuemax="100"><i style="width:{pct(totals.done, totals.total)}%"></i></div>
     </div>

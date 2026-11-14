@@ -132,7 +132,7 @@ const TOOLS: &[Tool] = &[
     },
     Tool { name: "archive", read: true, destructive: false, description: "Releases whose NZB Spool has saved, grouped by title, including titles no longer in the library. Each release has a saved_id usable with download_release and check_availability.", schema: || obj(json!({"query": {"type": "string", "description": "Filter by title or release name."}}), &[]) },
     Tool { name: "check_availability", read: true, destructive: false, description: "Ask the Usenet servers whether a saved release is still there, by sampling its articles. Downloads nothing.", schema: || obj(json!({"saved_id": {"type": "integer"}}), &["saved_id"]) },
-    Tool { name: "disk_space", read: true, destructive: false, description: "Free space, what is waiting for room, what sits in the recycle folder, and the largest titles with whether each was watched in Plex and whether it could be downloaded again from a saved release. Use it to suggest what to remove.", schema: || obj(json!({"limit": {"type": "integer", "description": "How many titles to list, largest first (default 30)."}}), &[]) },
+    Tool { name: "disk_space", read: true, destructive: false, description: "Free space on each location (and which one new titles go to) and on the disk downloads unpack on, what is waiting for room, what sits in the recycle folder, and the largest titles with whether each was watched in Plex and whether it could be downloaded again from a saved release. Use it to suggest what to remove.", schema: || obj(json!({"limit": {"type": "integer", "description": "How many titles to list, largest first (default 30)."}}), &[]) },
     Tool { name: "plex_report", read: true, destructive: false, description: "Compare Plex with Spool: what Plex has that Spool does not track, and titles with files that Plex has not picked up.", schema: || obj(json!({}), &[]) },
     Tool {
         name: "add_title",
@@ -538,7 +538,7 @@ impl Mcp {
                 let attention = self.get("/api/attention").await?;
                 let queue: Vec<Value> = act["items"].as_array().into_iter().flatten().filter(|r| r["job"].is_object() || r["acquisition"]["state"] == "importing").map(|r| acquisition_row(&r["acquisition"], &r["job"], &r["title"])).collect();
                 Ok(json!({
-                    "mode": s["mode"], "version": s["version"], "movies": s["movies"], "series": s["series"], "library_gb": gb(&s["library_bytes"]), "free_gb": gb(&s["free_bytes"]),
+                    "mode": s["mode"], "version": s["version"], "movies": s["movies"], "series": s["series"], "library_gb": gb(&s["library_bytes"]), "free_gb": gb(&s["free_bytes"]), "free_on": s["free_on"],
                     "media_volume_ok": s["volume_ok"], "queue_paused": s["queue_paused"], "warnings": s["warnings"], "downloading": queue,
                     "indexers": self.get("/api/indexers").await?.as_array().into_iter().flatten().map(|i| json!({"name": i["name"], "requests_today": i["usage"]["requests"], "request_limit": i["usage"]["request_limit"], "downloads_today": i["usage"]["grabs"], "download_limit": i["usage"]["grab_limit"], "limits_from": i["usage"]["source"], "failing": i["failing"]})).collect::<Vec<_>>(),
                     "attention": attention.as_array().into_iter().flatten().map(|x| json!({"attention_id": x["item"]["id"], "title": x["title"], "title_id": x["item"]["title_id"], "message": x["item"]["message"], "release": x["item"]["data"]["release"], "reason": x["item"]["data"]["reason"], "since": when(&x["item"]["ts"])})).collect::<Vec<_>>(),
@@ -692,7 +692,8 @@ impl Mcp {
                 let r = self.get("/api/space").await?;
                 let limit = a["limit"].as_u64().unwrap_or(30) as usize;
                 Ok(json!({
-                    "free_gb": gb(&r["free"]), "kept_free_gb": gb(&r["kept_free"]), "library_gb": gb(&r["library"]),
+                    "free_for_downloading_gb": gb(&r["free"]), "kept_free_gb": gb(&r["kept_free"]), "library_gb": gb(&r["library"]),
+                    "locations": r["locations"].as_array().into_iter().flatten().map(|l| json!({"name": l["name"], "free_gb": gb(&l["free"]), "new_titles_go_here": l["new_titles"], "reachable": l["online"]})).collect::<Vec<_>>(),
                     "recycle_folder": {"files": r["recycled"]["files"], "gb": gb(&r["recycled"]["bytes"]), "emptied_after_days": r["recycled"]["days"]},
                     "waiting_for_space": {"downloads": r["waiting"]["count"], "gb": gb(&r["waiting"]["bytes"])},
                     "largest_titles": r["titles"].as_array().into_iter().flatten().take(limit).map(|t| json!({

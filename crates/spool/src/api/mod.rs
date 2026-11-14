@@ -296,6 +296,8 @@ async fn status(State(app): State<App>) -> R<Value> {
     let titles = app.db.titles(None)?;
     let files = app.db.file_counts()?;
     let free = |p: &str| -> Option<u64> { (!p.is_empty()).then(|| crate::app::free_space(std::path::Path::new(p))).flatten() };
+    let places = app.placement();
+    let home = places.for_new(Kind::Movie, g.new_titles_location);
     let mut warnings: Vec<String> = vec![];
     if let Some(problem) = app.volume_problem() {
         warnings.push(problem);
@@ -331,7 +333,9 @@ async fn status(State(app): State<App>) -> R<Value> {
         "series": titles.iter().filter(|t| t.kind == Kind::Series).count(),
         "files": files.values().map(|f| f.0 as u64).sum::<u64>(),
         "library_bytes": files.values().map(|f| f.1).sum::<u64>(),
-        "free_bytes": free(if g.movie_root.is_empty() { &g.series_root } else { &g.movie_root }),
+        // Room where new titles are filed, which is where the next downloads will need it.
+        "free_bytes": home.and_then(|l| free(if l.movie_root.is_empty() { &l.series_root } else { &l.movie_root })),
+        "free_on": home.map(|l| l.name.clone()),
         "attention": app.db.attention(false)?.len(),
         "asks": app.asks_waiting(),
         "warnings": warnings,

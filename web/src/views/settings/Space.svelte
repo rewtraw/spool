@@ -74,7 +74,8 @@
   <div class="stack form">
     {#if space}
       <div class="card figures">
-        <div><b>{bytes(space.free)}</b><span>Free</span></div>
+        {#each space.locations.filter((l: any) => l.online && l.free != null) as l}<div><b>{bytes(l.free)}</b><span>Free on {l.name}{l.new_titles ? ' · new titles' : ''}</span></div>{/each}
+        <div><b>{bytes(space.free)}</b><span>Free for downloading</span></div>
         <div><b>{bytes(space.library)}</b><span>Library</span></div>
         <div><b>{bytes(space.recycled.bytes)}</b><span>Recycle folder</span></div>
         <div><b>{space.waiting.count ? bytes(space.waiting.bytes) : 'None'}</b><span>Waiting for room</span></div>
