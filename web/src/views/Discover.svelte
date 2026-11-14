@@ -258,8 +258,8 @@
 {#snippet bookActs(w: any)}
   {@const has = w.formats ?? []}
   <span class="acts">
-    {#if has.includes('epub')}<a class="btn small" href="#/book/{w.book_id}">EPUB wanted</a>{:else}<button class="btn small primary" onclick={() => addBook(w, ['epub'])}>EPUB</button>{/if}
-    {#if has.includes('audiobook')}<a class="btn small" href="#/book/{w.book_id}">Audiobook wanted</a>{:else}<button class="btn small" class:primary={!has.length} onclick={() => addBook(w, ['audiobook'])}>Audiobook</button>{/if}
+    {#if has.includes('epub')}<a class="btn small" href="#/book/{w.book_id}">EPUB wanted</a>{:else if w.on_shelf}<span class="chip ok" title="Already on Florilegium's shelf">On your shelf</span>{:else}<button class="btn small primary" onclick={() => addBook(w, ['epub'])}>EPUB</button>{/if}
+    {#if has.includes('audiobook')}<a class="btn small" href="#/book/{w.book_id}">Audiobook wanted</a>{:else}<button class="btn small" class:primary={!has.length && !w.on_shelf} onclick={() => addBook(w, ['audiobook'])}>Audiobook</button>{/if}
   </span>
 {/snippet}
 

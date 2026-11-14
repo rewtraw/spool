@@ -146,6 +146,8 @@ pub struct Book {
     pub epub: bool,
     /// Wanted as an audiobook, and where that stands. See [`audio`].
     pub audio: Option<audio::Audio>,
+    /// The entry of Florilegium's reading list it was wanted for, if it was.
+    pub florilegium_want: Option<i64>,
 }
 
 fn yes() -> bool {
@@ -244,6 +246,8 @@ pub struct Books {
     /// than hold the shutdown up.
     pub stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub stopped: tokio::sync::Notify,
+    /// Florilegium's shelf as last read. See [`florilegium`].
+    pub florilegium: Mutex<florilegium::Cache>,
 }
 
 impl Books {
@@ -252,7 +256,7 @@ impl Books {
         let mut state: dump::IndexState = db.get_setting("book_index");
         // A build cut short by a restart is not running any more.
         state.building = false;
-        Books { shelf: index::Shelf::new(&dir), index_state: Mutex::new(state), allowance: Mutex::new(db.get_setting("book_allowance")), working: Default::default(), dir, stopping: Default::default(), stopped: Default::default() }
+        Books { shelf: index::Shelf::new(&dir), index_state: Mutex::new(state), allowance: Mutex::new(db.get_setting("book_allowance")), working: Default::default(), dir, stopping: Default::default(), stopped: Default::default(), florilegium: Default::default() }
     }
 
     /// Spool is stopping.
@@ -332,6 +336,7 @@ impl App {
     /// Works in Open Library's catalogue, each with the book it already is here, if any.
     pub async fn book_lookup(&self, q: &str) -> Result<Vec<serde_json::Value>> {
         let works = openlibrary::search(&self.http, q).await?;
+        let shelf = self.florilegium_shelf(florilegium::Wait::No).await.unwrap_or_default();
         Ok(works
             .into_iter()
             .map(|w| {
@@ -340,6 +345,8 @@ impl App {
                 v["book_id"] = serde_json::json!(have.as_ref().map(|b| b.id));
                 // Which forms of it are already wanted.
                 v["formats"] = serde_json::json!(have.map(|b| [b.epub.then_some("epub"), b.audio.is_some().then_some("audiobook")].into_iter().flatten().collect::<Vec<_>>()));
+                let full = if w.subtitle.is_empty() { w.title.clone() } else { format!("{}: {}", w.title, w.subtitle) };
+                v["on_shelf"] = serde_json::json!(shelf.find(&full, w.authors.first().map(String::as_str).unwrap_or("")).is_some());
                 v
             })
             .collect())
@@ -347,10 +354,20 @@ impl App {
 
     /// Want a book: as an EPUB, an audiobook, or both. A book already added gains what it lacked.
     pub async fn add_book(&self, ol_work: &str, language: Option<&str>, account: Option<i64>, epub: bool, audiobook: bool) -> Result<Book> {
+        self.add_book_as(ol_work, language, account, epub, audiobook, None).await
+    }
+
+    /// Want a book's EPUB for an entry of Florilegium's reading list.
+    pub async fn add_book_from(&self, ol_work: &str, reading: Option<i64>) -> Result<Book> {
+        self.add_book_as(ol_work, None, None, true, false, reading).await
+    }
+
+    async fn add_book_as(&self, ol_work: &str, language: Option<&str>, account: Option<i64>, epub: bool, audiobook: bool, reading: Option<i64>) -> Result<Book> {
         if let Some(id) = self.db.book_by_work(ol_work)? {
             let mut b = self.db.book(id)?.ok_or_else(|| anyhow::anyhow!("the book went"))?;
-            let more = (epub && !b.epub) || (audiobook && b.audio.is_none());
+            let more = (epub && !b.epub) || (audiobook && b.audio.is_none()) || (reading.is_some() && b.florilegium_want.is_none());
             if more {
+                b.florilegium_want = b.florilegium_want.or(reading);
                 b.epub |= epub;
                 if audiobook && b.audio.is_none() {
                     b.audio = Some(audio::Audio::default());
@@ -377,6 +394,7 @@ impl App {
             account_id: account,
             epub,
             audio: audiobook.then(audio::Audio::default),
+            florilegium_want: reading,
             ..Default::default()
         };
         self.db.save_book(&mut b)?;
@@ -405,6 +423,9 @@ impl App {
         }
         if let Some(job) = b.audio.as_ref().and_then(|a| a.hunt.download()) {
             let _ = self.job_remove(job, true);
+        }
+        if let (Some(reading), false) = (b.florilegium_want, b.state == BookState::Have) {
+            self.florilegium_let_go(reading);
         }
         self.db.delete_book(id)
     }
@@ -454,6 +475,8 @@ impl App {
 
     /// The "books" task: move along every book that is not yet here.
     pub async fn books_task(&self) -> Result<String> {
+        // Florilegium's reading list first, so what it adds is moved along with the rest.
+        let synced = self.florilegium_sync().await;
         let mut moved = 0;
         let mut failed = 0;
         let books = self.db.books()?;
@@ -471,7 +494,13 @@ impl App {
             }
         }
         self.sweep_incoming(&books);
-        Ok(if failed > 0 { format!("{moved} books looked at, {failed} could not be") } else { format!("{moved} books looked at") })
+        let mut said = if failed > 0 { format!("{moved} books looked at, {failed} could not be") } else { format!("{moved} books looked at") };
+        match synced {
+            Ok(s) if !s.is_empty() => said = format!("{s}; {said}"),
+            Ok(_) => {}
+            Err(e) => said = format!("Florilegium's reading list could not be read: {e:#}; {said}"),
+        }
+        Ok(said)
     }
 
     /// Partial downloads of a file no book is fetching any more, left an hour.
@@ -550,6 +579,16 @@ impl App {
                     return Ok(());
                 }
                 rev = b.rev;
+            }
+            if b.state == BookState::Wanted {
+                let author = b.authors.first().cloned().unwrap_or_default();
+                if let Some(s) = self.florilegium_shelf(florilegium::Wait::IfNone).await.and_then(|shelf| shelf.find(&wanted_title(&b), &author).map(|s| s.title.clone())) {
+                    tracing::info!(book = %b.title, shelved = %s, "a book is on Florilegium's shelf already");
+                    b.state = BookState::Have;
+                    b.note = "On Florilegium's shelf already.".into();
+                    self.db.save_book_if(&mut b, rev)?;
+                    return Ok(());
+                }
             }
             match b.state {
                 BookState::Wanted => self.look_for(&mut b)?,
