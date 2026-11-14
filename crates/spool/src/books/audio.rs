@@ -87,6 +87,30 @@ fn is_audio(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).is_some_and(|e| AUDIO.contains(&e.to_ascii_lowercase().as_str()))
 }
 
+/// For each word of a name (as [`words`] splits it), whether a bracket, dash or the like stands
+/// between it and the word before. A dotted scene name is read with its dots as spaces.
+fn separated(name: &str) -> Vec<bool> {
+    let dotted = !name.contains(' ');
+    let mut out = vec![];
+    let mut sep = false;
+    let mut in_word = false;
+    for c in deunicode::deunicode(name).replace('&', " and ").replace('\'', "").chars() {
+        if c.is_ascii_alphanumeric() {
+            if !in_word {
+                out.push(sep);
+                sep = false;
+                in_word = true;
+            }
+        } else {
+            in_word = false;
+            if matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '-' | ':' | ',' | '/' | '|') || (!dotted && c == '.') {
+                sep = true;
+            }
+        }
+    }
+    out
+}
+
 /// Words a release names itself with after the title, which do not make it another book.
 const TAGS: &[&str] = &["unabridged", "abridged", "m4b", "mp3", "aac", "flac", "ogg", "opus", "audiobook", "audiobooks", "audio", "book", "read", "narrated", "by", "retail", "chapterized", "chapters", "full", "cast", "edition", "anniversary", "audible", "web", "cbr", "vbr", "kbps"];
 
@@ -120,7 +144,10 @@ pub fn grade(name: &str, size: u64, author: &str, title: &str) -> Option<Kind> {
             || author_words.contains(w)
             || full_title.contains(w)
     };
-    let alone = (0..n.len().saturating_sub(t.len() - 1)).filter(|&i| n[i..].starts_with(&t)).any(|i| n.get(i + t.len()).is_none_or(fine));
+    // A word set off from the title by a bracket or a dash is something else, such as who reads
+    // it ("[Andy Serkis]", "- Rob Inglis"); one that runs straight on is part of another title.
+    let set_off = separated(name);
+    let alone = (0..n.len().saturating_sub(t.len() - 1)).filter(|&i| n[i..].starts_with(&t)).any(|i| n.get(i + t.len()).is_none_or(|w| fine(w) || set_off.get(i + t.len()).copied().unwrap_or(false)));
     if t.is_empty() || !alone {
         return None;
     }
@@ -333,16 +360,28 @@ impl App {
         let surname = words(&author).pop().unwrap_or_default();
         let q = Query::Audiobook { text: format!("{} {surname}", short_title(&b.title).join(" ")) };
         let mut found = vec![];
+        let mut missed: Vec<String> = vec![];
         let mut trouble = vec![];
         for ix in &indexers {
             match self.query_indexer(ix, &q, false).await {
-                Ok(rs) => found.extend(rs.into_iter().filter_map(|r| grade(&r.title, r.size, &author, &b.title).map(|k| (r, k)))),
+                Ok(rs) => {
+                    for r in rs {
+                        match grade(&r.title, r.size, &author, &b.title) {
+                            Some(k) => found.push((r, k)),
+                            None => missed.push(r.title),
+                        }
+                    }
+                }
                 Err(e) => trouble.push(e.to_string()),
             }
         }
         let Some((r, k)) = best(&found, &a.turned_down).cloned() else {
             a.note = if found.is_empty() && !trouble.is_empty() {
                 format!("The indexers could not be searched: {}. It is looked for again later.", trouble.join("; "))
+            } else if !missed.is_empty() {
+                // What was found and passed over, so it can be seen why.
+                let some: Vec<&str> = missed.iter().take(3).map(String::as_str).collect();
+                format!("{} found, none of them this audiobook, such as: {}. It is looked for again every six hours.", missed.len(), some.join("; "))
             } else {
                 "No audiobook of it found. It is looked for again every six hours.".into()
             };
@@ -482,6 +521,9 @@ mod tests {
         assert_eq!(g("Frank Herbert - Dune (Unabridged) [M4B]"), Some(Kind::M4b));
         assert_eq!(g("Herbert, Frank - Dune - Read by Scott Brick 64k MP3"), Some(Kind::Files));
         assert_eq!(g("Frank Herbert - Dune Messiah [M4B]"), None, "another book that starts the same");
+        assert_eq!(g("Frank.Herbert-Dune.Messiah.M4B"), None, "dotted, the same");
+        assert_eq!(g("Frank Herbert - Dune [Scott Brick] M4B"), Some(Kind::M4b), "who reads it, set off");
+        assert_eq!(grade("J.R.R. Tolkien - The Fellowship of the Ring - Rob Inglis", 400 << 20, "J.R.R. Tolkien", "The Fellowship of the Ring"), Some(Kind::Files));
         assert_eq!(g("Dune - Frank Herbert - 2007 - 64kbps"), Some(Kind::Files), "the author after the title");
         assert_eq!(g("Frank Herbert - Dune - Book 1 of the Dune Chronicles M4B"), Some(Kind::M4b));
         assert_eq!(g("Frank Herbert - Dune [EPUB]"), None, "the ebook");
