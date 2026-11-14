@@ -2,6 +2,11 @@
 #
 #   docker build -t spool .
 #   docker run -p 7979:7979 -v spool-data:/data -v /path/to/media:/media spool
+#
+# deploy/helper.sh builds the binary itself, faster than a build in here could, and has this
+# put it in the same image: SPOOL_BINARY=prebuilt, with the folder holding it given as the
+# build context named "binary". The stages that build it are then skipped.
+ARG SPOOL_BINARY=build
 
 FROM oven/bun:1 AS web
 WORKDIR /src/web
@@ -18,6 +23,11 @@ COPY crates crates
 COPY --from=web /src/web/dist web/dist
 RUN cargo build --release --locked -p spool
 
+FROM scratch AS prebuilt
+COPY --from=binary spool /src/target/release/spool
+
+FROM ${SPOOL_BINARY} AS spool
+
 # 7-Zip from its authors: the build in Debian's main archive leaves out RAR support.
 FROM debian:bookworm-slim AS sevenzip
 ARG TARGETARCH
@@ -32,7 +42,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates par2 ffmpeg tini \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=sevenzip /usr/local/bin/7zz /usr/local/bin/7zz
-COPY --from=build /src/target/release/spool /usr/local/bin/spool
+COPY --from=spool /src/target/release/spool /usr/local/bin/spool
 
 # Everything Spool keeps (database, backups, saved NZBs, artwork, log) lives in /data.
 # HOME points there too so the container runs as any user without extra setup.
