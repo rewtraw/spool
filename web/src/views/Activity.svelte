@@ -361,9 +361,11 @@
     {#each data.orphan_jobs as j (j.id)}
       <div class="card item">
         <div class="grow">
-          <div class="row wrap top"><span class="t">{j.name}</span><span class="chip">{STATE_LABEL[j.state] ?? j.state}</span></div>
+          <!-- An album's download is named by the album, as a title's is; the release goes under it. -->
+          <div class="row wrap top">{#if j.album}<a class="t" href="#/wanted/{j.album.id}">{j.album.name}</a>{:else}<span class="t">{j.name}</span>{/if}<span class="chip">{j.album ? 'Album' : STATE_LABEL[j.state] ?? j.state}</span></div>
+          {#if j.album}<div class="mono faint break rel">{j.name}</div>{/if}
           <JobLine job={app.jobs[j.id] ?? j} state="downloading" error={j.error} />
-          <div class="faint why">{#if j.album}<a class="link" href="#/wanted/{j.album.id}">{j.album.name}</a>{:else}Not linked to a title{/if}</div>
+          {#if !j.album}<div class="faint why">Not linked to a title</div>{/if}
         </div>
         <div class="buttons"><button class="btn small ghost danger" onclick={async () => { await act(() => api.del(`/jobs/${j.id}`)); load(); }}>Remove</button></div>
       </div>
@@ -544,12 +546,21 @@
   .top {
     margin-bottom: 3px;
   }
+  /* Release names run long and have no spaces to break at: they wrap anywhere rather than
+     push the card, and the page, past the screen's edge. */
+  .item .grow {
+    flex: 1;
+    min-width: 0;
+  }
   .t {
     font-weight: 650;
     font-size: 15.5px;
+    overflow-wrap: anywhere;
+    min-width: 0;
   }
   .rel {
     margin-bottom: 8px;
+    overflow-wrap: anywhere;
   }
   .why {
     font-size: 12.5px;

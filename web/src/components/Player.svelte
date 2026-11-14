@@ -22,27 +22,31 @@
 ></audio>
 
 {#if playing}
+  <!-- One row on a wide screen; on a phone the track, then where it is in it, then the controls. -->
   <div class="player card" role="region" aria-label="Now playing">
-    {#if player.album}
-      <a href="#/album/{player.album.id}" class="cover" aria-label="Open {player.album.title}">
-        {#if player.album.has_cover}<img src={art(player.album.id)} alt="" />{/if}
-      </a>
-    {/if}
-    <div class="grow">
+    <a href={player.album ? `#/album/${player.album.id}` : undefined} class="cover" aria-label={player.album ? `Open ${player.album.title}` : undefined}>
+      {#if player.album?.has_cover}<img src={art(player.album.id)} alt="" />{/if}
+    </a>
+    <div class="info">
       <div class="clamp"><b>{playing.title}</b></div>
       <div class="muted small clamp">{playing.artist}{player.album ? ` · ${player.album.title}` : ''}{#if player.on}<span class="accent"> · on {player.on.name}</span>{/if}</div>
       {#if player.error}<div class="warn small clamp">{player.error}</div>{/if}
-      <input type="range" min="0" max={player.length || playing.seconds} step="1" value={player.now} oninput={(e) => seek(Number(e.currentTarget.value))} aria-label="Position" />
     </div>
-    <span class="faint small mono time">{clock(player.now)} / {clock(player.length || playing.seconds)}</span>
-    <button class="btn small" onclick={() => step(-1)} disabled={player.at === 0} aria-label="Previous">◀◀</button>
-    <button class="btn small primary" onclick={toggle} aria-label={player.paused ? 'Play' : 'Pause'}>{player.paused ? '▶' : '❚❚'}</button>
-    <button class="btn small" onclick={() => step(1)} disabled={player.at >= player.queue.length - 1} aria-label="Next">▶▶</button>
-    {#if player.on && player.volume != null}
-      <input class="volume" type="range" min="0" max="100" step="1" value={player.volume} onchange={(e) => setVolume(Number(e.currentTarget.value))} aria-label="Volume on {player.on.name}" />
-    {/if}
-    <PlayOn up />
-    <button class="btn small ghost" onclick={stop} aria-label="Stop and close">✕</button>
+    <div class="seek">
+      <input type="range" min="0" max={player.length || playing.seconds} step="1" value={player.now} oninput={(e) => seek(Number(e.currentTarget.value))} aria-label="Position" />
+      <span class="faint small mono time">{clock(player.now)} / {clock(player.length || playing.seconds)}</span>
+    </div>
+    <div class="controls">
+      <button class="btn small" onclick={() => step(-1)} disabled={player.at === 0} aria-label="Previous">◀◀</button>
+      <button class="btn small primary" onclick={toggle} aria-label={player.paused ? 'Play' : 'Pause'}>{player.paused ? '▶' : '❚❚'}</button>
+      <button class="btn small" onclick={() => step(1)} disabled={player.at >= player.queue.length - 1} aria-label="Next">▶▶</button>
+      {#if player.on && player.volume != null}
+        <input class="volume" type="range" min="0" max="100" step="1" value={player.volume} onchange={(e) => setVolume(Number(e.currentTarget.value))} aria-label="Volume on {player.on.name}" />
+      {/if}
+      <span class="push"></span>
+      <PlayOn up compact />
+      <button class="btn small ghost" onclick={stop} aria-label="Stop and close">✕</button>
+    </div>
   </div>
 {/if}
 
@@ -52,17 +56,21 @@
     left: 50%;
     bottom: 12px;
     transform: translateX(-50%);
-    width: min(820px, calc(100vw - 32px));
-    display: flex;
-    gap: 10px;
+    width: min(880px, calc(100vw - 32px));
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    grid-template-areas: 'cover info controls' 'cover seek controls';
+    column-gap: 12px;
+    row-gap: 2px;
     align-items: center;
     z-index: 30;
+    padding: 10px 12px;
     box-shadow: 0 6px 24px rgb(0 0 0 / 0.25);
   }
   .cover {
+    grid-area: cover;
     width: 48px;
     height: 48px;
-    flex: none;
     border-radius: 4px;
     overflow: hidden;
     background: var(--raised);
@@ -72,18 +80,38 @@
     height: 100%;
     object-fit: cover;
   }
-  .grow {
+  .info {
+    grid-area: info;
+    min-width: 0;
+  }
+  .seek {
+    grid-area: seek;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .seek input {
     flex: 1;
     min-width: 0;
+    margin: 0;
+  }
+  .time {
+    white-space: nowrap;
+  }
+  .controls {
+    grid-area: controls;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .push {
+    display: none;
   }
   .clamp {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  input[type='range'] {
-    width: 100%;
-    margin: 4px 0 0;
   }
   input.volume {
     width: 80px;
@@ -95,12 +123,22 @@
   .warn {
     color: var(--warn);
   }
-  /* Above the tab bar along the bottom on a phone. */
+  /* A phone: above the tab bar, and in three rows. */
   @media (max-width: 760px) {
     .player {
       bottom: calc(76px + env(safe-area-inset-bottom));
+      grid-template-columns: 44px minmax(0, 1fr);
+      grid-template-areas: 'cover info' 'seek seek' 'controls controls';
+      row-gap: 8px;
     }
-    .time,
+    .cover {
+      width: 44px;
+      height: 44px;
+    }
+    .push {
+      display: block;
+      flex: 1;
+    }
     .volume {
       display: none;
     }

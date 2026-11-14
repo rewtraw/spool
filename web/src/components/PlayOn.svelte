@@ -4,7 +4,8 @@
   import { api } from '../lib/api';
   import { player, playOn, type Renderer } from '../lib/player.svelte';
 
-  let { up = false }: { up?: boolean } = $props();
+  // `compact`: on a phone, the button shows the speaker alone.
+  let { up = false, compact = false }: { up?: boolean; compact?: boolean } = $props();
   let open = $state(false);
   let found = $state<Renderer[] | null>(null);
   let looking = $state(false);
@@ -22,7 +23,7 @@
   }
 </script>
 
-<div class="playon">
+<div class="playon" class:compact>
   <button class="btn small" class:on={!!player.on} onclick={look} aria-haspopup="menu" aria-expanded={open} title="Where music plays">
     <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm6 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm0-7a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z" /></svg>
     <span class="label">{player.on ? player.on.name : 'This device'}</span>
@@ -57,6 +58,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  @media (max-width: 560px) {
+    .compact .label {
+      display: none;
+    }
   }
   .menu {
     position: absolute;
