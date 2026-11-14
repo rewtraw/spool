@@ -281,7 +281,7 @@ impl reqwest::dns::Resolve for PublicOnly {
 
 /// Whether a link names somewhere out on the internet by its address, or by a name, which
 /// [`PublicOnly`] then holds to the same.
-fn public_link(url: &reqwest::Url) -> bool {
+pub(crate) fn public_link(url: &reqwest::Url) -> bool {
     matches!(url.scheme(), "http" | "https") && url.host_str().is_some_and(|h| h.trim_matches(['[', ']']).parse::<std::net::IpAddr>().map_or(true, public))
 }
 

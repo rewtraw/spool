@@ -84,11 +84,17 @@ impl Info {
 #[serde(default)]
 pub struct Entry {
     pub id: String,
+    /// "url" for an entry that points to a video's page; absent for one already read.
+    #[serde(rename = "_type")]
+    pub kind: Option<String>,
     pub url: Option<String>,
     pub title: Option<String>,
     pub timestamp: Option<f64>,
     pub upload_date: Option<String>,
     pub live_status: Option<String>,
+    /// Where it stands in its listing, counting from 1; 0 inside a tab of a channel.
+    #[serde(skip)]
+    pub index: u32,
 }
 
 /// A channel, an account or a playlist and what is in it, newest first as the site lists it.
@@ -123,14 +129,15 @@ impl Listing {
     /// its own; their videos are taken together.
     pub fn videos(&self) -> Vec<Entry> {
         let mut out = vec![];
-        for e in &self.entries {
+        for (i, e) in self.entries.iter().enumerate() {
             if e.get("_type").and_then(|t| t.as_str()) == Some("playlist") || e.get("entries").is_some() {
                 if let Ok(inner) = serde_json::from_value::<Listing>(e.clone()) {
-                    out.extend(inner.videos());
+                    out.extend(inner.videos().into_iter().map(|v| Entry { index: 0, ..v }));
                 }
                 continue;
             }
-            if let Ok(entry) = serde_json::from_value::<Entry>(e.clone()) {
+            if let Ok(mut entry) = serde_json::from_value::<Entry>(e.clone()) {
+                entry.index = i as u32 + 1;
                 if !entry.id.is_empty() && entry.live_status.as_deref() != Some("is_upcoming") {
                     out.push(entry);
                 }
@@ -163,7 +170,8 @@ pub enum Found {
 /// Arguments every run gets: no settings file of the person's own, quiet, and signed in to the
 /// sites as the cookies setting says.
 fn base(cookies: &str) -> Vec<String> {
-    let mut a: Vec<String> = ["--ignore-config", "--no-warnings", "--no-progress", "--encoding", "utf-8"].map(String::from).to_vec();
+    // Node as well as deno, the one yt-dlp uses by itself, to read YouTube.
+    let mut a: Vec<String> = ["--ignore-config", "--no-warnings", "--no-progress", "--encoding", "utf-8", "--js-runtimes", "node"].map(String::from).to_vec();
     let c = cookies.trim();
     if c.starts_with('/') {
         a.extend(["--cookies".into(), c.to_string()]);
@@ -235,7 +243,8 @@ fn progress_line(line: &str) -> Option<(u64, u64, u64, Option<u64>)> {
 /// Fetch one video into `dir` as `video.<ext>`, with its captions in `languages` as written
 /// (`video.<lang>.vtt`), its picture (`video.jpg`) and what yt-dlp knows of it
 /// (`video.info.json`). `progress` is told how it goes; `stop` ends it early.
-pub async fn fetch(tool: &Path, cookies: &str, url: &str, dir: &Path, languages: &[String], progress: impl Fn(Progress), stop: &tokio::sync::Notify) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+pub async fn fetch(tool: &Path, cookies: &str, url: &str, item: Option<u32>, dir: &Path, languages: &[String], progress: impl Fn(Progress), stop: &tokio::sync::Notify) -> Result<()> {
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     let mut args = base(cookies);
     args.retain(|a| a != "--no-progress");
@@ -244,8 +253,11 @@ pub async fn fetch(tool: &Path, cookies: &str, url: &str, dir: &Path, languages:
     // keep is chosen once they are here. Not the site's translations ("en-de", from German),
     // of which YouTube offers dozens and turns away a reader who asks for them all.
     let langs: Vec<String> = languages.iter().flat_map(|l| [l.clone(), format!("{l}-orig"), format!("{l}-[A-Z][A-Za-z]+")]).chain(["-live_chat".to_string()]).collect();
+    match item {
+        Some(n) => args.extend(["--yes-playlist".into(), "--playlist-items".into(), n.to_string()]),
+        None => args.push("--no-playlist".into()),
+    }
     args.extend([
-        "--no-playlist".into(),
         // Captions that cannot be had do not stop the video: whether it came is seen below.
         "--ignore-errors".into(),
         "--newline".into(),
@@ -267,7 +279,6 @@ pub async fn fetch(tool: &Path, cookies: &str, url: &str, dir: &Path, languages:
         "jpg".into(),
         "--write-info-json".into(),
         "--no-write-playlist-metafiles".into(),
-        "--no-part".into(),
         "--paths".into(),
         dir.to_string_lossy().to_string(),
         "--output".into(),
@@ -316,6 +327,8 @@ pub async fn fetch(tool: &Path, cookies: &str, url: &str, dir: &Path, languages:
     if !came || !dir.join("video.info.json").is_file() {
         bail!("{}", said(&stderr));
     }
+    // A video under its own name is whole: yt-dlp gives it that name only once it is all here,
+    // and keeps what is still coming as ".part". What failed besides is captions or the picture.
     if !status.success() {
         tracing::debug!(url, said = %said(&stderr), "yt-dlp fetched the video but not everything with it");
     }
@@ -355,7 +368,11 @@ mod tests {
             ],
             "thumbnails": [{"id": "banner", "url": "b", "width": 2000, "height": 300}, {"id": "avatar_uncropped", "url": "a"}]
         })).unwrap();
-        assert_eq!(l.videos().iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["a", "c"]);
+            assert_eq!(l.videos().iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["a", "c"]);
+        assert!(l.videos().iter().all(|e| e.index == 0));
+        // A post with two videos lists them read, each with its place in the post.
+        let post: Listing = serde_json::from_value(serde_json::json!({"id": "p", "_type": "playlist", "extractor_key": "Twitter", "entries": [{"id": "1", "url": "https://video.twimg.com/a.mp4"}, {"id": "2", "url": "https://video.twimg.com/b.mp4"}]})).unwrap();
+        assert_eq!(post.videos().iter().map(|e| (e.id.as_str(), e.index, e.kind.is_none())).collect::<Vec<_>>(), [("1", 1, true), ("2", 2, true)]);
         assert_eq!(l.avatar().as_deref(), Some("a"));
     }
 }

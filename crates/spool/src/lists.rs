@@ -26,6 +26,9 @@ const AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit
 const PAUSE: Duration = Duration::from_millis(1000);
 /// No list is longer than this many pages of a hundred films.
 const MOST_PAGES: usize = 60;
+/// One list is read at a time: two readers of a list would each forget what the other added,
+/// and two lists adding the same film at once would add it twice.
+static READING: std::sync::LazyLock<tokio::sync::Mutex<()>> = std::sync::LazyLock::new(Default::default);
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -116,6 +119,20 @@ impl App {
         self.db.with(|c| c.query_row("SELECT id, data FROM lists WHERE id = ?1", [id], row).optional())
     }
 
+    /// Save what a read of a list found, keeping what was changed meanwhile: its profile, and
+    /// whether it is followed at all. Says whether it still is.
+    fn save_read(&self, l: &mut List) -> Result<bool> {
+        let Some(fresh) = self.list(l.id)? else { return Ok(false) };
+        l.profile_id = fresh.profile_id;
+        for id in fresh.added {
+            if !l.added.contains(&id) {
+                l.added.push(id);
+            }
+        }
+        self.save_list(l)?;
+        Ok(true)
+    }
+
     fn save_list(&self, l: &mut List) -> Result<()> {
         let data = serde_json::to_string(l)?;
         if l.id == 0 {
@@ -189,6 +206,7 @@ impl App {
 
     /// Read a list through and add what is on it that the library lacks.
     pub async fn list_read(&self, id: i64) -> Result<usize> {
+        let _reading = READING.lock().await;
         let mut l = self.list(id)?.ok_or_else(|| anyhow!("no such list"))?;
         let mut films: Vec<String> = vec![];
         for page in 1..=MOST_PAGES {
@@ -199,11 +217,12 @@ impl App {
             let html = match self.letterboxd_page(&url).await {
                 Ok(h) => h,
                 // Past the last page there is no page.
-                Err(_) if page > 1 => break,
+                Err(e) if page > 1 && format!("{e:#}").contains("has no page") => break,
+                // Anything else is not the end of the list: what is known of it stays as it was.
                 Err(e) => {
                     l.error = format!("{e:#}");
                     l.checked_at = now();
-                    self.save_list(&mut l)?;
+                    self.save_read(&mut l)?;
                     return Err(e);
                 }
             };
@@ -219,6 +238,10 @@ impl App {
         let mut added = 0;
         let mut missed = vec![];
         for slug in &films {
+            // No longer followed: nothing more is added from it.
+            if self.list(id)?.is_none() {
+                return Ok(added);
+            }
             let found = match self.letterboxd_film(slug).await {
                 Ok(f) => f,
                 Err(e) => {
@@ -232,9 +255,10 @@ impl App {
                 missed.push(slug.clone());
                 continue;
             };
-            if l.added.contains(&tmdb) || self.db.find_title(Kind::Movie, Some(tmdb), None)?.is_some() {
+            if l.added.contains(&tmdb) || self.list(id)?.is_some_and(|f| f.added.contains(&tmdb)) || self.db.find_title(Kind::Movie, Some(tmdb), None)?.is_some() {
                 continue;
             }
+            let profile = self.list(id)?.map(|f| f.profile_id).filter(|p| *p > 0).unwrap_or(profile);
             match self.add_title(Kind::Movie, Some(tmdb), None, profile, true, true).await {
                 Ok(t) => {
                     added += 1;
@@ -247,21 +271,16 @@ impl App {
                 }
             }
             // Saved as it goes: a long list is a long read, and what was added stays added.
-            if added % 10 == 1 {
-                if let Some(fresh) = self.list(id)? {
-                    l.profile_id = fresh.profile_id;
-                }
-                self.save_list(&mut l)?;
+            if added % 10 == 1 && !self.save_read(&mut l)? {
+                return Ok(added);
             }
         }
-        // Removed while it was being read: it is not brought back.
-        let Some(fresh) = self.list(id)? else { return Ok(added) };
-        l.profile_id = fresh.profile_id;
         l.films = films.len();
         l.missed = missed;
         l.error.clear();
         l.checked_at = now();
-        self.save_list(&mut l)?;
+        // Removed while it was being read: it is not brought back.
+        self.save_read(&mut l)?;
         self.emit(Event::Title { id: 0 });
         Ok(added)
     }

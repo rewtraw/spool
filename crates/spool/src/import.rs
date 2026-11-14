@@ -757,7 +757,9 @@ impl App {
     fn recycle_roots(&self) -> Vec<PathBuf> {
         // Only where Spool may delete, and only what can be reached.
         let places = self.placement();
-        places.0.iter().filter(|(l, online)| l.manage && *online).flat_map(|(l, _)| [l.movie_root.clone(), l.series_root.clone()]).filter(|r| !r.is_empty()).map(|r| Path::new(&r).join(".spool-recycle")).collect()
+        let mut roots: Vec<PathBuf> = places.0.iter().filter(|(l, online)| l.manage && *online).flat_map(|(l, _)| [l.movie_root.clone(), l.series_root.clone(), l.video_root.clone()]).filter(|r| !r.is_empty()).map(|r| Path::new(&r).join(".spool-recycle")).collect();
+        roots.dedup();
+        roots
     }
 
     /// Number of files and total bytes waiting in the recycle folders.

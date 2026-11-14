@@ -103,6 +103,9 @@ pub struct Video {
     pub duration: Option<f64>,
     pub title_id: Option<i64>,
     pub episode_id: Option<i64>,
+    /// Which of the videos at `url` it is, counting from 1, when the link holds several: a post
+    /// on X with more than one video.
+    pub item: Option<u32>,
     pub error: String,
     pub added_at: i64,
     pub updated_at: i64,
@@ -118,8 +121,12 @@ impl Video {
 #[derive(Default)]
 pub struct Videos {
     progress: Mutex<HashMap<i64, ytdlp::Progress>>,
+    /// The videos being fetched, each with how to stop it. One worker a video, never two.
     stops: Mutex<HashMap<i64, Arc<tokio::sync::Notify>>>,
     wake: tokio::sync::Notify,
+    /// Held while a video is filed, or a channel's title made: two videos of a channel not
+    /// yet in the library would otherwise make it twice, or take the same number.
+    filing: tokio::sync::Mutex<()>,
 }
 
 /// The site a video is on, from yt-dlp's name for what read it: "YoutubeTab" and "Youtube"
@@ -284,7 +291,8 @@ impl App {
         if self.video_by_key(&format!("{site}:{id}"))?.is_some_and(|v| v.state != State::Failed) {
             return Ok(true);
         }
-        Ok(self.channel_episode(site, id)?.is_some())
+        // An episode left without its file, by a filing cut short or a file deleted, can be fetched again.
+        Ok(self.channel_episode(site, id)?.is_some_and(|e| e.file_id.is_some()))
     }
 
     fn channel_episode(&self, site: &str, id: &str) -> Result<Option<Episode>> {
@@ -305,7 +313,8 @@ impl App {
         if self.known(&draft.site, &draft.video_id)? {
             return Ok(false);
         }
-        let mut v = self.video_by_key(&draft.key())?.unwrap_or_default();
+        let existing = self.video_by_key(&draft.key())?;
+        let mut v = existing.clone().unwrap_or_default();
         v.url = draft.url;
         v.state = State::Queued;
         v.site = draft.site;
@@ -315,17 +324,37 @@ impl App {
         v.day = draft.day.or(v.day);
         v.duration = draft.duration.or(v.duration);
         v.error.clear();
-        self.save_video(&mut v)?;
+        v.item = draft.item;
+        match existing {
+            // One that failed is asked for again only if nothing else has asked for it since.
+            Some(_) => {
+                if !self.save_video_if(&mut v, State::Failed)? {
+                    return Ok(false);
+                }
+            }
+            None => self.save_video(&mut v)?,
+        }
         self.videos.wake.notify_one();
         Ok(true)
+    }
+
+    /// Save a video only if it still stands as `was`: two hands at it, the second finds it moved
+    /// on and leaves it. Says whether it was saved.
+    fn save_video_if(&self, v: &mut Video, was: State) -> Result<bool> {
+        v.updated_at = crate::db::now();
+        let data = serde_json::to_string(v)?;
+        let n = self.db.with(|c| c.execute("UPDATE videos SET state = ?2, data = ?3 WHERE id = ?1 AND state = ?4", params![v.id, v.state.as_str(), data, was.as_str()]))?;
+        Ok(n == 1)
     }
 
     /// Ask for what a link is: one video, or a channel, an account or a playlist, from which
     /// `take` says what to bring. `follow` keeps bringing what a channel posts.
     pub async fn videos_add(&self, url: &str, take: Take, follow: bool) -> Result<Added> {
         let url = url.trim();
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            bail!("that is not a link: it should start with https://");
+        // A link out on the internet: yt-dlp is not sent to machines in this network.
+        let parsed = reqwest::Url::parse(url).map_err(|_| anyhow!("that is not a link: it should start with https://"))?;
+        if !crate::app::public_link(&parsed) || parsed.host_str().is_some_and(crate::api::local_name) {
+            bail!("that link is not to a site on the internet");
         }
         if self.video_root().is_none() {
             bail!("there is no videos folder to file them in. Add one to a location in Settings → Library.");
@@ -343,6 +372,7 @@ impl App {
                 let fresh = self.queue(Video { url: link, site: site.clone(), video_id: info.id.clone(), title: info.title.clone(), channel, day: info.day(), duration: info.duration, ..Default::default() })?;
                 let mut out = Added { what: "video".into(), name: info.title.clone(), added: fresh as usize, already: !fresh as usize, ..Default::default() };
                 if follow {
+                    let _filing = self.videos.filing.lock().await;
                     out.title_id = Some(self.channel_title(&site, &info.poster(), None, true, &[])?);
                 }
                 Ok(out)
@@ -357,10 +387,11 @@ impl App {
                     Take::Newest => videos.iter().take(NEWEST).collect(),
                     Take::All => videos.iter().collect(),
                 };
+                let listing_url = if list.webpage_url.is_empty() { url.to_string() } else { list.webpage_url.clone() };
                 for e in &chosen {
-                    let link = e.url.clone().filter(|u| u.starts_with("http")).unwrap_or_else(|| watch_url(&site, &e.id));
+                    let (link, item) = entry_link(&site, &listing_url, e);
                     let day = e.upload_date.as_deref().filter(|d| d.len() == 8).map(|d| format!("{}-{}-{}", &d[..4], &d[4..6], &d[6..]));
-                    if self.queue(Video { url: link, site: site.clone(), video_id: e.id.clone(), title: e.title.clone().unwrap_or_default(), channel: poster.1.clone(), day, ..Default::default() })? {
+                    if self.queue(Video { url: link, item, site: site.clone(), video_id: e.id.clone(), title: e.title.clone().unwrap_or_default(), channel: poster.1.clone(), day, ..Default::default() })? {
                         out.added += 1;
                     } else {
                         out.already += 1;
@@ -368,8 +399,8 @@ impl App {
                 }
                 // What was there when it was followed and not asked for is never fetched by following.
                 let skip: Vec<String> = videos.iter().filter(|v| !chosen.iter().any(|c| c.id == v.id)).map(|v| v.id.clone()).collect();
-                let listing_url = if list.webpage_url.is_empty() { url.to_string() } else { list.webpage_url.clone() };
                 if follow || !chosen.is_empty() {
+                    let _filing = self.videos.filing.lock().await;
                     let id = self.channel_title(&site, &(poster.0.clone(), poster.1.clone(), listing_url), list.avatar(), follow, &skip)?;
                     out.title_id = Some(id);
                 }
@@ -388,6 +419,10 @@ impl App {
             if follow && !c.follow {
                 c.follow = true;
                 c.skip = skip.to_vec();
+                // With nothing to leave out yet, the first look notes what is there and fetches none of it.
+                if skip.is_empty() {
+                    c.checked_at = 0;
+                }
                 changed = true;
             }
             if c.url.is_empty() && !url.is_empty() {
@@ -423,7 +458,7 @@ impl App {
             network: Some(site_name(site)),
             poster: avatar,
             season_folder: true,
-            channel: Some(Channel { site: site.into(), id: id.clone(), url: url.clone(), follow, checked_at: crate::db::now(), skip: if follow { skip.to_vec() } else { vec![] } }),
+            channel: Some(Channel { site: site.into(), id: id.clone(), url: url.clone(), follow, checked_at: if follow && skip.is_empty() { 0 } else { crate::db::now() }, skip: if follow { skip.to_vec() } else { vec![] } }),
             ..Default::default()
         };
         let tid = self.db.save_title(&mut t)?;
@@ -461,19 +496,21 @@ impl App {
         }
         v.state = State::Queued;
         v.error.clear();
-        self.save_video(&mut v)?;
-        self.videos.wake.notify_one();
+        if self.save_video_if(&mut v, State::Failed)? {
+            self.videos.wake.notify_one();
+        }
         Ok(())
     }
 
     /// Forget a video asked for, stopping it if it is being fetched. What is already filed
     /// stays: it is an episode of its channel, and removed as one.
     pub fn video_remove(&self, id: i64) -> Result<()> {
-        if let Some(stop) = self.videos.stops.lock().get(&id) {
-            stop.notify_one();
-        }
         self.db.with(|c| c.execute("DELETE FROM videos WHERE id = ?1", [id]))?;
-        let _ = std::fs::remove_dir_all(self.video_staging(id));
+        // One being fetched is stopped, and its worker clears up after it once yt-dlp has gone.
+        match self.videos.stops.lock().get(&id) {
+            Some(stop) => stop.notify_one(),
+            None => self.clear_staging(id),
+        }
         Ok(())
     }
 
@@ -483,8 +520,43 @@ impl App {
     }
 
     fn video_staging(&self, id: i64) -> PathBuf {
+        self.staging_root().join(id.to_string())
+    }
+
+    fn staging_root(&self) -> PathBuf {
         let incomplete = self.engine.config().incomplete_dir;
-        incomplete.parent().map(|p| p.to_path_buf()).unwrap_or(incomplete).join("spool-videos").join(id.to_string())
+        incomplete.parent().map(|p| p.to_path_buf()).unwrap_or(incomplete).join("spool-videos")
+    }
+
+    /// Whether the folder videos are fetched into holds part of the library, or is held by it:
+    /// a videos folder set inside the downloads folder, say. Nothing is fetched or cleared then.
+    fn staging_overlaps(&self) -> Option<String> {
+        let root = self.staging_root();
+        if std::fs::symlink_metadata(&root).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Some(format!("{} is a link to somewhere else", root.display()));
+        }
+        let places = self.placement();
+        let folders = places.0.iter().flat_map(|(l, _)| [&l.movie_root, &l.series_root, &l.music_root, &l.audiobook_root, &l.video_root]).filter(|f| !f.is_empty()).cloned();
+        let titles = self.db.titles(None).unwrap_or_default().into_iter().map(|t| t.path).filter(|p| !p.is_empty());
+        for f in folders.chain(titles) {
+            let f = Path::new(&f);
+            if f.starts_with(&root) || root.starts_with(f) {
+                return Some(format!("{} is inside the library folder {}, or holds it", root.display(), f.display()));
+            }
+        }
+        None
+    }
+
+    /// Clear the folder one video was fetched into, when it is safely apart from the library.
+    fn clear_staging(&self, id: i64) {
+        let dir = self.video_staging(id);
+        if let Some(why) = self.staging_overlaps() {
+            tracing::warn!(dir = %dir.display(), why, "a video's download folder was left as it is");
+            return;
+        }
+        if std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir()) {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     // ------------------------------------------------------------ fetching
@@ -498,15 +570,11 @@ impl App {
             let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             loop {
                 while running.load(std::sync::atomic::Ordering::SeqCst) < AT_ONCE && app.is_active() {
-                    let Some(mut v) = app.next_video() else { break };
-                    v.state = State::Fetching;
-                    if app.save_video(&mut v).is_err() {
-                        break;
-                    }
+                    let Some((v, stop)) = app.claim_video() else { break };
                     running.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     let (app2, running2) = (app.clone(), running.clone());
                     tokio::spawn(async move {
-                        app2.fetch_video(v).await;
+                        app2.fetch_video(v, stop).await;
                         running2.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                         app2.videos.wake.notify_one();
                     });
@@ -516,23 +584,37 @@ impl App {
         });
     }
 
-    fn next_video(&self) -> Option<Video> {
-        self.db.with(|c| {
-            use rusqlite::OptionalExtension;
-            c.query_row("SELECT id, data FROM videos WHERE state = 'queued' ORDER BY id LIMIT 1", [], row).optional()
-        }).ok().flatten()
+    /// Take the next video in line: marked as being fetched in the same step as it is taken, so
+    /// that nothing else takes it, and with its way of being stopped in place before that, so a
+    /// removal from then on reaches it.
+    fn claim_video(&self) -> Option<(Video, Arc<tokio::sync::Notify>)> {
+        for _ in 0..20 {
+            let mut v = self.db.with(|c| {
+                use rusqlite::OptionalExtension;
+                c.query_row("SELECT id, data FROM videos WHERE state = 'queued' ORDER BY id LIMIT 1", [], row).optional()
+            }).ok().flatten()?;
+            let stop = Arc::new(tokio::sync::Notify::new());
+            if self.videos.stops.lock().insert(v.id, stop.clone()).is_some() {
+                // Still being stopped from an earlier turn: its worker has yet to finish.
+                return None;
+            }
+            v.state = State::Fetching;
+            if self.save_video_if(&mut v, State::Queued).unwrap_or(false) {
+                return Some((v, stop));
+            }
+            self.videos.stops.lock().remove(&v.id);
+        }
+        None
     }
 
-    async fn fetch_video(&self, mut v: Video) {
+    async fn fetch_video(&self, mut v: Video, stop: Arc<tokio::sync::Notify>) {
         let id = v.id;
-        let stop = Arc::new(tokio::sync::Notify::new());
-        self.videos.stops.lock().insert(id, stop.clone());
         let result = self.fetch_and_file(&mut v, &stop).await;
-        self.videos.stops.lock().remove(&id);
         self.videos.progress.lock().remove(&id);
         // Removed while it was being fetched: nothing is left of it.
         if self.video(id).ok().flatten().is_none() {
-            let _ = std::fs::remove_dir_all(self.video_staging(id));
+            self.clear_staging(id);
+            self.videos.stops.lock().remove(&id);
             return;
         }
         match result {
@@ -540,7 +622,7 @@ impl App {
                 v.state = State::Done;
                 v.error.clear();
                 let _ = self.db.add_history(v.title_id, "video_filed", serde_json::json!({"video": v.title, "channel": v.channel, "url": v.url}));
-                let _ = std::fs::remove_dir_all(self.video_staging(id));
+                self.clear_staging(id);
             }
             Err(e) => {
                 v.state = State::Failed;
@@ -550,6 +632,7 @@ impl App {
             }
         }
         let _ = self.save_video(&mut v);
+        self.videos.stops.lock().remove(&id);
         if let Some(t) = v.title_id {
             self.emit(crate::app::Event::Title { id: t });
         }
@@ -557,14 +640,21 @@ impl App {
 
     async fn fetch_and_file(&self, v: &mut Video, stop: &tokio::sync::Notify) -> Result<()> {
         let tool = self.tool()?;
+        if let Some(why) = self.staging_overlaps() {
+            bail!("videos are not fetched while {why}");
+        }
         let dir = self.video_staging(v.id);
-        let _ = std::fs::remove_dir_all(&dir);
+        self.clear_staging(v.id);
         let languages = self.caption_languages();
         let id = v.id;
         let progress = |p: ytdlp::Progress| {
             self.videos.progress.lock().insert(id, p);
         };
-        ytdlp::fetch(&tool, &self.cookies(), &v.url, &dir, &languages, progress, stop).await?;
+        ytdlp::fetch(&tool, &self.cookies(), &v.url, v.item, &dir, &languages, progress, stop).await?;
+        // Removed while it came: it is not filed.
+        if self.video(v.id)?.is_none() {
+            bail!("removed");
+        }
         let info: ytdlp::Info = serde_json::from_slice(&std::fs::read(dir.join("video.info.json")).context("yt-dlp left no notes on the video")?)?;
         v.state = State::Filing;
         v.title = info.title.clone();
@@ -604,9 +694,13 @@ impl App {
             .find(|p| p.file_stem().is_some_and(|s| s == "video") && p.extension().is_some_and(|e| matches!(e.to_str(), Some("mkv" | "mp4" | "webm" | "mov" | "m4v"))))
             .ok_or_else(|| anyhow!("yt-dlp finished but left no video"))?;
         let ext = video.extension().and_then(|e| e.to_str()).unwrap_or("mkv").to_string();
+        // One filing at a time, and none into a channel being moved to another location.
+        let _filing = self.videos.filing.lock().await;
         let title_id = self.channel_title(&site, &poster, None, false, &[])?;
+        let turn = self.title_imports.lock().entry(title_id).or_default().clone();
+        let _turn = turn.lock().await;
         let mut title = self.db.title(title_id)?.ok_or_else(|| anyhow!("the channel's title went"))?;
-        if let Some(why) = self.placement().locked(&title) {
+        if let Some(why) = self.title_locked(&title) {
             bail!("{why}");
         }
 
@@ -661,7 +755,8 @@ impl App {
         }
 
         let size = std::fs::metadata(&video)?.len();
-        let media_info = self.probe(&video, &stem).await.ok().flatten();
+        // A video that does not play is not filed: a fetch cut short leaves one.
+        let media_info = self.probe(&video, &stem).await.context("what was fetched does not play as a video")?;
         let height = media_info.as_ref().map(|m| m.height).filter(|h| *h > 0).or(info.height).unwrap_or(0);
         let file = MediaFile {
             id: 0,
@@ -701,6 +796,7 @@ impl App {
         };
         self.file_operation(op).await?;
         if let Some(f) = self.db.files(title_id)?.into_iter().find(|f| f.rel_path == rel) {
+            self.compact_arrivals(title_id, &[f.id]);
             if let Ok(found) = self.find_sidecars(f.id) {
                 if let Some(mut f) = self.db.file(f.id)? {
                     f.subtitles = found.into_iter().map(|s| crate::subs::Sidecar { source: "download".into(), release: info.webpage_url.clone(), ..s }).collect();
@@ -730,7 +826,7 @@ impl App {
             }
         }
         if let Some(url) = avatar {
-            if let Ok(r) = self.http.get(&url).timeout(std::time::Duration::from_secs(30)).send().await.and_then(|r| r.error_for_status()) {
+            if let Ok(r) = self.public_http.get(&url).timeout(std::time::Duration::from_secs(30)).send().await.and_then(|r| r.error_for_status()) {
                 if let Ok(bytes) = r.bytes().await {
                     let tmp = dir.join("poster.jpg");
                     if std::fs::write(&tmp, &bytes).is_ok() && self.file_move(&tmp, &folder.join("poster.jpg")).is_ok() {
@@ -773,8 +869,8 @@ impl App {
                             skip.push(e.id.clone());
                             continue;
                         }
-                        let link = e.url.clone().filter(|u| u.starts_with("http")).unwrap_or_else(|| watch_url(&c.site, &e.id));
-                        if self.queue(Video { url: link, site: c.site.clone(), video_id: e.id.clone(), title: e.title.clone().unwrap_or_default(), channel: t.title.clone(), ..Default::default() })? {
+                        let (link, item) = entry_link(&c.site, &c.url, e);
+                        if self.queue(Video { url: link, item, site: c.site.clone(), video_id: e.id.clone(), title: e.title.clone().unwrap_or_default(), channel: t.title.clone(), ..Default::default() })? {
                             added += 1;
                         }
                     }
@@ -796,6 +892,18 @@ impl App {
             }
         }
         Ok(format!("{looked} followed {}, {added} new {}{}", if looked == 1 { "channel" } else { "channels" }, if added == 1 { "video" } else { "videos" }, if failed > 0 { format!(", {failed} could not be looked at") } else { String::new() }))
+    }
+}
+
+/// Where to fetch one entry of a listing from: its own page when the listing points to it, or
+/// else the listing itself and which of its videos it is. A post on X with several videos lists
+/// them already read, each with the address of the file itself, which says nothing of whose
+/// it is; fetched from the post, it is known.
+fn entry_link(site: &str, listing: &str, e: &ytdlp::Entry) -> (String, Option<u32>) {
+    match (e.kind.as_deref(), e.url.as_deref()) {
+        (Some("url" | "url_transparent"), Some(u)) if u.starts_with("http") => (u.to_string(), None),
+        _ if e.index > 0 && !listing.is_empty() => (listing.to_string(), Some(e.index)),
+        _ => (watch_url(site, &e.id), None),
     }
 }
 
