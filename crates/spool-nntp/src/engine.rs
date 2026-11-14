@@ -74,6 +74,10 @@ const CHECKPOINT_EVERY: Duration = Duration::from_secs(10);
 #[cfg(feature = "testing")]
 const CHECKPOINT_EVERY: Duration = Duration::from_millis(150);
 
+/// Downloads fetching at once. They share each server's connections: the second waits for the
+/// first's spare ones, so a small job's slow start and last few articles overlap the next.
+const FETCHING_AT_ONCE: usize = 2;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct FileProgress {
@@ -155,6 +159,8 @@ pub(crate) struct Job {
     in_post: AtomicBool,
     /// How many times that work has been started for this job. More than once at a time is a fault.
     post_runs: AtomicU64,
+    /// Set while the queue is downloading the job, so it is not taken twice.
+    fetching: AtomicBool,
 }
 
 impl Job {
@@ -418,6 +424,11 @@ impl Dispatch {
         pending.into_iter().filter_map(|w| self.push(w, false)).collect()
     }
 
+    /// Whether there is an article waiting that this server could be asked for.
+    fn has_work(&self, server: usize) -> bool {
+        self.queues[self.server_level[server]].iter().any(|w| w.tried & (1 << server) == 0)
+    }
+
     fn finished(&self) -> bool {
         self.unreachable || (self.in_flight == 0 && self.queues.iter().all(|q| q.is_empty()))
     }
@@ -467,7 +478,9 @@ pub(crate) struct Inner {
     paused: AtomicBool,
     /// Limits how many jobs are post-processed at once.
     post_slots: Semaphore,
-    semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
+    /// Each server's connections, shared by every job, with the count it allows. One per server
+    /// for good: a changed count resizes it, so jobs already running stay within the new limit.
+    semaphores: Mutex<HashMap<String, (u32, Arc<Semaphore>)>>,
     limiter: Limiter,
     shutdown: AtomicBool,
 }
@@ -501,7 +514,7 @@ fn now() -> i64 {
 
 impl Inner {
     fn semaphore(&self, s: &ServerConfig) -> Arc<Semaphore> {
-        self.semaphores.lock().entry(s.id.clone()).or_insert_with(|| Arc::new(Semaphore::new(s.connections.max(1) as usize))).clone()
+        self.semaphores.lock().entry(s.id.clone()).or_insert_with(|| (s.connections.max(1), Arc::new(Semaphore::new(s.connections.max(1) as usize)))).1.clone()
     }
 
     pub(crate) fn publish(&self, job: &Job) {
@@ -624,7 +637,8 @@ fn finalize_failure(job: &Job, w: Work) {
 
 async fn worker(inner: Arc<Inner>, job: Arc<Job>, server: ServerConfig, si: usize, dispatch: Arc<Mutex<Dispatch>>, idle: Arc<Notify>) {
     let sem = inner.semaphore(&server);
-    let Ok(_permit) = sem.acquire_owned().await else { return };
+    // One of the server's connections, held only while there is work for it here.
+    let mut permit: Option<tokio::sync::OwnedSemaphorePermit> = None;
     let mut conn: Option<Connection> = None;
     let mut connect_failures = 0u32;
     let depth = server.pipeline.clamp(1, 16) as usize;
@@ -633,14 +647,35 @@ async fn worker(inner: Arc<Inner>, job: Arc<Job>, server: ServerConfig, si: usiz
         if inner.stopped(&job) {
             break;
         }
-        let batch = {
+        let (batch, wanted) = {
             let mut d = dispatch.lock();
             if d.finished() || d.down & (1 << si) != 0 {
                 break;
             }
-            d.take(si, depth)
+            if permit.is_some() {
+                (d.take(si, depth), false)
+            } else {
+                (Vec::new(), d.has_work(si))
+            }
         };
         if batch.is_empty() {
+            if wanted {
+                // A while at a time, so a job that finishes or stops meanwhile is noticed.
+                if let Ok(Ok(p)) = tokio::time::timeout(Duration::from_secs(1), sem.clone().acquire_owned()).await {
+                    permit = Some(p);
+                }
+                continue;
+            }
+            // Nothing here for this server: its connection goes back for another job to use. Kept,
+            // it would hold up the next download, and two downloads could each hold what the other
+            // waits for.
+            if let Some(p) = permit.take() {
+                // Closed before it is given back, so the server never sees one connection too many.
+                if let Some(c) = conn.take() {
+                    c.quit().await;
+                }
+                drop(p);
+            }
             let _ = tokio::time::timeout(Duration::from_millis(150), idle.notified()).await;
             continue;
         }
@@ -775,7 +810,7 @@ impl Engine {
                 rec.state = JobState::Queued;
                 rec.message = "Resuming after restart".into();
             }
-            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), saving: Mutex::new(()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) }));
+            loaded.push(Arc::new(Job { id: rec.id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), saving: Mutex::new(()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0), fetching: AtomicBool::new(false) }));
         }
         loaded.sort_by_key(|j| j.rec.lock().added_at);
         *inner.jobs.lock() = loaded;
@@ -788,103 +823,135 @@ impl Engine {
 
     async fn run(self) {
         let inner = self.0.clone();
+        let fetching = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         loop {
             if inner.shutdown.load(Ordering::Relaxed) {
                 return;
             }
-            let next = if inner.paused.load(Ordering::Relaxed) {
+            let next = if inner.paused.load(Ordering::Relaxed) || fetching.load(Ordering::Relaxed) >= FETCHING_AT_ONCE {
                 None
             } else {
-                inner.jobs.lock().iter().find(|j| !j.in_post.load(Ordering::Relaxed) && matches!(j.rec.lock().state, JobState::Queued | JobState::Downloading)).cloned()
+                // Claimed before it is looked at: a download hands over to checking by setting
+                // `in_post` before it lets go, so a job seen free here really is.
+                inner.jobs.lock().iter().find(|j| {
+                    if j.fetching.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+                        return false;
+                    }
+                    let free = !j.in_post.load(Ordering::SeqCst) && matches!(j.rec.lock().state, JobState::Queued | JobState::Downloading);
+                    if !free {
+                        j.fetching.store(false, Ordering::SeqCst);
+                    }
+                    free
+                }).cloned()
             };
             let Some(job) = next else {
                 let _ = tokio::time::timeout(Duration::from_secs(2), inner.wake.notified()).await;
                 continue;
             };
-
-            // Alongside the download, a second task unpacks each RAR volume as it completes.
-            let volumes = {
-                let wanted = inner.cfg.read().direct_unpack && {
-                    let r = job.rec.lock();
-                    !r.direct_done && !r.direct_off && r.password.is_none()
+            fetching.fetch_add(1, Ordering::Relaxed);
+            let (inner, fetching) = (inner.clone(), fetching.clone());
+            tokio::spawn(async move {
+                // Paused since it was picked: it stays paused.
+                let picked = {
+                    let mut r = job.rec.lock();
+                    let ok = matches!(r.state, JobState::Queued | JobState::Downloading);
+                    if ok {
+                        r.state = JobState::Downloading;
+                        r.message = "Downloading".into();
+                        r.error = None;
+                    }
+                    ok
                 };
-                wanted.then(|| crate::direct::plan(&job)).flatten()
-            };
-            // Volumes already unpacked and gone are not fetched again.
-            if let Some(v) = &volumes {
-                crate::direct::tidy(&job, v);
-            }
-            let files: Vec<usize> = {
-                let mut r = job.rec.lock();
-                r.state = JobState::Downloading;
-                r.message = "Downloading".into();
-                r.error = None;
-                (0..r.files.len()).filter(|i| !r.files[*i].deferred && !r.files[*i].complete()).collect()
-            };
-            inner.publish(&job);
-            let (stop, downloaded) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-            let mut unpacker = volumes.map(|volumes| tokio::spawn(crate::direct::run(job.clone(), volumes, stop.clone(), downloaded.clone())));
-            let fetched = inner.fetch_files(&job, &files).await;
-            if fetched != FetchOutcome::Complete {
-                // Paused, stopped or cut off: the unpacker finishes the volume in hand and saves its place.
-                stop.store(true, Ordering::Relaxed);
-                if let Some(u) = unpacker.take() {
-                    if let Ok(crate::direct::Outcome::GaveUp(why)) = u.await {
-                        tracing::info!(job = %job.id, reason = %why, "not unpacking while downloading");
-                        job.rec.lock().direct_off = true;
-                    }
+                if !picked {
+                    job.fetching.store(false, Ordering::SeqCst);
+                    fetching.fetch_sub(1, Ordering::Relaxed);
+                    inner.wake.notify_one();
+                    return;
                 }
-            }
-            match fetched {
-                FetchOutcome::Complete => {
-                    job.close_handles();
-                    job.set_state(JobState::Verifying, "Checking the download");
-                    let _ = job.save();
-                    inner.publish(&job);
-                    let (inner2, job2) = (inner.clone(), job.clone());
-                    job.in_post.store(true, Ordering::Relaxed);
-                    job.post_runs.fetch_add(1, Ordering::Relaxed);
-                    tokio::spawn(async move {
-                        let _slot = inner2.post_slots.acquire().await;
-                        if let Some(u) = unpacker {
-                            job2.set_state(JobState::Extracting, "Unpacking");
-                            inner2.publish(&job2);
-                            downloaded.store(true, Ordering::Relaxed);
-                            match u.await {
-                                Ok(crate::direct::Outcome::Unpacked) => job2.rec.lock().direct_done = true,
-                                Ok(crate::direct::Outcome::GaveUp(why)) => {
-                                    tracing::info!(job = %job2.id, reason = %why, "unpacked the ordinary way instead");
-                                    job2.rec.lock().direct_off = true;
-                                }
-                                _ => {}
-                            }
-                            let _ = job2.save();
+                // Alongside the download, a second task unpacks each RAR volume as it completes.
+                let volumes = {
+                    let wanted = inner.cfg.read().direct_unpack && {
+                        let r = job.rec.lock();
+                        !r.direct_done && !r.direct_off && r.password.is_none()
+                    };
+                    wanted.then(|| crate::direct::plan(&job)).flatten()
+                };
+                // Volumes already unpacked and gone are not fetched again.
+                if let Some(v) = &volumes {
+                    crate::direct::tidy(&job, v);
+                }
+                let files: Vec<usize> = {
+                    let r = job.rec.lock();
+                    (0..r.files.len()).filter(|i| !r.files[*i].deferred && !r.files[*i].complete()).collect()
+                };
+                inner.publish(&job);
+                let (stop, downloaded) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+                let mut unpacker = volumes.map(|volumes| tokio::spawn(crate::direct::run(job.clone(), volumes, stop.clone(), downloaded.clone())));
+                let fetched = inner.fetch_files(&job, &files).await;
+                if fetched != FetchOutcome::Complete {
+                    // Paused, stopped or cut off: the unpacker finishes the volume in hand and saves its place.
+                    stop.store(true, Ordering::Relaxed);
+                    if let Some(u) = unpacker.take() {
+                        if let Ok(crate::direct::Outcome::GaveUp(why)) = u.await {
+                            tracing::info!(job = %job.id, reason = %why, "not unpacking while downloading");
+                            job.rec.lock().direct_off = true;
                         }
-                        crate::post::process(&inner2, &job2).await;
-                        let _ = job2.save();
-                        job2.in_post.store(false, Ordering::Relaxed);
-                        inner2.publish(&job2);
-                        // Cut short while fetching recovery data, it goes back to the queue.
-                        inner2.wake.notify_one();
-                    });
-                }
-                FetchOutcome::Stopped => {
-                    job.close_handles();
-                    let _ = job.save();
-                    inner.publish(&job);
-                }
-                FetchOutcome::Unreachable(why) => {
-                    job.close_handles();
-                    {
-                        let mut r = job.rec.lock();
-                        r.state = JobState::Queued;
-                        r.message = format!("Waiting to retry: {why}");
                     }
-                    let _ = job.save();
-                    inner.publish(&job);
-                    let _ = tokio::time::timeout(Duration::from_secs(30), inner.wake.notified()).await;
                 }
-            }
+                match fetched {
+                    FetchOutcome::Complete => {
+                        job.close_handles();
+                        job.set_state(JobState::Verifying, "Checking the download");
+                        let _ = job.save();
+                        inner.publish(&job);
+                        let (inner2, job2) = (inner.clone(), job.clone());
+                        job.in_post.store(true, Ordering::SeqCst);
+                        job.post_runs.fetch_add(1, Ordering::Relaxed);
+                        tokio::spawn(async move {
+                            let _slot = inner2.post_slots.acquire().await;
+                            if let Some(u) = unpacker {
+                                job2.set_state(JobState::Extracting, "Unpacking");
+                                inner2.publish(&job2);
+                                downloaded.store(true, Ordering::Relaxed);
+                                match u.await {
+                                    Ok(crate::direct::Outcome::Unpacked) => job2.rec.lock().direct_done = true,
+                                    Ok(crate::direct::Outcome::GaveUp(why)) => {
+                                        tracing::info!(job = %job2.id, reason = %why, "unpacked the ordinary way instead");
+                                        job2.rec.lock().direct_off = true;
+                                    }
+                                    _ => {}
+                                }
+                                let _ = job2.save();
+                            }
+                            crate::post::process(&inner2, &job2).await;
+                            let _ = job2.save();
+                            job2.in_post.store(false, Ordering::SeqCst);
+                            inner2.publish(&job2);
+                            // Cut short while fetching recovery data, it goes back to the queue.
+                            inner2.wake.notify_one();
+                        });
+                    }
+                    FetchOutcome::Stopped => {
+                        job.close_handles();
+                        let _ = job.save();
+                        inner.publish(&job);
+                    }
+                    FetchOutcome::Unreachable(why) => {
+                        job.close_handles();
+                        {
+                            let mut r = job.rec.lock();
+                            r.state = JobState::Queued;
+                            r.message = format!("Waiting to retry: {why}");
+                        }
+                        let _ = job.save();
+                        inner.publish(&job);
+                        let _ = tokio::time::timeout(Duration::from_secs(30), inner.wake.notified()).await;
+                    }
+                }
+                job.fetching.store(false, Ordering::SeqCst);
+                fetching.fetch_sub(1, Ordering::Relaxed);
+                inner.wake.notify_one();
+            });
         }
     }
 
@@ -935,7 +1002,7 @@ impl Engine {
             direct_done: false,
             direct_off: false,
         };
-        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), saving: Mutex::new(()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0) });
+        let job = Arc::new(Job { id: id.clone(), dir, nzb, rec: Mutex::new(rec), handles: Mutex::new(HashMap::new()), saving: Mutex::new(()), cancel: AtomicBool::new(false), speed: AtomicU64::new(0), fetched: AtomicU64::new(0), in_post: AtomicBool::new(false), post_runs: AtomicU64::new(0), fetching: AtomicBool::new(false) });
         job.save()?;
         self.0.jobs.lock().push(job.clone());
         self.0.publish(&job);
@@ -1066,7 +1133,24 @@ impl Engine {
     /// Apply new settings. Server changes take effect for the next job.
     pub fn set_config(&self, cfg: EngineConfig) {
         self.0.limiter.rate.store(cfg.speed_limit, Ordering::Relaxed);
-        self.0.semaphores.lock().clear();
+        for s in &cfg.servers {
+            let want = s.connections.max(1);
+            let mut sems = self.0.semaphores.lock();
+            let Some((have, sem)) = sems.get_mut(&s.id) else { continue };
+            if want > *have {
+                sem.add_permits((want - *have) as usize);
+            } else if want < *have {
+                // Fewer: the extra connections are taken out as the jobs using them let go.
+                let (sem, fewer) = (sem.clone(), *have - want);
+                let Ok(rt) = tokio::runtime::Handle::try_current() else { continue };
+                rt.spawn(async move {
+                    if let Ok(p) = sem.acquire_many_owned(fewer).await {
+                        p.forget();
+                    }
+                });
+            }
+            *have = want;
+        }
         *self.0.cfg.write() = cfg;
         self.0.wake.notify_one();
     }

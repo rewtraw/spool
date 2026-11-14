@@ -789,3 +789,63 @@ fn a_download_killed_partway_resumes_whole() {
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_next_job_starts_on_connections_the_last_one_has_no_more_use_for() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (a, b) = (bytes(31, 600_000), bytes(32, 600_000));
+    let mut first = Post::new();
+    first.add_file("First.Album.flac", &a, 20_000);
+    let mut second = Post::after(&first);
+    second.add_file("Second.Album.flac", &b, 20_000);
+    let server = FakeServer::start(first.articles.clone().into_iter().chain(second.articles.clone()).collect()).await;
+    server.state.lock().delay_ms = 5;
+    let engine = Engine::start(cfg(tmp.path(), vec![server.config("main", 0, 4)])).await.unwrap();
+
+    let one = engine.add(&first.nzb(), "First.Album.nzb", None).unwrap();
+    let two = engine.add(&second.nzb(), "Second.Album.nzb", None).unwrap();
+    let mut overlapped = false;
+    for _ in 0..600 {
+        let (s1, s2) = (engine.job(&one).unwrap(), engine.job(&two).unwrap());
+        overlapped |= s1.state == JobState::Downloading && s2.state == JobState::Downloading && s2.done_bytes > 0;
+        if s1.state.is_terminal() && s2.state.is_terminal() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let (d1, d2) = (wait_done(&engine, &one).await, wait_done(&engine, &two).await);
+    assert_eq!((d1.state, d2.state), (JobState::Completed, JobState::Completed), "{:?} {:?}", d1.error, d2.error);
+    assert_eq!(read(&d1, "First.Album.flac"), a);
+    assert_eq!(read(&d2, "Second.Album.flac"), b);
+    assert_eq!(server.max_served_per_article(), 1, "no article should be fetched twice");
+    assert!(overlapped, "the second job should start while the first finishes its last articles");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_downloads_on_one_connection_each_never_wait_on_each_other() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (a, b) = (bytes(41, 300_000), bytes(42, 300_000));
+    let mut first = Post::new();
+    let ids = first.add_file("first.bin", &a, 20_000);
+    let mut second = Post::after(&first);
+    second.add_file("second.bin", &b, 20_000);
+    let all: std::collections::HashMap<_, _> = first.articles.clone().into_iter().chain(second.articles.clone()).collect();
+    let primary = FakeServer::start(all.clone()).await;
+    let backup = FakeServer::start(all).await;
+    {
+        // Missing from the primary all through the first job, so it keeps needing the backup
+        // while the second job wants the primary.
+        let mut s = primary.state.lock();
+        s.delay_ms = 3;
+        for id in ids.iter().step_by(3) {
+            s.missing.insert(id.clone());
+        }
+    }
+    let engine = Engine::start(cfg(tmp.path(), vec![primary.config("primary", 0, 1), backup.config("backup", 1, 1)])).await.unwrap();
+    let one = engine.add(&first.nzb(), "first", None).unwrap();
+    let two = engine.add(&second.nzb(), "second", None).unwrap();
+    let (d1, d2) = (wait_done(&engine, &one).await, wait_done(&engine, &two).await);
+    assert_eq!((d1.state, d2.state), (JobState::Completed, JobState::Completed), "{:?} {:?}", d1.error, d2.error);
+    assert_eq!(read(&d1, "first.bin"), a);
+    assert_eq!(read(&d2, "second.bin"), b);
+}

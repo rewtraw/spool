@@ -170,6 +170,11 @@ impl Post {
         Post::default()
     }
 
+    /// Another post whose message ids carry on from `other`'s, so one server can hold both.
+    pub fn after(other: &Post) -> Post {
+        Post { counter: other.counter, ..Post::default() }
+    }
+
     /// Add a file under `posted_name`, split into segments of `segment_size` decoded bytes.
     /// Returns the message ids, in order.
     pub fn add_file(&mut self, posted_name: &str, data: &[u8], segment_size: usize) -> Vec<String> {
