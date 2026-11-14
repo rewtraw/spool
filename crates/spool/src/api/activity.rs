@@ -42,25 +42,34 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
         .db
         .history(None, 400)?
         .into_iter()
-        .filter(|h| matches!(h.kind.as_str(), "compact_made" | "compact_failed" | "moved" | "album_filed" | "album_failed" | "book_got" | "book_failed" | "audiobook_filed" | "audiobook_failed"))
+        .filter(|h| crate::models::history_kind(&h.kind).is_some_and(|k| k.work))
         .take(25)
-        .map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "title_id": h.title_id, "title": h.title_id.and_then(|id| titles.get(&id)).map(|t| t.title.clone()), "data": h.data}))
+        .map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "label": h.label, "tone": h.tone, "title_id": h.title_id, "title": h.title_id.and_then(|id| titles.get(&id)).map(|t| t.title.clone()), "data": h.data}))
         .collect();
     let known: Vec<&str> = recent.iter().filter_map(|a| a.job_id.as_deref()).collect();
-    // Downloads of no title's: an album's, an audiobook's, or ones added by hand.
-    let audiobooks: Vec<(String, Value)> = app.db.books()?.into_iter().filter_map(|b| Some((b.audio.as_ref()?.job_id.clone()?, json!({"id": b.id, "name": format!("{} \u{2014} {}", b.authors.first().cloned().unwrap_or_default(), b.title)})))).collect();
-    let albums: Vec<(String, Value)> = app.db.music_wants()?.into_iter().filter_map(|w| Some((w.job_id?, json!({"id": w.id, "name": format!("{} \u{2014} {}", w.artist, w.title)})))).collect();
-    let orphans: Vec<Value> = jobs
+    // Downloads of no title's, each with what it is for: an album, an audiobook, or nothing
+    // when it was added by hand.
+    let mut wanted: HashMap<String, Value> = HashMap::new();
+    for b in app.db.books()? {
+        if let Some(job) = b.audio.as_ref().and_then(|a| a.hunt.job_id.clone()) {
+            wanted.insert(job, json!({"kind": "audiobook", "link": format!("#/book/{}", b.id), "name": format!("{} \u{2014} {}", b.authors.first().cloned().unwrap_or_default(), b.title)}));
+        }
+    }
+    for w in app.db.music_wants()? {
+        if let Some(job) = w.hunt.job_id {
+            wanted.insert(job, json!({"kind": "album", "link": format!("#/wanted/{}", w.id), "name": format!("{} \u{2014} {}", w.artist, w.title)}));
+        }
+    }
+    let downloads: Vec<Value> = jobs
         .iter()
         .filter(|j| !known.contains(&j.id.as_str()))
         .map(|j| {
             let mut v = json!(j);
-            v["album"] = albums.iter().find(|(id, _)| *id == j.id).map(|(_, a)| a.clone()).unwrap_or(Value::Null);
-            v["audiobook"] = audiobooks.iter().find(|(id, _)| *id == j.id).map(|(_, a)| a.clone()).unwrap_or(Value::Null);
+            v["for"] = wanted.get(&j.id).cloned().unwrap_or(Value::Null);
             v
         })
         .collect();
-    Ok(Json(json!({"items": rows, "orphan_jobs": orphans, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}, "moves": app.moves_shown(), "compact": app.compacts_shown(), "playing": app.playing_now(), "done": done})))
+    Ok(Json(json!({"items": rows, "downloads": downloads, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}, "moves": app.moves_shown(), "compact": app.compacts_shown(), "playing": app.playing_now(), "done": done})))
 }
 
 pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): Path<(i64, String)>, body: Option<Json<Value>>) -> R<Value> {
@@ -135,7 +144,7 @@ pub(super) async fn job_remove(State(app): State<App>, Path(id): Path<String>) -
 pub(super) async fn history(State(app): State<App>, Query(q): Query<HashMap<String, String>>) -> R<Value> {
     let titles: HashMap<i64, String> = app.db.titles(None)?.into_iter().map(|t| (t.id, t.title)).collect();
     let rows = app.db.history(q.get("title_id").and_then(|t| t.parse().ok()), q.get("limit").and_then(|l| l.parse().ok()).unwrap_or(200))?;
-    Ok(Json(json!(rows.into_iter().map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "title_id": h.title_id, "title": h.title_id.and_then(|i| titles.get(&i).cloned()), "data": h.data})).collect::<Vec<_>>())))
+    Ok(Json(json!(rows.into_iter().map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "label": h.label, "tone": h.tone, "title_id": h.title_id, "title": h.title_id.and_then(|i| titles.get(&i).cloned()), "data": h.data})).collect::<Vec<_>>())))
 }
 
 pub(super) async fn attention(State(app): State<App>) -> R<Value> {

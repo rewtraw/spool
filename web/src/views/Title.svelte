@@ -270,7 +270,6 @@
 
   const seasonOf = (n: number) => t?.seasons.find((s) => s.number === n)?.monitored ?? true;
   const media = (f: MediaFile) => [f.media_info?.dynamic_range_type, f.media_info?.video_codec, f.media_info ? `${f.media_info.audio_codec} ${f.media_info.audio_channels || ''}`.trim() : '', f.release_group].filter(Boolean).join(' · ');
-  const HISTORY: Record<string, string> = { grabbed: 'Sent to download', would_grab: 'Would have grabbed', imported: 'Imported', upgraded: 'Upgraded', download_failed: 'Download failed', file_deleted: 'File deleted', file_missing: 'File went missing', adopted: 'Brought in where it lay', moved: 'Moved to another location', not_the_film: 'Recognised as an extra, not the film', was_film: 'Switched from a film to a series', in_episodes: 'Found to be posted in episodes' };
 
   // What lies in the folder beside the film or the episodes.
   const EXTRA: Record<string, string> = { trailer: 'Trailers', behind_the_scenes: 'Behind the scenes', deleted_scene: 'Deleted scenes', featurette: 'Featurettes', interview: 'Interviews', scene: 'Scenes', short: 'Shorts', clip: 'Clips', other: 'Other extras', sample: 'Samples', theme_video: 'Theme videos' };
@@ -666,7 +665,7 @@
           <tbody>
             {#each t.history.slice(0, 40) as h (h.id)}
               <tr>
-                <td style="white-space:nowrap"><span class="chip {h.kind === 'download_failed' ? 'bad' : h.kind === 'imported' || h.kind === 'upgraded' ? 'ok' : h.kind === 'would_grab' ? 'warn' : ''}">{HISTORY[h.kind] ?? h.kind}</span></td>
+                <td style="white-space:nowrap"><span class="chip {h.tone}">{h.label}</span></td>
                 <td><div class="mono faint break">{h.data.release ?? h.data.path ?? ''}</div>{#if h.data.reason}<div class="muted small">{h.data.reason}</div>{/if}</td>
                 <td class="muted" style="white-space:nowrap">{ago(h.ts)}</td>
               </tr>

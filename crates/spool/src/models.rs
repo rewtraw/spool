@@ -687,9 +687,60 @@ pub struct HistoryEntry {
     pub id: i64,
     pub ts: i64,
     pub title_id: Option<i64>,
-    /// grabbed, would_grab, imported, download_failed, file_deleted, upgraded.
+    /// One of [`HISTORY_KINDS`].
     pub kind: String,
     pub data: serde_json::Value,
+    /// What its kind says, in words, and whether it is good or bad news: "ok", "bad", "warn" or "".
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub tone: String,
+}
+
+/// A kind of history entry: what it says, whether it is good or bad news, and whether it is
+/// work Spool finished that was not a download, shown with the queue's recently finished.
+pub struct HistoryKind {
+    pub kind: &'static str,
+    pub label: &'static str,
+    pub tone: &'static str,
+    pub work: bool,
+}
+
+const fn hk(kind: &'static str, label: &'static str, tone: &'static str, work: bool) -> HistoryKind {
+    HistoryKind { kind, label, tone, work }
+}
+
+/// Every kind of history entry, named here alone so a new one is added in one place.
+pub const HISTORY_KINDS: &[HistoryKind] = &[
+    hk("grabbed", "Sent to download", "", false),
+    hk("would_grab", "Would have grabbed", "warn", false),
+    hk("imported", "Imported", "ok", false),
+    hk("upgraded", "Upgraded", "ok", false),
+    hk("download_failed", "Download failed", "bad", false),
+    hk("file_deleted", "File deleted", "", false),
+    hk("file_missing", "File went missing", "bad", false),
+    hk("adopted", "Brought in where it lay", "", false),
+    hk("refiled", "Filed again by its episode", "", false),
+    hk("refile_stopped", "Filing again stopped", "bad", false),
+    hk("quality_set", "Quality corrected", "", false),
+    hk("not_the_film", "Recognised as an extra, not the film", "", false),
+    hk("was_film", "Switched from a film to a series", "", false),
+    hk("in_episodes", "Found to be posted in episodes", "", false),
+    hk("moved", "Moved to another location", "", true),
+    hk("compact_made", "Compact version made", "ok", true),
+    hk("compact_failed", "Compact version failed", "bad", true),
+    hk("compact_removed", "Compact version removed", "", false),
+    hk("compact_kept", "Original let go; compact version kept", "", false),
+    hk("album_filed", "Album filed", "ok", true),
+    hk("album_failed", "Album download did not do", "bad", true),
+    hk("book_got", "Book got", "ok", true),
+    hk("book_failed", "Book file did not do", "bad", true),
+    hk("audiobook_filed", "Audiobook filed", "ok", true),
+    hk("audiobook_failed", "Audiobook download did not do", "bad", true),
+];
+
+pub fn history_kind(kind: &str) -> Option<&'static HistoryKind> {
+    HISTORY_KINDS.iter().find(|k| k.kind == kind)
 }
 
 /// The episodes a name gives by season and number. Anime is posted counted across the whole
@@ -711,4 +762,37 @@ pub fn episodes_by_absolute<'a>(episodes: &'a [Episode], numbers: &[u32]) -> Opt
     regular.sort_by_key(|e| (e.season, e.episode));
     let found: Vec<&Episode> = numbers.iter().filter_map(|n| regular.get((*n as usize).checked_sub(1)?).copied()).collect();
     (!found.is_empty() && found.len() == numbers.len()).then_some(found)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every kind written anywhere is named in the table, so none shows up without words.
+    #[test]
+    fn every_history_kind_written_is_named() {
+        let mut dirs = vec![std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))];
+        let mut written = std::collections::BTreeSet::new();
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    let src = std::fs::read_to_string(&p).unwrap();
+                    // The kind is the first quoted word after the call, on its line or the next few.
+                    for (at, _) in src.match_indices("add_history(") {
+                        let rest: String = src[at..].chars().take(400).collect();
+                        if let Some(kind) = rest.split('"').nth(1).filter(|k| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_')) {
+                            written.insert(kind.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        written.insert("upgraded".into());
+        assert!(written.len() > 20, "{written:?}");
+        let unnamed: Vec<&String> = written.iter().filter(|k| history_kind(k).is_none()).collect();
+        assert!(unnamed.is_empty(), "history kinds with no words in HISTORY_KINDS: {unnamed:?}");
+    }
 }

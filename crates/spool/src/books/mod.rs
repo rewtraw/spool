@@ -18,6 +18,7 @@ pub mod text;
 
 use crate::app::App;
 use crate::db::{json, now, Db};
+use crate::hunt::HuntState;
 use anyhow::{bail, Result};
 use parking_lot::Mutex;
 use rusqlite::{params, OptionalExtension};
@@ -402,7 +403,7 @@ impl App {
         if let Some(c) = &b.chosen {
             self.drop_partial(&c.md5);
         }
-        if let Some(job) = b.audio.as_ref().filter(|a| a.state == audio::AudioState::Downloading).and_then(|a| a.job_id.as_deref()) {
+        if let Some(job) = b.audio.as_ref().and_then(|a| a.hunt.download()) {
             let _ = self.job_remove(job, true);
         }
         self.db.delete_book(id)
@@ -457,7 +458,7 @@ impl App {
         let mut failed = 0;
         let books = self.db.books()?;
         for b in &books {
-            let audio_due = b.audio.as_ref().is_some_and(|a| a.state != audio::AudioState::Have);
+            let audio_due = b.audio.as_ref().is_some_and(|a| a.hunt.state != HuntState::Have);
             if (b.epub && matches!(b.state, BookState::Wanted | BookState::Fetching | BookState::Sending)) || audio_due {
                 // One book's trouble does not hold up the rest.
                 match self.advance_book(b.id).await {
@@ -510,7 +511,7 @@ impl App {
             let rev = b.rev;
             self.advance_audio(&mut b).await?;
             let after = b.audio.clone().unwrap_or_default();
-            let job_before = before.as_ref().and_then(|a| a.job_id.clone());
+            let job_before = before.as_ref().and_then(|a| a.hunt.job_id.clone());
             if b.audio == before {
                 return Ok(());
             }
@@ -518,10 +519,8 @@ impl App {
                 // Changed meanwhile, or removed. A download this pass started would be followed by
                 // nothing, so it goes; a filing is found again on the next pass, as the files are
                 // already in place. Then the book is taken up again as it now is.
-                if after.state == audio::AudioState::Downloading && after.job_id != job_before {
-                    if let Some(job) = &after.job_id {
-                        let _ = self.job_remove(job, true);
-                    }
+                if let Some(job) = after.hunt.download().filter(|j| job_before.as_deref() != Some(*j)) {
+                    let _ = self.job_remove(job, true);
                 }
                 continue;
             }
@@ -530,8 +529,8 @@ impl App {
                 let _ = self.job_remove(job, true);
                 self.remove_download_folder(Some(job), out).await;
             }
-            let moved = after.state != before.as_ref().map(|a| a.state).unwrap_or_default() || before.map(|a| a.note) != Some(after.note.clone());
-            if !moved || after.state != audio::AudioState::Wanted {
+            let moved = before.map(|a| (a.hunt.state, a.hunt.note)) != Some((after.hunt.state, after.hunt.note.clone()));
+            if !moved || after.hunt.state != HuntState::Wanted {
                 return Ok(());
             }
         }

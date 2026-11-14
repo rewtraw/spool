@@ -3,28 +3,17 @@
 //! downloads it, checks it is the book and long enough to be one, and files it in a location's
 //! audiobooks folder as "Author/Title (Year)", reading its chapters for the player.
 //!
-//! The audiobook goes Wanted → Downloading → Have, beside the EPUB's own way, and a release
-//! that turns out not to do is remembered and passed over.
+//! The audiobook goes Wanted → Downloading → Have beside the EPUB's own way, by the steps
+//! every wanted thing takes; see [`crate::hunt`].
 
 use super::{Book, BookState};
 use crate::app::App;
-use crate::db::now;
-use crate::models::Release;
-use crate::music::want::{a_piece, album_files, copy_album, folder_safe, same_files, words, Grab, TurnedDown};
+use crate::hunt::{copy_files, download_files, same_files, Filing, Followed, Hunt, HuntState, Search};
+use crate::music::want::{a_piece, folder_safe, words};
 use crate::newznab::Query;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use spool_nntp::JobState;
 use std::path::{Path, PathBuf};
-
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AudioState {
-    #[default]
-    Wanted,
-    Downloading,
-    Have,
-}
 
 /// How good a copy a release would give: one file with chapters, or many.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -53,14 +42,9 @@ pub struct Chapter {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Audio {
-    pub state: AudioState,
-    /// What is happening to it, or what it waits for, in words.
-    pub note: String,
-    pub release: Option<Release>,
+    #[serde(flatten)]
+    pub hunt: Hunt,
     pub kind: Kind,
-    pub job_id: Option<String>,
-    pub turned_down: Vec<TurnedDown>,
-    pub searched_at: i64,
     /// The folder it was filed in, and what is in it, in order.
     pub folder: String,
     pub files: Vec<AudioFile>,
@@ -164,14 +148,12 @@ pub fn grade(name: &str, size: u64, author: &str, title: &str) -> Option<Kind> {
     Some(if has("m4b") { Kind::M4b } else { Kind::Files })
 }
 
-/// The release to take: one file with chapters over many, unabridged over not said, then the
-/// indexer put first, then the newest.
-fn best<'a>(found: &'a [(Release, Kind)], turned_down: &[TurnedDown]) -> Option<&'a (Release, Kind)> {
-    found
-        .iter()
-        .filter(|(r, _)| !turned_down.iter().any(|t| t.guid == r.guid || t.name == r.title))
-        .filter(|(r, _)| !words(&r.title).iter().any(|w| w == "abridged"))
-        .max_by_key(|(r, k)| (*k, words(&r.title).iter().any(|w| w == "unabridged"), r.indexer_priority, r.published))
+/// How a release judged to be the audiobook ranks: one file with chapters over many, then
+/// unabridged over not said. An abridged one never does.
+fn rank(name: &str, kind: Kind) -> Option<(Kind, bool)> {
+    let w = words(name);
+    let says = |x: &str| w.iter().any(|y| y == x);
+    (!says("abridged")).then(|| (kind, says("unabridged")))
 }
 
 pub fn folder_name(b: &Book) -> PathBuf {
@@ -293,11 +275,6 @@ fn natural(s: &str) -> Vec<(String, u64)> {
     out
 }
 
-enum Filing {
-    Wrong(String),
-    Later(String),
-}
-
 impl App {
     /// The audiobooks folders of every location, with whether each can be reached now.
     pub fn audiobook_roots(&self) -> Vec<(String, bool)> {
@@ -331,7 +308,7 @@ impl App {
     pub fn drop_audio(&self, id: i64) -> Result<Book> {
         let mut b = self.db.book(id)?.ok_or_else(|| anyhow!("no such book"))?;
         if let Some(a) = &b.audio {
-            if let (AudioState::Downloading, Some(job)) = (a.state, &a.job_id) {
+            if let Some(job) = a.hunt.download() {
                 let _ = self.job_remove(job, true);
             }
         }
@@ -343,10 +320,7 @@ impl App {
     /// Look for the audiobook again now, giving releases turned down another chance.
     pub fn search_audio(&self, id: i64) -> Result<Book> {
         let mut b = self.db.book(id)?.ok_or_else(|| anyhow!("no such book"))?;
-        if let Some(a) = b.audio.as_mut().filter(|a| a.state == AudioState::Wanted) {
-            a.searched_at = 0;
-            a.turned_down.clear();
-            a.note = "Looking for it.".into();
+        if b.audio.as_mut().is_some_and(|a| a.hunt.search_again()) {
             self.db.save_book(&mut b)?;
             self.nudge_book(id);
         }
@@ -356,7 +330,7 @@ impl App {
     /// A download finished or failed: if it was an audiobook's, take it from there.
     pub fn book_job_done(&self, job: &str) -> bool {
         let Ok(books) = self.db.books() else { return false };
-        match books.into_iter().find(|b| b.audio.as_ref().is_some_and(|a| a.state == AudioState::Downloading && a.job_id.as_deref() == Some(job))) {
+        match books.into_iter().find(|b| b.audio.as_ref().is_some_and(|a| a.hunt.download() == Some(job))) {
             Some(b) => {
                 self.nudge_book(b.id);
                 true
@@ -369,142 +343,59 @@ impl App {
     pub(super) async fn advance_audio(&self, b: &mut Book) -> Result<()> {
         let Some(a) = b.audio.clone() else { return Ok(()) };
         let mut a = a;
-        match a.state {
-            AudioState::Wanted => self.look_for_audio(b, &mut a).await,
-            AudioState::Downloading => self.follow_audio(b, &mut a).await,
-            AudioState::Have => {}
+        match a.hunt.state {
+            HuntState::Wanted => self.look_for_audio(b, &mut a).await?,
+            HuntState::Downloading => self.follow_audio(b, &mut a).await,
+            HuntState::Have => {}
         }
         b.audio = Some(a);
         Ok(())
     }
 
-    async fn look_for_audio(&self, b: &Book, a: &mut Audio) {
-        if now() - a.searched_at < 6 * 3600 {
-            return;
-        }
-        let lately = a.turned_down.iter().filter(|t| now() - t.at < 3600).count();
-        if lately >= 3 {
-            a.searched_at = now() - 5 * 3600;
-            a.note = format!("{lately} releases did not do in the last hour. The next is tried in an hour.");
-            return;
-        }
-        if !self.is_active() {
-            a.note = "Spool is not downloading right now.".into();
-            return;
-        }
-        if self.audiobook_roots_to_file().is_empty() {
-            a.note = "No audiobooks folder Spool manages can be reached. Add one to a location in Settings → Library.".into();
-            return;
-        }
-        let indexers: Vec<_> = self.db.indexers().unwrap_or_default().into_iter().filter(|i| i.enable_search).collect();
-        if indexers.is_empty() {
-            a.note = "No indexer is set up to search.".into();
-            return;
-        }
-        a.searched_at = now();
+    async fn look_for_audio(&self, b: &Book, a: &mut Audio) -> Result<()> {
         let author = b.authors.first().cloned().unwrap_or_default();
         let surname = words(&author).pop().unwrap_or_default();
-        let q = Query::Audiobook { text: format!("{} {surname}", short_title(&b.title).join(" ")) };
-        let mut found = vec![];
-        let mut missed: Vec<String> = vec![];
-        let mut trouble = vec![];
-        for ix in &indexers {
-            match self.query_indexer(ix, &q, false).await {
-                Ok(rs) => {
-                    for r in rs {
-                        match grade(&r.title, r.size, &author, &b.title) {
-                            Some(k) => found.push((r, k)),
-                            None => missed.push(r.title),
-                        }
-                    }
-                }
-                Err(e) => trouble.push(e.to_string()),
-            }
-        }
-        let Some((r, k)) = best(&found, &a.turned_down).cloned() else {
-            a.note = if found.is_empty() && !trouble.is_empty() {
-                format!("The indexers could not be searched: {}. It is looked for again later.", trouble.join("; "))
-            } else if !missed.is_empty() {
-                // What was found and passed over, so it can be seen why.
-                let some: Vec<&str> = missed.iter().take(3).map(String::as_str).collect();
-                format!("{} found, none of them this audiobook, such as: {}. It is looked for again every six hours.", missed.len(), some.join("; "))
-            } else {
-                "No audiobook of it found. It is looked for again every six hours.".into()
-            };
-            return;
+        let search = Search {
+            what: "audiobook",
+            name: &b.title,
+            no_folder: self.audiobook_roots_to_file().is_empty().then_some("No audiobooks folder Spool manages can be reached. Add one to a location in Settings → Library."),
+            queries: vec![Query::Audiobook { text: format!("{} {surname}", short_title(&b.title).join(" ")) }],
+            grade: &|r, _| grade(&r.title, r.size, &author, &b.title).and_then(|k| rank(&r.title, k)),
+            none: "No audiobook of it found.",
         };
-        match self.grab_release(&r).await {
-            Ok(job) => {
-                tracing::info!(book = %b.title, release = %r.title, "downloading an audiobook");
-                a.state = AudioState::Downloading;
-                a.job_id = Some(job);
-                a.release = Some(r);
-                a.kind = k;
-                a.note.clear();
-            }
-            Err(Grab::Release(why)) => {
-                a.turned_down.push(TurnedDown { guid: r.guid.clone(), name: r.title.clone(), why: why.clone(), at: now() });
-                a.searched_at = 0;
-                a.note = format!("A release would not do: {why}. Trying the next.");
-            }
-            Err(Grab::Later(why)) => {
-                a.searched_at = now() - 5 * 3600;
-                a.note = format!("Found {}, but it could not be started: {why}. It is tried again in an hour.", r.title);
-            }
+        if let Some((k, _)) = self.hunt_search(&mut a.hunt, search).await? {
+            a.kind = k;
         }
+        Ok(())
     }
 
     fn audio_failed(&self, b: &Book, a: &mut Audio, why: &str, release_at_fault: bool) {
         tracing::info!(book = %b.title, why, "an audiobook's download did not do");
-        let r = a.release.clone();
-        let _ = self.db.add_history(None, "audiobook_failed", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": r.as_ref().map(|r| &r.title), "reason": why}));
-        if let (true, Some(r)) = (release_at_fault, r) {
-            a.turned_down.push(TurnedDown { guid: r.guid, name: r.title, why: why.to_string(), at: now() });
-        }
-        a.state = AudioState::Wanted;
-        a.job_id = None;
-        a.release = None;
-        a.searched_at = 0;
-        a.note = format!("A download did not do: {why}. Trying the next.");
+        let r = a.hunt.release.as_ref();
+        let _ = self.db.add_history(None, "audiobook_failed", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": r.map(|r| &r.title), "reason": why}));
+        a.hunt.failed(why, release_at_fault);
     }
 
     async fn follow_audio(&self, b: &Book, a: &mut Audio) {
-        let Some(job_id) = a.job_id.clone() else {
-            a.state = AudioState::Wanted;
-            return;
-        };
-        let job = match self.job_lookup(&job_id) {
-            crate::remote::Found::Job(j) => j,
-            crate::remote::Found::Unknown => return,
-            crate::remote::Found::Gone => return self.audio_failed(b, a, "the download disappeared from the queue", false),
-        };
-        match job.state {
-            JobState::Failed => {
-                let _ = self.job_remove(&job_id, true);
-                self.audio_failed(b, a, &job.error.unwrap_or_else(|| "the download failed".into()), true);
-            }
-            JobState::Completed => {
-                let Some(out) = job.output_path else { return self.audio_failed(b, a, "the download finished without a folder", true) };
-                match self.file_audio(b, &out).await {
-                    Ok((folder, files, chapters, seconds)) => {
-                        a.filed_from = Some((job_id.clone(), out.clone()));
-                        tracing::info!(book = %b.title, folder = %folder, "filed an audiobook");
-                        let r = a.release.as_ref();
-                        let _ = self.db.add_history(None, "audiobook_filed", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": r.map(|r| &r.title), "indexer": r.map(|r| &r.indexer), "size": r.map(|r| r.size), "folder": folder, "seconds": seconds}));
-                        (a.folder, a.files, a.chapters, a.seconds) = (folder, files, chapters, seconds);
-                        a.state = AudioState::Have;
-                        a.job_id = None;
-                        a.note.clear();
-                    }
-                    Err(Filing::Wrong(why)) => {
-                        let _ = self.job_remove(&job_id, true);
-                        self.remove_download_folder(Some(&job_id), &out).await;
-                        self.audio_failed(b, a, &why, true);
-                    }
-                    Err(Filing::Later(why)) => a.note = format!("Downloaded, but not filed yet: {why}. It is tried again later."),
+        match self.hunt_follow(&mut a.hunt) {
+            Followed::Going => {}
+            Followed::Failed(why, at_fault) => self.audio_failed(b, a, &why, at_fault),
+            Followed::Finished(job, out) => match self.file_audio(b, &out).await {
+                Ok((folder, files, chapters, seconds)) => {
+                    // Cleared away once the filing is saved; see `filed_from`.
+                    a.filed_from = Some((job, out));
+                    tracing::info!(book = %b.title, folder = %folder, "filed an audiobook");
+                    let r = a.hunt.release.as_ref();
+                    let _ = self.db.add_history(None, "audiobook_filed", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": r.map(|r| &r.title), "indexer": r.map(|r| &r.indexer), "size": r.map(|r| r.size), "folder": folder, "seconds": seconds}));
+                    (a.folder, a.files, a.chapters, a.seconds) = (folder, files, chapters, seconds);
+                    a.hunt.filed();
                 }
-            }
-            _ => {}
+                Err(Filing::Wrong(why)) => {
+                    self.hunt_clear(&job, &out).await;
+                    self.audio_failed(b, a, &why, true);
+                }
+                Err(Filing::Later(why)) => a.hunt.not_filed_yet(&why),
+            },
         }
     }
 
@@ -514,7 +405,7 @@ impl App {
         let dest = root.join(folder_name(b));
         let (out, ffprobe) = (out.to_path_buf(), self.ffprobe_path());
         tokio::task::spawn_blocking(move || {
-            let files = album_files(&out).map_err(|e| Filing::Wrong(format!("{e:#}")))?;
+            let files = download_files(&out).map_err(|e| Filing::Wrong(format!("{e:#}")))?;
             if !files.iter().any(|(p, _)| is_audio(p)) {
                 return Err(Filing::Wrong("the download held no audio".into()));
             }
@@ -534,7 +425,7 @@ impl App {
                         return Err(Filing::Later(format!("{} leads out of the audiobooks folder", parent.display())));
                     }
                 }
-                copy_album(&files, &dest).map_err(|e| Filing::Later(format!("{e:#}")))?;
+                copy_files(&files, &dest).map_err(|e| Filing::Later(format!("{e:#}")))?;
             }
             let (files, chapters, seconds) = read_book(&dest, ffprobe.as_deref());
             Ok((dest.to_string_lossy().into_owned(), files, chapters, seconds))
@@ -545,7 +436,7 @@ impl App {
 
     /// One file of a book's audiobook, for the player.
     pub fn audio_file(&self, b: &Book, n: usize) -> Option<PathBuf> {
-        let f = b.audio.as_ref().filter(|a| a.state == AudioState::Have)?.files.get(n)?;
+        let f = b.audio.as_ref().filter(|a| a.hunt.state == HuntState::Have)?.files.get(n)?;
         let p = PathBuf::from(&f.path);
         self.audiobook_file_ok(&p).then_some(p)
     }
@@ -553,7 +444,7 @@ impl App {
 
 /// Whether a book is here in some form: its EPUB got, or its audiobook filed.
 pub fn have(b: &Book) -> bool {
-    (b.epub && b.state == BookState::Have) || b.audio.as_ref().is_some_and(|a| a.state == AudioState::Have)
+    (b.epub && b.state == BookState::Have) || b.audio.as_ref().is_some_and(|a| a.hunt.state == HuntState::Have)
 }
 
 #[cfg(test)]
@@ -581,9 +472,11 @@ mod tests {
 
     #[test]
     fn one_file_with_chapters_and_unabridged_are_taken_first() {
-        let r = |t: &str| Release { guid: t.into(), title: t.into(), ..Default::default() };
-        let found = vec![(r("Dune MP3"), Kind::Files), (r("Dune Abridged M4B"), Kind::M4b), (r("Dune M4B"), Kind::M4b), (r("Dune Unabridged MP3"), Kind::Files)];
-        assert_eq!(best(&found, &[]).unwrap().0.title, "Dune M4B");
+        let r = |t: &str| crate::models::Release { guid: t.into(), title: t.into(), ..Default::default() };
+        let found: Vec<_> = [("Dune MP3", Kind::Files), ("Dune Abridged M4B", Kind::M4b), ("Dune M4B", Kind::M4b), ("Dune Unabridged MP3", Kind::Files)].into_iter().filter_map(|(t, k)| Some((r(t), rank(t, k)?))).collect();
+        assert_eq!(crate::hunt::best(&found, &[]).unwrap().0.title, "Dune M4B");
+        let found: Vec<_> = [("Dune MP3", Kind::Files), ("Dune Unabridged MP3", Kind::Files)].into_iter().filter_map(|(t, k)| Some((r(t), rank(t, k)?))).collect();
+        assert_eq!(crate::hunt::best(&found, &[]).unwrap().0.title, "Dune Unabridged MP3");
     }
 
     #[test]

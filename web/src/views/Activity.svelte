@@ -5,7 +5,7 @@
   import JobLine from '../components/JobLine.svelte';
 
   const tab = $derived(route.arg || 'queue');
-  let data = $state<any>({ items: [], orphan_jobs: [], paused: false });
+  let data = $state<any>({ items: [], downloads: [], paused: false });
   let history = $state<any[]>([]);
   let blocklist = $state<any[]>([]);
   let loaded = $state(false);
@@ -102,7 +102,7 @@
       count++;
     }
     // Downloads no title is waiting on, albums among them.
-    for (const o of data.orphan_jobs ?? []) {
+    for (const o of data.downloads ?? []) {
       const j = app.jobs[o.id] ?? o;
       const size = j.total_bytes || 0;
       total += size;
@@ -160,30 +160,6 @@
     if (r) data.paused = r.paused;
   }
 
-  const HISTORY: Record<string, string> = {
-    grabbed: 'Sent to download',
-    would_grab: 'Would have grabbed',
-    imported: 'Imported',
-    upgraded: 'Upgraded',
-    download_failed: 'Download failed',
-    file_deleted: 'File deleted',
-    file_missing: 'File went missing',
-    adopted: 'Brought in where it lay',
-    moved: 'Moved to another location',
-    compact_made: 'Compact version made',
-    compact_failed: 'Compact version failed',
-    compact_removed: 'Compact version removed',
-    compact_kept: 'Original let go; compact version kept',
-    not_the_film: 'Recognised as an extra, not the film',
-    was_film: 'Switched from a film to a series',
-    in_episodes: 'Found to be posted in episodes',
-    album_filed: 'Album filed',
-    album_failed: 'Album download did not do',
-    book_got: 'Book got',
-    book_failed: 'Book file did not do',
-    audiobook_filed: 'Audiobook filed',
-    audiobook_failed: 'Audiobook download did not do',
-  };
   /** What a finished piece of work came to, in a line: sizes, how long it took and with what. */
   function outcome(h: any): string {
     const d = h.data ?? {};
@@ -198,7 +174,6 @@
   const finished = $derived(
     [...recent.map((i: any) => ({ at: i.acquisition.updated_at, item: i })), ...(data.done ?? []).map((h: any) => ({ at: h.ts, work: h }))].sort((a, b) => b.at - a.at).slice(0, 30),
   );
-  const tone = (k: string) => (['download_failed', 'file_missing', 'compact_failed', 'album_failed', 'book_failed', 'audiobook_failed'].includes(k) ? 'bad' : ['compact_made', 'imported', 'upgraded', 'album_filed', 'book_got', 'audiobook_filed'].includes(k) ? 'ok' : k === 'would_grab' ? 'warn' : '');
 </script>
 
 <!-- What a piece of history is about: a title, an album or a book. -->
@@ -343,7 +318,7 @@
       {/if}
     </div>
   {/if}
-  {#if !queue.length && !data.orphan_jobs?.length && loaded}
+  {#if !queue.length && !data.downloads?.length && loaded}
     <div class="card empty">Nothing is downloading.</div>
   {/if}
   {#if queue.length > 1}
@@ -375,14 +350,14 @@
         </div>
       </div>
     {/each}
-    {#each data.orphan_jobs as j (j.id)}
+    {#each data.downloads as j (j.id)}
       <div class="card item">
         <div class="grow">
-          <!-- An album's download is named by the album, as a title's is; the release goes under it. -->
-          <div class="row wrap top">{#if j.album}<a class="t" href="#/wanted/{j.album.id}">{j.album.name}</a>{:else}<span class="t">{j.name}</span>{/if}<span class="chip">{j.album ? 'Album' : STATE_LABEL[j.state] ?? j.state}</span></div>
-          {#if j.album}<div class="mono faint break rel">{j.name}</div>{/if}
+          <!-- A download for an album or an audiobook is named by it, as a title's is; the release goes under it. -->
+          <div class="row wrap top">{#if j.for}<a class="t" href={j.for.link}>{j.for.name}</a>{:else}<span class="t">{j.name}</span>{/if}<span class="chip">{j.for ? (j.for.kind === 'album' ? 'Album' : 'Audiobook') : STATE_LABEL[j.state] ?? j.state}</span></div>
+          {#if j.for}<div class="mono faint break rel">{j.name}</div>{/if}
           <JobLine job={app.jobs[j.id] ?? j} state="downloading" error={j.error} />
-          {#if !j.album}<div class="faint why">Not linked to a title</div>{/if}
+          {#if !j.for}<div class="faint why">Not linked to a title</div>{/if}
         </div>
         <div class="buttons"><button class="btn small ghost danger" onclick={async () => { await act(() => api.del(`/jobs/${j.id}`)); load(); }}>Remove</button></div>
       </div>
@@ -405,7 +380,7 @@
             {:else}
               {@const h = f.work}
               <tr>
-                <td style="white-space:nowrap"><span class="chip {tone(h.kind)}">{HISTORY[h.kind] ?? h.kind}</span></td>
+                <td style="white-space:nowrap"><span class="chip {h.tone}">{h.label}</span></td>
                 <td>{@render about(h)}{#if outcome(h)}<div class="muted small">{outcome(h)}</div>{/if}{#if h.data.reason}<div class="err">{h.data.reason}</div>{/if}</td>
                 <td class="muted" style="white-space:nowrap">{ago(h.ts)}</td>
               </tr>
@@ -422,7 +397,7 @@
         <tbody>
           {#each history as h (h.id)}
             <tr>
-              <td style="white-space:nowrap"><span class="chip {tone(h.kind)}">{HISTORY[h.kind] ?? h.kind}</span></td>
+              <td style="white-space:nowrap"><span class="chip {h.tone}">{h.label}</span></td>
               <td>
                 {@render about(h)}
                 {#if h.data.covers}<span class="muted"> {h.data.covers}</span>{/if}

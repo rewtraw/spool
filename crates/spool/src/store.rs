@@ -840,7 +840,9 @@ impl Db {
         self.with(|c| {
             let mut s = c.prepare("SELECT id, ts, title_id, kind, data FROM history WHERE (?1 IS NULL OR title_id = ?1) ORDER BY ts DESC, id DESC LIMIT ?2")?;
             let rows = s.query_map(params![title_id, limit], |r| {
-                Ok(HistoryEntry { id: r.get(0)?, ts: r.get(1)?, title_id: r.get(2)?, kind: r.get(3)?, data: json(r.get::<_, String>(4)?)? })
+                let kind: String = r.get(3)?;
+                let k = crate::models::history_kind(&kind);
+                Ok(HistoryEntry { id: r.get(0)?, ts: r.get(1)?, title_id: r.get(2)?, label: k.map_or(kind.clone(), |k| k.label.into()), tone: k.map_or("", |k| k.tone).into(), kind, data: json(r.get::<_, String>(4)?)? })
             })?;
             rows.collect()
         })
