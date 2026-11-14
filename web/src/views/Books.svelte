@@ -2,16 +2,12 @@
   // Books: find one in Open Library's catalogue and add it; Spool finds an EPUB of it in
   // its index of Anna's Archive, downloads it, checks it and hands it to Florilegium.
   import { api, type Book, type Candidate } from '../lib/api';
-  import { act, toast } from '../lib/state.svelte';
+  import { act, route, toast } from '../lib/state.svelte';
   import { ago, bytes } from '../lib/format';
 
   let books = $state<Book[]>([]);
   let status = $state<any>(null);
   let loaded = $state(false);
-  let query = $state('');
-  let found = $state<any[]>([]);
-  let searching = $state(false);
-  let searched = $state('');
   let open = $state<Record<number, boolean>>({});
   let md5 = $state<Record<number, string>>({});
   // A build asked for, until the server says it has begun or has stopped: it first fetches
@@ -26,7 +22,8 @@
     }
     loaded = true;
   }
-  load();
+  // Opened at a book (#/books/12), as the library links to them.
+  load().then(() => setTimeout(() => document.getElementById(`book-${route.arg}`)?.scrollIntoView({ block: 'center' }), 60));
 
   // While anything is on its way, look again every few seconds.
   const moving = $derived(books.some((b) => b.state === 'fetching' || b.state === 'sending') || status?.index?.building || starting > 0);
@@ -38,34 +35,6 @@
     const t = setInterval(load, 4000);
     return () => clearInterval(t);
   });
-
-  let seq = 0;
-  async function search(e?: Event) {
-    e?.preventDefault();
-    const q = query.trim();
-    if (q.length < 2) return;
-    const mine = ++seq;
-    searching = true;
-    try {
-      const r = await api.get<any[]>(`/books/lookup?q=${encodeURIComponent(q)}`);
-      if (mine === seq) {
-        found = r;
-        searched = q;
-      }
-    } catch (err: any) {
-      if (mine === seq) toast(err.message);
-    } finally {
-      if (mine === seq) searching = false;
-    }
-  }
-
-  async function add(w: any) {
-    const b = await act(() => api.post<Book>('/books', { ol_work: w.ol_work }), `Added ${w.title}`);
-    if (b) {
-      w.book_id = b.id;
-      await load();
-    }
-  }
 
   async function choose(b: Book, hash: string) {
     if (await act(() => api.post(`/books/${b.id}/choose`, { md5: hash }), 'Downloading it')) {
@@ -136,42 +105,19 @@
   </div>
 {/if}
 
-<form class="bar" onsubmit={search}>
-  <input class="input" type="search" placeholder="Find a book by title or author" bind:value={query} aria-label="Find a book" />
-  <button class="btn primary" disabled={searching || query.trim().length < 2}>{searching ? 'Searching…' : 'Search'}</button>
-</form>
-
-{#if searched}
-  {#if !found.length}
-    <div class="card empty">Open Library has nothing for “{searched}”.</div>
-  {:else}
-    <p class="faint source">From Open Library. <button class="link" onclick={() => ((found = []), (searched = ''))}>Clear</button></p>
-    <div class="found">
-      {#each found as w (w.ol_work)}
-        <div class="card work">
-          {#if w.cover}<img src={w.cover} alt="" loading="lazy" />{:else}<div class="nocover">{w.title}</div>{/if}
-          <div class="about">
-            <b class="clamp">{w.title}</b>
-            <span class="muted small clamp">{by(w)}</span>
-            <span class="faint small">{w.year || ''}{w.editions ? ` · ${w.editions} editions` : ''}</span>
-            {#if w.book_id}<span class="chip ok">Added</span>{:else}<button class="btn small primary" onclick={() => add(w)}>Add</button>{/if}
-          </div>
-        </div>
-      {/each}
-    </div>
-  {/if}
-{/if}
-
-<div class="section-title">Your books</div>
+<div class="row between">
+  <div class="section-title">Your books</div>
+  <a class="btn small primary" href="#/discover?kind=books">Find books</a>
+</div>
 {#if !loaded}
   <div class="empty">Loading…</div>
 {:else if !books.length}
-  <div class="card empty">No books yet. Find one above and add it.</div>
+  <div class="card empty">No books yet. Find one in Discover and add it.</div>
 {:else}
   <div class="stack">
     {#each books as b (b.id)}
       {@const l = label[b.state]}
-      <div class="card book">
+      <div class="card book" id="book-{b.id}" class:here={String(b.id) === route.arg}>
         {#if b.cover}<img src={b.cover} alt="" loading="lazy" />{:else}<div class="nocover small">{b.title}</div>{/if}
         <div class="grow">
           <div class="row wrap">
@@ -236,36 +182,23 @@
   .warn {
     color: var(--warn);
   }
-  .bar {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 18px;
+  .between {
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
   }
-  .bar .input {
-    flex: 1 1 auto;
-    width: auto;
-    min-width: 0;
+  .between .section-title {
+    margin: 0;
   }
-  .source {
-    margin: 0 0 10px;
+  .book.here {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
-  .found {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-    gap: 12px;
-    margin-bottom: 26px;
-  }
-  .work,
   .book {
     display: flex;
     gap: 14px;
     padding: 12px;
     min-width: 0;
-  }
-  .work img,
-  .work .nocover {
-    width: 64px;
-    height: 96px;
   }
   .book img,
   .book .nocover {
@@ -289,17 +222,6 @@
     font-size: 11px;
     color: var(--muted);
     overflow: hidden;
-  }
-  .about {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    align-items: flex-start;
-  }
-  .about .btn,
-  .about .chip {
-    margin-top: auto;
   }
   .clamp {
     display: -webkit-box;
@@ -339,14 +261,5 @@
   }
   .grow {
     min-width: 0;
-  }
-  button.link {
-    background: none;
-    border: 0;
-    padding: 0;
-    color: inherit;
-    text-decoration: underline;
-    cursor: pointer;
-    font: inherit;
   }
 </style>

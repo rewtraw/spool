@@ -175,6 +175,13 @@ fn has_all(name: &[String], want: &str) -> bool {
     !needed.is_empty() && needed.iter().all(|w| name.contains(w))
 }
 
+/// Whether an album in the library is the one named. Its title may carry more after the
+/// name: "Diamond-Jubilee - REALISTIK MASTER", "OK Computer (Remastered)".
+fn same_album(have: &str, want: &str) -> bool {
+    let (h, w) = (words(have), words(want));
+    !w.is_empty() && h.starts_with(&w)
+}
+
 /// What a release would give, or None when it is not the album or not good enough.
 pub fn grade(name: &str, size: u64, artist: &str, album: &str) -> Option<Grade> {
     let n = words(name);
@@ -313,8 +320,7 @@ impl App {
     pub fn album_in_library(&self, artist: &str, title: &str) -> Option<i64> {
         let lib = self.music.library();
         let a = scan::artist_key(artist);
-        let t = words(title);
-        lib.albums.iter().find(|x| scan::artist_key(&x.artist) == a && words(&x.title) == t).map(|x| x.id)
+        lib.albums.iter().find(|x| scan::artist_key(&x.artist) == a && same_album(&x.title, title)).map(|x| x.id)
     }
 
     pub async fn want_album(&self, mbid: &str, account: Option<i64>) -> Result<Want> {
@@ -687,6 +693,14 @@ mod tests {
         assert_eq!(best(&found, &down).unwrap().0.guid, "flac-a");
         let down = vec![TurnedDown { guid: "flac-a".into(), ..Default::default() }, TurnedDown { guid: "flac-b".into(), ..Default::default() }];
         assert_eq!(best(&found, &down).unwrap().0.guid, "mp3");
+    }
+
+    #[test]
+    fn an_album_in_the_library_may_say_more_than_its_name() {
+        assert!(same_album("Diamond-Jubilee - REALISTIK MASTER - March 27 2024", "Diamond Jubilee"));
+        assert!(same_album("OK Computer", "OK Computer"));
+        assert!(!same_album("Kid A", "OK Computer"));
+        assert!(!same_album("Untrue", ""));
     }
 
     #[test]

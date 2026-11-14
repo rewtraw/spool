@@ -16,6 +16,7 @@
     dim = false,
     picked = false,
     stack = false,
+    square = false,
     watched,
     onclick,
     children,
@@ -32,6 +33,8 @@
     dim?: boolean;
     picked?: boolean;
     stack?: boolean;
+    /** An album's cover, square where a poster is tall. */
+    square?: boolean;
     /** Where whoever is signed in stands with it: a tick when watched, a bar when part-way. */
     watched?: Watched;
     onclick?: (e: MouseEvent) => void;
@@ -42,7 +45,7 @@
 
 <a class="tile" {href} class:dim class:picked {onclick}>
   <div class="art" class:stack>
-    <Poster {src} {title} {kind} />
+    <Poster {src} {title} {kind} {square} />
     {@render children?.()}
     {#if chip}<span class="chip {tone} pin">{chip}</span>{/if}
     {#if watched?.done}<span class="seen" title="Watched" aria-label="Watched">✓</span>

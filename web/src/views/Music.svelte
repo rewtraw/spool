@@ -3,7 +3,7 @@
   // players (Feishin, Amperfy, play:Sub and the like) connect to the same library over
   // OpenSubsonic, at this server's address.
   import { api } from '../lib/api';
-  import { app, toast } from '../lib/state.svelte';
+  import { app, route, toast } from '../lib/state.svelte';
   import { ago, bytes, clock } from '../lib/format';
 
   let albums = $state<any[]>([]);
@@ -14,11 +14,9 @@
   let opened = $state<any>(null);
 
   // Albums wanted: found in MusicBrainz, then looked for, downloaded and filed by Spool.
-  let tab = $state<'library' | 'wanted'>('library');
+  // Albums are found and wanted in Discover; here is what has become of them.
+  let tab = $state<'library' | 'wanted'>(route.arg === 'wanted' && app.manages ? 'wanted' : 'library');
   let wants = $state<any[]>([]);
-  let find = $state('');
-  let found = $state<any[] | null>(null);
-  let finding = $state(false);
 
   async function loadWants() {
     if (!app.manages) return;
@@ -34,25 +32,6 @@
     return () => clearInterval(t);
   });
 
-  async function look(e: Event) {
-    e.preventDefault();
-    if (find.trim().length < 2) return;
-    finding = true;
-    found = await api.get<any[]>(`/music/find?q=${encodeURIComponent(find.trim())}`).catch((e) => (toast(e.message), []));
-    finding = false;
-  }
-
-  async function want(r: any) {
-    try {
-      const w = await api.post<any>('/music/wants', { mbid: r.group.mbid });
-      r.want_id = w.want.id;
-      r.state = w.want.state;
-      await loadWants();
-    } catch (e: any) {
-      toast(e.message);
-    }
-  }
-
   async function again(id: number) {
     await api.post(`/music/wants/${id}/search`, {}).catch((e) => toast(e.message));
     loadWants();
@@ -60,7 +39,6 @@
 
   async function unwant(id: number) {
     await api.del(`/music/wants/${id}`).catch((e) => toast(e.message));
-    if (found) found = found.map((r) => (r.want_id === id ? { ...r, want_id: null, state: null } : r));
     loadWants();
   }
 
@@ -83,7 +61,13 @@
     }
     loaded = true;
   }
-  load();
+  // Opened at an album (#/music/12), as the library links to them.
+  load().then(() => {
+    const id = Number(route.arg);
+    if (!id || !albums.some((a) => a.id === id)) return;
+    show(id);
+    setTimeout(() => document.getElementById(`album-${id}`)?.scrollIntoView({ block: 'center' }), 60);
+  });
 
   $effect(() => {
     if (!status?.scan?.scanning) return;
@@ -198,33 +182,12 @@
 {/if}
 
 {#if tab === 'wanted'}
-  <form class="bar row" onsubmit={look}>
-    <input class="input grow" type="search" placeholder="Find an album: artist, album or both" bind:value={find} aria-label="Find an album" />
-    <button class="btn primary" disabled={finding || find.trim().length < 2}>{finding ? 'Looking…' : 'Find'}</button>
-  </form>
-  {#if found}
-    <div class="card list">
-      {#each found as r (r.group.mbid)}
-        <div class="line">
-          <img class="thumb" src={r.cover} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')} />
-          <div class="grow">
-            <div class="clamp"><b>{r.group.title}</b></div>
-            <div class="muted small clamp">{r.group.artist}</div>
-            <div class="faint small">{[r.group.year || '', r.group.kind].filter(Boolean).join(' · ')}</div>
-          </div>
-          {#if r.have}<span class="chip ok">In the library</span>
-          {:else if r.want_id}<span class="chip">{WANT_LABEL[r.state] ?? 'Wanted'}</span>
-          {:else}<button class="btn small primary" onclick={() => want(r)}>Want</button>{/if}
-        </div>
-      {:else}
-        <div class="faint">Nothing found in MusicBrainz.</div>
-      {/each}
-    </div>
-  {/if}
-
-  <div class="section-title">Wanted albums</div>
+  <div class="row between">
+    <div class="section-title">Wanted albums</div>
+    <a class="btn small primary" href="#/discover?kind=music">Find albums</a>
+  </div>
   {#if !wants.length}
-    <div class="card empty">Nothing wanted yet. Find an album above. Spool looks for a FLAC copy, or 320k when there is none, and files it in the music folder.</div>
+    <div class="card empty">Nothing wanted yet. Find an album in Discover. Spool looks for a FLAC copy, or 320k when there is none, and files it in the music folder.</div>
   {:else}
     <div class="card list">
       {#each wants as { want: w, cover } (w.id)}
@@ -261,7 +224,7 @@
 {:else}
   <div class="grid">
     {#each shown as a (a.id)}
-      <div class="album" class:open={openId === a.id}>
+      <div class="album" id="album-{a.id}" class:open={openId === a.id}>
         <button class="cover" onclick={() => show(a.id)} aria-label="{a.title} by {a.artist}">
           {#if a.has_cover}<img src={art(a.id)} alt="" loading="lazy" />{/if}
           <span class="nocover">{a.title}</span>
@@ -347,9 +310,13 @@
   .bar .input {
     width: 100%;
   }
-  .bar.row {
-    display: flex;
-    gap: 8px;
+  .between {
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .between .section-title {
+    margin: 0;
   }
   .tabs {
     display: flex;

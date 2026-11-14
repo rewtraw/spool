@@ -1,5 +1,6 @@
 <script lang="ts">
-  let { src, title, kind = 'movie' }: { src?: string | null; title: string; kind?: string } = $props();
+  let { src, title, kind = 'movie', square = false }: { src?: string | null; title: string; kind?: string; square?: boolean } = $props();
+  const KIND: Record<string, string> = { movie: 'Film', series: 'Series', album: 'Album', book: 'Book' };
   let failed = $state(false);
   // Images already in the browser's cache are shown at once; only a first load fades in, so
   // filtering or re-sorting a grid never makes its posters blink.
@@ -10,12 +11,12 @@
   }
 </script>
 
-<div class="poster" class:fallback={!src || failed}>
+<div class="poster" class:square class:fallback={!src || failed}>
   {#if src && !failed}
     <img {src} alt="" loading="lazy" width="400" height="600" class:fresh use:watch onload={(e) => e.currentTarget.classList.add('ready')} onerror={() => (failed = true)} />
   {:else}
     <span>{title}</span>
-    <small>{kind === 'movie' ? 'Film' : 'Series'}</small>
+    <small>{KIND[kind] ?? 'Series'}</small>
   {/if}
 </div>
 
@@ -27,6 +28,9 @@
     background: var(--raised);
     border: 1px solid var(--line);
     width: 100%;
+  }
+  .poster.square {
+    aspect-ratio: 1;
   }
   img {
     width: 100%;

@@ -1,16 +1,28 @@
 <script lang="ts">
-  import { api, type Kind, type Title } from '../lib/api';
-  import { app, act, go, loadTitles } from '../lib/state.svelte';
+  // One search across everything Spool can get: films and series (TMDB, TVmaze, AniList),
+  // albums (MusicBrainz) and books (Open Library). "Everything" shows the best few of each,
+  // and each kind can be looked at on its own.
+  import { api, type Title } from '../lib/api';
+  import { app, act, go, loadTitles, route, toast } from '../lib/state.svelte';
   import Poster from '../components/Poster.svelte';
   import { bytes } from '../lib/format';
 
-  let kind = $state<Kind>('movie');
-  let query = $state('');
+  type Scope = 'all' | 'movie' | 'series' | 'music' | 'books';
+  const SCOPES: [Scope, string][] = [['all', 'Everything'], ['movie', 'Movies'], ['series', 'Series'], ['music', 'Music'], ['books', 'Books']];
+  const asked = route.query.get('kind') as Scope | null;
+  let kind = $state<Scope>(asked && SCOPES.some(([k]) => k === asked) ? asked : 'all');
+  let query = $state(route.query.get('q') ?? '');
   type Found = Title & { library_id?: number | null; anime?: { format: string; episodes: number; name: string; as_series?: boolean } };
   let found = $state<{ movies: Found[]; series: Found[]; movies_error?: string | null }>({ movies: [], series: [] });
+  let albums = $state<any[]>([]);
+  let books = $state<any[]>([]);
+  let partErrors = $state<{ music?: string; books?: string }>({});
   // The kind asked for first, then what the other kind has under the same name.
-  const results = $derived(kind === 'movie' ? found.movies : found.series);
-  const others = $derived(kind === 'movie' ? found.series : found.movies);
+  const results = $derived(kind === 'movie' ? found.movies : kind === 'series' ? found.series : []);
+  const others = $derived(kind === 'movie' ? found.series : kind === 'series' ? found.movies : []);
+  const video = $derived(kind === 'all' || kind === 'movie' || kind === 'series');
+  /** How many of each "Everything" shows before "See all". */
+  const FEW = 6;
   const FORMAT: Record<string, string> = { TV: 'series', TV_SHORT: 'short series', MOVIE: 'film', OVA: 'OVA', ONA: 'web series', SPECIAL: 'special' };
   let searching = $state(false);
   let searched = $state(false);
@@ -36,30 +48,79 @@
     timer = setTimeout(run, 350);
   }
 
+  // What each part was last searched for, so changing scope asks only for what is new.
+  let did: Record<string, string> = {};
+
   async function run() {
     const q = query.trim();
     const mine = ++seq;
     if (!q) {
       found = { movies: [], series: [] };
+      albums = [];
+      books = [];
+      did = {};
       searched = false;
       error = '';
       return;
     }
     searching = true;
     error = '';
-    try {
-      const r = await api.get<typeof found>(`/lookup/all?q=${encodeURIComponent(q)}`);
-      if (mine !== seq) return;
-      found = r;
+    const want = (part: string) => did[part] !== q && (kind === 'all' || part === (kind === 'movie' || kind === 'series' ? 'video' : kind));
+    const parts: Promise<void>[] = [];
+    if (want('video'))
+      parts.push(
+        api.get<typeof found>(`/lookup/all?q=${encodeURIComponent(q)}`).then(
+          (r) => { if (mine === seq) { found = r; did.video = q; } },
+          (e) => { if (mine === seq) { error = e.message; found = { movies: [], series: [] }; } },
+        ),
+      );
+    // Album and book searches need two letters or more.
+    if (want('music') && q.length > 1)
+      parts.push(
+        api.get<any[]>(`/music/find?q=${encodeURIComponent(q)}`).then(
+          (r) => { if (mine === seq) { albums = r; did.music = q; partErrors.music = ''; } },
+          (e) => { if (mine === seq) { albums = []; partErrors.music = e.message; } },
+        ),
+      );
+    if (want('books') && q.length > 1)
+      parts.push(
+        api.get<any[]>(`/books/lookup?q=${encodeURIComponent(q)}`).then(
+          (r) => { if (mine === seq) { books = r; did.books = q; partErrors.books = ''; } },
+          (e) => { if (mine === seq) { books = []; partErrors.books = e.message; } },
+        ),
+      );
+    await Promise.all(parts);
+    if (mine === seq) {
       searched = true;
-    } catch (e: any) {
-      if (mine !== seq) return;
-      error = e.message;
-      found = { movies: [], series: [] };
-    } finally {
-      if (mine === seq) searching = false;
+      searching = false;
     }
   }
+  // Opened with a search already in the address (#/discover?q=…).
+  if (route.query.get('q')) run();
+
+  function scope(k: Scope) {
+    kind = k;
+    if (query.trim()) run();
+  }
+
+  async function wantAlbum(r: any) {
+    try {
+      const w = await api.post<any>('/music/wants', { mbid: r.group.mbid });
+      r.want_id = w.want.id;
+      r.state = w.want.state;
+      toast(w.want.state === 'have' ? `${r.group.title} is already in the music folder` : `Wanted ${r.group.title}. Spool looks for it now.`);
+    } catch (e: any) {
+      toast(e.message);
+    }
+  }
+
+  async function addBook(w: any) {
+    const b = await act(() => api.post<any>('/books', { ol_work: w.ol_work }), `Added ${w.title}`);
+    if (b) w.book_id = b.id;
+  }
+
+  const WANT_LABEL: Record<string, string> = { wanted: 'Wanted', downloading: 'Downloading', have: 'Here' };
+  const nothing = $derived(!found.movies.length && !found.series.length && !albums.length && !books.length);
 
   function open(t: Title) {
     adding = t;
@@ -98,11 +159,12 @@
 <header class="head"><h1>Discover</h1></header>
 
 <div class="bar">
-  <div class="seg">
-    <button class:on={kind === 'movie'} onclick={() => (kind = 'movie')}>Movies</button>
-    <button class:on={kind === 'series'} onclick={() => (kind = 'series')}>Series</button>
+  <div class="seg" role="tablist" aria-label="What to find">
+    {#each SCOPES as [k, label]}
+      <button role="tab" aria-selected={kind === k} class:on={kind === k} onclick={() => scope(k)}>{label}</button>
+    {/each}
   </div>
-  <input class="input grow" type="search" placeholder="Search by title, or paste an IMDb id" bind:value={query} oninput={onInput} onkeydown={(e) => e.key === 'Enter' && run()} data-search />
+  <input class="input grow" type="search" placeholder={kind === 'music' ? 'An artist, an album, or both' : kind === 'books' ? 'A title, an author, or both' : kind === 'all' ? 'A film, series, album or book' : 'Search by title, or paste an IMDb id'} bind:value={query} oninput={onInput} onkeydown={(e) => e.key === 'Enter' && run()} data-search />
 </div>
 
 {#snippet card(r: Found)}
@@ -124,26 +186,121 @@
   </div>
 {/snippet}
 
-{#if error}
-  <div class="card empty">{error}{#if error.includes('TMDB')} <a class="link" href="#/settings">Open Settings</a>{/if}</div>
-{:else if searching && !results.length && !others.length}
-  <div class="empty">Searching…</div>
-{:else if searched && !results.length}
-  <div class="card empty">{kind === 'movie' && found.movies_error ? found.movies_error : `No ${kind === 'movie' ? 'movies' : 'series'} found for “${query.trim()}”.`}{#if kind === 'movie' && found.movies_error?.includes('TMDB')} <a class="link" href="#/settings">Open Settings</a>{/if}</div>
-{:else if !searched}
-  <div class="card empty">Find a film or a series to add to the library.</div>
-{/if}
-
-{#if results.length}<p class="faint source">{kind === 'movie' ? 'Films, from TMDB.' : 'Series, from TVmaze, and from TMDB where TVmaze has none.'} Anime is also looked up on AniList, under any of its names.</p>{/if}
-<div class="results">
-  {#each results as r (`${r.tmdb_id}:${r.tvmaze_id}`)}{@render card(r)}{/each}
-</div>
-
-{#if others.length}
-  <div class="section-title also">{kind === 'movie' ? 'Series' : 'Films'} with this name</div>
-  <div class="results">
-    {#each others.slice(0, 6) as r (`${r.tmdb_id}:${r.tvmaze_id}`)}{@render card(r)}{/each}
+{#snippet album(r: any)}
+  <div class="card result">
+    <div class="art"><img class="square" src={r.cover} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')} /></div>
+    <div class="grow body">
+      <div class="row wrap"><h2>{r.group.title}</h2><span class="muted">{r.group.year || ''}</span></div>
+      <div class="muted">{r.group.artist}</div>
+      <div class="faint meta">{r.group.kind}</div>
+      <div class="row">
+        {#if r.have}<a class="btn small" href="#/library?kind=music">In library</a>
+        {:else if r.want_id}<a class="btn small" href="#/music/wanted">{WANT_LABEL[r.state] ?? 'Wanted'}</a>
+        {:else}<button class="btn small primary" onclick={() => wantAlbum(r)}>Want</button>{/if}
+      </div>
+    </div>
   </div>
+{/snippet}
+
+{#snippet book(w: any)}
+  <div class="card result">
+    <div class="art"><Poster src={w.cover} title={w.title} kind="book" /></div>
+    <div class="grow body">
+      <div class="row wrap"><h2>{w.title}</h2><span class="muted">{w.year || ''}</span></div>
+      <div class="muted">{(w.authors ?? []).join(', ')}</div>
+      {#if w.subtitle || w.editions}<div class="faint meta">{[w.subtitle, w.editions ? `${w.editions} editions` : ''].filter(Boolean).join(' · ')}</div>{/if}
+      <div class="row">
+        {#if w.book_id}<a class="btn small" href="#/books/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}
+      </div>
+    </div>
+  </div>
+{/snippet}
+
+<!-- "Everything" shows a few of each kind, small, to choose from or to see more of. -->
+{#snippet mini(cover: string | null | undefined, square: boolean, name: string, line: string, action: import('svelte').Snippet)}
+  <div class="card mini">
+    <div class="thumb" class:square>{#if cover}<img src={cover} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')} />{/if}</div>
+    <div class="grow body">
+      <b class="clamp">{name}</b>
+      <span class="faint small clamp">{line}</span>
+      <div>{@render action()}</div>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet more(k: Scope, n: number, label: string)}
+  {#if n > FEW}<button class="btn small ghost more" onclick={() => scope(k)}>See all {n} {label}</button>{/if}
+{/snippet}
+
+{#if error && video}
+  <div class="card empty">{error}{#if error.includes('TMDB')} <a class="link" href="#/settings">Open Settings</a>{/if}</div>
+{/if}
+{#if searching && nothing}
+  <div class="empty">Searching…</div>
+{:else if !searched}
+  <div class="card empty">Find a film, a series, an album or a book. Films and series are added to the library; albums and books are wanted, and Spool fetches them.</div>
+{:else if kind === 'all'}
+  {#if nothing}<div class="card empty">Nothing found for “{query.trim()}”.</div>{/if}
+  {#each [['movie', 'Films', found.movies], ['series', 'Series', found.series]] as [k, label, list]}
+    {#if (list as Found[]).length}
+      <div class="section-title">{label}</div>
+      <div class="minis">
+        {#each (list as Found[]).slice(0, FEW) as r (`${r.tmdb_id}:${r.tvmaze_id}`)}
+          {#snippet act()}{#if r.library_id}<a class="btn small" href="#/title/{r.library_id}">In library</a>{:else}<button class="btn small" class:primary={!r.anime?.as_series} onclick={() => open(r)}>Add</button>{/if}{/snippet}
+          {@render mini(r.poster, false, r.title, [r.year || '', r.network ?? r.studio, r.anime ? 'Anime' : ''].filter(Boolean).join(' · '), act)}
+        {/each}
+      </div>
+      {@render more(k as Scope, (list as Found[]).length, (label as string).toLowerCase())}
+    {/if}
+  {/each}
+  {#if albums.length}
+    <div class="section-title">Albums</div>
+    <div class="minis">
+      {#each albums.slice(0, FEW) as r (r.group.mbid)}
+        {#snippet act()}{#if r.have}<a class="btn small" href="#/library?kind=music">In library</a>{:else if r.want_id}<a class="btn small" href="#/music/wanted">{WANT_LABEL[r.state] ?? 'Wanted'}</a>{:else}<button class="btn small primary" onclick={() => wantAlbum(r)}>Want</button>{/if}{/snippet}
+        {@render mini(r.cover, true, r.group.title, [r.group.artist, r.group.year || '', r.group.kind].filter(Boolean).join(' · '), act)}
+      {/each}
+    </div>
+    {@render more('music', albums.length, 'albums')}
+  {:else if partErrors.music}<p class="faint small">Albums could not be searched: {partErrors.music}</p>{/if}
+  {#if books.length}
+    <div class="section-title">Books</div>
+    <div class="minis">
+      {#each books.slice(0, FEW) as w (w.ol_work)}
+        {#snippet act()}{#if w.book_id}<a class="btn small" href="#/books/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}{/snippet}
+        {@render mini(w.cover, false, w.title, [(w.authors ?? []).join(', '), w.year || ''].filter(Boolean).join(' · '), act)}
+      {/each}
+    </div>
+    {@render more('books', books.length, 'books')}
+  {:else if partErrors.books}<p class="faint small">Books could not be searched: {partErrors.books}</p>{/if}
+{:else if kind === 'music'}
+  {#if partErrors.music}<div class="card empty">{partErrors.music}</div>
+  {:else if !albums.length}<div class="card empty">MusicBrainz has no album for “{query.trim()}”.</div>
+  {:else}
+    <p class="faint source">Albums, from MusicBrainz. Spool looks for a FLAC copy, or 320k when there is none, and files it in the music folder.</p>
+    <div class="results">{#each albums as r (r.group.mbid)}{@render album(r)}{/each}</div>
+  {/if}
+{:else if kind === 'books'}
+  {#if partErrors.books}<div class="card empty">{partErrors.books}</div>
+  {:else if !books.length}<div class="card empty">Open Library has nothing for “{query.trim()}”.</div>
+  {:else}
+    <p class="faint source">Books, from Open Library. Spool finds an EPUB in its index of Anna's Archive and sends it to Florilegium.</p>
+    <div class="results">{#each books as w (w.ol_work)}{@render book(w)}{/each}</div>
+  {/if}
+{:else}
+  {#if !results.length && !error}
+    <div class="card empty">{kind === 'movie' && found.movies_error ? found.movies_error : `No ${kind === 'movie' ? 'movies' : 'series'} found for “${query.trim()}”.`}{#if kind === 'movie' && found.movies_error?.includes('TMDB')} <a class="link" href="#/settings">Open Settings</a>{/if}</div>
+  {/if}
+  {#if results.length}<p class="faint source">{kind === 'movie' ? 'Films, from TMDB.' : 'Series, from TVmaze, and from TMDB where TVmaze has none.'} Anime is also looked up on AniList, under any of its names.</p>{/if}
+  <div class="results">
+    {#each results as r (`${r.tmdb_id}:${r.tvmaze_id}`)}{@render card(r)}{/each}
+  </div>
+  {#if others.length}
+    <div class="section-title also">{kind === 'movie' ? 'Series' : 'Films'} with this name</div>
+    <div class="results">
+      {#each others.slice(0, 6) as r (`${r.tmdb_id}:${r.tvmaze_id}`)}{@render card(r)}{/each}
+    </div>
+  {/if}
 {/if}
 
 {#if adding}
@@ -203,9 +360,14 @@
     background: var(--raised);
     border: 1px solid var(--line);
   }
+  .seg {
+    max-width: 100%;
+    overflow-x: auto;
+  }
   .seg button {
     height: 28px;
     padding: 0 12px;
+    white-space: nowrap;
     border: none;
     background: transparent;
     border-radius: 6px;
@@ -221,6 +383,64 @@
   .source {
     font-size: 12.5px;
     margin-bottom: 10px;
+  }
+  .section-title {
+    margin: 26px 0 12px;
+  }
+  .more {
+    margin-top: 10px;
+  }
+  .minis {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+    gap: 10px;
+  }
+  .mini {
+    display: flex;
+    gap: 12px;
+    padding: 10px;
+    min-width: 0;
+  }
+  .mini .body {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+  .mini .body > div {
+    margin-top: auto;
+    padding-top: 4px;
+  }
+  .clamp {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .thumb {
+    width: 54px;
+    aspect-ratio: 2 / 3;
+    flex: none;
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--raised);
+    align-self: flex-start;
+  }
+  .thumb.square {
+    aspect-ratio: 1;
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .square {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 6px;
+    background: var(--raised);
+    display: block;
   }
   .results {
     display: grid;

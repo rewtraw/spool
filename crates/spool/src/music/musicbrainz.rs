@@ -13,6 +13,19 @@ const AGENT: &str = concat!("Spool/", env!("CARGO_PKG_VERSION"), " ( https://git
 static LAST: parking_lot::Mutex<Option<std::time::Instant>> = parking_lot::Mutex::new(None);
 
 async fn get<T: for<'de> Deserialize<'de>>(http: &reqwest::Client, url: &str) -> Result<T> {
+    // It answers 503 when asked too often or when busy; a moment later usually does.
+    for _ in 0..2 {
+        match get_once(http, url).await {
+            Err(Busy) => tokio::time::sleep(std::time::Duration::from_millis(1500)).await,
+            Ok(r) => return r,
+        }
+    }
+    get_once(http, url).await.unwrap_or_else(|Busy| Err(anyhow!("MusicBrainz is busy; try again in a moment")))
+}
+
+struct Busy;
+
+async fn get_once<T: for<'de> Deserialize<'de>>(http: &reqwest::Client, url: &str) -> std::result::Result<Result<T>, Busy> {
     let wait = {
         let mut last = LAST.lock();
         let now = std::time::Instant::now();
@@ -23,11 +36,17 @@ async fn get<T: for<'de> Deserialize<'de>>(http: &reqwest::Client, url: &str) ->
     if !wait.is_zero() {
         tokio::time::sleep(wait).await;
     }
-    let resp = http.get(url).header(reqwest::header::USER_AGENT, AGENT).timeout(std::time::Duration::from_secs(20)).send().await.map_err(|e| anyhow!("MusicBrainz: {}", e.without_url()))?;
-    if !resp.status().is_success() {
-        return Err(anyhow!("MusicBrainz answered HTTP {}", resp.status().as_u16()));
+    let resp = match http.get(url).header(reqwest::header::USER_AGENT, AGENT).timeout(std::time::Duration::from_secs(20)).send().await {
+        Ok(r) => r,
+        Err(e) => return Ok(Err(anyhow!("MusicBrainz: {}", e.without_url()))),
+    };
+    if resp.status().as_u16() == 503 {
+        return Err(Busy);
     }
-    resp.json().await.map_err(|e| anyhow!("MusicBrainz sent something unexpected: {}", e.without_url()))
+    if !resp.status().is_success() {
+        return Ok(Err(anyhow!("MusicBrainz answered HTTP {}", resp.status().as_u16())));
+    }
+    Ok(resp.json().await.map_err(|e| anyhow!("MusicBrainz sent something unexpected: {}", e.without_url())))
 }
 
 /// An album, as a search finds it.
