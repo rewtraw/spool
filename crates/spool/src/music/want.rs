@@ -189,6 +189,30 @@ fn same_album(have: &str, want: &str) -> bool {
 /// "The" left off either. Every word of each somewhere in the name is not enough: every
 /// release of Kraftwerk's has the words of their first album, "Kraftwerk", in it.
 fn names_album(n: &[String], artist: &str, album: &str) -> bool {
+    names_album_by(n, artist, album) || names_album_by(n, main_artist(artist), album)
+}
+
+/// Who an album is posted under: an album credited to "Alice Coltrane featuring Pharoah
+/// Sanders" is Alice Coltrane's.
+fn main_artist(artist: &str) -> &str {
+    let lower = artist.to_lowercase();
+    [" featuring ", " feat. ", " feat ", " ft. ", " with "].iter().filter_map(|sep| lower.find(sep)).min().map_or(artist, |at| &artist[..at])
+}
+
+/// What an album may be posted as: its whole name, and, for a name with a part after a comma
+/// or colon ("Music From the Unrealized Film Script, Dusk at Cubist Castle"), that part.
+fn album_names(title: &str) -> Vec<String> {
+    let mut out = vec![title.to_string()];
+    if let Some(at) = title.rfind([':', ',']) {
+        let part = title[at + 1..].trim();
+        if words(part).len() >= 2 {
+            out.push(part.to_string());
+        }
+    }
+    out
+}
+
+fn names_album_by(n: &[String], artist: &str, album: &str) -> bool {
     let bare = |w: Vec<String>| if w.len() > 1 && w[0] == "the" { w[1..].to_vec() } else { w };
     let (a, t) = (bare(words(artist)), bare(words(album)));
     if a.is_empty() || t.is_empty() {
@@ -207,10 +231,13 @@ fn names_album(n: &[String], artist: &str, album: &str) -> bool {
     })
 }
 
-/// A piece of a bigger post rather than a release: `[05 of 20] "04. Track.flac"`, `(02/21)`.
+/// A piece of a bigger post rather than a release: `[05 of 20] "04. Track.flac"`, `(02/21)`,
+/// or a name that ends in a file's, `… - 04-Vein Melter.flac`.
 fn a_piece(name: &str) -> bool {
     let n = name.to_lowercase();
-    n.contains('"') || n.split(|c: char| !c.is_ascii_alphanumeric() && c != '/').any(|w| w.split_once('/').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty() && a.chars().chain(b.chars()).all(|c| c.is_ascii_digit())))
+    // A scene name is dotted throughout ("Artist.Album.2010.FLAC"); a file's has spaces.
+    let file = n.trim().contains(' ') && n.trim().rsplit_once('.').is_some_and(|(_, ext)| matches!(ext, "flac" | "mp3" | "m4a" | "wav" | "ogg" | "rar" | "zip" | "par2" | "nfo" | "sfv" | "jpg" | "cue" | "log") || (ext.starts_with('r') && ext[1..].chars().all(|c| c.is_ascii_digit()) && ext.len() == 3));
+    file || n.contains('"') || n.split(|c: char| !c.is_ascii_alphanumeric() && c != '/').any(|w| w.split_once('/').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty() && a.chars().chain(b.chars()).all(|c| c.is_ascii_digit())))
         || n.split_whitespace().collect::<Vec<_>>().windows(3).any(|w| w[1] == "of" && w[0].trim_start_matches('[').parse::<u32>().is_ok() && w[2].trim_end_matches(']').parse::<u32>().is_ok())
 }
 
@@ -504,13 +531,19 @@ impl App {
             w.note = "No indexer is set up to search.".into();
             return Ok(());
         }
-        let q = Query::Music { text: format!("{} {}", w.artist, w.title) };
         let mut found = vec![];
         let mut trouble = vec![];
-        for ix in &indexers {
-            match self.query_indexer(ix, &q, false).await {
-                Ok(rs) => found.extend(rs.into_iter().filter_map(|r| grade(&r.title, r.size, &w.artist, &w.title).map(|g| (r, g)))),
-                Err(e) => trouble.push(e.to_string()),
+        for name in album_names(&w.title) {
+            // Plain words: indexers find nothing for a curly quote, a Unicode hyphen or a slash.
+            let q = Query::Music { text: words(&format!("{} {name}", main_artist(&w.artist))).join(" ") };
+            for ix in &indexers {
+                match self.query_indexer(ix, &q, false).await {
+                    Ok(rs) => found.extend(rs.into_iter().filter_map(|r| grade(&r.title, r.size, &w.artist, &name).map(|g| (r, g)))),
+                    Err(e) => trouble.push(e.to_string()),
+                }
+            }
+            if !found.is_empty() {
+                break;
             }
         }
         let Some((r, g)) = best(&found, &w.turned_down).cloned() else {
@@ -608,6 +641,8 @@ impl App {
                         let _ = self.job_remove(&job_id, true);
                         self.remove_download_folder(Some(&job_id), &out).await;
                         tracing::info!(album = %w.title, folder = %folder, "filed an album");
+                        let r = w.release.as_ref();
+                        let _ = self.db.add_history(None, "album_filed", serde_json::json!({"want_id": w.id, "album": w.title, "artist": w.artist, "release": r.map(|r| &r.title), "indexer": r.map(|r| &r.indexer), "size": r.map(|r| r.size), "folder": folder}));
                         w.folder = folder;
                         w.state = WantState::Have;
                         w.job_id = None;
@@ -641,6 +676,8 @@ impl App {
 
     fn album_failed(&self, w: &mut Want, why: &str, release_at_fault: bool) {
         tracing::info!(album = %w.title, why, "an album's download did not do");
+        let r = w.release.as_ref();
+        let _ = self.db.add_history(None, "album_failed", serde_json::json!({"want_id": w.id, "album": w.title, "artist": w.artist, "release": r.map(|r| &r.title), "indexer": r.map(|r| &r.indexer), "reason": why}));
         if let (true, Some(r)) = (release_at_fault, &w.release) {
             w.turned_down.push(TurnedDown { guid: r.guid.clone(), name: r.title.clone(), why: why.to_string(), at: now() });
         }
@@ -751,6 +788,10 @@ mod tests {
         assert_eq!(k("Kraftwerk - Die Mensch-Maschine (2009 Remaster) (1978) FLAC", "Die Mensch·Maschine"), Some(Grade::Flac));
         assert_eq!(k(r#"Kraftwerk - 1970 - Kraftwerk 1 (NMR) [05 of 20] "04. Von Himmel Hoch.flac""#, "Kraftwerk"), None, "one file of a post");
         assert_eq!(k(r#"(02/21) "Kraftwerk-2004-Aerodynamik (EP) FLAC.part01.rar" - 185,29 MB"#, "Aerodynamik"), None);
+        assert_eq!(grade("Herbie Hancock - 1973 - Head Hunters [DR] [2013 Reissue] [24-96] - 04-Vein Melter.flac", 300 * mb, "Herbie Hancock", "Head Hunters"), None, "one track posted alone");
+        assert_eq!(grade("Herbie Hancock - 1973 - Head Hunters [2013 Reissue] [24-96] FLAC", 300 * mb, "Herbie Hancock", "Head Hunters"), Some(Grade::Flac));
+        assert_eq!(grade("Herbie.Hancock-Head.Hunters-1973.FLAC", 300 * mb, "Herbie Hancock", "Head Hunters"), Some(Grade::Flac), "a dotted name is a release");
+        assert_eq!(grade("Alice Coltrane - Journey In Satchidananda (1971) [FLAC]", 300 * mb, "Alice Coltrane featuring Pharoah Sanders", "Journey in Satchidananda"), Some(Grade::Flac));
     }
 
     #[test]
@@ -770,6 +811,16 @@ mod tests {
         assert!(same_album("OK Computer", "OK Computer"));
         assert!(!same_album("Kid A", "OK Computer"));
         assert!(!same_album("Untrue", ""));
+    }
+
+    #[test]
+    fn a_long_name_is_also_looked_for_by_its_last_part() {
+        assert_eq!(album_names("Music From the Unrealized Film Script, Dusk at Cubist Castle"), ["Music From the Unrealized Film Script, Dusk at Cubist Castle", "Dusk at Cubist Castle"]);
+        assert_eq!(album_names("Selected Ambient Works 85–92"), ["Selected Ambient Works 85–92"]);
+        assert_eq!(album_names("Live: 1975"), ["Live: 1975"], "one word is not enough to go on");
+        assert_eq!(main_artist("Alice Coltrane featuring Pharoah Sanders"), "Alice Coltrane");
+        assert_eq!(words("Neu! ’75").join(" "), "neu 75");
+        assert_eq!(words("Transient Random‐Noise Bursts").join(" "), "transient random noise bursts");
     }
 
     #[test]

@@ -71,6 +71,19 @@ async fn get_once(http: &reqwest::Client, url: &str) -> std::result::Result<Resu
     Ok(resp.text().await.map_err(|e| anyhow!("MusicBrainz: {}", e.without_url())))
 }
 
+/// What was typed, as plain words to MusicBrainz's search: its query language takes `!`, `/`,
+/// `:`, quotes and brackets for operators, so "Neu!" or "Either/Or" would be refused.
+fn escape(q: &str) -> String {
+    let mut out = String::with_capacity(q.len());
+    for c in q.chars() {
+        if "+-&|!(){}[]^\"~*?:\\/".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// An album, as a search finds it.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -138,7 +151,7 @@ struct Search {
 
 /// Albums matching what was typed: an album, an artist, or both.
 pub async fn search(http: &reqwest::Client, q: &str) -> Result<Vec<Group>> {
-    let url = format!("{BASE}/release-group?fmt=json&limit=25&query={}", urlencoding::encode(q));
+    let url = format!("{BASE}/release-group?fmt=json&limit=25&query={}", urlencoding::encode(&escape(q)));
     let s: Search = get(http, &url).await?;
     Ok(s.release_groups.into_iter().map(Group::from).collect())
 }
@@ -178,7 +191,7 @@ fn plain(s: &str) -> String {
 /// The artist named by what was typed, when it names one outright: "boards of canada",
 /// "Beatles". Typing more than a name ("radiohead ok computer") is a search for albums.
 pub async fn artist(http: &reqwest::Client, q: &str) -> Result<Option<Artist>> {
-    let url = format!("{BASE}/artist?fmt=json&limit=5&query={}", urlencoding::encode(q));
+    let url = format!("{BASE}/artist?fmt=json&limit=5&query={}", urlencoding::encode(&escape(q)));
     let a: Artists = get(http, &url).await?;
     Ok(named(&a.artists, q))
 }
@@ -253,6 +266,13 @@ mod tests {
         let raw: RawGroup = serde_json::from_str(r#"{"id":"x","title":"Watch the Throne","primary-type":"Album","secondary-types":["Live"],"first-release-date":"2011-08-08","artist-credit":[{"name":"JAY-Z","joinphrase":" & ","artist":{"id":"a1"}},{"name":"Kanye West","joinphrase":"","artist":{"id":"a2"}}]}"#).unwrap();
         let g = Group::from(raw);
         assert_eq!((g.artist.as_str(), g.artist_mbid.as_str(), g.year, g.kind.as_str()), ("JAY-Z & Kanye West", "a1", 2011, "Album · Live"));
+    }
+
+    #[test]
+    fn what_was_typed_is_searched_as_words() {
+        assert_eq!(escape("Neu! 75"), "Neu\\! 75");
+        assert_eq!(escape("Either/Or"), "Either\\/Or");
+        assert_eq!(escape("AC/DC: Back in Black"), "AC\\/DC\\: Back in Black");
     }
 
     #[test]

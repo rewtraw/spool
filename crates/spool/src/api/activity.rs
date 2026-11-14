@@ -42,7 +42,7 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
         .db
         .history(None, 400)?
         .into_iter()
-        .filter(|h| matches!(h.kind.as_str(), "compact_made" | "compact_failed" | "moved"))
+        .filter(|h| matches!(h.kind.as_str(), "compact_made" | "compact_failed" | "moved" | "album_filed" | "album_failed" | "book_got" | "book_failed"))
         .take(25)
         .map(|h| json!({"id": h.id, "ts": h.ts, "kind": h.kind, "title_id": h.title_id, "title": h.title_id.and_then(|id| titles.get(&id)).map(|t| t.title.clone()), "data": h.data}))
         .collect();

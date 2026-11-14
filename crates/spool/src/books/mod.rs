@@ -520,6 +520,8 @@ impl App {
 
     fn turn_down(&self, b: &mut Book, md5: &str, why: String) {
         tracing::info!(book = %b.title, md5, why = %why, "a file of a book would not do");
+        let file = b.chosen.as_ref().map(|c| c.title.clone());
+        let _ = self.db.add_history(None, "book_failed", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": file, "reason": why}));
         self.drop_partial(md5);
         b.turned_down.push(TurnedDown { md5: md5.to_string(), why: why.clone(), at: now() });
         b.candidates.retain(|c| c.md5 != md5);
@@ -606,6 +608,7 @@ impl App {
     async fn send(&self, b: &mut Book) -> Result<()> {
         let g = self.settings.general();
         if g.books.florilegium_url.is_empty() {
+            let _ = self.db.add_history(None, "book_got", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": b.file, "kept": true}));
             b.state = BookState::Have;
             b.note = "Kept in Spool. Set up Florilegium in Settings → Books to send books there.".into();
             return Ok(());
@@ -614,6 +617,7 @@ impl App {
         match florilegium::send(&self.http, &g.books.florilegium_url, &g.books.florilegium_token, &path, &b.file).await {
             Ok(r) => {
                 tracing::info!(book = %b.title, status = %r.status, "sent a book to Florilegium");
+                let _ = self.db.add_history(None, "book_got", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": b.file, "florilegium": true}));
                 b.receipt = Some(r);
                 b.state = BookState::Have;
                 b.note.clear();

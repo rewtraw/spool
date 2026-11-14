@@ -163,20 +163,33 @@
     not_the_film: 'Recognised as an extra, not the film',
     was_film: 'Switched from a film to a series',
     in_episodes: 'Found to be posted in episodes',
+    album_filed: 'Album filed',
+    album_failed: 'Album download did not do',
+    book_got: 'Book got',
+    book_failed: 'Book file did not do',
   };
   /** What a finished piece of work came to, in a line: sizes, how long it took and with what. */
   function outcome(h: any): string {
     const d = h.data ?? {};
     if (h.kind === 'compact_made') return [`${bytes(d.from_bytes ?? 0)} to ${bytes(d.bytes ?? 0)}`, d.seconds ? `in ${duration(d.seconds)}` : '', d.how === 'hardware' ? 'on the video hardware' : d.how === 'software' ? 'on the processor' : ''].filter(Boolean).join(' · ');
     if (h.kind === 'moved') return [d.bytes ? bytes(d.bytes) : '', d.kept_original ? 'the original stays where it was' : ''].filter(Boolean).join(' · ');
+    if (h.kind === 'album_filed') return [d.size ? bytes(d.size) : '', d.indexer ?? ''].filter(Boolean).join(' · ');
+    if (h.kind === 'book_got') return d.florilegium ? 'sent to Florilegium' : d.kept ? 'kept in Spool' : '';
     return '';
   }
   // Downloads that finished and other work that did, together, newest first.
   const finished = $derived(
     [...recent.map((i: any) => ({ at: i.acquisition.updated_at, item: i })), ...(data.done ?? []).map((h: any) => ({ at: h.ts, work: h }))].sort((a, b) => b.at - a.at).slice(0, 30),
   );
-  const tone = (k: string) => (k === 'download_failed' || k === 'file_missing' || k === 'compact_failed' ? 'bad' : k === 'compact_made' ? 'ok' : k === 'imported' || k === 'upgraded' ? 'ok' : k === 'would_grab' ? 'warn' : '');
+  const tone = (k: string) => (['download_failed', 'file_missing', 'compact_failed', 'album_failed', 'book_failed'].includes(k) ? 'bad' : ['compact_made', 'imported', 'upgraded', 'album_filed', 'book_got'].includes(k) ? 'ok' : k === 'would_grab' ? 'warn' : '');
 </script>
+
+<!-- What a piece of history is about: a title, an album or a book. -->
+{#snippet about(h: any)}
+  {#if h.title_id}<a href="#/title/{h.title_id}"><b>{h.title ?? 'Removed title'}</b></a>
+  {:else if h.data?.want_id}<a href="#/wanted/{h.data.want_id}"><b>{h.data.album}</b></a> <span class="muted">{h.data.artist}</span>
+  {:else if h.data?.book_id}<a href="#/book/{h.data.book_id}"><b>{h.data.book}</b></a> <span class="muted">{(h.data.authors ?? []).join(', ')}</span>{/if}
+{/snippet}
 
 <header class="head">
   <h1>Activity</h1>
@@ -374,7 +387,7 @@
               {@const h = f.work}
               <tr>
                 <td style="white-space:nowrap"><span class="chip {tone(h.kind)}">{HISTORY[h.kind] ?? h.kind}</span></td>
-                <td>{#if h.title_id}<a href="#/title/{h.title_id}"><b>{h.title ?? 'Removed title'}</b></a>{/if}{#if outcome(h)}<div class="muted small">{outcome(h)}</div>{/if}{#if h.data.reason}<div class="err">{h.data.reason}</div>{/if}</td>
+                <td>{@render about(h)}{#if outcome(h)}<div class="muted small">{outcome(h)}</div>{/if}{#if h.data.reason}<div class="err">{h.data.reason}</div>{/if}</td>
                 <td class="muted" style="white-space:nowrap">{ago(h.ts)}</td>
               </tr>
             {/if}
@@ -392,7 +405,7 @@
             <tr>
               <td style="white-space:nowrap"><span class="chip {tone(h.kind)}">{HISTORY[h.kind] ?? h.kind}</span></td>
               <td>
-                {#if h.title_id}<a href="#/title/{h.title_id}"><b>{h.title ?? 'Removed title'}</b></a>{/if}
+                {@render about(h)}
                 {#if h.data.covers}<span class="muted"> {h.data.covers}</span>{/if}
                 <div class="mono faint break">{h.data.release ?? h.data.path ?? h.data.to ?? ''}</div>
                 {#if outcome(h)}<div class="muted small">{outcome(h)}</div>{/if}
