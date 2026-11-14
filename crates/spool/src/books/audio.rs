@@ -224,7 +224,28 @@ pub fn read_book(folder: &Path, ffprobe: Option<&Path>) -> (Vec<AudioFile>, Vec<
         files.push(AudioFile { path: p.to_string_lossy().into_owned(), seconds });
         at += seconds;
     }
+    tidy(&mut chapters);
     (files, chapters, at)
+}
+
+/// Chapters named after their files often all begin "Author - Title - "; what they share up to
+/// its last " - " goes, so each reads as what it is ("001 of 108"). "Chapter 1" and "1-01 …"
+/// share nothing set off that way and are left as they are.
+fn tidy(chapters: &mut [Chapter]) {
+    if chapters.len() < 2 {
+        return;
+    }
+    let first = chapters[0].title.clone();
+    let shared = chapters.iter().skip(1).map(|c| first.chars().zip(c.title.chars()).take_while(|(a, b)| a == b).count()).min().unwrap_or(0);
+    let common: String = first.chars().take(shared).collect();
+    let Some(at) = common.rfind(" - ") else { return };
+    let cut = common[..at + 3].chars().count();
+    for c in chapters.iter_mut() {
+        let rest: String = c.title.chars().skip(cut).collect::<String>().trim_matches([' ', '-', '_', '.']).to_string();
+        if !rest.is_empty() {
+            c.title = rest;
+        }
+    }
 }
 
 /// A name sorted with its numbers as numbers.
@@ -538,6 +559,19 @@ mod tests {
         let r = |t: &str| Release { guid: t.into(), title: t.into(), ..Default::default() };
         let found = vec![(r("Dune MP3"), Kind::Files), (r("Dune Abridged M4B"), Kind::M4b), (r("Dune M4B"), Kind::M4b), (r("Dune Unabridged MP3"), Kind::Files)];
         assert_eq!(best(&found, &[]).unwrap().0.title, "Dune M4B");
+    }
+
+    #[test]
+    fn chapter_names_lose_what_they_all_share() {
+        let mut ch: Vec<Chapter> = ["Alexandre Dumas - The Count of Monte Cristo - 001 of 108", "Alexandre Dumas - The Count of Monte Cristo - 002 of 108"].iter().map(|t| Chapter { title: t.to_string(), start: 0.0 }).collect();
+        tidy(&mut ch);
+        assert_eq!(ch[0].title, "001 of 108");
+        let mut ch: Vec<Chapter> = ["Chapter 1", "Chapter 2"].iter().map(|t| Chapter { title: t.to_string(), start: 0.0 }).collect();
+        tidy(&mut ch);
+        assert_eq!(ch[1].title, "Chapter 2", "nothing set off is shared");
+        let mut ch: Vec<Chapter> = ["1-01 Disc One Intro", "1-02 Recap"].iter().map(|t| Chapter { title: t.to_string(), start: 0.0 }).collect();
+        tidy(&mut ch);
+        assert_eq!(ch[0].title, "1-01 Disc One Intro");
     }
 
     #[test]
