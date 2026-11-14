@@ -121,6 +121,68 @@ pub async fn search(http: &reqwest::Client, q: &str) -> Result<Vec<Group>> {
     Ok(s.release_groups.into_iter().map(Group::from).collect())
 }
 
+/// An artist, as a search finds one.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Artist {
+    pub mbid: String,
+    pub name: String,
+    /// What tells two of the same name apart: "UK rock band".
+    pub disambiguation: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RawArtist {
+    id: String,
+    name: String,
+    score: u32,
+    disambiguation: String,
+    #[serde(rename = "sort-name")]
+    sort_name: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Artists {
+    artists: Vec<RawArtist>,
+}
+
+/// Words as compared: lower case, without accents or punctuation, "&" as "and".
+fn plain(s: &str) -> String {
+    deunicode::deunicode(s).to_lowercase().replace('&', " and ").split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+/// The artist named by what was typed, when it names one outright: "boards of canada",
+/// "Beatles". Typing more than a name ("radiohead ok computer") is a search for albums.
+pub async fn artist(http: &reqwest::Client, q: &str) -> Result<Option<Artist>> {
+    let url = format!("{BASE}/artist?fmt=json&limit=5&query={}", urlencoding::encode(q));
+    let a: Artists = get(http, &url).await?;
+    Ok(named(&a.artists, q))
+}
+
+fn named(found: &[RawArtist], q: &str) -> Option<Artist> {
+    let q = plain(q);
+    let strip = |s: String| s.strip_prefix("the ").map(str::to_string).unwrap_or(s);
+    // The best scored of those whose name is what was typed, "The" or not.
+    found
+        .iter()
+        .filter(|a| a.score >= 80 && (strip(plain(&a.name)) == strip(q.clone()) || plain(&a.sort_name) == q))
+        .max_by_key(|a| a.score)
+        .map(|a| Artist { mbid: a.id.clone(), name: a.name.clone(), disambiguation: a.disambiguation.clone() })
+}
+
+/// An artist's own albums and EPs, oldest first: not live recordings, compilations,
+/// remixes, demos or bootlegs, which have second types.
+pub async fn discography(http: &reqwest::Client, artist_mbid: &str) -> Result<Vec<Group>> {
+    let url = format!("{BASE}/release-group?fmt=json&limit=100&inc=artist-credits&type=album|ep&artist={}", urlencoding::encode(artist_mbid));
+    let s: Search = get(http, &url).await?;
+    let mut out: Vec<Group> = s.release_groups.into_iter().map(Group::from).filter(|g| !g.kind.contains(" · ")).collect();
+    // Albums before EPs, and each oldest first; one with no date last.
+    out.sort_by_key(|g| (g.kind != "Album", if g.year > 0 { g.year } else { i32::MAX }, g.title.to_lowercase()));
+    Ok(out)
+}
+
 pub async fn group(http: &reqwest::Client, mbid: &str) -> Result<Group> {
     let url = format!("{BASE}/release-group/{}?fmt=json&inc=artist-credits", urlencoding::encode(mbid));
     Ok(get::<RawGroup>(http, &url).await?.into())
@@ -169,6 +231,16 @@ mod tests {
         let raw: RawGroup = serde_json::from_str(r#"{"id":"x","title":"Watch the Throne","primary-type":"Album","secondary-types":["Live"],"first-release-date":"2011-08-08","artist-credit":[{"name":"JAY-Z","joinphrase":" & ","artist":{"id":"a1"}},{"name":"Kanye West","joinphrase":"","artist":{"id":"a2"}}]}"#).unwrap();
         let g = Group::from(raw);
         assert_eq!((g.artist.as_str(), g.artist_mbid.as_str(), g.year, g.kind.as_str()), ("JAY-Z & Kanye West", "a1", 2011, "Album · Live"));
+    }
+
+    #[test]
+    fn an_artist_is_taken_only_when_named_outright() {
+        let a = |name: &str, score: u32| RawArtist { id: name.into(), name: name.into(), sort_name: name.into(), score, ..Default::default() };
+        let found = [a("Boards of Canada", 100), a("Boards", 70)];
+        assert_eq!(named(&found, "boards of canada").map(|x| x.name), Some("Boards of Canada".into()));
+        assert_eq!(named(&[a("The Beatles", 100)], "beatles").map(|x| x.name), Some("The Beatles".into()));
+        assert_eq!(named(&[a("Simon & Garfunkel", 100)], "simon and garfunkel").map(|x| x.name), Some("Simon & Garfunkel".into()));
+        assert_eq!(named(&[a("Radiohead", 90)], "radiohead ok computer"), None);
     }
 
     #[test]

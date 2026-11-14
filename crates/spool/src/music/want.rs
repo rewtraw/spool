@@ -302,18 +302,26 @@ fn copy_album(files: &[(PathBuf, PathBuf)], dest: &Path) -> Result<()> {
 }
 
 impl App {
-    /// Albums matching what was typed, each marked if it is wanted or already here.
-    pub async fn album_lookup(&self, q: &str) -> Result<Vec<serde_json::Value>> {
+    /// Albums matching what was typed, each marked if it is wanted or already here. When
+    /// what was typed is an artist's name, that artist and their own albums come first.
+    pub async fn album_lookup(&self, q: &str) -> Result<serde_json::Value> {
+        let artist = musicbrainz::artist(&self.http, q).await.unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "artists not searched");
+            None
+        });
+        let own = match &artist {
+            Some(a) => musicbrainz::discography(&self.http, &a.mbid).await.unwrap_or_default(),
+            None => vec![],
+        };
         let found = musicbrainz::search(&self.http, q).await?;
         let wants = self.db.music_wants()?;
-        Ok(found
-            .into_iter()
-            .map(|g| {
-                let want = wants.iter().find(|w| w.mbid == g.mbid);
-                let have = self.album_in_library(&g.artist, &g.title).is_some();
-                serde_json::json!({"cover": g.cover(), "group": g, "want_id": want.map(|w| w.id), "state": want.map(|w| w.state.as_str()), "have": have})
-            })
-            .collect())
+        let row = |g: Group| {
+            let want = wants.iter().find(|w| w.mbid == g.mbid);
+            let have = self.album_in_library(&g.artist, &g.title).is_some();
+            serde_json::json!({"cover": g.cover(), "group": g, "want_id": want.map(|w| w.id), "state": want.map(|w| w.state.as_str()), "have": have})
+        };
+        let others: Vec<_> = found.into_iter().filter(|g| !own.iter().any(|o| o.mbid == g.mbid)).map(row).collect();
+        Ok(serde_json::json!({"artist": artist, "albums": own.into_iter().map(row).collect::<Vec<_>>(), "others": others}))
     }
 
     /// The album in the library by this artist with this name, if there is one.

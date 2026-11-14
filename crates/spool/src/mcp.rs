@@ -229,7 +229,7 @@ const TOOLS: &[Tool] = &[
         name: "find_album",
         read: true,
         destructive: false,
-        description: "Search MusicBrainz for an album by artist and/or album name. Returns release groups with their mbid for want_album, whether each is already in the library, and want_id when it is already wanted.",
+        description: "Search MusicBrainz for an album by artist and/or album name. When the query is an artist's name, returns that artist and their own albums and EPs (oldest first) as artist_albums; other_matches are albums found by name. Each has its mbid for want_album, whether it is already in the library, and want_id when it is already wanted.",
         schema: || obj(json!({"query": {"type": "string"}}), &["query"]),
     },
     Tool {
@@ -1046,7 +1046,8 @@ impl Mcp {
             "find_album" => {
                 let q = a["query"].as_str().unwrap_or("").trim();
                 let found = self.get(&format!("/api/music/find?q={}", urlencoding::encode(q))).await?;
-                Ok(json!(found.as_array().into_iter().flatten().map(|r| json!({"mbid": r["group"]["mbid"], "title": r["group"]["title"], "artist": r["group"]["artist"], "year": r["group"]["year"], "kind": r["group"]["kind"], "in_library": r["have"], "want_id": r["want_id"]})).collect::<Vec<_>>()))
+                let rows = |k: &str| found[k].as_array().into_iter().flatten().map(|r| json!({"mbid": r["group"]["mbid"], "title": r["group"]["title"], "artist": r["group"]["artist"], "year": r["group"]["year"], "kind": r["group"]["kind"], "in_library": r["have"], "want_id": r["want_id"]})).collect::<Vec<_>>();
+                Ok(json!({"artist": found["artist"], "artist_albums": rows("albums"), "other_matches": rows("others")}))
             }
             "want_album" => {
                 let w = self.post("/api/music/wants", json!({"mbid": a["mbid"].as_str().ok_or("mbid is required")?})).await?;

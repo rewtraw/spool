@@ -14,7 +14,10 @@
   let query = $state(route.query.get('q') ?? '');
   type Found = Title & { library_id?: number | null; anime?: { format: string; episodes: number; name: string; as_series?: boolean } };
   let found = $state<{ movies: Found[]; series: Found[]; movies_error?: string | null }>({ movies: [], series: [] });
+  // Albums: an artist's own first, when what was typed is their name, then the rest.
   let albums = $state<any[]>([]);
+  let artist = $state<{ name: string; disambiguation: string } | null>(null);
+  let ownAlbums = $state(0);
   let books = $state<any[]>([]);
   let partErrors = $state<{ music?: string; books?: string }>({});
   // The kind asked for first, then what the other kind has under the same name.
@@ -57,6 +60,8 @@
     if (!q) {
       found = { movies: [], series: [] };
       albums = [];
+      artist = null;
+      ownAlbums = 0;
       books = [];
       did = {};
       searched = false;
@@ -77,9 +82,9 @@
     // Album and book searches need two letters or more.
     if (want('music') && q.length > 1)
       parts.push(
-        api.get<any[]>(`/music/find?q=${encodeURIComponent(q)}`).then(
-          (r) => { if (mine === seq) { albums = r; did.music = q; partErrors.music = ''; } },
-          (e) => { if (mine === seq) { albums = []; partErrors.music = e.message; } },
+        api.get<{ artist: any; albums: any[]; others: any[] }>(`/music/find?q=${encodeURIComponent(q)}`).then(
+          (r) => { if (mine === seq) { albums = [...r.albums, ...r.others]; artist = r.artist; ownAlbums = r.albums.length; did.music = q; partErrors.music = ''; } },
+          (e) => { if (mine === seq) { albums = []; artist = null; ownAlbums = 0; partErrors.music = e.message; } },
         ),
       );
     if (want('books') && q.length > 1)
@@ -219,7 +224,7 @@
 <!-- "Everything" shows a few of each kind, small, to choose from or to see more of. -->
 {#snippet mini(cover: string | null | undefined, square: boolean, name: string, line: string, action: import('svelte').Snippet)}
   <div class="card mini">
-    <div class="thumb" class:square>{#if cover}<img src={cover} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')} />{/if}</div>
+    <div class="thumb" class:cd={square}>{#if cover}<img src={cover} alt="" loading="lazy" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')} />{/if}</div>
     <div class="grow body">
       <b class="clamp">{name}</b>
       <span class="faint small clamp">{line}</span>
@@ -254,7 +259,7 @@
     {/if}
   {/each}
   {#if albums.length}
-    <div class="section-title">Albums</div>
+    <div class="section-title">{artist && ownAlbums ? `Albums by ${artist.name}` : 'Albums'}</div>
     <div class="minis">
       {#each albums.slice(0, FEW) as r (r.group.mbid)}
         {#snippet act()}{#if r.have}<a class="btn small" href="#/library?kind=music">In library</a>{:else if r.want_id}<a class="btn small" href="#/wanted/{r.want_id}">{WANT_LABEL[r.state] ?? 'Wanted'}</a>{:else}<button class="btn small primary" onclick={() => wantAlbum(r)}>Want</button>{/if}{/snippet}
@@ -278,7 +283,16 @@
   {:else if !albums.length}<div class="card empty">MusicBrainz has no album for “{query.trim()}”.</div>
   {:else}
     <p class="faint source">Albums, from MusicBrainz. Spool looks for a FLAC copy, or 320k when there is none, and files it in the music folder.</p>
-    <div class="results">{#each albums as r (r.group.mbid)}{@render album(r)}{/each}</div>
+    {#if artist && ownAlbums}
+      <div class="artist">
+        <h2>{artist.name}</h2>
+        {#if artist.disambiguation}<span class="faint">{artist.disambiguation}</span>{/if}
+        <span class="faint small">· {ownAlbums} albums and EPs, oldest first</span>
+      </div>
+      <div class="results">{#each albums.slice(0, ownAlbums) as r (r.group.mbid)}{@render album(r)}{/each}</div>
+      {#if albums.length > ownAlbums}<div class="section-title">Other matches</div>{/if}
+    {/if}
+    <div class="results">{#each albums.slice(artist ? ownAlbums : 0) as r (r.group.mbid)}{@render album(r)}{/each}</div>
   {/if}
 {:else if kind === 'books'}
   {#if partErrors.books}<div class="card empty">{partErrors.books}</div>
@@ -390,6 +404,16 @@
   .more {
     margin-top: 10px;
   }
+  .artist {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    margin: 6px 0 14px;
+  }
+  .artist h2 {
+    margin: 0;
+  }
   .minis {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
@@ -425,7 +449,7 @@
     background: var(--raised);
     align-self: flex-start;
   }
-  .thumb.square {
+  .thumb.cd {
     aspect-ratio: 1;
   }
   .thumb img {
