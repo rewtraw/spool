@@ -120,8 +120,10 @@
     <div class="section-title">Audiobook</div>
     <div class="card audio">
       {#if a.state === 'have'}
-        <div class="faint small">{hours(a.seconds)} · {a.chapters.length} {a.chapters.length === 1 ? 'chapter' : 'chapters'}{a.release ? ` · ${a.release.title}` : ''}</div>
-        <div class="faint small mono path">{a.folder}</div>
+        {@const parts = a.chapters.every((c) => /^Part \d+$/.test(c.title))}
+        <div class="head faint small" title={a.folder}>
+          {hours(a.seconds)} · {a.chapters.length} {parts ? (a.chapters.length === 1 ? 'part' : 'parts') : a.chapters.length === 1 ? 'chapter' : 'chapters'} · {(a.files[0]?.path.split('.').pop() ?? (a.kind === 'm4b' ? 'm4b' : '')).toUpperCase()}
+        </div>
         <ol class="chapters">
           {#each a.chapters as c, i}
             <li class:now={listening && chapterAt(player.now) === i}>
@@ -223,21 +225,29 @@
     display: grid;
     gap: 8px;
   }
-  .path {
-    word-break: break-all;
+  .audio:has(.chapters) {
+    gap: 0;
+    overflow: hidden;
+  }
+  .audio:not(:has(.chapters)) {
+    padding: 12px 14px;
+  }
+  .head {
+    padding: 10px 14px;
   }
   .chapters {
     list-style: none;
     padding: 0;
-    margin: 4px 0 0;
+    margin: 0;
     max-height: 420px;
     overflow-y: auto;
   }
   .chapter {
     display: flex;
+    align-items: baseline;
     gap: 10px;
     width: 100%;
-    padding: 8px 4px;
+    padding: 9px 14px;
     border: 0;
     border-top: 1px solid var(--line);
     background: none;

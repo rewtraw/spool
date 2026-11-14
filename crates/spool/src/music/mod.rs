@@ -7,6 +7,7 @@
 //! and file names where the tags say nothing. Ids are kept from one scan to the next: a
 //! track by its path, an album by its folder, an artist by its name.
 
+mod art;
 pub mod cast;
 pub mod musicbrainz;
 pub mod scan;

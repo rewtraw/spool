@@ -64,6 +64,8 @@ pub struct Audio {
     /// The folder it was filed in, and what is in it, in order.
     pub folder: String,
     pub files: Vec<AudioFile>,
+    /// Tidied as they are read too, so books filed before a better tidy read the same.
+    #[serde(deserialize_with = "tidied")]
     pub chapters: Vec<Chapter>,
     pub seconds: f64,
     /// A finished download to clear away once the filing is saved, so that losing the save
@@ -231,10 +233,33 @@ pub fn read_book(folder: &Path, ffprobe: Option<&Path>) -> (Vec<AudioFile>, Vec<
 /// Chapters named after their files often all begin "Author - Title - "; what they share up to
 /// its last " - " goes, so each reads as what it is ("001 of 108"). "Chapter 1" and "1-01 …"
 /// share nothing set off that way and are left as they are.
+fn tidied<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Chapter>, D::Error> {
+    let mut chapters = Vec::<Chapter>::deserialize(d)?;
+    tidy(&mut chapters);
+    Ok(chapters)
+}
+
 fn tidy(chapters: &mut [Chapter]) {
     if chapters.len() < 2 {
         return;
     }
+    cut_shared(chapters);
+    // Left with only a number ("001 of 108", "07"), a file is a part, not a named chapter.
+    let numbered = |t: &str| {
+        let t = t.split(" of ").next().unwrap_or(t);
+        !t.is_empty() && t.chars().all(|c| c.is_ascii_digit())
+    };
+    if chapters.iter().all(|c| numbered(&c.title) || c.title.starts_with("Part ")) {
+        for c in chapters.iter_mut() {
+            if numbered(&c.title) {
+                let n: u64 = c.title.split(" of ").next().and_then(|n| n.parse().ok()).unwrap_or(0);
+                c.title = format!("Part {n}");
+            }
+        }
+    }
+}
+
+fn cut_shared(chapters: &mut [Chapter]) {
     let first = chapters[0].title.clone();
     let shared = chapters.iter().skip(1).map(|c| first.chars().zip(c.title.chars()).take_while(|(a, b)| a == b).count()).min().unwrap_or(0);
     let common: String = first.chars().take(shared).collect();
@@ -565,7 +590,9 @@ mod tests {
     fn chapter_names_lose_what_they_all_share() {
         let mut ch: Vec<Chapter> = ["Alexandre Dumas - The Count of Monte Cristo - 001 of 108", "Alexandre Dumas - The Count of Monte Cristo - 002 of 108"].iter().map(|t| Chapter { title: t.to_string(), start: 0.0 }).collect();
         tidy(&mut ch);
-        assert_eq!(ch[0].title, "001 of 108");
+        assert_eq!(ch[0].title, "Part 1");
+        tidy(&mut ch);
+        assert_eq!(ch[1].title, "Part 2", "tidying twice changes nothing");
         let mut ch: Vec<Chapter> = ["Chapter 1", "Chapter 2"].iter().map(|t| Chapter { title: t.to_string(), start: 0.0 }).collect();
         tidy(&mut ch);
         assert_eq!(ch[1].title, "Chapter 2", "nothing set off is shared");

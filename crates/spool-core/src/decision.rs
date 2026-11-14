@@ -50,6 +50,11 @@ pub struct Candidate {
     pub efficient_codec: bool,
     /// What the name says about how the release will play. See [`PlaybackTraits`].
     pub playback: PlaybackTraits,
+    /// How much the name leaves in doubt that it is this title at all: 0 when it names the
+    /// episode it says it is, or doubt has never arisen; 1 when it names no episode and the
+    /// title has a namesake whose episodes have been taken for its own; 2 when it names
+    /// another episode, a namesake's. Weighed before anything but playing at all.
+    pub doubt: u8,
 }
 
 /// Properties of a release, read from its name, that decide whether a typical streaming box
@@ -329,7 +334,7 @@ pub fn compare(a: &Candidate, b: &Candidate, profile: &QualityProfile, policy: P
     let tail = a.indexer_priority.cmp(&b.indexer_priority).then_with(|| b.item_count.cmp(&a.item_count)).then_with(|| age_bucket(a.age_days).cmp(&age_bucket(b.age_days)));
 
     match profile.target_size_gb {
-        None => unplayable(a).cmp(&unplayable(b)).then(unheard(a).cmp(&unheard(b))).then(quality).then(revision).then(codec).then(tail).then_with(|| size_bucket(b.size_bytes).cmp(&size_bucket(a.size_bytes))),
+        None => unplayable(a).cmp(&unplayable(b)).then(a.doubt.cmp(&b.doubt)).then(unheard(a).cmp(&unheard(b))).then(quality).then(revision).then(codec).then(tail).then_with(|| size_bucket(b.size_bytes).cmp(&size_bucket(a.size_bytes))),
         Some((lo, hi)) => {
             // Unknown sizes are treated as fitting; indexers nearly always report one.
             let over = |c: &Candidate| c.size_bytes > 0 && gb(c) > hi;
@@ -338,7 +343,7 @@ pub fn compare(a: &Candidate, b: &Candidate, profile: &QualityProfile, policy: P
                 let g = gb(c);
                 (if g < lo { lo - g } else if g > hi { g - hi } else { 0.0 }).round() as i64
             };
-            unplayable(a).cmp(&unplayable(b)).then(over(a).cmp(&over(b))).then(unheard(a).cmp(&unheard(b))).then_with(|| {
+            unplayable(a).cmp(&unplayable(b)).then(a.doubt.cmp(&b.doubt)).then(over(a).cmp(&over(b))).then(unheard(a).cmp(&unheard(b))).then_with(|| {
                 if over(a) {
                     // Both too big: the smaller overshoot wins before quality is considered.
                     distance(a).cmp(&distance(b)).then(quality).then(revision).then(codec).then(tail)
@@ -357,7 +362,7 @@ mod tests {
     use crate::quality::{Quality, Revision};
 
     fn cand(q: Quality) -> Candidate {
-        Candidate { quality: QualityModel::new(q), size_bytes: 8 << 30, age_days: 2.0, languages: vec![], release_group: Some("GRP".into()), indexer_priority: 25, item_count: 1, dubbed: false, speaks_wanted: true, full_season: false, multi_season: false, efficient_codec: false, playback: PlaybackTraits::default() }
+        Candidate { quality: QualityModel::new(q), size_bytes: 8 << 30, age_days: 2.0, languages: vec![], release_group: Some("GRP".into()), indexer_priority: 25, item_count: 1, dubbed: false, speaks_wanted: true, full_season: false, multi_season: false, efficient_codec: false, playback: PlaybackTraits::default(), doubt: 0 }
     }
 
     fn ctx<'a>(p: &'a QualityProfile, existing: &'a [ExistingFile]) -> Context<'a> {
@@ -455,6 +460,15 @@ mod tests {
         p.target_size_gb = Some((15.0, 25.0));
         p.prefer_efficient_codec = true;
         p
+    }
+
+    #[test]
+    fn a_release_in_doubt_goes_after_one_that_is_not() {
+        let p = lean();
+        // An unnamed release that fits the target loses to a named one over it, once doubt has arisen.
+        let unnamed = Candidate { doubt: 1, ..sized(Quality::Webdl1080p, 2, true) };
+        let pick = best(vec![unnamed, sized(Quality::Bluray1080p, 40, false)], &p);
+        assert_eq!(pick.quality.quality, Quality::Bluray1080p);
     }
 
     #[test]

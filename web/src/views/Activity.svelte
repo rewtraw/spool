@@ -167,12 +167,15 @@
     album_failed: 'Album download did not do',
     book_got: 'Book got',
     book_failed: 'Book file did not do',
+    audiobook_filed: 'Audiobook filed',
+    audiobook_failed: 'Audiobook download did not do',
   };
   /** What a finished piece of work came to, in a line: sizes, how long it took and with what. */
   function outcome(h: any): string {
     const d = h.data ?? {};
     if (h.kind === 'compact_made') return [`${bytes(d.from_bytes ?? 0)} to ${bytes(d.bytes ?? 0)}`, d.seconds ? `in ${duration(d.seconds)}` : '', d.how === 'hardware' ? 'on the video hardware' : d.how === 'software' ? 'on the processor' : ''].filter(Boolean).join(' · ');
     if (h.kind === 'moved') return [d.bytes ? bytes(d.bytes) : '', d.kept_original ? 'the original stays where it was' : ''].filter(Boolean).join(' · ');
+    if (h.kind === 'audiobook_filed') return [d.seconds ? `${Math.round(d.seconds / 360) / 10} h` : '', d.size ? bytes(d.size) : '', d.indexer ?? ''].filter(Boolean).join(' · ');
     if (h.kind === 'album_filed') return [d.size ? bytes(d.size) : '', d.indexer ?? ''].filter(Boolean).join(' · ');
     if (h.kind === 'book_got') return d.florilegium ? 'sent to Florilegium' : d.kept ? 'kept in Spool' : '';
     return '';
@@ -181,7 +184,7 @@
   const finished = $derived(
     [...recent.map((i: any) => ({ at: i.acquisition.updated_at, item: i })), ...(data.done ?? []).map((h: any) => ({ at: h.ts, work: h }))].sort((a, b) => b.at - a.at).slice(0, 30),
   );
-  const tone = (k: string) => (['download_failed', 'file_missing', 'compact_failed', 'album_failed', 'book_failed'].includes(k) ? 'bad' : ['compact_made', 'imported', 'upgraded', 'album_filed', 'book_got'].includes(k) ? 'ok' : k === 'would_grab' ? 'warn' : '');
+  const tone = (k: string) => (['download_failed', 'file_missing', 'compact_failed', 'album_failed', 'book_failed', 'audiobook_failed'].includes(k) ? 'bad' : ['compact_made', 'imported', 'upgraded', 'album_filed', 'book_got', 'audiobook_filed'].includes(k) ? 'ok' : k === 'would_grab' ? 'warn' : '');
 </script>
 
 <!-- What a piece of history is about: a title, an album or a book. -->

@@ -153,7 +153,34 @@ struct Search {
 pub async fn search(http: &reqwest::Client, q: &str) -> Result<Vec<Group>> {
     let url = format!("{BASE}/release-group?fmt=json&limit=25&query={}", urlencoding::encode(&escape(q)));
     let s: Search = get(http, &url).await?;
-    Ok(s.release_groups.into_iter().map(Group::from).collect())
+    Ok(albums_first(s.release_groups.into_iter().map(Group::from).collect()))
+}
+
+/// Of releases of one name by one artist ("Rage Against the Machine", the album and the EP;
+/// "Sunday at the Village Vanguard", the album and a later compilation), the album itself
+/// comes first, wherever the search put each: a plain album, then a live album or a
+/// soundtrack, then a compilation, an EP, a single; the earlier first between equals. "Bill
+/// Evans Trio featuring Scott LaFaro" is Bill Evans here.
+fn albums_first(found: Vec<Group>) -> Vec<Group> {
+    let same = |a: &Group, b: &Group| {
+        let (x, y) = (plain(&a.artist), plain(&b.artist));
+        plain(&a.title) == plain(&b.title) && (x.starts_with(&y) || y.starts_with(&x))
+    };
+    let rank = |g: &Group| match g.kind.as_str() {
+        "Album" => 0,
+        k if k.starts_with("Album") && !k.contains("Compilation") => 1,
+        k if k.starts_with("Album") => 2,
+        "EP" => 3,
+        "Single" => 4,
+        _ => 5,
+    };
+    let mut ranked: Vec<(usize, u8, i32, usize, Group)> = found
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (found.iter().position(|o| same(o, g)).unwrap_or(i), rank(g), if g.year > 0 { g.year } else { 9999 }, i, g.clone()))
+        .collect();
+    ranked.sort_by_key(|(at, rank, year, i, _)| (*at, *rank, *year, *i));
+    ranked.into_iter().map(|(.., g)| g).collect()
 }
 
 /// An artist, as a search finds one.
@@ -260,6 +287,19 @@ fn counts(releases: &[Release]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_album_comes_before_an_ep_of_its_name() {
+        let g = |title: &str, kind: &str| Group { title: title.into(), artist: "Rage Against the Machine".into(), kind: kind.into(), ..Default::default() };
+        let found = albums_first(vec![g("Rage Against the Machine", "EP"), g("Evil Empire", "Album"), g("Rage Against the Machine", "Album")]);
+        let order: Vec<_> = found.iter().map(|g| (g.title.as_str(), g.kind.as_str())).collect();
+        assert_eq!(order, [("Rage Against the Machine", "Album"), ("Rage Against the Machine", "EP"), ("Evil Empire", "Album")]);
+        let found = albums_first(vec![
+            Group { title: "Sunday At The Village Vanguard".into(), artist: "Bill Evans".into(), kind: "Album · Compilation".into(), year: 2012, ..Default::default() },
+            Group { title: "Sunday at the Village Vanguard".into(), artist: "Bill Evans Trio featuring Scott LaFaro".into(), kind: "Album · Live".into(), year: 1961, ..Default::default() },
+        ]);
+        assert_eq!(found[0].year, 1961);
+    }
 
     #[test]
     fn a_group_reads_its_artists_and_year() {

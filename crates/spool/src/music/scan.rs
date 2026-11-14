@@ -125,6 +125,108 @@ pub fn from_folder_name(name: &str) -> (String, String, i32) {
     }
 }
 
+/// Words that make a part of an album's name about the edition, not the album: "(Super
+/// Deluxe)", ": 30th Anniversary Edition", " - REALISTIK MASTER - March 27 2024".
+const EDITION: &[&str] = &["deluxe", "edition", "remaster", "remastered", "remasters", "expanded", "anniversary", "anniv", "reissue", "master", "mastered", "bonus", "collector", "collectors", "limited", "mono", "stereo", "cd", "2cd", "3cd", "version", "mix", "sped"];
+/// Of those, the ones that leave no doubt when they end a name without brackets.
+const EDITION_SURE: &[&str] = &["deluxe", "edition", "remaster", "remastered", "expanded", "anniversary", "cd", "2cd", "3cd"];
+
+/// An album's name without what it says about the edition: "Born To Run 30th Anniversary
+/// Edition" is Born To Run, "Abbey Road (Super Deluxe Edition)" is Abbey Road.
+pub fn album_name(title: &str) -> String {
+    let words = |s: &str| s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(|w| w.to_lowercase()).collect::<Vec<_>>();
+    let about_edition = |s: &str| words(s).iter().any(|w| EDITION.contains(&w.as_str()));
+    let mut s = title.trim().to_string();
+    loop {
+        let before = s.clone();
+        // A bracketed part at the end.
+        if let Some(open) = match s.chars().last() {
+            Some(')') => s.rfind('('),
+            Some(']') => s.rfind('['),
+            _ => None,
+        } {
+            if open > 0 && about_edition(&s[open..]) {
+                s = s[..open].trim_end().to_string();
+            }
+        }
+        // A part set off by a colon or a dash at the end.
+        // The first such part from which on everything is about the edition goes, and the rest with it.
+        for sep in [": ", " - ", " – "] {
+            if let Some((at, _)) = s.match_indices(sep).find(|(at, _)| *at > 0 && about_edition(&s[at + sep.len()..])) {
+                s = s[..at].trim_end().to_string();
+            }
+        }
+        // Edition words ending the name, with the ordinal or year before them: "30th Anniversary Edition".
+        let ws: Vec<&str> = s.split(' ').collect();
+        let mut cut = ws.len();
+        while cut > 1 {
+            let w = ws[cut - 1].to_lowercase();
+            let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+            let ordinal = ["st", "nd", "rd", "th"].iter().any(|s| w.strip_suffix(s).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())));
+            if EDITION.contains(&w) || ordinal || w == "super" {
+                cut -= 1;
+            } else {
+                break;
+            }
+        }
+        // One word alone ("New Edition", "Special Mix") may be the name itself; two or more, or a
+        // plain "CD", are not.
+        let tail: Vec<String> = ws[cut..].iter().map(|w| w.to_lowercase().trim_matches(|c: char| !c.is_alphanumeric()).to_string()).collect();
+        let sure = tail.iter().any(|w| EDITION_SURE.contains(&w.as_str())) && (tail.len() > 1 || ["cd", "2cd", "3cd", "remastered"].contains(&tail[0].as_str()));
+        if cut < ws.len() && sure {
+            s = ws[..cut].join(" ").trim_end_matches([' ', '-', ':', ',']).to_string();
+        }
+        if s == before {
+            break;
+        }
+    }
+    if s.is_empty() { title.trim().to_string() } else { s }
+}
+
+/// Album artists that are the shop it came from, not anyone who made it.
+const SHOPS: &[&str] = &["tidal", "spotify", "deezer", "qobuz", "apple music", "amazon music", "itunes", "bandcamp"];
+
+/// Put right what the files alone get wrong: an album Spool filed is called what MusicBrainz
+/// calls it, and a file loose in a music folder, not in an album's, is named for itself.
+pub fn named_better(gathered: &mut [Gathered], roots: &[String], wants: &[super::want::Want]) {
+    for g in gathered.iter_mut() {
+        if let Some(w) = wants.iter().find(|w| !w.folder.is_empty() && w.folder == g.folder) {
+            g.title = w.title.clone();
+            if w.year > 0 {
+                g.year = w.year;
+            }
+        } else if roots.iter().any(|r| Path::new(r) == Path::new(&g.folder)) {
+            if let [t] = g.tracks.as_slice() {
+                if g.title.is_empty() || g.title == Path::new(&g.folder).file_name().and_then(|n| n.to_str()).unwrap_or("") {
+                    g.title = readable(Path::new(&t.path).file_stem().and_then(|s| s.to_str()).unwrap_or(""));
+                }
+            }
+        }
+    }
+}
+
+/// A file's name made readable: "Tokemak.Radio.v1.2 [558699867]" is "Tokemak Radio v1.2".
+fn readable(stem: &str) -> String {
+    let mut s = stem.trim().to_string();
+    while s.ends_with(']') {
+        match s.rfind('[') {
+            Some(i) => s = s[..i].trim_end().to_string(),
+            None => break,
+        }
+    }
+    for ext in [".mp4", ".mkv", ".m4a", ".mp3", ".flac"] {
+        if let Some(t) = s.strip_suffix(ext) {
+            s = t.to_string();
+        }
+    }
+    if !s.contains(' ') {
+        // Dots between words, but not inside a version number.
+        let chars: Vec<char> = s.chars().collect();
+        s = chars.iter().enumerate().map(|(i, c)| if *c == '.' && !(i > 0 && chars[i - 1].is_ascii_digit() && chars.get(i + 1).is_some_and(|n| n.is_ascii_digit())) { ' ' } else { *c }).collect();
+    }
+    s.trim().to_string()
+}
+
 /// What a file named like "07. Artist - Title.flac" or "1-02 Title.wav" says: disc, track
 /// and title. The artist's name, when it leads the title, is taken off.
 pub fn from_file_name(stem: &str, artist: &str) -> (Option<u32>, Option<u32>, String) {
@@ -251,7 +353,7 @@ pub fn gather(files: Vec<(Read, Option<u32>)>) -> Vec<Gathered> {
     for (folder, reads) in by_folder {
         let name = folder.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let (f_artist, f_album, f_year) = from_folder_name(name);
-        let album_artist = most_common(reads.iter().map(|(r, _)| r.album_artist.as_str()));
+        let album_artist = Some(most_common(reads.iter().map(|(r, _)| r.album_artist.as_str()))).filter(|a| !SHOPS.contains(&a.to_lowercase().as_str())).unwrap_or_default();
         let artists: Vec<&str> = reads.iter().map(|(r, _)| r.track.artist.as_str()).filter(|a| !a.is_empty()).collect();
         let distinct = {
             let mut d: Vec<&str> = artists.clone();
@@ -271,7 +373,14 @@ pub fn gather(files: Vec<(Read, Option<u32>)>) -> Vec<Gathered> {
             "Unknown Artist".to_string()
         };
         let title = Some(most_common(reads.iter().map(|(r, _)| r.album.as_str()))).filter(|t| !t.is_empty()).unwrap_or(f_album);
-        let year = reads.iter().map(|(r, _)| r.track.year).filter(|y| *y > 0).min().unwrap_or(f_year);
+        let title = album_name(&title);
+        // Tags often give the year of the reissue; a folder's name, the album's own.
+        let tagged = reads.iter().map(|(r, _)| r.track.year).filter(|y| *y > 0).min();
+        let year = match tagged {
+            Some(t) if f_year > 0 => t.min(f_year),
+            Some(t) => t,
+            None => f_year,
+        };
         let genre = most_common(reads.iter().map(|(r, _)| r.track.genre.as_str()));
         let mbid = most_common(reads.iter().map(|(r, _)| r.mb_album.as_str()));
         let tracks: Vec<Track> = reads
@@ -381,7 +490,9 @@ impl App {
         })
         .await?;
         let read_count = self.music.scan.lock().read;
-        let gathered = tokio::task::spawn_blocking(move || gather(reads)).await?;
+        let mut gathered = tokio::task::spawn_blocking(move || gather(reads)).await?;
+        let root_paths: Vec<String> = roots.iter().map(|(r, _)| r.clone()).collect();
+        named_better(&mut gathered, &root_paths, &self.db.music_wants().unwrap_or_default());
         let (albums, tracks) = (gathered.len(), gathered.iter().map(|g| g.tracks.len()).sum::<usize>());
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || save(&db, &gathered, &read)).await??;
@@ -552,6 +663,39 @@ mod tests {
     fn read(path: &str, artist: &str, album: &str, album_artist: &str, title: &str) -> (Read, Option<u32>) {
         let (_, disc) = album_folder(Path::new(path));
         (Read { track: Track { path: path.into(), artist: artist.into(), title: title.into(), ..Default::default() }, album: album.into(), album_artist: album_artist.into(), mb_album: String::new() }, disc)
+    }
+
+    #[test]
+    fn album_names_lose_what_they_say_about_the_edition() {
+        for (from, to) in [
+            ("Abbey Road (Super Deluxe Edition)", "Abbey Road"),
+            ("Rumours (Super Deluxe)", "Rumours"),
+            ("Born To Run 30th Anniversary Edition", "Born To Run"),
+            ("(What's The Story) Morning Glory: 30th Anniversary Deluxe Edition", "(What's The Story) Morning Glory"),
+            ("Dubnobasswithmyheadman (Super Deluxe 20th Anniversary)", "Dubnobasswithmyheadman"),
+            ("Queen 40 Limited Edition", "Queen 40"),
+            ("Music From Big Pink CD", "Music From Big Pink"),
+            ("II (10th Anniversary Sped-up Edition)", "II"),
+            ("Diamond-Jubilee - REALISTIK MASTER - March 27 2024", "Diamond-Jubilee"),
+            ("In Utero (30th Anniversary Super Deluxe Edition)", "In Utero"),
+            ("Astral Weeks: Live At The Hollywood Bowl", "Astral Weeks: Live At The Hollywood Bowl"),
+            ("Illmatic XX", "Illmatic XX"),
+            ("Mix-Up", "Mix-Up"),
+            ("Deluxe", "Deluxe"),
+            ("New Edition", "New Edition"),
+            ("Live 東京", "Live 東京"),
+            ("Heartbreak City 東京 (Deluxe Edition)", "Heartbreak City 東京"),
+            ("The Velvet Underground & Nico (45th Anniversary Edition)", "The Velvet Underground & Nico"),
+        ] {
+            assert_eq!(album_name(from), to, "{from}");
+        }
+    }
+
+    #[test]
+    fn loose_files_are_named_for_themselves_and_filed_albums_as_wanted() {
+        let mut g = vec![Gathered { folder: "/m".into(), title: "m".into(), tracks: vec![Track { path: "/m/Tokemak.Radio.v1.2.mp4 [558699867].mp4".into(), ..Default::default() }], ..Default::default() }];
+        named_better(&mut g, &["/m".into()], &[]);
+        assert_eq!(g[0].title, "Tokemak Radio v1.2");
     }
 
     #[test]

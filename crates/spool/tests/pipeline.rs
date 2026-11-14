@@ -1904,7 +1904,8 @@ async fn files_that_hold_more_or_less_than_their_name_says_are_noticed() {
     assert!(tree(&w.root.join("TV Shows/Double Show")).iter().any(|f| f.contains("S01E01-02")), "{:?}", tree(&w.root.join("TV Shows/Double Show")));
 
     // Named as one episode and as long as two, when the next is already here: more likely an
-    // episode of another show with the same name. Asked, and a yes files it as the one it says.
+    // episode of another show with the same name. Chosen by Spool, it is thrown out, kept from
+    // being chosen again, and another looked for.
     let (other, eps) = w.series("Other Show", 504, &[(1, 1, "One"), (1, 2, "Two"), (1, 3, "Three")]);
     minute_long(&w, &other);
     w.release("Other.Show.S01E02.1080p.WEB.H264-GRP", &[("o2.mkv", &short)]);
@@ -1912,26 +1913,11 @@ async fn files_that_hold_more_or_less_than_their_name_says_are_noticed() {
     w.wait_state(other.id, AcqState::Imported).await;
     w.release("Other.Show.S01E01.1080p.WEB.H264-GRP", &[("o1.mkv", &double)]);
     w.app.search(other.id, Scope::Episode(eps[0]), true, true).await.unwrap();
-    let stopped = w.wait_state(other.id, AcqState::ImportBlocked).await;
-    assert!(stopped.error.as_deref().unwrap_or_default().contains("an episode of another show"), "{:?}", stopped.error);
-    // Tried again, it is checked again, and stopped for the same reason.
-    let api = spool::api::router(w.app.clone());
-    let (status, _) = call(&api, "POST", &format!("/api/activity/{}/retry_import", stopped.id), serde_json::json!({})).await;
-    assert_eq!(status, 200);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let again = w.wait_state(other.id, AcqState::ImportBlocked).await;
-    assert_eq!(again.id, stopped.id);
-    // Imported anyway, it goes in as the one episode it says it is.
-    let (status, _) = call(&api, "POST", &format!("/api/activity/{}/import_anyway", stopped.id), serde_json::json!({})).await;
-    assert_eq!(status, 200);
-    for _ in 0..200 {
-        if w.app.db.episodes(other.id).unwrap()[0].file_id.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    let thrown = w.wait_state(other.id, AcqState::Failed).await;
+    assert!(thrown.error.as_deref().unwrap_or_default().contains("an episode of another show"), "{:?}", thrown.error);
+    assert!(w.app.db.blocklisted(other.id).unwrap().iter().any(|(_, name)| name == "Other.Show.S01E01.1080p.WEB.H264-GRP"));
     let have: Vec<bool> = w.app.db.episodes(other.id).unwrap().iter().map(|e| e.file_id.is_some()).collect();
-    assert_eq!(have, [true, true, false]);
+    assert_eq!(have, [false, true, false]);
 
     // A whole season run together into one file: all its episodes are not counted without a yes.
     let four = [(1, 1, "One"), (1, 2, "Two"), (1, 3, "Three"), (1, 4, "Four")];

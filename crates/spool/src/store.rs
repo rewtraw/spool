@@ -851,6 +851,11 @@ impl Db {
         Ok(())
     }
 
+    /// Whether a release was kept out of this title for a reason that says `words`.
+    pub fn blocklist_says(&self, title_id: i64, words: &str) -> Result<bool> {
+        self.with(|c| Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM blocklist WHERE title_id = ?1 AND instr(reason, ?2) > 0)", params![title_id, words], |r| r.get(0))?))
+    }
+
     pub fn blocklisted(&self, title_id: i64) -> Result<Vec<(String, String)>> {
         self.with(|c| {
             let mut s = c.prepare("SELECT guid, release_title FROM blocklist WHERE title_id = ?1")?;

@@ -179,7 +179,7 @@ fn has_all(name: &[String], want: &str) -> bool {
 /// Whether an album in the library is the one named. Its title may carry more after the name
 /// when it is set off: "Diamond-Jubilee - REALISTIK MASTER", "OK Computer (Remastered)"; but
 /// "Play & Play: B Sides" is not "Play".
-fn same_album(have: &str, want: &str) -> bool {
+pub(crate) fn same_album(have: &str, want: &str) -> bool {
     let (h, w) = (words(have), words(want));
     if w.is_empty() || !h.starts_with(&w) {
         return false;
@@ -463,7 +463,12 @@ impl App {
                 tracing::warn!(album = %w.title, error = %e, "an album could not be moved along");
             }
         }
-        Ok(format!("{looked} albums looked at"))
+        let covers = match self.music_covers().await {
+            Ok(0) => String::new(),
+            Ok(n) => format!("; {n} covers found"),
+            Err(e) => format!("; covers: {e}"),
+        };
+        Ok(format!("{looked} albums looked at{covers}"))
     }
 
     /// A download finished or failed: if it was an album's, take it from there.

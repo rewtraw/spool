@@ -36,6 +36,9 @@ pub enum Blocked {
     Needs(String),
     /// Temporary condition; try again later.
     Retry(String),
+    /// Plainly not what it says it is (another show's episode under this one's name): when
+    /// Spool chose it, it is discarded and another looked for; when a person did, they are asked.
+    Wrong(String),
 }
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -591,6 +594,16 @@ impl App {
         let ops = match self.plan(&acq, &title, &root, forced_episodes.as_deref()).await {
             Ok(ops) => ops,
             Err(Blocked::Needs(why)) => return block(self, &mut acq, why),
+            Err(Blocked::Wrong(why)) if !crate::acquire::chosen_by_spool(&acq.reason) => return block(self, &mut acq, format!("{why} Import anyway files it as named.")),
+            Err(Blocked::Wrong(why)) => {
+                if let Some(job) = &acq.job_id {
+                    let _ = self.job_remove(job, true);
+                }
+                if let Some(out) = &acq.output_path {
+                    self.remove_download_folder(acq.job_id.as_deref(), Path::new(out)).await;
+                }
+                return self.fail_acquisition(&mut acq, &why, true).await;
+            }
             Err(Blocked::Retry(why)) => {
                 acq.state = AcqState::Downloading;
                 acq.error = Some(why);

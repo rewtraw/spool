@@ -14,6 +14,16 @@ use std::collections::{HashMap, HashSet};
 
 pub const SMALLER_REASON: &str = "smaller copy that fits the profile's size target";
 pub const BY_HAND_REASON: &str = "chosen by hand";
+pub const SEARCH_REASON: &str = "best acceptable release from search";
+pub const FEED_REASON: &str = "wanted release seen in the indexer feed";
+
+/// Said of a download that was another show's episode under this one's name.
+pub const ANOTHER_SHOW: &str = "an episode of another show";
+
+/// Whether a download is one Spool chose itself, rather than one a person picked.
+pub fn chosen_by_spool(reason: &str) -> bool {
+    [SEARCH_REASON, FEED_REASON, SMALLER_REASON].contains(&reason)
+}
 pub const ANOTHER_VERSION_REASON: &str = "chosen by hand, to keep as another version";
 
 /// What a search is for.
@@ -394,6 +404,9 @@ pub struct TitleContext {
     pub files: Vec<MediaFile>,
     pub active: Vec<Acquisition>,
     pub blocklist: Vec<(String, String)>,
+    /// Another show's episode has been taken for one of this one's: from then on a release
+    /// that names its episode goes before one that names none.
+    pub namesake: bool,
     /// Judge for a smaller copy of what is on disk, not for an upgrade.
     pub smaller: bool,
     /// Files over the profile's size target, when a smaller copy is being looked for.
@@ -491,6 +504,7 @@ impl App {
             files: self.db.files(title.id)?,
             active: self.db.title_acquisitions(title.id)?.into_iter().filter(|a| a.state.is_active()).collect(),
             blocklist: self.db.blocklisted(title.id)?,
+            namesake: self.db.blocklist_says(title.id, ANOTHER_SHOW)?,
             locked: self.title_locked(&title),
             seasons: self.season_names(&title),
             profile,
@@ -515,7 +529,7 @@ impl App {
             let unknown = QualityModel::new(Quality::Unknown);
             return Judged {
                 record: rejected(t.id, release, source, unknown, rej("unparseable", "the release name could not be understood")),
-                candidate: Candidate { quality: unknown, size_bytes: release.size, age_days: release.age_days(), languages: vec![], release_group: None, indexer_priority: release.indexer_priority, item_count: 0, dubbed: false, speaks_wanted: false, full_season: false, multi_season: false, efficient_codec: false, playback: Default::default() },
+                candidate: Candidate { quality: unknown, size_bytes: release.size, age_days: release.age_days(), languages: vec![], release_group: None, indexer_priority: release.indexer_priority, item_count: 0, dubbed: false, speaks_wanted: false, full_season: false, multi_season: false, efficient_codec: false, playback: Default::default(), doubt: 0 },
             };
         };
 
@@ -539,6 +553,14 @@ impl App {
             multi_season,
             efficient_codec: playback.hevc || playback.av1,
             playback,
+            doubt: match covered.as_slice() {
+                [one] => match crate::names::says_episode(&release.title, one) {
+                    Some(true) => 0,
+                    Some(false) => 2,
+                    None => u8::from(tc.namesake),
+                },
+                _ => 0,
+            },
         };
         let mut record = DecisionRecord { id: 0, ts: 0, title_id: t.id, release: release.clone(), quality, languages, speaks_wanted: candidate.speaks_wanted, release_group: group, covers, episode_ids: covered_ids.clone(), accepted: false, rejections: vec![], source: source.into() };
 
@@ -837,7 +859,7 @@ impl App {
                 .collect();
             let mut any_gone = false;
             for j in pick(&live, &tc.profile, policy) {
-                match self.grab(&j.record, &tc.title, if tc.smaller { SMALLER_REASON } else { "best acceptable release from search" }, may_queue).await {
+                match self.grab(&j.record, &tc.title, if tc.smaller { SMALLER_REASON } else { SEARCH_REASON }, may_queue).await {
                     Ok(Some(a)) => grabbed.push(a),
                     Ok(None) => {}
                     Err(e) if e.downcast_ref::<NoSpace>().is_some() => {
@@ -1083,7 +1105,7 @@ impl App {
                 considered += judged.len();
                 self.db.record_decisions(&judged.iter().map(|j| j.record.clone()).collect::<Vec<_>>())?;
                 for j in pick(&judged.iter().collect::<Vec<_>>(), &tc.profile, g.proper_policy) {
-                    match self.grab(&j.record, &tc.title, "wanted release seen in the indexer feed", false).await {
+                    match self.grab(&j.record, &tc.title, FEED_REASON, false).await {
                         Ok(Some(a)) => {
                             grabbed += 1;
                             self.archive_runner_ups(&tc.title, runner_ups(&judged, std::slice::from_ref(&a), &tc.profile, g.proper_policy, g.archive_runner_ups as usize));
@@ -1411,11 +1433,14 @@ fn pick<'a>(judged: &[&'a Judged], profile: &QualityProfile, policy: decision::P
     }
 
     // Releases over the profile's size target are a last resort: coverage is worked out from
-    // those that fit first, and the oversized fill only what is still uncovered.
+    // those that fit first, and the oversized fill only what is still uncovered. Doubt that a
+    // release is this title at all weighs before size, as it does in choosing one release.
     let over = |j: &Judged| profile.size_ceiling().is_some_and(|c| j.candidate.size_bytes > c * j.candidate.item_count.max(1) as u64);
     let mut claimed: HashSet<i64> = HashSet::new();
-    for oversized in [false, true] {
-        pick_runs(&accepted.iter().copied().filter(|j| !j.record.episode_ids.is_empty() && over(j) == oversized).collect::<Vec<_>>(), &mut claimed, &mut out);
+    for doubt in 0..=2 {
+        for oversized in [false, true] {
+            pick_runs(&accepted.iter().copied().filter(|j| !j.record.episode_ids.is_empty() && j.candidate.doubt == doubt && over(j) == oversized).collect::<Vec<_>>(), &mut claimed, &mut out);
+        }
     }
     out
 }

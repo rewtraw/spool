@@ -8,9 +8,9 @@
   import { bytes } from '../lib/format';
 
   type Scope = 'all' | 'movie' | 'series' | 'music' | 'books';
-  const SCOPES: [Scope, string][] = [['all', 'Everything'], ['movie', 'Movies'], ['series', 'Series'], ['music', 'Music'], ['books', 'Books']];
+  const SCOPES: [Scope, string][] = [['movie', 'Movies'], ['series', 'Series'], ['music', 'Music'], ['books', 'Books'], ['all', 'Everything']];
   const asked = route.query.get('kind') as Scope | null;
-  let kind = $state<Scope>(asked && SCOPES.some(([k]) => k === asked) ? asked : 'all');
+  let kind = $state<Scope>(asked && SCOPES.some(([k]) => k === asked) ? asked : 'movie');
   let query = $state(route.query.get('q') ?? '');
   type Found = Title & { library_id?: number | null; anime?: { format: string; episodes: number; name: string; as_series?: boolean } };
   let found = $state<{ movies: Found[]; series: Found[]; movies_error?: string | null }>({ movies: [], series: [] });
