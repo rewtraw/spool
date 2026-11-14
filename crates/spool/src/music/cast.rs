@@ -28,9 +28,10 @@ const ANSWER_MOST: usize = 256 << 10;
 const MOST: usize = 32;
 
 /// Devices are asked with a client of their own: no redirects and no proxy, so that what one
-/// says cannot send Spool anywhere but back to it.
+/// says cannot send Spool anywhere but back to it; and a new connection each time, as small
+/// players close idle ones without saying so, and a request sent down one is lost.
 static DEVICES: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).no_proxy().connect_timeout(Duration::from_secs(3)).build().expect("http client")
+    reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).no_proxy().pool_max_idle_per_host(0).connect_timeout(Duration::from_secs(3)).build().expect("http client")
 });
 
 /// Whether a link a device gave is to that device itself.
@@ -267,14 +268,16 @@ impl App {
         let envelope = format!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body><u:{action} xmlns:u=\"{service}\">{body}</u:{action}></s:Body></s:Envelope>"
         );
-        let resp = DEVICES
-            .post(url)
-            .header("Content-Type", "text/xml; charset=\"utf-8\"")
-            .header("SOAPACTION", format!("\"{service}#{action}\""))
-            .body(envelope)
-            .timeout(Duration::from_secs(6))
-            .send()
-            .await?;
+        let send = || DEVICES.post(url).header("Content-Type", "text/xml; charset=\"utf-8\"").header("SOAPACTION", format!("\"{service}#{action}\"")).body(envelope.clone()).timeout(Duration::from_secs(8)).send();
+        // A player that dropped the connection is asked once more on a new one.
+        let resp = match send().await {
+            Ok(r) => r,
+            Err(e) if !e.is_timeout() => {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                send().await.map_err(|e| anyhow!("{} did not answer {action}: {}", url, e.without_url()))?
+            }
+            Err(e) => bail!("{action} was not answered in time: {}", e.without_url()),
+        };
         let status = resp.status();
         let text = answer(resp).await?;
         if !status.is_success() {
