@@ -130,8 +130,6 @@ const pages = [
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
   ['clips', '#/clips', ['Clips', 'Make a clip', 'Find'], true],
-  ['music', '#/music', ['Music'], true],
-  ['books', '#/books', ['Books', 'Your books'], true],
   ['archive', '#/archive', ['Archive'], true],
   ['settings-general', '#/settings/general', ['Mode', 'Downloads', 'Connections'], false],
   ['settings-players', '#/settings/players', ['People', 'Asked for', 'Lately'], true],
@@ -143,11 +141,16 @@ const pages = [
   ['settings-plex', '#/settings/plex', [/Library match|Plex is not set up|Plex is turned off/], true],
   ['settings-compact', '#/settings/compact', ['How they are made', 'The library'], true],
   ['settings-space', '#/settings/space', ['Free'], true],
+  ['settings-music', '#/settings/music', ['The music folder', 'Music players'], true],
   ['settings-books', '#/settings/books', ["Anna's Archive", 'Florilegium'], false],
   ['settings-maintenance', '#/settings/maintenance', ['Read indexer feeds', 'Recycled files'], true],
 ];
 const film = titles.find((t) => t.kind === 'movie' && t.file_count > 0) ?? titles[0];
 if (film) pages.push(['title', `#/title/${film.id}`, [film.title.slice(0, 12), 'Monitored', 'Make a clip'], true]);
+const album = (await api('/api/music'))?.albums?.[0];
+if (album) pages.push(['album', `#/album/${album.id}`, [album.title.slice(0, 12), 'Play'], true]);
+const book = (await api('/api/books'))?.books?.[0];
+if (book) pages.push(['book', `#/book/${book.id}`, [book.title.slice(0, 12)], true]);
 if (collections[0]) pages.push(['collection', `#/collection/${collections[0].id}`, [collections[0].name.slice(0, 12), 'in the library'], true]);
 
 if (shots) mkdirSync(shots, { recursive: true });

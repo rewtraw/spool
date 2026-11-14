@@ -14,9 +14,10 @@
   import Space from './settings/Space.svelte';
   import Compact from './settings/Compact.svelte';
   import Maintenance from './settings/Maintenance.svelte';
+  import Music from './settings/Music.svelte';
   import Books from './settings/Books.svelte';
 
-  const tabs = [['general', 'General'], ['library', 'Library'], ['players', 'Players'], ['usenet', 'Usenet'], ['indexers', 'Indexers'], ['profiles', 'Profiles'], ['naming', 'Naming'], ['plex', 'Plex'], ['books', 'Books'], ['compact', 'Compact versions'], ['space', 'Disk space'], ['maintenance', 'Maintenance']];
+  const tabs = [['general', 'General'], ['library', 'Library'], ['players', 'Players'], ['usenet', 'Usenet'], ['indexers', 'Indexers'], ['profiles', 'Profiles'], ['naming', 'Naming'], ['plex', 'Plex'], ['music', 'Music'], ['books', 'Books'], ['compact', 'Compact versions'], ['space', 'Disk space'], ['maintenance', 'Maintenance']];
   const tab = $derived(route.arg || 'general');
 </script>
 
@@ -36,6 +37,7 @@
   {:else if tab === 'plex'}<Plex />
   {:else if tab === 'compact'}<Compact />
   {:else if tab === 'space'}<Space />
+  {:else if tab === 'music'}<Music />
   {:else if tab === 'books'}<Books />
   {:else if tab === 'maintenance'}<Maintenance />
   {/if}

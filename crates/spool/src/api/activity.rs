@@ -48,13 +48,13 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
         .collect();
     let known: Vec<&str> = recent.iter().filter_map(|a| a.job_id.as_deref()).collect();
     // Downloads of no title's: an album's, or ones added by hand.
-    let albums: Vec<(String, String)> = app.db.music_wants()?.into_iter().filter_map(|w| Some((w.job_id?, format!("{} \u{2014} {}", w.artist, w.title)))).collect();
+    let albums: Vec<(String, Value)> = app.db.music_wants()?.into_iter().filter_map(|w| Some((w.job_id?, json!({"id": w.id, "name": format!("{} \u{2014} {}", w.artist, w.title)})))).collect();
     let orphans: Vec<Value> = jobs
         .iter()
         .filter(|j| !known.contains(&j.id.as_str()))
         .map(|j| {
             let mut v = json!(j);
-            v["album"] = json!(albums.iter().find(|(id, _)| *id == j.id).map(|(_, name)| name));
+            v["album"] = albums.iter().find(|(id, _)| *id == j.id).map(|(_, a)| a.clone()).unwrap_or(Value::Null);
             v
         })
         .collect();

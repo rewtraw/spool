@@ -195,7 +195,7 @@
       <div class="faint meta">{r.group.kind}</div>
       <div class="row">
         {#if r.have}<a class="btn small" href="#/library?kind=music">In library</a>
-        {:else if r.want_id}<a class="btn small" href="#/music/wanted">{WANT_LABEL[r.state] ?? 'Wanted'}</a>
+        {:else if r.want_id}<a class="btn small" href="#/wanted/{r.want_id}">{WANT_LABEL[r.state] ?? 'Wanted'}</a>
         {:else}<button class="btn small primary" onclick={() => wantAlbum(r)}>Want</button>{/if}
       </div>
     </div>
@@ -210,7 +210,7 @@
       <div class="muted">{(w.authors ?? []).join(', ')}</div>
       {#if w.subtitle || w.editions}<div class="faint meta">{[w.subtitle, w.editions ? `${w.editions} editions` : ''].filter(Boolean).join(' · ')}</div>{/if}
       <div class="row">
-        {#if w.book_id}<a class="btn small" href="#/books/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}
+        {#if w.book_id}<a class="btn small" href="#/book/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}
       </div>
     </div>
   </div>
@@ -257,7 +257,7 @@
     <div class="section-title">Albums</div>
     <div class="minis">
       {#each albums.slice(0, FEW) as r (r.group.mbid)}
-        {#snippet act()}{#if r.have}<a class="btn small" href="#/library?kind=music">In library</a>{:else if r.want_id}<a class="btn small" href="#/music/wanted">{WANT_LABEL[r.state] ?? 'Wanted'}</a>{:else}<button class="btn small primary" onclick={() => wantAlbum(r)}>Want</button>{/if}{/snippet}
+        {#snippet act()}{#if r.have}<a class="btn small" href="#/library?kind=music">In library</a>{:else if r.want_id}<a class="btn small" href="#/wanted/{r.want_id}">{WANT_LABEL[r.state] ?? 'Wanted'}</a>{:else}<button class="btn small primary" onclick={() => wantAlbum(r)}>Want</button>{/if}{/snippet}
         {@render mini(r.cover, true, r.group.title, [r.group.artist, r.group.year || '', r.group.kind].filter(Boolean).join(' · '), act)}
       {/each}
     </div>
@@ -267,7 +267,7 @@
     <div class="section-title">Books</div>
     <div class="minis">
       {#each books.slice(0, FEW) as w (w.ol_work)}
-        {#snippet act()}{#if w.book_id}<a class="btn small" href="#/books/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}{/snippet}
+        {#snippet act()}{#if w.book_id}<a class="btn small" href="#/book/{w.book_id}">Added</a>{:else}<button class="btn small primary" onclick={() => addBook(w)}>Add</button>{/if}{/snippet}
         {@render mini(w.cover, false, w.title, [(w.authors ?? []).join(', '), w.year || ''].filter(Boolean).join(' · '), act)}
       {/each}
     </div>

@@ -115,7 +115,7 @@
       const lossless = LOSSLESS.includes(a.format) || (a.format === 'm4a' && a.bit_depth > 0);
       out.push({
         key: `a${a.id}`, type: 'album', label: 'Album', name: a.title, sortName: sortable(a.title), by: a.artist, year: a.year, added: a.added_at, size: a.bytes,
-        href: `#/music/${a.id}`, cover: a.has_cover ? `/api/music/albums/${a.id}/art?size=300` : null, square: true, have: true,
+        href: `#/album/${a.id}`, cover: a.has_cover ? `/api/music/albums/${a.id}/art?size=300` : null, square: true, have: true,
         status: { label: (a.format ?? '').toUpperCase(), tone: '' }, lossless,
       });
     }
@@ -123,13 +123,13 @@
     for (const w of wants.filter((w) => w.state !== 'have')) {
       out.push({
         key: `w${w.id}`, type: 'want', label: 'Album', name: w.title, sortName: sortable(w.title), by: w.artist, year: w.year, added: w.added_at, size: w.release?.size ?? 0,
-        href: '#/music/wanted', cover: w.cover, square: true, have: false, status: w.state === 'downloading' ? { label: 'Downloading', tone: 'accent' } : { label: 'Wanted', tone: 'warn' }, state: w.state,
+        href: `#/wanted/${w.id}`, cover: w.cover, square: true, have: false, status: w.state === 'downloading' ? { label: 'Downloading', tone: 'accent' } : { label: 'Wanted', tone: 'warn' }, state: w.state,
       });
     }
     for (const b of books) {
       out.push({
         key: `b${b.id}`, type: 'book', label: 'Book', name: b.title, sortName: sortable(b.title), by: b.authors.join(', '), year: b.year, added: b.added_at, size: b.chosen?.size ?? 0,
-        href: `#/books/${b.id}`, cover: b.cover, square: false, have: b.state === 'have', status: BOOK_STATE[b.state] ?? { label: b.state, tone: '' }, state: b.state,
+        href: `#/book/${b.id}`, cover: b.cover, square: false, have: b.state === 'have', status: BOOK_STATE[b.state] ?? { label: b.state, tone: '' }, state: b.state,
       });
     }
     return out;
