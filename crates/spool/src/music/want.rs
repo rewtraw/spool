@@ -417,6 +417,10 @@ impl App {
         Ok(w)
     }
 
+    fn want_lock(&self, id: i64) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+        self.music.want_locks.lock().entry(id).or_default().clone()
+    }
+
     /// Move an album along in the background.
     pub fn nudge_want(&self, id: i64) {
         let app = self.clone();
@@ -430,7 +434,7 @@ impl App {
     /// Look for it again now.
     /// Releases turned down before are given another chance.
     pub async fn search_want(&self, id: i64) -> Result<Want> {
-        let _held = self.music.wanting.lock().await;
+        let _held = self.want_lock(id).lock_owned().await;
         let mut w = self.db.music_want(id)?.ok_or_else(|| anyhow!("no such album"))?;
         if w.state == WantState::Wanted {
             w.searched_at = 0;
@@ -444,7 +448,7 @@ impl App {
 
     /// Stop wanting an album, and stop its download. What was filed stays.
     pub async fn remove_want(&self, id: i64) -> Result<()> {
-        let _held = self.music.wanting.lock().await;
+        let _held = self.want_lock(id).lock_owned().await;
         if let Some(w) = self.db.music_want(id)? {
             if let (WantState::Downloading, Some(job)) = (w.state, &w.job_id) {
                 let _ = self.job_remove(job, true);
@@ -481,7 +485,9 @@ impl App {
 
     /// Take an album as far as it can go now.
     pub async fn advance_want(&self, id: i64) -> Result<()> {
-        let _held = self.music.wanting.lock().await;
+        // Its turn first, then the album itself, so a removal never waits behind the queue.
+        let _turn = self.music.wanting.lock().await;
+        let _held = self.want_lock(id).lock_owned().await;
         for _ in 0..4 {
             let Some(mut w) = self.db.music_want(id)? else { return Ok(()) };
             let rev = w.rev;

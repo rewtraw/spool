@@ -198,6 +198,9 @@ pub struct Music {
     pub checking: tokio::sync::Semaphore,
     /// Held while a wanted album is moved along, so that one is worked on at a time.
     pub wanting: tokio::sync::Mutex<()>,
+    /// Held while one album is changed, so it is removed or looked for again only between
+    /// steps, without waiting for every other album's turn.
+    pub want_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
     /// Players on the network that music is played on. See [`cast`].
     pub cast: cast::Cast,
 }
@@ -205,7 +208,7 @@ pub struct Music {
 impl Music {
     pub fn new(db: &Db) -> Music {
         let library = db.music_library().unwrap_or_default();
-        Music { library: Mutex::new(Arc::new(library)), scan: Mutex::new(ScanState::default()), signed: Mutex::new(HashMap::new()), now_playing: Default::default(), checking: tokio::sync::Semaphore::new(2), wanting: Default::default(), cast: Default::default() }
+        Music { library: Mutex::new(Arc::new(library)), scan: Mutex::new(ScanState::default()), signed: Mutex::new(HashMap::new()), now_playing: Default::default(), checking: tokio::sync::Semaphore::new(2), wanting: Default::default(), want_locks: Default::default(), cast: Default::default() }
     }
     pub fn library(&self) -> Arc<Library> {
         self.library.lock().clone()
