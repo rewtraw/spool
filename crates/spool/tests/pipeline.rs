@@ -179,7 +179,7 @@ impl World {
             .map(|(s, e, name)| {
                 self.app
                     .db
-                    .upsert_episode(&Episode { id: 0, title_id: t.id, season: *s, episode: *e, absolute: None, title: name.to_string(), overview: String::new(), air_date: Some("2016-10-02".into()), air_date_utc: None, runtime: 0, monitored: true, file_id: None, still: None, rating: None })
+                    .upsert_episode(&Episode { id: 0, title_id: t.id, season: *s, episode: *e, absolute: None, title: name.to_string(), overview: String::new(), air_date: Some("2016-10-02".into()), air_date_utc: None, runtime: 0, monitored: true, file_id: None, still: None, rating: None, video: None })
                     .unwrap()
             })
             .collect();
@@ -5581,4 +5581,78 @@ async fn a_video_outside_the_library_is_clipped_with_its_subtitles_drawn_in() {
     // Subtitles with nothing in the stretch asked for say so.
     let err = spool::clips::clip_file(&src, &dir.path().join("x.mp4"), 1.9, 0.05, Some(&srt)).await.unwrap_err();
     assert!(format!("{err:#}").contains("has no lines"), "{err:#}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_video_from_a_site_is_filed_under_its_channel_with_its_captions() {
+    let Some(video) = sample_video() else { return };
+    let w = World::new(Mode::Active).await;
+    // A stand-in for yt-dlp: it says what the link is, and "fetches" by copying what it has.
+    let fake = w.root.join("fake-yt-dlp");
+    std::fs::create_dir_all(&fake).unwrap();
+    std::fs::write(fake.join("video.mkv"), &video).unwrap();
+    std::fs::write(fake.join("video.jpg"), b"not really a picture").unwrap();
+    std::fs::write(fake.join("video.en.vtt"), "WEBVTT\n\n00:00:00.100 --> 00:00:01.000\nhello<00:00:00.500><c> there</c>\n\n00:00:01.000 --> 00:00:01.010\nhello there\n\n00:00:01.010 --> 00:00:02.000\nhello there\nhow are you\n").unwrap();
+    let info = serde_json::json!({
+        "id": "abc123", "title": "A talk: on things", "description": "What it is about", "extractor_key": "Youtube",
+        "webpage_url": "https://www.youtube.com/watch?v=abc123", "channel": "Some Channel", "channel_id": "UCxyz",
+        "channel_url": "https://www.youtube.com/channel/UCxyz", "upload_date": "20251114", "duration": 2.0, "height": 240, "subtitles": {}
+    });
+    std::fs::write(fake.join("info.json"), info.to_string()).unwrap();
+    let script = fake.join("yt-dlp");
+    std::fs::write(&script, format!("#!/bin/sh\ndir=''; prev=''\nfor a in \"$@\"; do\n  if [ \"$a\" = --dump-single-json ]; then cat '{f}/info.json'; exit 0; fi\n  if [ \"$prev\" = --paths ]; then dir=\"$a\"; fi\n  prev=\"$a\"\ndone\necho 'SPOOL-PROGRESS 50 100 NA 10 1'\ncp '{f}/video.mkv' '{f}/video.jpg' '{f}/video.en.vtt' \"$dir/\"\ncp '{f}/info.json' \"$dir/video.info.json\"\n", f = fake.display())).unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    std::env::set_var("SPOOL_YT_DLP", &script);
+    let mut g = w.app.settings.general();
+    g.video_root = w.root.join("Videos").to_string_lossy().to_string();
+    w.app.settings.set_general(&g).unwrap();
+    std::fs::create_dir_all(w.root.join("Videos")).unwrap();
+    w.app.spawn_videos();
+
+    let added = w.app.videos_add("https://www.youtube.com/watch?v=abc123", spool::videos::Take::Newest, false).await.unwrap();
+    assert_eq!((added.added, added.what.as_str()), (1, "video"));
+    let mut done = None;
+    for _ in 0..200 {
+        let v = w.app.videos_all().unwrap().pop().unwrap();
+        if matches!(v.state, spool::videos::State::Done | spool::videos::State::Failed) {
+            done = Some(v);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let v = done.expect("the video was neither filed nor failed");
+    assert_eq!(v.state, spool::videos::State::Done, "{}", v.error);
+
+    // Filed under its channel, a series of its videos: a season for the year, an episode for the day.
+    let channel = w.app.db.title(v.title_id.unwrap()).unwrap().unwrap();
+    assert_eq!(channel.title, "Some Channel");
+    assert!(!channel.monitored, "a channel is never searched for on the indexers");
+    let c = channel.channel.clone().unwrap();
+    assert_eq!((c.site.as_str(), c.id.as_str(), c.follow), ("youtube", "UCxyz", false));
+    let eps = w.app.db.episodes(channel.id).unwrap();
+    assert_eq!(eps.len(), 1);
+    assert_eq!((eps[0].season, eps[0].episode, eps[0].title.as_str(), eps[0].air_date.as_deref()), (2025, 111401, "A talk: on things", Some("2025-11-14")));
+    let files = w.app.db.files(channel.id).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(eps[0].file_id, Some(files[0].id));
+    let folder = w.root.join("Videos/Some Channel/Season 2025");
+    let stem = "Some Channel - 2025-11-14 - A talk on things [abc123]";
+    assert_eq!(files[0].rel_path, format!("Season 2025/{stem}.mkv"));
+    assert!(folder.join(format!("{stem}.mkv")).is_file());
+    assert!(folder.join(format!("{stem}-thumb.jpg")).is_file());
+    // The site's rolling captions, made into one line a cue, and known as the file's subtitles.
+    let srt = std::fs::read_to_string(folder.join(format!("{stem}.en.srt"))).unwrap();
+    assert_eq!(srt.matches("hello there").count(), 1, "{srt}");
+    assert_eq!(files[0].subtitles.len(), 1);
+    assert_eq!(files[0].subtitles[0].source, "download");
+    // With no picture of its own to be had, the channel takes the video's.
+    assert!(w.root.join("Videos/Some Channel/poster.jpg").is_file());
+
+    // Asked for again: it is here already.
+    let again = w.app.videos_add("https://www.youtube.com/watch?v=abc123", spool::videos::Take::Newest, false).await.unwrap();
+    assert_eq!((again.added, again.already), (0, 1));
+    std::env::remove_var("SPOOL_YT_DLP");
 }

@@ -5,6 +5,8 @@ pub mod adopt;
 pub mod anime;
 pub mod books;
 pub mod music;
+pub mod videos;
+pub mod lists;
 pub mod hunt;
 pub mod api;
 pub mod app;

@@ -119,7 +119,7 @@ impl App {
     }
 
     /// Where a replaced or deleted file is parked. Empty when files are deleted outright.
-    fn recycle_path(&self, title: &Title, file_abs: &Path) -> PathBuf {
+    pub(crate) fn recycle_path(&self, title: &Title, file_abs: &Path) -> PathBuf {
         let g = self.settings.general();
         if g.recycle_days == 0 {
             return PathBuf::new();
@@ -169,6 +169,11 @@ impl App {
     /// Where a file belongs in the library, relative to the title folder.
     pub fn library_rel_path(&self, title: &Title, episodes: &[Episode], file: &MediaFile, ext: &str) -> String {
         let cfg = self.settings.naming();
+        if title.channel.is_some() {
+            if let Some(e) = episodes.first() {
+                return crate::videos::rel_path(&cfg, title, e, ext.trim_start_matches('.'));
+            }
+        }
         let original = file.scene_name.clone().unwrap_or_default();
         match title.kind {
             Kind::Movie => {
@@ -273,6 +278,18 @@ impl App {
             tx.execute("UPDATE journal SET state = 'done' WHERE id = ?1", [journal_id])?;
             Ok(())
         })
+    }
+
+    /// File one thing into the library through the journal, as an import files a download:
+    /// what is not finished now is finished at the next start.
+    pub(crate) async fn file_operation(&self, op: Operation) -> Result<()> {
+        let id = self.journal(&op)?;
+        let app = self.clone();
+        let res = tokio::task::spawn_blocking(move || app.execute(id, &op)).await?;
+        if res.is_err() {
+            self.db.with(|c| c.execute("UPDATE journal SET state = 'failed' WHERE id = ?1", [id]))?;
+        }
+        res
     }
 
     fn journal(&self, op: &Operation) -> Result<i64> {

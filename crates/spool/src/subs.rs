@@ -1035,7 +1035,8 @@ impl App {
         let mut out = vec![];
         let places = self.placement();
         // Only where a subtitle file could be put beside the video.
-        for t in self.db.titles(None)?.into_iter().filter(|t| places.locked(t).is_none()) {
+        // A video from a site has only the captions it came with; OpenSubtitles has none for it.
+        for t in self.db.titles(None)?.into_iter().filter(|t| places.locked(t).is_none() && t.channel.is_none()) {
             for f in self.db.files(t.id)?.into_iter().filter(|f| f.base.is_none()) {
                 let have: Vec<String> = embedded_languages(&f).into_iter().chain(f.subtitles.iter().map(|s| s.language.clone())).collect();
                 let missing: Vec<String> = wanted.iter().filter(|w| !have.contains(w)).cloned().collect();

@@ -191,6 +191,10 @@ pub struct Title {
     /// film, or the seasons of a series the title's own folder lacks.
     #[serde(default)]
     pub also: Vec<String>,
+    /// A channel or an account on a video site, kept as a series of its videos: a season for
+    /// each year, an episode for each video. See [`crate::videos`].
+    #[serde(default)]
+    pub channel: Option<crate::videos::Channel>,
 }
 
 impl Default for Title {
@@ -316,6 +320,9 @@ pub struct Episode {
     pub still: Option<String>,
     #[serde(default)]
     pub rating: Option<f32>,
+    /// The video on its site, for an episode of a channel.
+    #[serde(default)]
+    pub video: Option<crate::videos::VideoRef>,
 }
 
 impl Episode {
@@ -737,6 +744,9 @@ pub const HISTORY_KINDS: &[HistoryKind] = &[
     hk("book_failed", "Book file did not do", "bad", true),
     hk("audiobook_filed", "Audiobook filed", "ok", true),
     hk("audiobook_failed", "Audiobook download did not do", "bad", true),
+    hk("video_filed", "Video filed", "ok", true),
+    hk("video_failed", "Video download did not do", "bad", true),
+    hk("list_added", "Added from a list", "", false),
 ];
 
 pub fn history_kind(kind: &str) -> Option<&'static HistoryKind> {

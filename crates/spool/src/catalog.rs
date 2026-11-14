@@ -203,6 +203,10 @@ impl App {
     /// Pull fresh metadata for one title. User choices (monitoring, profile, path) are kept.
     pub async fn refresh_title(&self, id: i64) -> Result<()> {
         let mut t = self.db.title(id)?.ok_or_else(|| anyhow!("no such title"))?;
+        // A channel is known from its videos, not from a listing.
+        if t.channel.is_some() {
+            return Ok(());
+        }
         let g = self.settings.general();
         match t.kind {
             Kind::Movie => {
@@ -328,7 +332,7 @@ impl App {
             self.scan_folder(&title, None, report).await?;
             // Filing again that cannot be finished now is tried again next time; it does not
             // stop the folder being looked through.
-            if title.kind == Kind::Series {
+            if title.kind == Kind::Series && title.channel.is_none() {
                 match self.refile_by_titles(&title).await {
                     Ok(n) => report.refiled += n,
                     Err(e) => {
@@ -407,6 +411,16 @@ impl App {
                 Kind::Movie => vec![],
                 // It is a version of an episode's file, not the episode's file.
                 Kind::Series if compact_of.is_some() => vec![],
+                // A channel's video is named for the video it is: "… [id].mkv".
+                Kind::Series if title.channel.is_some() => {
+                    let video_id = stem(rel).rsplit_once(" [").and_then(|(_, id)| id.strip_suffix(']')).map(str::to_string);
+                    let ids: Vec<i64> = episodes.iter().filter(|e| video_id.is_some() && e.video.as_ref().map(|v| &v.id) == video_id.as_ref()).map(|e| e.id).collect();
+                    if ids.is_empty() {
+                        report.unmatched.push(abs.to_string_lossy().to_string());
+                        continue;
+                    }
+                    ids
+                }
                 Kind::Series => {
                     let ids: Vec<i64> = parse_episode_path(&abs.to_string_lossy())
                         .map(|p| episodes.iter().filter(|e| e.season == p.season_number() && p.episode_numbers.contains(&e.episode)).filter(|e| copy.is_none() || e.file_id.is_none()).map(|e| e.id).collect())

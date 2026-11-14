@@ -318,7 +318,7 @@
       {/if}
     </div>
   {/if}
-  {#if !queue.length && !data.downloads?.length && loaded}
+  {#if !queue.length && !data.downloads?.length && !data.videos?.length && loaded}
     <div class="card empty">Nothing is downloading.</div>
   {/if}
   {#if queue.length > 1}
@@ -360,6 +360,18 @@
           {#if !j.for}<div class="faint why">Not linked to a title</div>{/if}
         </div>
         <div class="buttons"><button class="btn small ghost danger" onclick={async () => { await act(() => api.del(`/jobs/${j.id}`)); load(); }}>Remove</button></div>
+      </div>
+    {/each}
+    {#each data.videos ?? [] as v (`v${v.id}`)}
+      <!-- A video from a site: fetched by yt-dlp, not from Usenet. -->
+      <div class="card item">
+        <div class="grow">
+          <div class="row wrap top"><a class="t" href="#/discover?kind=videos">{v.title}</a><span class="chip">{v.site}</span></div>
+          {#if v.channel}<div class="mono faint break rel">{v.channel}</div>{/if}
+          <div class="muted small">{v.state === 'queued' ? 'Waiting its turn' : v.state === 'filing' ? 'Filing into the library' : v.progress?.total_bytes ? `${bytes(v.progress.done_bytes)} of ${bytes(v.progress.total_bytes)}` : 'Starting'}</div>
+          {#if v.state === 'fetching' && v.progress?.total_bytes}<div class="progress" aria-hidden="true"><i style="width:{pct(v.progress.done_bytes, v.progress.total_bytes)}%"></i></div>{/if}
+        </div>
+        <div class="buttons"><button class="btn small ghost danger" onclick={async () => { await act(() => api.del(`/videos/${v.id}`)); load(); }}>Remove</button></div>
       </div>
     {/each}
   </div>

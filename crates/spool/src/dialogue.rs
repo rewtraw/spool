@@ -639,7 +639,8 @@ impl App {
         let places = self.placement();
         let mut out = vec![];
         for title in self.db.titles(None)? {
-            let can_take = places.locked(&title).is_none();
+            // A video from a site comes with the site's captions or none; OpenSubtitles has none for it.
+            let can_take = places.locked(&title).is_none() && title.channel.is_none();
             let files: Vec<(MediaFile, Option<i64>)> = match title.kind {
                 Kind::Movie => self.film_file(&title)?.into_iter().map(|f| (f, None)).collect(),
                 Kind::Series => {

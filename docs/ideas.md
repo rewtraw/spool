@@ -144,3 +144,33 @@ A location stops meaning folders on this machine and comes to mean folders on so
 **Why it is waiting.** It is a different thing from the rest of Spool, which does what it is asked. Left to add by itself it can fill a disk with films nobody watches; kept to offering, it is a list to work through. Which of the two is wanted decides most of the design.
 
 **When to build it.** With room to spare on a location and an indexer that does not count requests, and once it is settled whether it should offer or add.
+
+## A door for Audiobookshelf's apps
+
+**What it is.** Spool fetches audiobooks and files them a folder for each book (see [books](../crates/spool/src/books/audio.rs)), and the web app plays them and keeps each person's place. Audiobookshelf's apps for iPhone and Android are better at it: chapters, a sleep timer, playing in the car, and downloading a book to listen to away from home. Spool could answer those apps as it answers Infuse, through a door that speaks their server's API.
+
+**What it would take.** The routes the apps use to sign in, list libraries and books, stream a book and report where each person is. Each person's place is kept already (the `listening` table).
+
+**Why it is waiting.** The web app plays books well enough for now, and the apps' API is large and changes between versions.
+
+**When to build it.** Someone wants to listen in the car or offline.
+
+## Books sent to a Kindle
+
+**What it is.** When an EPUB arrives it goes to Florilegium's shelf. It could also be sent to a Kindle, by Amazon's Send to Kindle address for the device, for each book or for every book.
+
+**What it would take.** A way to send mail (an SMTP account in settings, or a relay), the device's Send to Kindle address, and that address allowed to receive from the sender in Amazon's settings. A button on the book's page, and a setting to send every book.
+
+**Why it is waiting.** Florilegium's shelf is where books are read now, and sending mail needs an account set up for it.
+
+**When to build it.** Books are wanted on the Kindle as well as in Florilegium.
+
+## Comics and graphic novels
+
+**What it is.** Comic books and graphic novels, fetched like books and filed a folder for each series, with each issue as a CBZ, for a reader app that reads a folder of them (Panels, Chunky, Komga's apps).
+
+**What it would take.** A source of issues (Usenet posts them, named by series, issue number and year, much as television is), a parser for those names, ComicVine or Metron for what is in each series, and filing by series and issue.
+
+**Why it is waiting.** Nobody in the house reads comics yet.
+
+**When to build it.** Someone does.

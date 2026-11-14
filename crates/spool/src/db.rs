@@ -700,6 +700,29 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (account_id, book_id)
     );
     "#,
+    r#"
+    -- Videos from YouTube and other sites, asked for by their links; see videos/mod.rs. And
+    -- lists on Letterboxd followed, each film on them added; see lists.rs.
+    CREATE TABLE videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL,
+        added_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+    CREATE TABLE lists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL UNIQUE,
+        added_at INTEGER NOT NULL,
+        data TEXT NOT NULL
+    );
+    CREATE TABLE letterboxd_films (
+        slug TEXT PRIMARY KEY,
+        tmdb_id INTEGER,
+        kind TEXT NOT NULL DEFAULT 'movie',
+        checked_at INTEGER NOT NULL
+    );
+    "#,
 ];
 
 impl Db {

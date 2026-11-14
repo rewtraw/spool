@@ -24,7 +24,7 @@ impl Location {
 
     /// How deep inside this location a folder is: the length of the library folder holding it.
     fn holds(&self, path: &str) -> Option<usize> {
-        [&self.movie_root, &self.series_root].into_iter().filter(|r| !r.is_empty() && Path::new(path).starts_with(r)).map(|r| r.len()).max()
+        [&self.movie_root, &self.series_root, &self.video_root].into_iter().filter(|r| !r.is_empty() && Path::new(path).starts_with(r)).map(|r| r.len()).max()
     }
 }
 
@@ -69,7 +69,7 @@ fn probe(l: &Location) -> Answer {
     // when they are all there is. One that cannot be read is found out when it is scanned.
     let mut roots: Vec<&String> = [&l.movie_root, &l.series_root].into_iter().filter(|r| !r.is_empty()).collect();
     if roots.is_empty() {
-        roots.extend([&l.music_root, &l.audiobook_root].into_iter().filter(|r| !r.is_empty()));
+        roots.extend([&l.music_root, &l.audiobook_root, &l.video_root].into_iter().filter(|r| !r.is_empty()));
     }
     if roots.is_empty() {
         return Answer::Gone;
@@ -143,7 +143,7 @@ impl App {
     pub fn locations(&self) -> Vec<Location> {
         let g = self.settings.general();
         let name = Path::new(&g.required_volume).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Library".into());
-        let mut all = vec![Location { id: 0, name, movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, audiobook_root: g.audiobook_root, volume: g.required_volume, manage: true, movie_profile: 0, series_profile: 0 }];
+        let mut all = vec![Location { id: 0, name, movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, audiobook_root: g.audiobook_root, video_root: g.video_root, volume: g.required_volume, manage: true, movie_profile: 0, series_profile: 0 }];
         all.extend(g.locations.into_iter().filter(|l| l.id != 0));
         all
     }
@@ -256,14 +256,14 @@ impl App {
         let mut out: Vec<Location> = vec![];
         for mut l in list {
             l.name = l.name.trim().to_string();
-            (l.movie_root, l.series_root, l.music_root, l.audiobook_root, l.volume) = (clean(&l.movie_root), clean(&l.series_root), clean(&l.music_root), clean(&l.audiobook_root), clean(&l.volume));
+            (l.movie_root, l.series_root, l.music_root, l.audiobook_root, l.video_root, l.volume) = (clean(&l.movie_root), clean(&l.series_root), clean(&l.music_root), clean(&l.audiobook_root), clean(&l.video_root), clean(&l.volume));
             if l.name.is_empty() {
                 return Err("every location needs a name".into());
             }
-            if l.movie_root.is_empty() && l.series_root.is_empty() && l.music_root.is_empty() && l.audiobook_root.is_empty() {
-                return Err(format!("{} needs a folder for films, television or music", l.name));
+            if l.movie_root.is_empty() && l.series_root.is_empty() && l.music_root.is_empty() && l.audiobook_root.is_empty() && l.video_root.is_empty() {
+                return Err(format!("{} needs a folder for films, television, music or videos", l.name));
             }
-            if [&l.movie_root, &l.series_root, &l.music_root, &l.audiobook_root, &l.volume].into_iter().any(|p| !p.is_empty() && !p.starts_with('/')) {
+            if [&l.movie_root, &l.series_root, &l.music_root, &l.audiobook_root, &l.video_root, &l.volume].into_iter().any(|p| !p.is_empty() && !p.starts_with('/')) {
                 return Err(format!("the folders of {} must be full paths, starting with /", l.name));
             }
             if l.id == 0 || out.iter().any(|o| o.id == l.id) {
@@ -273,11 +273,11 @@ impl App {
             out.push(l);
         }
         // A folder inside another location's folder would leave its titles belonging to both.
-        let main = Location { id: 0, name: "the main library".into(), movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, audiobook_root: g.audiobook_root, ..Default::default() };
+        let main = Location { id: 0, name: "the main library".into(), movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, audiobook_root: g.audiobook_root, video_root: g.video_root, ..Default::default() };
         let all: Vec<&Location> = std::iter::once(&main).chain(out.iter()).collect();
         for (i, a) in all.iter().enumerate() {
             for b in all.iter().skip(i + 1) {
-                let roots = |l: &Location| [l.movie_root.clone(), l.series_root.clone(), l.music_root.clone(), l.audiobook_root.clone()].into_iter().filter(|r| !r.is_empty()).collect::<Vec<_>>();
+                let roots = |l: &Location| [l.movie_root.clone(), l.series_root.clone(), l.music_root.clone(), l.audiobook_root.clone(), l.video_root.clone()].into_iter().filter(|r| !r.is_empty()).collect::<Vec<_>>();
                 if roots(a).iter().any(|x| roots(b).iter().any(|y| Path::new(x).starts_with(y) || Path::new(y).starts_with(x))) {
                     return Err(format!("{} and {} share a folder; each location needs folders of its own", a.name, b.name));
                 }
@@ -301,7 +301,7 @@ impl App {
                 // Asking a share that has gone away how full it is can wait a long time.
                 let free = online.then(|| [&l.movie_root, &l.series_root].into_iter().find(|r| !r.is_empty()).and_then(|r| crate::app::free_space(Path::new(r)))).flatten();
                 serde_json::json!({
-                    "id": l.id, "name": l.name, "movie_root": l.movie_root, "series_root": l.series_root, "volume": l.volume, "manage": l.manage,
+                    "id": l.id, "name": l.name, "movie_root": l.movie_root, "series_root": l.series_root, "video_root": l.video_root, "volume": l.volume, "manage": l.manage,
                     "online": online, "free": free, "titles": mine.len(), "bytes": mine.iter().map(|t| sizes.get(&t.id).map(|s| s.1).unwrap_or(0)).sum::<u64>(),
                     "new_titles": places.for_new(Kind::Movie, g.new_titles_location).is_some_and(|n| n.id == l.id),
                     "movie_profile": l.movie_profile, "series_profile": l.series_profile,
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn a_missing_folder_is_gone_and_a_present_one_there() {
         let dir = tempfile::tempdir().unwrap();
-        let at = |root: &Path| Location { id: 1, name: "Shelf".into(), movie_root: root.to_string_lossy().to_string(), series_root: String::new(), music_root: String::new(), audiobook_root: String::new(), volume: String::new(), manage: true, movie_profile: 0, series_profile: 0 };
+        let at = |root: &Path| Location { id: 1, name: "Shelf".into(), movie_root: root.to_string_lossy().to_string(), series_root: String::new(), music_root: String::new(), audiobook_root: String::new(), video_root: String::new(), volume: String::new(), manage: true, movie_profile: 0, series_profile: 0 };
         assert_eq!(probe(&at(dir.path())), Answer::There);
         assert_eq!(probe(&at(&dir.path().join("nowhere"))), Answer::Gone);
     }

@@ -37,6 +37,7 @@ mod players;
 mod books;
 mod clips;
 mod music;
+mod videos;
 use titles::*;
 use subtitles::*;
 use activity::*;
@@ -49,6 +50,7 @@ use compact::*;
 use books::*;
 use clips::*;
 use music::*;
+use videos::*;
 
 #[derive(rust_embed::RustEmbed)]
 #[folder = "../../web/dist"]
@@ -410,6 +412,14 @@ fn api_routes() -> Router<App> {
         .route("/api/books/{id}/audio/search", post(search_audio))
         .route("/api/books/{id}/audio/{n}", get(audio_file))
         .route("/api/books/{id}/listen", get(get_listen).put(put_listen))
+        .route("/api/videos", get(videos).post(add_video))
+        .route("/api/videos/clear", post(clear_videos))
+        .route("/api/videos/{id}", axum::routing::delete(remove_video))
+        .route("/api/videos/{id}/retry", post(retry_video))
+        .route("/api/channels/{id}/follow", post(follow_channel))
+        .route("/api/lists", get(lists).post(add_list))
+        .route("/api/lists/{id}", axum::routing::patch(change_list).delete(remove_list))
+        .route("/api/lists/{id}/read", post(read_list))
         .route("/api/music", get(music))
         .route("/api/music/scan", post(music_scan))
         .route("/api/music/albums/{id}", get(music_album))

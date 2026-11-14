@@ -591,6 +591,7 @@ impl App {
                         file_id,
                         still: None,
                         rating: None,
+                        video: None,
                     };
                     let id = self.db.upsert_episode(&ep)?;
                     self.db.with(|c| c.execute("UPDATE episodes SET monitored = ?2, file_id = ?3 WHERE id = ?1", rusqlite::params![id, ep.monitored, file_id]))?;

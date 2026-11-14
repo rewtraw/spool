@@ -29,6 +29,9 @@ pub struct Location {
     /// Where its audiobooks are, a folder for each author and in it one for each book; empty
     /// when it holds none. See [`crate::books::audio`].
     pub audiobook_root: String,
+    /// Where videos from YouTube and other sites go, a folder for each channel; empty when it
+    /// holds none. See [`crate::videos`].
+    pub video_root: String,
     /// The volume that must be mounted for the location to count as there. Empty means the
     /// folders only have to be readable.
     pub volume: String,
@@ -110,6 +113,12 @@ pub struct General {
     pub music_root: String,
     /// The main location's audiobooks folder; empty when it holds none.
     pub audiobook_root: String,
+    /// The main location's videos folder; empty when it holds none.
+    pub video_root: String,
+    /// How yt-dlp signs in to sites that want it, Instagram above all: the name of a browser on
+    /// this machine to borrow the sign-in of ("safari", "chrome", "firefox"), or the full path of
+    /// a cookies.txt file. Empty signs in nowhere. See [`crate::videos`].
+    pub video_cookies: String,
     /// The volume that must be mounted before Spool reads or writes media. Empty disables the check.
     pub required_volume: String,
     pub downloads_dir: String,
@@ -189,6 +198,8 @@ impl Default for General {
             series_root: String::new(),
             music_root: String::new(),
             audiobook_root: String::new(),
+            video_root: String::new(),
+            video_cookies: String::new(),
             required_volume: String::new(),
             downloads_dir: String::new(),
             recycle_days: 7,

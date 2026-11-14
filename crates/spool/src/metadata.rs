@@ -461,6 +461,7 @@ impl Metadata {
                 file_id: None,
                 still: e.get("image").and_then(|i| opt(i, "original").or_else(|| opt(i, "medium"))),
                 rating: score(e.get("rating").and_then(|r| r.get("average"))),
+                video: None,
             });
         }
         let mut seasons: Vec<u32> = episodes.iter().map(|e| e.season).collect();
@@ -581,6 +582,7 @@ impl Metadata {
                     file_id: None,
                     still: opt(e, "still_path").map(|p| format!("{TMDB_IMG}/w780{p}")),
                     rating: score(e.get("vote_average")),
+                    video: None,
                 });
             }
         }

@@ -252,9 +252,21 @@ export interface Watched {
   runtime?: number;
 }
 
+/** A channel or an account on a video site, kept as a series of its videos. */
+export interface Channel {
+  site: string;
+  id: string;
+  url: string;
+  /** Whether what it posts is fetched as it is posted. */
+  follow: boolean;
+  checked_at: number;
+}
+
 export interface Title {
   /** Where the person signed in stands with it; absent when untouched. */
   watched?: Watched;
+  /** Set when the title is a channel on a video site rather than a series. */
+  channel?: Channel | null;
   original_language?: string | null;
   /** The AniList entries it is, when it is anime; empty when it is not. */
   anilist?: number[];
@@ -326,6 +338,8 @@ export interface Episode {
   air_date_utc?: string | null;
   monitored: boolean;
   file_id?: number | null;
+  /** The video on its site, for an episode of a channel. */
+  video?: { site: string; id: string; url: string } | null;
 }
 
 export interface MediaFile {

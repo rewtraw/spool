@@ -69,7 +69,15 @@ pub(super) async fn activity(State(app): State<App>) -> R<Value> {
             v
         })
         .collect();
-    Ok(Json(json!({"items": rows, "downloads": downloads, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}, "moves": app.moves_shown(), "compact": app.compacts_shown(), "playing": app.playing_now(), "done": done})))
+    // Videos from sites on their way, with how far each has got.
+    let progress = app.video_progress();
+    let videos: Vec<Value> = app
+        .videos_all()?
+        .into_iter()
+        .filter(|v| matches!(v.state, crate::videos::State::Queued | crate::videos::State::Fetching | crate::videos::State::Filing))
+        .map(|v| json!({"id": v.id, "title": if v.title.is_empty() { v.url.clone() } else { v.title.clone() }, "channel": v.channel, "site": crate::videos::site_name(&v.site), "state": v.state, "progress": progress.get(&v.id)}))
+        .collect();
+    Ok(Json(json!({"items": rows, "downloads": downloads, "videos": videos, "paused": app.engine.is_paused(), "speed_limit": app.settings.speed_limit(), "finished": {"count": finished, "bytes": finished_bytes}, "moves": app.moves_shown(), "compact": app.compacts_shown(), "playing": app.playing_now(), "done": done})))
 }
 
 pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): Path<(i64, String)>, body: Option<Json<Value>>) -> R<Value> {

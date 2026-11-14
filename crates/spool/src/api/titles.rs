@@ -69,6 +69,9 @@ pub(super) fn listed(app: &App, only: Option<&HashSet<i64>>) -> anyhow::Result<V
                 for k in ["overview", "alt_titles", "alt_years", "genres", "seasons", "fanart", "path", "studio", "network", "last_search_at", "last_refresh_at", "people", "tagline", "collection", "details_at", "local"] {
                     o.remove(k);
                 }
+                if let Some(c) = o.get_mut("channel").and_then(|c| c.as_object_mut()) {
+                    c.remove("skip");
+                }
             }
             v
         })

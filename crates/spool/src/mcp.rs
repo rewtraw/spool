@@ -142,6 +142,29 @@ const TOOLS: &[Tool] = &[
         schema: || obj(json!({"kind": {"type": "string", "enum": ["movie", "series"]}, "tmdb_id": {"type": "integer"}, "tvmaze_id": {"type": "integer"}, "monitored": {"type": "boolean", "description": "Default true."}, "search": {"type": "boolean", "description": "Search and download right away. Default true."}, "profile": {"type": "string", "description": "Quality profile name. Defaults to the library default."}}), &["kind"]),
     },
     Tool {
+        name: "get_video",
+        read: false,
+        destructive: false,
+        description: "Download a video from YouTube, X, Instagram or any other site yt-dlp reads, by its link. It is filed under its channel or account, which the library keeps as a series (a season a year, an episode a video), with the site's captions as subtitles. A link to a channel, account or playlist brings its newest videos, all of them, or none, as take says; follow keeps fetching what the channel posts.",
+        schema: || obj(json!({"url": {"type": "string"}, "take": {"type": "string", "enum": ["newest", "all", "new"], "description": "For a channel, account or playlist: its ten newest videos (default), all of them, or only what it posts from now on."}, "follow": {"type": "boolean", "description": "Keep fetching what the channel posts. Default false."}}), &["url"]),
+    },
+    Tool { name: "videos", read: true, destructive: false, description: "Videos asked for from sites and how each stands (queued, fetching with progress, filed, or failed with why), and the channels they are filed under, with whether each is followed.", schema: || obj(json!({}), &[]) },
+    Tool {
+        name: "follow_channel",
+        read: false,
+        destructive: false,
+        description: "Follow a channel (its title_id from videos) so what it posts is fetched as it is posted, or stop following it.",
+        schema: || obj(json!({"title_id": {"type": "integer"}, "follow": {"type": "boolean"}}), &["title_id", "follow"]),
+    },
+    Tool { name: "lists", read: true, destructive: false, description: "Letterboxd lists followed: each film on one is added to the library, and so is every film put on it later.", schema: || obj(json!({}), &[]) },
+    Tool {
+        name: "follow_list",
+        read: false,
+        destructive: false,
+        description: "Follow a Letterboxd list or watchlist by its link: every film on it the library lacks is added (monitored, so downloads start), and films put on it later are added as they appear. A film added from a list and later removed is not added again.",
+        schema: || obj(json!({"url": {"type": "string"}, "profile": {"type": "string", "description": "Quality profile for the films it adds. Defaults to the usual movie profile."}}), &["url"]),
+    },
+    Tool {
         name: "update_title",
         read: false,
         destructive: false,
@@ -798,6 +821,30 @@ impl Mcp {
                 Ok(json!({"configured": r["configured"], "last_read": when(&r["synced_at"]), "plex_items": r["plex_items"], "matched": r["matched"],
                     "in_plex_not_in_spool": r["plex_only"].as_array().into_iter().flatten().map(|x| json!({"rating_key": x["rating_key"], "title": x["title"], "year": x["year"], "kind": x["kind"], "path": x["path"], "can_track": x["can_track"]})).collect::<Vec<_>>(),
                     "in_spool_with_files_not_in_plex": r["spool_only"]}))
+            }
+            "get_video" => {
+                let body = json!({"url": a["url"], "take": a["take"].as_str().unwrap_or("newest"), "follow": a["follow"].as_bool().unwrap_or(false)});
+                self.post("/api/videos", body).await
+            }
+            "videos" => {
+                let r = self.get("/api/videos").await?;
+                Ok(json!({
+                    "videos": r["videos"].as_array().into_iter().flatten().take(60).map(|v| json!({
+                        "video_id": v["id"], "title": v["title"], "channel": v["channel"], "site": v["site_name"], "state": v["state"], "url": v["url"],
+                        "progress": v["progress"], "error": if v["error"].as_str().unwrap_or("").is_empty() { Value::Null } else { v["error"].clone() }, "title_id": v["title_id"],
+                    })).collect::<Vec<_>>(),
+                    "channels": r["channels"],
+                    "ready": r["ready"],
+                }))
+            }
+            "follow_channel" => self.post(&format!("/api/channels/{}/follow", int("title_id")?), json!({"follow": a["follow"].as_bool().ok_or("follow is required")?})).await,
+            "lists" => self.get("/api/lists").await,
+            "follow_list" => {
+                let profile = match a["profile"].as_str() {
+                    Some(name) => self.profile_id(name, "movie")?,
+                    None => 0,
+                };
+                self.post("/api/lists", json!({"url": a["url"], "profile_id": profile})).await
             }
             "add_title" => {
                 let kind = a["kind"].as_str().ok_or("kind is required")?;

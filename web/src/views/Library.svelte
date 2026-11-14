@@ -8,7 +8,7 @@
   import { bytes } from '../lib/format';
   import Tile from '../components/Tile.svelte';
 
-  type Scope = 'all' | 'video' | 'music' | 'books';
+  type Scope = 'all' | 'video' | 'channels' | 'music' | 'books';
   type VideoKind = 'all' | 'movie' | 'series' | 'anime';
   const saved = (() => {
     try {
@@ -18,7 +18,7 @@
     }
   })();
   const askedScope = route.query.get('kind');
-  let scope = $state<Scope>((['all', 'video', 'music', 'books'].includes(askedScope ?? '') ? askedScope : saved.scope ?? 'all') as Scope);
+  let scope = $state<Scope>((['all', 'video', 'channels', 'music', 'books'].includes(askedScope ?? '') ? askedScope : saved.scope ?? 'all') as Scope);
   let kind = $state<VideoKind>(saved.kind ?? 'all');
   let show = $state<string>(saved.show ?? 'all');
   let sort = $state<string>(saved.sort ?? 'title');
@@ -108,7 +108,7 @@
 
   const items = $derived.by((): Item[] => {
     const out: Item[] = app.titles.map((t) => ({
-      key: `t${t.id}`, type: 'title', label: t.kind === 'movie' ? 'Film' : 'Series', name: t.title, sortName: t.sort_title, by: '', year: t.year, added: t.added_at, size: t.size,
+      key: `t${t.id}`, type: 'title', label: t.kind === 'movie' ? 'Film' : t.channel ? 'Channel' : 'Series', name: t.title, sortName: t.sort_title, by: '', year: t.year, added: t.added_at, size: t.size,
       href: `#/title/${t.id}`, cover: t.poster_small ?? t.poster, square: false, have: t.kind === 'movie' ? t.file_count > 0 : t.episodes_have > 0, status: statusOf(t), t,
     }));
     for (const a of albums) {
@@ -138,7 +138,9 @@
     return out;
   });
 
-  const inScope = (i: Item, s: Scope) => s === 'all' || (s === 'video' ? i.type === 'title' : s === 'music' ? i.type === 'album' || i.type === 'want' : i.type === 'book');
+  // Channels are series of their videos, and have a tab of their own rather than Film & TV's.
+  const inScope = (i: Item, s: Scope) =>
+    s === 'all' || (s === 'video' ? i.type === 'title' && !i.t?.channel : s === 'channels' ? i.type === 'title' && !!i.t?.channel : s === 'music' ? i.type === 'album' || i.type === 'want' : i.type === 'book');
 
   // What can be shown and sorted by depends on what is being looked at.
   const SHOWS: Record<Scope, [string, string][]> = $derived({
@@ -148,6 +150,7 @@
       ...((app.me ? [['unwatched', 'Not watched'], ['watching', 'Part-way through'], ['watched', 'Watched']] : []) as [string, string][]),
       ...((app.manages ? [['monitored', 'Monitored'], ['unmonitored', 'Not monitored']] : []) as [string, string][]),
     ],
+    channels: [['all', 'Everything'], ...((app.me ? [['unwatched', 'Not watched'], ['watching', 'Part-way through'], ['watched', 'Watched']] : []) as [string, string][])],
     music: [['all', 'Everything'], ['have', 'In the music folder'], ['wanted', 'Wanted, not here yet'], ['lossless', 'Lossless'], ['lossy', 'Lossy']],
     books: [['all', 'Everything'], ['have', 'Got'], ['wanted', 'Wanted, not here yet'], ['choose', 'Waiting for a choice']],
   });
@@ -339,20 +342,21 @@
   const inPlace = $derived(place && placeNames.includes(place) ? app.titles.filter((t) => onPlace(t, place)) : app.titles);
   const seen = $derived(app.manages ? inPlace : inPlace.filter(have));
   const counts = $derived({
-    video: seen.length,
+    video: seen.filter((t) => !t.channel).length,
+    channels: seen.filter((t) => !!t.channel).length,
     movie: seen.filter((t) => t.kind === 'movie').length,
-    series: seen.filter((t) => t.kind === 'series').length,
+    series: seen.filter((t) => t.kind === 'series' && !t.channel).length,
     anime: seen.filter(isAnime).length,
     music: place ? 0 : albums.length + wants.filter((w) => w.state !== 'have').length,
     books: place ? 0 : books.length,
   });
   const scopes = $derived(
-    ([['all', 'Everything', counts.video + counts.music + counts.books], ['video', 'Film & TV', counts.video], ['music', 'Music', counts.music], ['books', 'Books', counts.books]] as [Scope, string, number][]).filter(
-      ([k]) => k !== 'books' || app.manages,
+    ([['all', 'Everything', counts.video + counts.channels + counts.music + counts.books], ['video', 'Film & TV', counts.video], ['channels', 'Channels', counts.channels], ['music', 'Music', counts.music], ['books', 'Books', counts.books]] as [Scope, string, number][]).filter(
+      ([k, , n]) => (k !== 'books' || app.manages) && (k !== 'channels' || n > 0),
     ),
   );
-  const noun = $derived(scope === 'video' ? ['title', 'titles'] : scope === 'music' ? ['album', 'albums'] : scope === 'books' ? ['book', 'books'] : ['item', 'items']);
-  const discoverKind: Record<Scope, string> = { all: 'all', video: 'all', music: 'music', books: 'books' };
+  const noun = $derived(scope === 'video' ? ['title', 'titles'] : scope === 'channels' ? ['channel', 'channels'] : scope === 'music' ? ['album', 'albums'] : scope === 'books' ? ['book', 'books'] : ['item', 'items']);
+  const discoverKind: Record<Scope, string> = { all: 'all', video: 'all', channels: 'videos', music: 'music', books: 'books' };
 </script>
 
 <header class="head">

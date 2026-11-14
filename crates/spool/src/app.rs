@@ -218,6 +218,8 @@ pub struct Inner {
     pub books: crate::books::Books,
     /// Music: the library as last read, and its scan. See [`crate::music`].
     pub music: crate::music::Music,
+    /// Videos from YouTube and other sites being fetched. See [`crate::videos`].
+    pub videos: crate::videos::Videos,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -512,6 +514,7 @@ impl App {
             art_fetches: tokio::sync::Semaphore::new(6),
             books,
             music,
+            videos: Default::default(),
         }));
         app.reload_players();
         Ok(app)

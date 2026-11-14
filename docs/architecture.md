@@ -22,6 +22,8 @@ Inside the server crate, the parts that are easiest to lose track of:
 | `anime.rs` | AniList, the id list, and collections. |
 | `local.rs`, `locations.rs`, `adopt.rs` | What else is in a folder, where the library lives, and bringing in what is already there. |
 | `jellyfin/` | The server players speak to. |
+| `videos/` | Videos from YouTube and other sites, fetched by yt-dlp and filed under their channels as series. |
+| `lists.rs` | Letterboxd lists followed, their films added as they appear. |
 
 ## The path of a download
 

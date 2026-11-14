@@ -5,13 +5,18 @@
   import { api, type Title } from '../lib/api';
   import { app, act, go, loadTitles, route, toast } from '../lib/state.svelte';
   import Poster from '../components/Poster.svelte';
+  import VideoGet from '../components/VideoGet.svelte';
+  import ListsFollow from '../components/ListsFollow.svelte';
   import { bytes } from '../lib/format';
 
-  type Scope = 'all' | 'movie' | 'series' | 'music' | 'books';
-  const SCOPES: [Scope, string][] = [['movie', 'Movies'], ['series', 'Series'], ['music', 'Music'], ['books', 'Books'], ['all', 'Everything']];
+  type Scope = 'all' | 'movie' | 'series' | 'music' | 'books' | 'videos' | 'lists';
+  const SCOPES: [Scope, string][] = [['movie', 'Movies'], ['series', 'Series'], ['music', 'Music'], ['books', 'Books'], ['videos', 'Videos'], ['lists', 'Lists'], ['all', 'Everything']];
   const asked = route.query.get('kind') as Scope | null;
   let kind = $state<Scope>(asked && SCOPES.some(([k]) => k === asked) ? asked : 'movie');
   let query = $state(route.query.get('q') ?? '');
+  // Videos and lists are got by their links, not searched for.
+  const byLink = $derived(kind === 'videos' || kind === 'lists');
+  let link = $state('');
   type Found = Title & { library_id?: number | null; anime?: { format: string; episodes: number; name: string; as_series?: boolean } };
   let found = $state<{ movies: Found[]; series: Found[]; movies_error?: string | null }>({ movies: [], series: [] });
   // Albums: an artist's own first, when what was typed is their name, then the rest. The two
@@ -61,6 +66,14 @@
 
   async function run() {
     const q = query.trim();
+    // A link pasted where a title is searched for: a Letterboxd list to follow, or a video to get.
+    if (/^https?:\/\//i.test(q) && !/imdb\.com\//i.test(q)) {
+      link = q;
+      query = '';
+      kind = /letterboxd\.com\//i.test(q) ? 'lists' : 'videos';
+      return;
+    }
+    if (byLink) return;
     const mine = ++seq;
     if (!q) {
       found = { movies: [], series: [] };
@@ -191,7 +204,7 @@
       <button role="tab" aria-selected={kind === k} class:on={kind === k} onclick={() => scope(k)}>{label}</button>
     {/each}
   </div>
-  <input class="input grow" type="search" placeholder={kind === 'music' ? 'An artist, an album, or both' : kind === 'books' ? 'A title, an author, or both' : kind === 'all' ? 'A film, series, album or book' : 'Search by title, or paste an IMDb id'} bind:value={query} oninput={onInput} onkeydown={(e) => e.key === 'Enter' && run()} data-search />
+  {#if !byLink}<input class="input grow" type="search" placeholder={kind === 'music' ? 'An artist, an album, or both' : kind === 'books' ? 'A title, an author, or both' : kind === 'all' ? 'A film, series, album or book' : 'Search by title, or paste an IMDb id'} bind:value={query} oninput={onInput} onkeydown={(e) => e.key === 'Enter' && run()} data-search />{/if}
 </div>
 
 {#snippet card(r: Found)}
@@ -267,6 +280,11 @@
   {#if n > FEW}<button class="btn small ghost more" onclick={() => scope(k)}>See all {n} {label}</button>{/if}
 {/snippet}
 
+{#if kind === 'videos'}
+  {#key link}<VideoGet initial={link} />{/key}
+{:else if kind === 'lists'}
+  {#key link}<ListsFollow initial={link} />{/key}
+{:else}
 {#if error && video}
   <div class="card empty">{error}{#if error.includes('TMDB')} <a class="link" href="#/settings">Open Settings</a>{/if}</div>
 {/if}
@@ -345,6 +363,7 @@
       {#each others.slice(0, 6) as r (`${r.tmdb_id}:${r.tvmaze_id}`)}{@render card(r)}{/each}
     </div>
   {/if}
+{/if}
 {/if}
 
 {#if adding}

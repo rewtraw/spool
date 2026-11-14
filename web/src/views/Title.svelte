@@ -239,6 +239,11 @@
     }
   }
 
+  async function follow(on: boolean) {
+    await act(() => api.post(`/channels/${id}/follow`, { follow: on }), on ? 'Following. New videos are fetched as they are posted.' : 'No longer following');
+    load();
+  }
+
   async function toggleSeason(n: number, monitored: boolean) {
     await act(() => api.patch(`/titles/${id}/seasons/${n}`, { monitored }));
     load();
@@ -393,7 +398,23 @@
         {#if !t.offline && (t.kind === 'movie' ? t.files.some((f) => !f.compact_of) : t.episodes.some((e) => e.file_id))}
           <div class="clipping"><ClipMaker titleId={t.id} kind={t.kind} episodes={t.episodes} watched={t.watched_episodes ?? {}} filmPosition={t.kind === 'movie' && t.watched && !t.watched.done ? (t.watched.position ?? 0) : 0} /></div>
         {/if}
-        {#if app.manages}
+        {#if app.manages && t.channel}
+        <!-- A channel: its videos come from its site, so there is nothing to search for or monitor. -->
+        <div class="controls">
+          <label class="check"><input type="checkbox" checked={t.channel.follow} onchange={(e) => follow(e.currentTarget.checked)} /> Follow: fetch what it posts</label>
+          {#if t.channel.url}<a class="btn small ghost" href={t.channel.url} target="_blank" rel="noreferrer">Open on {t.network ?? 'its site'}</a>{/if}
+        </div>
+        <div class="row wrap">
+          {#if t.files.length}
+            {#if compacting}<button class="btn ghost" onclick={() => cancelCompact()}>Cancel compact versions</button>
+            {:else}<button class="btn ghost" title="Make a smaller copy of each video that would gain from one, kept beside it for playing away from home" onclick={() => makeCompact()}>Make compact versions</button>{/if}
+          {/if}
+          <button class="btn ghost" onclick={async () => { const r = await act(() => api.post(`/titles/${id}/scan`)); if (r) { searchMessage = `Scan: ${r.files_found} files on disk, ${r.files_added} added, ${r.files_missing} missing`; load(); } }}>Rescan folder</button>
+          <button class="btn ghost danger" onclick={() => (confirmDelete = true)}>Remove</button>
+        </div>
+        {#if t.channel.follow}<p class="faint small">Looked at every hour{t.channel.checked_at ? `, last ${ago(t.channel.checked_at)}` : ''}. New videos are fetched as they appear.</p>{/if}
+        {#if searchMessage}<p class="muted" role="status">{searchMessage}</p>{/if}
+        {:else if app.manages}
         <div class="controls">
           <label class="check"><input type="checkbox" checked={t.monitored} onchange={(e) => patch({ monitored: e.currentTarget.checked })} /> Monitored</label>
           <select class="input auto" value={t.profile_id} onchange={(e) => patch({ profile_id: Number(e.currentTarget.value) })} aria-label="Quality profile">
@@ -496,7 +517,7 @@
     {/if}
   {:else}
     <section>
-      <div class="section-title">Episodes</div>
+      <div class="section-title">{t.channel ? 'Videos' : 'Episodes'}</div>
       <div class="stack">
         {#each seasons as [n, eps] (n)}
           {@const have = eps.filter((e) => e.file_id).length}
@@ -505,11 +526,11 @@
             <div class="shead">
               <button class="toggle" onclick={() => (openSeasons[n] = !openSeasons[n])} aria-expanded={!!openSeasons[n]}>
                 <span class="caret" class:open={openSeasons[n]}>›</span>
-                <b>{n === 0 ? 'Specials' : `Season ${n}`}</b>
+                <b>{t.channel ? n : n === 0 ? 'Specials' : `Season ${n}`}</b>
                 <span class="chip {have >= airedCount && airedCount > 0 ? 'ok' : have < airedCount && seasonOf(n) ? 'warn' : ''}">{have} / {airedCount}{airedCount < eps.length ? ` of ${eps.length}` : ''}</span>
               </button>
               {#if app.me && have}{@const all = seasonSeen(eps)}<button class="btn small ghost" onclick={() => markWatched(t!.id, !all, { season: n })} title={all ? 'Mark every episode of this season not watched' : 'Mark every episode of this season watched'}>{all ? 'Season watched ✓' : 'Mark season watched'}</button>{/if}
-              {#if app.manages}
+              {#if app.manages && !t.channel}
               <label class="check small"><input type="checkbox" checked={seasonOf(n)} onchange={(e) => toggleSeason(n, e.currentTarget.checked)} /> Monitored</label>
               {#if n > 0 && !locked}<button class="btn small" disabled={!!searching} onclick={() => search({ season: n }, true, `s${n}`)}>{searching === `s${n}` ? 'Searching…' : 'Search season'}</button>{:else if n > 0 && locked}<span class="faint small" title={locked}>No searching: {t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `${t.location} is only read`}</span>{/if}
               {/if}
@@ -520,8 +541,8 @@
                   {@const f = e.file_id ? fileById.get(e.file_id) : null}
                   {@const ew = seenOf(e)}
                   <div class="ep" class:dim={!e.monitored && !f}>
-                    {#if app.manages}<input type="checkbox" checked={e.monitored} onchange={() => toggleEpisode(e)} aria-label="Monitor episode {e.episode}" />{/if}
-                    <span class="num">{e.episode}</span>
+                    {#if app.manages && !t.channel}<input type="checkbox" checked={e.monitored} onchange={() => toggleEpisode(e)} aria-label="Monitor episode {e.episode}" />{/if}
+                    {#if !t.channel}<span class="num">{e.episode}</span>{/if}
                     <div class="grow">
                       <div class="truncate">{e.title || 'To be announced'}</div>
                       <div class="faint small">{e.air_date ? fullDate(e.air_date) : 'No air date'}{f && app.manages ? ` · ${bytes(f.size)}${f.release_group ? ' · ' + f.release_group : ''}` : ''}{ew && !ew.done && ew.position ? ` · stopped at ${duration(ew.position)}` : ''}</div>
@@ -533,11 +554,13 @@
                     {:else if app.manages && f?.compacting}<span class="chip accent" title="A compact version is being made or waiting to be">{making?.file_id === f.id && making.total_ms ? `Compact ${Math.round(pct(making.done_ms, making.total_ms))}%` : 'Compact soon'}</span>{/if}
                     {#if app.manages && coming.get(e.id)}<span class="chip accent">{coming.get(e.id)}</span>
                     {:else if !f && !aired(e)}<span class="chip">Not aired</span>
+                    {:else if !f && t.channel}<span class="chip">Not here</span>
                     {:else if !f && e.monitored}<span class="chip warn">Missing</span>
                     {:else if !f}<span class="chip">Not here</span>{/if}
                     {#if app.manages && !f && aired(e) && locked}<span class="faint small" title={locked}>{t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `no searching on ${t.location}`}</span>{/if}
                     {#if f && infuseEpisode(e, f)}<a class="btn small ghost" href={infuseEpisode(e, f)} title="Plays the episode in Infuse on this device." aria-label="Play episode {e.episode} in Infuse">Play</a>{/if}
-                    {#if app.manages && aired(e) && !locked}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
+                    {#if app.manages && aired(e) && !locked && !t.channel}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
+                    {#if e.video?.url}<a class="btn small ghost" href={e.video.url} target="_blank" rel="noreferrer" title="The video on {t.network ?? 'its site'}">Source</a>{/if}
                     {#if f && app.manages}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f && app.manages}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}
                   </div>

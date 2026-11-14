@@ -214,6 +214,7 @@ async fn main() -> Result<()> {
             if std::env::var_os("SPOOL_NO_SCHEDULER").is_none() {
                 app.spawn_scheduler();
                 app.spawn_dialogue();
+                app.spawn_videos();
             }
             let listener = tokio::net::TcpListener::bind(&bind).await.with_context(|| format!("binding {bind}"))?;
             let _ = app.port.set(listener.local_addr()?.port());
