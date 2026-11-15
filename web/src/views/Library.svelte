@@ -28,6 +28,8 @@
   /** Only what is kept on this location, as its home or as a copy; empty for everywhere. */
   let place = $state<string>(saved.place ?? '');
   const placeNames = $derived([...new Set(app.titles.flatMap((t) => [t.location, ...(t.also_on ?? [])]).filter(Boolean) as string[])].sort());
+  /** The location kept to, where its picker shows: albums and books have none, so it leaves them be. */
+  const atPlace = $derived(place && placeNames.includes(place) && (scope === 'all' || scope === 'video') ? place : '');
   /** Anime, films and series alike: what AniList has an entry for. */
   const isAnime = (t: Title) => !!t.anilist?.length;
   const onPlace = (t: Title, name: string) => t.location === name || (t.also_on ?? []).includes(name);
@@ -171,10 +173,10 @@
     const t = i.t;
     if (t) {
       if (scope === 'video' && (kind === 'anime' ? !isAnime(t) : kind !== 'all' && t.kind !== kind)) return false;
-      if (place && placeNames.includes(place) && !onPlace(t, place)) return false;
+      if (atPlace && !onPlace(t, atPlace)) return false;
       // Someone who only watches is shown what there is to watch.
       if (!app.manages && !have(t)) return false;
-    } else if (place && placeNames.includes(place)) return false;
+    } else if (atPlace) return false;
     switch (show) {
       case 'have': return i.have;
       case 'wanted': return !i.have && (!t || (t.monitored && t.available));
@@ -338,20 +340,24 @@
     bulkProfile = '';
   }
 
-  // The counts follow the location chosen, so they say what the tabs will show.
-  const inPlace = $derived(place && placeNames.includes(place) ? app.titles.filter((t) => onPlace(t, place)) : app.titles);
+  // The counts say what each tab will show: Everything and Film & TV keep to the location chosen,
+  // and the tabs without its picker do not.
+  const kept = $derived(place && placeNames.includes(place) ? place : '');
+  const inPlace = $derived(kept ? app.titles.filter((t) => onPlace(t, kept)) : app.titles);
   const seen = $derived(app.manages ? inPlace : inPlace.filter(have));
+  const seenAnywhere = $derived(app.manages ? app.titles : app.titles.filter(have));
   const counts = $derived({
     video: seen.filter((t) => !t.channel).length,
-    channels: seen.filter((t) => !!t.channel).length,
+    channels: seenAnywhere.filter((t) => !!t.channel).length,
+    channelsHere: seen.filter((t) => !!t.channel).length,
     movie: seen.filter((t) => t.kind === 'movie').length,
     series: seen.filter((t) => t.kind === 'series' && !t.channel).length,
     anime: seen.filter(isAnime).length,
-    music: place ? 0 : albums.length + wants.filter((w) => w.state !== 'have').length,
-    books: place ? 0 : books.length,
+    music: albums.length + wants.filter((w) => w.state !== 'have').length,
+    books: books.length,
   });
   const scopes = $derived(
-    ([['all', 'Everything', counts.video + counts.channels + counts.music + counts.books], ['video', 'Film & TV', counts.video], ['channels', 'Channels', counts.channels], ['music', 'Music', counts.music], ['books', 'Books', counts.books]] as [Scope, string, number][]).filter(
+    ([['all', 'Everything', counts.video + counts.channelsHere + (kept ? 0 : counts.music + counts.books)], ['video', 'Film & TV', counts.video], ['channels', 'Channels', counts.channels], ['music', 'Music', counts.music], ['books', 'Books', counts.books]] as [Scope, string, number][]).filter(
       ([k, , n]) => (k !== 'books' || app.manages) && (k !== 'channels' || n > 0),
     ),
   );
