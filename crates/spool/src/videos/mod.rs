@@ -123,7 +123,9 @@ pub struct Videos {
     progress: Mutex<HashMap<i64, ytdlp::Progress>>,
     /// The videos being fetched, each with how to stop it. One worker a video, never two.
     stops: Mutex<HashMap<i64, Arc<tokio::sync::Notify>>>,
-    wake: tokio::sync::Notify,
+    pub wake: tokio::sync::Notify,
+    /// Videos stopped because Spool was paused: they go back in line rather than failing.
+    held: Mutex<std::collections::HashSet<i64>>,
     /// Held while a video is filed, or a channel's title made: two videos of a channel not
     /// yet in the library would otherwise make it twice, or take the same number.
     filing: tokio::sync::Mutex<()>,
@@ -514,6 +516,16 @@ impl App {
         Ok(())
     }
 
+    /// Stop what is being fetched, for Spool has been paused; each goes back in line.
+    pub fn videos_hold(&self) {
+        let stops = self.videos.stops.lock();
+        let mut held = self.videos.held.lock();
+        for (id, stop) in stops.iter() {
+            held.insert(*id);
+            stop.notify_one();
+        }
+    }
+
     /// Forget the videos that were filed or failed.
     pub fn videos_clear(&self) -> Result<usize> {
         self.db.with(|c| c.execute("DELETE FROM videos WHERE state IN ('done', 'failed')", []))
@@ -611,6 +623,17 @@ impl App {
         let id = v.id;
         let result = self.fetch_and_file(&mut v, &stop).await;
         self.videos.progress.lock().remove(&id);
+        // Stopped by a pause before it was filed: back in line, to be fetched from the start
+        // on resuming. One filed meanwhile is done, whatever the pause.
+        let held = self.videos.held.lock().remove(&id);
+        if held && result.is_err() && self.video(id).ok().flatten().is_some() {
+            self.clear_staging(id);
+            v.state = State::Queued;
+            v.error.clear();
+            let _ = self.save_video(&mut v);
+            self.videos.stops.lock().remove(&id);
+            return;
+        }
         // Removed while it was being fetched: nothing is left of it.
         if self.video(id).ok().flatten().is_none() {
             self.clear_staging(id);

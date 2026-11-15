@@ -267,6 +267,7 @@ impl App {
             tokio::time::sleep(Duration::from_secs(20)).await;
             let mut last: std::collections::HashMap<&str, i64> = Default::default();
             loop {
+                app.catch_up_pause();
                 let g = app.settings.general();
                 let due = |name: &str, every_minutes: i64, last: &std::collections::HashMap<&str, i64>| now() - last.get(name).copied().unwrap_or(0) >= every_minutes * 60;
                 for (name, every) in [

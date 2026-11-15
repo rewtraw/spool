@@ -772,7 +772,7 @@ impl App {
 
     /// What the helpers are given of Spool's settings.
     fn pushed(&self) -> Pushed {
-        Pushed { servers: self.settings.servers(), speed_limit: self.settings.speed_limit() }
+        Pushed { servers: self.settings.servers(), speed_limit: self.settings.speed_limit(), paused: self.paused() }
     }
 
     /// Ask one helper how things stand, and act on what has changed.

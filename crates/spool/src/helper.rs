@@ -123,6 +123,8 @@ impl Conf {
 pub struct Pushed {
     pub servers: Vec<ServerConfig>,
     pub speed_limit: u64,
+    /// Spool is paused: the helper's downloads wait too, through its own restarts.
+    pub paused: bool,
 }
 
 /// A folder being moved from one place on the helper's disks to another.
@@ -254,6 +256,9 @@ impl Helper {
             Err(_) => Pushed::default(),
         };
         let engine = Engine::start(Self::engine_config(&conf, &pushed)).await?;
+        if pushed.paused {
+            engine.pause_all();
+        }
         let boot = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
         let shares: Vec<Share> = conf.roots.iter().map(|p| Share::new(p, true)).chain(conf.read_roots.iter().map(|p| Share::new(p, false))).collect();
         let disks = shares.iter().map(|s| disk_of(&s.path)).collect();
@@ -833,6 +838,13 @@ async fn config(State(h): State<Helper>, Json(pushed): Json<Pushed>) -> R {
     if *h.0.pushed.lock() != pushed {
         write_private(&h.0.data_dir.join("helper.json"), &serde_json::to_vec(&pushed)?)?;
         h.0.engine.set_config(Helper::engine_config(&h.0.conf, &pushed));
+        if pushed.paused != h.0.pushed.lock().paused {
+            if pushed.paused {
+                h.0.engine.pause_all();
+            } else {
+                h.0.engine.resume_all();
+            }
+        }
         *h.0.pushed.lock() = pushed;
     }
     Ok(Json(json!({"ok": true})))

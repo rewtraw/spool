@@ -35,6 +35,21 @@ pub(super) async fn get_settings(State(app): State<App>) -> Json<Value> {
     Json(g)
 }
 
+/// Refuse a location or a link with a field it does not have: a mistyped folder would
+/// otherwise be dropped, and the folder it meant to set cleared.
+fn known_fields(change: &Value) -> Result<(), String> {
+    let fields = |v: Value| v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+    for (list, mut have) in [("locations", fields(serde_json::to_value(crate::settings::Location::default()).unwrap_or_default())), ("links", fields(serde_json::to_value(crate::settings::LinkConf::default()).unwrap_or_default()))] {
+        have.push("key_set".into());
+        for entry in change[list].as_array().into_iter().flatten() {
+            if let Some(bad) = entry.as_object().and_then(|o| o.keys().find(|k| !have.contains(k))) {
+                return Err(format!("a {} has no setting called {bad}", if list == "links" { "link" } else { "location" }));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Lay a change over what is there: objects field by field, anything else in its place.
 fn merge(into: &mut Value, change: Value) -> Result<(), String> {
     match change {
@@ -82,6 +97,7 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
     let result = app.settings.update(|g| {
         let old = g.clone();
         let mut v = serde_json::to_value(&*g)?;
+        known_fields(&change).map_err(|e| anyhow::anyhow!(e))?;
         merge(&mut v, change).map_err(|e| anyhow::anyhow!(e))?;
         let mut new: General = serde_json::from_value(v).map_err(|e| anyhow::anyhow!("{e}"))?;
         settle(&watch, &old, &mut new).map_err(|e| anyhow::anyhow!(e))?;
@@ -90,24 +106,13 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
     });
     let (g, old) = result.map_err(|e| bad(format!("{e:#}")))?;
     if g.paused != old.paused {
-        app.queue_pause(g.paused);
+        app.apply_pause(g.paused);
     }
     if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password || g.opensubtitles_api_key != old.opensubtitles_api_key {
         *app.subtitle_login.lock() = None;
     }
     if old.compact.auto && !g.compact.auto {
         app.drop_automatic_compacts();
-    }
-    // A main folder given inside a folder that is there is made, so one folder chosen for the
-    // whole library is enough. One whose parent is not there is left: its disk may be away.
-    let (main, was) = (g.main(), old.main());
-    for (new, before) in [(&main.movie_root, &was.movie_root), (&main.series_root, &was.series_root), (&main.music_root, &was.music_root), (&main.audiobook_root, &was.audiobook_root), (&main.video_root, &was.video_root)] {
-        let dir = std::path::Path::new(new.as_str());
-        if new != before && !new.is_empty() && !dir.exists() && dir.parent().is_some_and(|p| p.is_dir()) {
-            if let Err(e) = std::fs::create_dir(dir) {
-                tracing::warn!(folder = %new, error = %e, "a library folder could not be made");
-            }
-        }
     }
     let moved = g.locations != old.locations;
     if moved {
@@ -132,6 +137,19 @@ fn settle(app: &App, old: &General, g: &mut General) -> Result<(), String> {
     // Checked against each other as they would be, whichever changed.
     let list = std::mem::take(&mut g.locations);
     g.locations = app.tidy_locations(list)?;
+    // A main folder given inside a folder that is there is made, so one folder chosen for the
+    // whole library is enough; made first, so the disk it is on is found below. One whose
+    // parent is not there is left: its disk may be away.
+    if let (Some(main), was) = (g.locations.iter().find(|l| l.id == 0), old.main()) {
+        for (new, before) in [(&main.movie_root, &was.movie_root), (&main.series_root, &was.series_root), (&main.music_root, &was.music_root), (&main.audiobook_root, &was.audiobook_root), (&main.video_root, &was.video_root)] {
+            let dir = std::path::Path::new(new.as_str());
+            if new != before && !new.is_empty() && !dir.exists() && dir.parent().is_some_and(|p| p.is_dir()) {
+                if let Err(e) = std::fs::create_dir(dir) {
+                    tracing::warn!(folder = %new, error = %e, "a library folder could not be made");
+                }
+            }
+        }
+    }
     // The disk each set of folders needs is Spool's to work out.
     for l in &mut g.locations {
         let known = old.locations.iter().find(|o| o.id == l.id).map(|o| o.volume.as_str()).unwrap_or("");
@@ -333,9 +351,10 @@ pub(super) async fn run_task(State(app): State<App>, Path(name): Path<String>) -
 /// ones are worth doing but stop nothing.
 pub(super) async fn setup(State(app): State<App>) -> R<Value> {
     let g = app.settings.general();
-    let main = app.placement().0.into_iter().find(|(l, _)| l.id == 0);
-    let has_folders = g.locations.iter().any(|l| !l.movie_root.is_empty() || !l.series_root.is_empty());
-    let reachable = main.as_ref().is_some_and(|(_, on)| *on);
+    let places = app.placement().0;
+    let with_folders = |l: &crate::settings::Location| !l.movie_root.is_empty() || !l.series_root.is_empty();
+    let has_folders = places.iter().any(|(l, _)| with_folders(l));
+    let reachable = places.iter().any(|(l, on)| *on && with_folders(l));
     let providers = app.settings.servers().iter().any(|s| s.enabled && !s.host.trim().is_empty());
     let indexers = app.db.indexers()?.iter().any(|i| !i.url.trim().is_empty() && (i.enable_rss || i.enable_search));
     let signs_in = app.db.accounts()?.iter().any(|a| a.enabled && !a.password.is_empty());

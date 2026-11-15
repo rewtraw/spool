@@ -184,15 +184,17 @@ fn upgrade_rejection(ctx: &Context, new: &QualityModel, new_group: &Option<Strin
 }
 
 /// The fewest megabytes a minute a release of a quality can honestly be: below it, it is
-/// mislabelled, a sample or a fake. How big a release should be otherwise is the profile's
-/// size target to say.
+/// mislabelled, a sample or a fake. Low enough for the most frugal encodes, such as an anime
+/// episode of 24 minutes at 1080p in 70 MB; how big a release should be otherwise is the
+/// profile's size target to say.
 fn smallest_mb_per_minute(q: Quality) -> f64 {
     match (q.resolution(), matches!(q, Quality::Remux1080p | Quality::Remux2160p)) {
-        (_, true) | (2160, _) => 35.0,
-        (1080, _) => 4.0,
-        (720, _) => 3.0,
-        (1..=576, _) => 2.0,
-        _ => 1.0,
+        (_, true) => 20.0,
+        (2160, _) => 8.0,
+        (1080, _) => 2.0,
+        (720, _) => 1.2,
+        (1..=576, _) => 0.8,
+        _ => 0.5,
     }
 }
 
@@ -409,6 +411,9 @@ mod tests {
         let mut small = cand(Quality::Bluray1080p);
         small.size_bytes = 100 << 20;
         assert_eq!(codes(evaluate(&small, &c)), ["too_small"], "100 MB is no 1080p film of 110 minutes");
+        let mut frugal = cand(Quality::Bluray1080p);
+        frugal.size_bytes = 70 << 20;
+        assert!(evaluate(&frugal, &Context { runtime_minutes: 24, ..ctx(&p, &[]) }).is_empty(), "a frugal anime encode passes");
         let mut big = cand(Quality::Bluray1080p);
         big.size_bytes = 40 << 30;
         assert!(evaluate(&big, &c).is_empty(), "how big is too big is the profile's size target to say");

@@ -5671,6 +5671,24 @@ async fn settings_change_only_what_is_sent_and_keep_their_secrets() {
     assert_eq!(w.app.settings.general().language, "english");
     assert_eq!(call(&api, "PATCH", "/api/settings", json!({"default_movie_profile": 999})).await.0, 400);
 
+    // A location with a mistyped folder is refused rather than losing the folder it meant.
+    let (status, said) = call(&api, "PATCH", "/api/settings", json!({"locations": [{"id": 0, "movies_root": "/media/Movies"}]})).await;
+    assert_eq!(status, 400, "{said}");
+    assert!(!w.app.settings.general().main().movie_root.is_empty());
+
+    // Pausing holds the downloads and is kept; resuming lets them go.
+    assert_eq!(call(&api, "POST", "/api/queue/pause", Value::Null).await.0, 200);
+    assert!(w.app.paused() && w.app.engine.is_paused());
+    let (_, status) = call(&api, "GET", "/api/status", Value::Null).await;
+    assert_eq!(status["paused"].as_bool(), Some(true));
+    // One saved without being put on the downloads, as `spool pause` does, is caught up with.
+    w.app.settings.update(|g| { g.paused = false; Ok(()) }).unwrap();
+    w.app.catch_up_pause();
+    assert!(!w.app.engine.is_paused(), "a resume saved elsewhere reaches the downloads");
+    assert_eq!(call(&api, "POST", "/api/queue/pause", Value::Null).await.0, 200);
+    assert_eq!(call(&api, "POST", "/api/queue/resume", Value::Null).await.0, 200);
+    assert!(!w.app.paused() && !w.app.engine.is_paused());
+
     // What is still needed is listed, the TMDB key just cleared among it.
     let (_, setup) = call(&api, "GET", "/api/setup", Value::Null).await;
     let tmdb = setup["items"].as_array().unwrap().iter().find(|i| i["id"] == "tmdb").unwrap().clone();

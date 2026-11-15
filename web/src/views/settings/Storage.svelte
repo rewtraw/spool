@@ -154,11 +154,12 @@
 </script>
 
 {#snippet mainCard()}
-  {@const main = placeOf(0)}
+  {@const seen = placeOf(0)}
+  {#if main}
   <div class="place">
     <div class="row wrap">
-      <b>{main?.name ?? 'Library'}</b>
-      {#if main}<span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', 'the main location', general.new_titles_location === 0 ? 'new titles go here' : '', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>{/if}
+      <b>{main.name || 'Library'}</b>
+      {#if seen}<span class="small" class:warn={!seen.online}>{[seen.online ? 'Reachable' : 'Cannot be reached', 'the main location', general.new_titles_location === 0 ? 'new titles go here' : '', `${seen.titles} ${seen.titles === 1 ? 'title' : 'titles'}`, seen.bytes ? bytes(seen.bytes) : '', seen.free != null ? `${bytes(seen.free)} free` : ''].filter(Boolean).join(' · ')}</span>{/if}
     </div>
     {#if main.movie_root || main.series_root || main.music_root || main.audiobook_root || main.video_root}<div class="mono small faint where">{[main.movie_root, main.series_root, main.music_root, main.audiobook_root, main.video_root].filter(Boolean).join(' · ')}</div>{/if}
     {#if !main.movie_root && !main.series_root}
@@ -179,8 +180,9 @@
     <span class="hint">{main.volume ? `These are on the disk at ${main.volume}. While it is not mounted, Spool pauses instead of writing somewhere else.` : 'Spool works out which disk these are on, and pauses while a disk that can be unplugged is not there.'}</span>
     <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
     </details>
-    {#if main}{@render checked(0)}{/if}
+    {#if seen}{@render checked(0)}{/if}
   </div>
+  {/if}
 {/snippet}
 
 {#snippet placeCard(l: any, i: number)}

@@ -187,6 +187,9 @@ pub struct Inner {
     /// The OpenSubtitles sign-in in use and when it was made, or the account details last
     /// refused and why, which are not tried again until they change.
     pub subtitle_login: Mutex<Option<(Result<String, (String, String)>, i64)>>,
+    /// The pause last put on the downloads, so a pause or resume made where it could not be
+    /// put on them at once (by `spool pause`, say) is put on them when next looked at.
+    pub paused_applied: std::sync::atomic::AtomicBool,
     /// Where OpenSubtitles' API is. Tests put a stand-in here.
     pub opensubtitles_api: Mutex<String>,
     /// How many subtitles OpenSubtitles will still hand over today, and when that starts
@@ -463,7 +466,8 @@ impl App {
         }
         let engine = Engine::start(engine_config(&settings, data_dir)).await?;
         // A Spool paused stays paused across a restart.
-        if settings.general().paused {
+        let settings_paused = settings.general().paused;
+        if settings_paused {
             engine.pause_all();
         }
         let http = http_client();
@@ -512,6 +516,7 @@ impl App {
             space_blocked: Mutex::new(HashMap::new()),
             subtitle_login: Mutex::new(None),
             opensubtitles_api: Mutex::new("https://api.opensubtitles.com/api/v1".into()),
+            paused_applied: std::sync::atomic::AtomicBool::new(settings_paused),
             subtitle_allowance: Mutex::new(None),
             dialogue: crate::dialogue::Index::open(&data_dir.join("dialogue.db"))?,
             players: Default::default(),
@@ -541,15 +546,38 @@ impl App {
         self.settings.general().paused
     }
 
-    /// Pause Spool or set it going again: the setting, the downloads here and on the helpers.
+    /// Pause Spool or set it going again: the setting, the downloads here and on the helpers,
+    /// and the videos being fetched.
     pub fn set_paused(&self, paused: bool) -> anyhow::Result<()> {
         self.settings.update(|g| {
             g.paused = paused;
             Ok(())
         })?;
-        self.queue_pause(paused);
+        self.apply_pause(paused);
         self.emit(Event::Task { name: "pause".into(), running: false, message: if paused { "Paused" } else { "Running" }.into() });
         Ok(())
+    }
+
+    /// Put a pause on the downloads, or take it off: here, on the helpers (which are also told
+    /// with their settings, so a helper started again stays paused), and the videos being
+    /// fetched, which go back in line.
+    pub fn apply_pause(&self, paused: bool) {
+        self.paused_applied.store(paused, std::sync::atomic::Ordering::Relaxed);
+        self.queue_pause(paused);
+        if paused {
+            self.videos_hold();
+        } else {
+            self.videos.wake.notify_one();
+        }
+    }
+
+    /// Put on the downloads a pause, or a resume, that was saved without being put on them.
+    pub fn catch_up_pause(&self) {
+        let paused = self.paused();
+        if paused != self.paused_applied.load(std::sync::atomic::Ordering::Relaxed) {
+            tracing::info!(paused, "putting the saved pause on the downloads");
+            self.apply_pause(paused);
+        }
     }
 
     /// Push current settings into the download engine.
