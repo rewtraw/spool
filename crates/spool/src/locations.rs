@@ -142,8 +142,7 @@ impl App {
     /// Every location, the main one first.
     pub fn locations(&self) -> Vec<Location> {
         let g = self.settings.general();
-        let name = Path::new(&g.required_volume).file_name().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| "Library".into());
-        let mut all = vec![Location { id: 0, name, movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, audiobook_root: g.audiobook_root, video_root: g.video_root, volume: g.required_volume, manage: true, movie_profile: 0, series_profile: 0 }];
+        let mut all = vec![g.main()];
         all.extend(g.locations.into_iter().filter(|l| l.id != 0));
         all
     }
@@ -245,10 +244,10 @@ impl App {
         self.placement().locked(t)
     }
 
-    /// Check a list of further locations as someone has edited it, and give new ones their ids.
-    /// The further locations as they would be beside the main folders of `g`: tidied, numbered,
-    /// and refused when they overlap.
-    pub fn tidy_locations(&self, g: &crate::settings::General, list: Vec<Location>) -> Result<Vec<Location>, String> {
+    /// Check the locations as someone has edited them, and give new ones their ids. The first
+    /// with id 0 is the main one, always managed and never without a name; any other with id 0
+    /// is new. A main location is made when there is none. Refused when two overlap.
+    pub fn tidy_locations(&self, list: Vec<Location>) -> Result<Vec<Location>, String> {
         let saved = self.settings.general();
         let mut next: u32 = self.db.get_setting::<u32>("location_seq").max(saved.locations.iter().map(|l| l.id).max().unwrap_or(0));
         let clean = |s: &str| {
@@ -259,26 +258,34 @@ impl App {
         for mut l in list {
             l.name = l.name.trim().to_string();
             (l.movie_root, l.series_root, l.music_root, l.audiobook_root, l.video_root, l.volume) = (clean(&l.movie_root), clean(&l.series_root), clean(&l.music_root), clean(&l.audiobook_root), clean(&l.video_root), clean(&l.volume));
-            if l.name.is_empty() {
+            let main = l.id == 0 && !out.iter().any(|o| o.id == 0);
+            if main {
+                l.manage = true;
+                if l.name.is_empty() {
+                    l.name = "Library".into();
+                }
+            } else if l.name.is_empty() {
                 return Err("every location needs a name".into());
-            }
-            if l.movie_root.is_empty() && l.series_root.is_empty() && l.music_root.is_empty() && l.audiobook_root.is_empty() && l.video_root.is_empty() {
+            } else if l.movie_root.is_empty() && l.series_root.is_empty() && l.music_root.is_empty() && l.audiobook_root.is_empty() && l.video_root.is_empty() {
                 return Err(format!("{} needs a folder for films, television, music or videos", l.name));
             }
             if [&l.movie_root, &l.series_root, &l.music_root, &l.audiobook_root, &l.video_root, &l.volume].into_iter().any(|p| !p.is_empty() && !p.starts_with('/')) {
                 return Err(format!("the folders of {} must be full paths, starting with /", l.name));
             }
-            if l.id == 0 || out.iter().any(|o| o.id == l.id) {
+            if !main && (l.id == 0 || out.iter().any(|o| o.id == l.id)) {
                 next += 1;
                 l.id = next;
             }
             out.push(l);
         }
+        if !out.iter().any(|l| l.id == 0) {
+            out.insert(0, Location::main());
+        }
+        // The main one first, as everything that lists them expects.
+        out.sort_by_key(|l| l.id != 0);
         // A folder inside another location's folder would leave its titles belonging to both.
-        let main = Location { id: 0, name: "the main library".into(), movie_root: g.movie_root.clone(), series_root: g.series_root.clone(), music_root: g.music_root.clone(), audiobook_root: g.audiobook_root.clone(), video_root: g.video_root.clone(), ..Default::default() };
-        let all: Vec<&Location> = std::iter::once(&main).chain(out.iter()).collect();
-        for (i, a) in all.iter().enumerate() {
-            for b in all.iter().skip(i + 1) {
+        for (i, a) in out.iter().enumerate() {
+            for b in out.iter().skip(i + 1) {
                 let roots = |l: &Location| [l.movie_root.clone(), l.series_root.clone(), l.music_root.clone(), l.audiobook_root.clone(), l.video_root.clone()].into_iter().filter(|r| !r.is_empty()).collect::<Vec<_>>();
                 if roots(a).iter().any(|x| roots(b).iter().any(|y| Path::new(x).starts_with(y) || Path::new(y).starts_with(x))) {
                     return Err(format!("{} and {} share a folder; each location needs folders of its own", a.name, b.name));

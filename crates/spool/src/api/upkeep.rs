@@ -63,9 +63,6 @@ pub(super) async fn archive_check(State(app): State<App>, Path(id): Path<i64>) -
 }
 
 pub(super) async fn archive_grab(State(app): State<App>, Path(id): Path<i64>, body: Option<Json<Value>>) -> R<Value> {
-    if !app.is_active() {
-        return Err(ApiError(StatusCode::CONFLICT, "Spool is in shadow mode and does not download".into()));
-    }
     let another = body.is_some_and(|b| b.0["another_version"].as_bool().unwrap_or(false));
     let a = app.grab_saved(id, another).await?;
     Ok(Json(json!({"acquisition": a})))
@@ -171,9 +168,4 @@ pub(super) async fn recycle_empty(State(app): State<App>) -> R<Value> {
     let app2 = app.clone();
     let freed = tokio::task::spawn_blocking(move || app2.clean_recycle(true)).await??;
     Ok(Json(json!({"freed": freed})))
-}
-
-pub(super) async fn check_paths(State(app): State<App>) -> R<Value> {
-    let (same, differ) = app.check_paths()?;
-    Ok(Json(json!({"matching": same, "differing": differ.into_iter().map(|(a, e)| json!({"actual": a, "expected": e})).collect::<Vec<_>>()})))
 }

@@ -61,7 +61,7 @@ impl App {
         self.emit(Event::Acquisition { id: acq.id, title_id: acq.title_id, state: acq.state.as_str().into() });
         tracing::warn!(release = %acq.release.title, reason = %why, "download failed");
 
-        if self.is_active() && !acq.release.guid.starts_with("manual:") {
+        if !self.paused() && !acq.release.guid.starts_with("manual:") {
             let (app, title_id, episodes) = (self.clone(), acq.title_id, acq.episode_ids.clone());
             let (release, reason) = (acq.release.title.clone(), why.to_string());
             tokio::spawn(async move {
@@ -113,7 +113,7 @@ impl App {
             tracing::warn!(reason = %self.volume_problem().unwrap_or_default(), "the media volume cannot be used; pausing downloads");
             self.engine.pause_all();
         } else if !*was_ok && ok {
-            tracing::info!("the media volume is back; resuming downloads");
+            tracing::info!("the media volume is back; resuming downloads unless Spool is paused");
             if let Err(e) = self.recover() {
                 tracing::warn!(error = %e, "could not finish interrupted imports");
             }
@@ -122,7 +122,9 @@ impl App {
                     let _ = self.engine.retry(&job.id);
                 }
             }
-            self.engine.resume_all();
+            if !self.paused() {
+                self.engine.resume_all();
+            }
         }
         *was_ok = ok;
     }

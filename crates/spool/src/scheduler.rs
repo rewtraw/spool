@@ -51,8 +51,8 @@ impl App {
 
     /// Search for a few missing titles, least recently searched first.
     async fn backlog(&self) -> anyhow::Result<String> {
-        if !self.is_active() {
-            return Ok("skipped in shadow mode".into());
+        if self.paused() {
+            return Ok("skipped while paused".into());
         }
         let files = self.db.file_counts()?;
         let today = chrono::Local::now().date_naive();
@@ -97,8 +97,8 @@ impl App {
     /// and the indexers can take.
     async fn smaller_copies(&self) -> anyhow::Result<String> {
         const PER_RUN: usize = 8;
-        if !self.is_active() {
-            return Ok("skipped in shadow mode".into());
+        if self.paused() {
+            return Ok("skipped while paused".into());
         }
         let profiles = self.db.profiles()?;
         let mut over: Vec<(u64, crate::models::Title)> = vec![];

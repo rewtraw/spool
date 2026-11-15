@@ -29,7 +29,7 @@ Two rules keep a web page you happen to open from using Spool through your brows
 
 ## Status
 
-`GET /api/status` gives the mode, the version, how many movies, series and files there are, free space, whether the queue is paused, the scheduled tasks and any warnings, such as a location that cannot be reached.
+`GET /api/status` gives whether Spool is paused, the version, how many movies, series and files there are, free space, whether the queue is paused, the scheduled tasks and any warnings, such as a location that cannot be reached.
 
 ## Before restarting
 
@@ -111,7 +111,9 @@ The routes the web app uses are open to other programs as well. A few that are u
 
 | Request | Effect |
 | --- | --- |
-| `POST /api/queue/pause`, `POST /api/queue/resume` | Stop and start downloading. |
+| `POST /api/queue/pause`, `POST /api/queue/resume` | Pause Spool, or set it going: while paused it starts nothing by itself and downloads wait, until resumed, through restarts. |
+| `GET /api/settings`, `PATCH /api/settings` | The settings, and changing some: send only those to change. A secret comes back blank, with `secrets` saying whether each is set; sent blank it is kept, sent as `null` it is cleared. A setting that does not exist, a value of the wrong kind, or settings that do not fit together (two locations sharing a folder, a profile that is not one) get `400` and change nothing. `locations` is every location, the main one first. |
+| `GET /api/setup` | What Spool still needs before it can work, each with whether it is done and where it is given. |
 | `POST /api/tasks/{name}` | Run a scheduled task now: `rss`, `backlog`, `refresh`, `scan`, `housekeeping`, `plex`, `anime`, `subtitles`, `music`, `music_wants`, `books`, `book_index`, `videos` or `lists`. |
 | `POST /api/titles/{id}/search` | Search for a title now. |
 | `POST /api/titles/{id}/scan` | Rescan a title's folder. |

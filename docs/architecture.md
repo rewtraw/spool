@@ -60,7 +60,7 @@ One SQLite database in WAL mode holds everything, in a "columns plus JSON docume
 
 ## Locations
 
-The library always has a main location: the two folders in the general settings, on the volume named there. Further locations sit beside it, each with folders of its own and each either managed or only read. A title belongs to the location whose folder holds its own, so nothing about a title says where it is except its path.
+The library always has a main location: the first in the list of locations, always managed, and where new titles go when the place chosen for them cannot take them. Further locations sit beside it, each with folders of its own and each either managed or only read. A title belongs to the location whose folder holds its own, so nothing about a title says where it is except its path.
 
 Two rules follow from that, and every part of Spool that touches files asks the same question of them (`title_locked`):
 
@@ -114,8 +114,8 @@ A caller whose count is older than the oldest removal still remembered, or is on
 
 ## Safety rules the code enforces
 
-- If the required volume is not mounted or not readable, nothing is downloaded, imported or created. Spool never makes stand-in folders on another disk.
-- Spool starts in shadow mode: it records what it would do and touches nothing until switched to active.
+- If the main location's disk is not mounted or not readable, nothing is downloaded, imported or created. Spool never makes stand-in folders on another disk.
+- While paused, Spool records what it would do and starts nothing by itself; downloads wait.
 - Downloads that the disk cannot hold wait in the queue instead of starting.
 - A release that fails is blocklisted and the next acceptable one is tried.
 - Deleting files through the MCP endpoint needs an explicit confirmation.

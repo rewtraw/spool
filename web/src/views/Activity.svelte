@@ -191,7 +191,7 @@
   {#if tab === 'queue'}
     <div class="row">
       {#if totalSpeed > 0}<span class="muted speed">{bytes(totalSpeed)}/s</span>{/if}
-      <button class="btn" onclick={toggleQueue}>{data.paused ? 'Resume downloads' : 'Pause downloads'}</button>
+      <button class="btn" title={data.paused ? 'Find, download and file again' : 'Find and fetch nothing by itself, and hold downloads, until set going again'} onclick={toggleQueue}>{data.paused ? 'Resume' : 'Pause'}</button>
     </div>
   {/if}
 </header>

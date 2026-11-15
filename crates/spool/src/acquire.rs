@@ -4,7 +4,7 @@ use crate::app::{App, Event};
 use crate::models::*;
 use crate::names::plain;
 use crate::newznab::{self, Query};
-use crate::settings::{fixed, Mode};
+use crate::settings::fixed;
 use anyhow::{anyhow, bail, Result};
 use spool_core::decision::{self, Candidate, Context, ExistingFile, Rejection};
 use spool_core::matching;
@@ -1112,14 +1112,15 @@ impl App {
                 self.emit(Event::Decisions { title_id });
             }
         }
-        let mut msg = format!("{considered} matching releases, {grabbed} {}", if g.mode == Mode::Shadow { "would be grabbed" } else { "grabbed" });
+        let mut msg = format!("{considered} matching releases, {grabbed} {}", if g.paused { "would be grabbed" } else { "grabbed" });
         if !errors.is_empty() {
             msg.push_str(&format!("; errors: {}", errors.join("; ")));
         }
         Ok(msg)
     }
 
-    /// Send a release to the downloader. In shadow mode this only records what would have happened.
+    /// Send a release to the downloader. While Spool is paused, one it chose by itself is only
+    /// noted; one someone asked for is put in line, to start on resuming.
     pub async fn grab(&self, d: &DecisionRecord, title: &Title, reason: &str, user: bool) -> Result<Option<Acquisition>> {
         // One grab of a given release at a time; a concurrent duplicate waits and then finds the first.
         let key = (title.id, d.release.title.clone());
@@ -1139,7 +1140,7 @@ impl App {
             "release": d.release.title, "indexer": d.release.indexer, "size": d.release.size, "guid": d.release.guid,
             "quality": d.quality, "covers": d.covers, "episode_ids": d.episode_ids, "reason": reason,
         });
-        if !self.is_active() {
+        if self.paused() && !user {
             let already = self.db.history(Some(title.id), 200)?.iter().any(|h| h.kind == "would_grab" && h.data["guid"] == d.release.guid);
             if !already {
                 self.db.add_history(Some(title.id), "would_grab", summary)?;
@@ -1333,9 +1334,6 @@ impl App {
 
     /// Queue an NZB the user supplied for a known title.
     pub fn add_manual_nzb(&self, title: &Title, episode_ids: Vec<i64>, name: &str, nzb: &[u8]) -> Result<Acquisition> {
-        if !self.is_active() {
-            bail!("Spool is in shadow mode and does not download");
-        }
         if !self.volume_ok() {
             bail!("the media volume is not mounted");
         }

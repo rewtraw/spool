@@ -1,7 +1,7 @@
 <script lang="ts">
   import Setup from '../components/Setup.svelte';
   import { api } from '../lib/api';
-  import { app, act, go, loadTitles, signOut } from '../lib/state.svelte';
+  import { app, act, go, loadStatus, loadTitles, signOut } from '../lib/state.svelte';
   import { ago, bytes, day, duration, pct, qualityName } from '../lib/format';
   import Poster from '../components/Poster.svelte';
   import JobLine from '../components/JobLine.svelte';
@@ -101,6 +101,9 @@
       ? places.map((p) => ({ label: `Free on ${p.name}`, value: !p.online ? 'Away' : p.free != null ? bytes(p.free) : '—' }))
       : [{ label: 'Free', value: app.status.free_bytes != null ? bytes(app.status.free_bytes) : '—' }]),
   ] : []);
+  async function resume() {
+    if ((await act(() => api.post('/queue/resume'), 'Spool is running')) !== undefined) loadStatus();
+  }
 </script>
 
 <header class="head">
@@ -115,10 +118,10 @@
 
 {#if app.manages}<Setup />{/if}
 
-{#if app.manages && app.status?.mode === 'shadow'}
+{#if app.manages && app.status?.paused}
   <div class="notice">
-    <b>Shadow mode.</b> Spool is reading the indexer feeds and recording what it would do. It does not download, move or delete anything.
-    <a href="#/settings">Change in Settings</a>
+    <b>Spool is paused.</b> It notes what it would fetch and fetches nothing by itself; downloads wait.
+    <button class="link" onclick={() => resume()}>Set it going</button>
   </div>
 {/if}
 {#each app.manages ? (app.status?.warnings ?? []) : [] as w}
@@ -345,7 +348,7 @@
   .notice.warn {
     background: color-mix(in srgb, var(--warn) 15%, transparent);
   }
-  .notice a {
+  .notice .link {
     color: var(--accent);
     font-weight: 550;
     white-space: nowrap;

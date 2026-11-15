@@ -57,17 +57,16 @@ Everything else has a sensible value already. Settings has four tabs:
 
 What Spool does by itself, with a button to do each now, is under Activity, Upkeep, beside how the library stands with Plex, the music folders and the book index. What is using the disks, and compact versions to make, are under Activity, Space.
 
-## Shadow mode, then active
+## Pausing it
 
-Spool starts in **shadow mode**. It reads the indexer feeds and records what it would download and why, and changes nothing: no downloads, no moved files, no deletions. This is the time to add a few titles, open one, and read the verdicts it gives each release.
-
-When the choices look right, switch to **active** under Settings, General, Mode, or from the command line:
+**Pause**, at the top of Activity, stops Spool doing anything by itself: it still reads the indexer feeds and notes what it would download and why, but downloads nothing of its own accord, and downloads under way wait. What someone asks for while it is paused is put in line, to start when it is set going again. A pause lasts until **Resume**, through restarts. From the command line:
 
 ```sh
-spool mode active
+spool pause
+spool resume
 ```
 
-Stop Radarr and Sonarr from managing the same folders first. Two programs filing into one library will fight over the same files.
+`spool migrate`, which brings a library over from Radarr and Sonarr, leaves Spool paused, so that it can be looked over before it starts: add a few titles, open one and read the verdicts it gives each release. Stop Radarr and Sonarr from managing the same folders before resuming. Two programs filing into one library will fight over the same files.
 
 Titles are added under **Discover**. One search looks for films and series together: the kind you chose is listed first and the other below it, so a film and the series of the same name are both in front of you.
 
@@ -117,7 +116,7 @@ If the library is on a removable disk, set `SPOOL_SIGN_IDENTITY` to a stable cod
 
 ```sh
 spool serve [--bind 0.0.0.0:7979]   # run the service
-spool mode active|shadow            # start or stop making changes
+spool pause | spool resume          # stop or start doing things by itself
 spool migrate ...                   # import from Radarr, Sonarr and SABnzbd
 spool check-paths                   # are existing files where Spool would put them?
 spool shadow-report ...             # compare with Radarr's and Sonarr's history

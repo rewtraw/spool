@@ -735,6 +735,29 @@ const MIGRATIONS: &[&str] = &[
         '$.space_wait_gb', '$.direct_unpack', '$.post_parallel', '$.archive_runner_ups') WHERE key = 'general';
     DELETE FROM settings WHERE key = 'size_limits';
     "#,
+    r#"
+    -- Shadow mode becomes a pause that keeps its promise: a Spool in shadow mode (the old
+    -- default, so also one that never said) is paused, and an active one is not.
+    UPDATE settings SET value = json_remove(json_set(value, '$.paused', json(CASE json_extract(value, '$.mode') WHEN 'active' THEN 'false' ELSE 'true' END)), '$.mode') WHERE key = 'general';
+    "#,
+    r#"
+    -- The main location is one of the locations, the first with id 0, rather than folders of
+    -- its own beside them. Its name was its disk's, or Library.
+    UPDATE settings SET value = json_remove(json_set(value, '$.locations', json_insert(COALESCE(json_extract(value, '$.locations'), json('[]')), '$[#]', json_object(
+            'id', 0,
+            'name', COALESCE(NULLIF(replace(rtrim(COALESCE(json_extract(value, '$.required_volume'), ''), '/'), rtrim(rtrim(COALESCE(json_extract(value, '$.required_volume'), ''), '/'), replace(rtrim(COALESCE(json_extract(value, '$.required_volume'), ''), '/'), '/', '')), ''), ''), 'Library'),
+            'movie_root', COALESCE(json_extract(value, '$.movie_root'), ''),
+            'series_root', COALESCE(json_extract(value, '$.series_root'), ''),
+            'music_root', COALESCE(json_extract(value, '$.music_root'), ''),
+            'audiobook_root', COALESCE(json_extract(value, '$.audiobook_root'), ''),
+            'video_root', COALESCE(json_extract(value, '$.video_root'), ''),
+            'volume', COALESCE(json_extract(value, '$.required_volume'), ''),
+            'manage', json('true'),
+            'movie_profile', 0,
+            'series_profile', 0))),
+        '$.movie_root', '$.series_root', '$.music_root', '$.audiobook_root', '$.video_root', '$.required_volume')
+        WHERE key = 'general';
+    "#,
 ];
 
 impl Db {

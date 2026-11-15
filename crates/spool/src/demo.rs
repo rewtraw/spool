@@ -39,10 +39,9 @@ pub async fn seed(app: &App, root: &Path) -> Result<usize> {
         std::fs::create_dir_all(root.join(d))?;
     }
     let mut g = serde_json::to_value(app.settings.general())?;
-    g["movie_root"] = at("Movies").into();
-    g["series_root"] = at("Series").into();
     g["downloads_dir"] = at("Downloads").into();
     g["locations"] = json!([
+        {"id": 0, "name": "Library", "movie_root": at("Movies"), "series_root": at("Series"), "manage": true},
         {"id": 1, "name": "Shelf", "movie_root": at("Shelf/Films"), "series_root": at("Shelf/Series"), "manage": true},
         {"id": 2, "name": "Vault", "movie_root": at("Vault/Films"), "manage": false},
     ]);

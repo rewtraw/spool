@@ -102,8 +102,8 @@
         <div class="who"><span class="truncate">{app.me.name}</span><button class="link" onclick={signOut}>Sign out</button></div>
       {/if}
       {#if app.status && app.manages}
-        <div class="mode" class:shadow={app.status.mode === 'shadow'} title={app.status.mode === 'shadow' ? 'Watching and deciding only. Nothing is downloaded or moved.' : 'Downloading and importing.'}>
-          <i></i>{app.status.mode === 'shadow' ? 'Shadow mode' : 'Active'}
+        <div class="mode" class:paused={app.status.paused} title={app.status.paused ? 'Noting what it would fetch, and fetching nothing by itself.' : 'Finding, downloading and filing.'}>
+          <i></i>{app.status.paused ? 'Paused' : 'Running'}
         </div>
       {/if}
     </nav>
@@ -247,7 +247,7 @@
     border-radius: 50%;
     background: var(--ok);
   }
-  .mode.shadow i {
+  .mode.paused i {
     background: var(--warn);
   }
   main {

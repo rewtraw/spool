@@ -114,8 +114,8 @@
 <p>This page is for anyone pointing Spool at films and shows they already have. It says how to bring a library in, exactly what Spool changes on disk, what it never touches, and how to get something back.</p>
 <h2 id="the-short-answer"><a href="#the-short-answer">The short answer</a></h2>
 <ul>
-<li>In shadow mode, and on a location marked as only read, Spool changes nothing on disk.</li>
-<li>On a location it manages, in active mode, Spool adds files, replaces a film or episode with a better copy when the title&#39;s profile allows it, and deletes what you tell it to. Replaced and deleted files wait in a recycle folder for seven days.</li>
+<li>While paused, Spool changes nothing on disk by itself; on a location marked as only read it changes nothing at all.</li>
+<li>On a location it manages, Spool adds files, replaces a film or episode with a better copy when the title&#39;s profile allows it, and deletes what you tell it to. Replaced and deleted files wait in a recycle folder for seven days.</li>
 <li>It never moves or renames the files already in your library, and never touches trailers, extras, artwork or a media server&#39;s notes, with one small exception described <a href="#one-exception-files-named-after-the-film">below</a>.</li>
 </ul>
 <p>The real risks are an unwanted upgrade and a folder matched to the wrong film. Both are avoided by bringing titles in unmonitored and looking before you switch things on.</p>
@@ -147,7 +147,7 @@
 </tbody></table></div>
 <p>The third way works on further locations, not on the main folders. If your only library is a set of plain folders, give Spool an empty main folder for new titles and add the existing library as a location.</p>
 <h2 id="what-spool-changes-and-when"><a href="#what-spool-changes-and-when">What Spool changes, and when</a></h2>
-<p>Everything in this table needs active mode and a location Spool manages.</p>
+<p>Everything in this table needs a location Spool manages, and what Spool does by itself waits while it is paused.</p>
 <div class="scroll"><table>
 <thead>
 <tr>
@@ -200,7 +200,7 @@
 <p>A title that is not monitored is never searched for, downloaded or upgraded. Removing a title from Spool leaves its files where they are unless you ask otherwise.</p>
 <h2 id="what-spool-never-does"><a href="#what-spool-never-does">What Spool never does</a></h2>
 <ul>
-<li><strong>Move or rename files already in the library.</strong> <code>spool check-paths</code>, and the same check under Settings, Maintenance, only report where files differ from the naming format.</li>
+<li><strong>Move or rename files already in the library.</strong> <code>spool check-paths</code> only reports where files differ from the naming format.</li>
 <li><strong>Touch what else is in the folder.</strong> Trailers, featurettes, samples, posters, backdrops, theme music, <code>.nfo</code> files and <code>.plexmatch</code> are recognised and left alone. An upgrade replaces the film&#39;s main file and nothing else. Second versions of a film are left alone too. <a href="local-files.html">Files Spool recognises</a> lists every name.</li>
 <li><strong>Write to a location marked as only read.</strong> No downloads, upgrades, renames, subtitles or deletions happen there.</li>
 <li><strong>Write when the disk is missing.</strong> If the disk named in the settings is not mounted, Spool pauses. It does not create stand-in folders somewhere else.</li>
@@ -266,12 +266,12 @@
 </ul>
 <h2 id="a-careful-way-in"><a href="#a-careful-way-in">A careful way in</a></h2>
 <ol>
-<li>Install Spool and leave it in shadow mode.</li>
+<li>Install Spool and pause it (Activity, <strong>Pause</strong>).</li>
 <li>Bring the library in by one of the three ways above, unmonitored, or as a location that is only read.</li>
 <li>Open a few titles. Check the details are right and that the page lists the files you expect, with any extras under &quot;Also in the folder&quot;.</li>
-<li>Run the check under Settings, Maintenance, File locations to see how your naming compares with Spool&#39;s.</li>
+<li>Run <code>spool check-paths</code> to see how your naming compares with Spool&#39;s.</li>
 <li>Add a title you do not have, monitored, and read the verdicts Spool gives its releases.</li>
-<li>Switch to active. Monitor more as you come to trust it.</li>
+<li>Resume. Monitor more as you come to trust it.</li>
 </ol>
 <nav class="around" aria-label="Other guides"><a class="prev" href="getting-started.html"><span>Before</span>Getting started</a><a class="next" href="locations.html"><span>Next</span>A library in more than one place</a></nav>
     </article>

@@ -137,8 +137,8 @@ pub(super) async fn activity_action(State(app): State<App>, Path((id, action)): 
 
 pub(super) async fn queue_action(State(app): State<App>, Path(action): Path<String>) -> R<Value> {
     match action.as_str() {
-        "pause" => app.queue_pause(true),
-        "resume" => app.queue_pause(false),
+        "pause" => app.set_paused(true)?,
+        "resume" => app.set_paused(false)?,
         _ => return Err(ApiError(StatusCode::BAD_REQUEST, "unknown action".into())),
     }
     Ok(Json(json!({"paused": app.engine.is_paused()})))

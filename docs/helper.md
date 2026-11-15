@@ -134,7 +134,7 @@ A helper can be started without a key. It then does nothing for anybody until it
 this helper is not linked yet: in Spool, under Settings, Storage, link another Spool and type this code  code="4821 0937"
 ```
 
-Type that code into Spool, beside the helper's address, and choose **Link**. The two agree a key between themselves, the helper writes it down, and from then on it is linked as if the key had been typed into both. The code is never sent, and neither is the key: each side sends the other one message made from the code, and only two that hold the same code come out with the same key.
+Type that code into Spool, beside the helper's address, and choose **Link**. The two agree a key between themselves, the helper writes it down, Spool keeps the link at once, and from then on it is linked as if the key had been typed into both. The code is never sent, and neither is the key: each side sends the other one message made from the code, and only two that hold the same code come out with the same key.
 
 To choose the code yourself, start the helper with `SPOOL_LINK_CODE` set to eight digits or more, in place of `SPOOL_HELPER_KEY`. A code the helper makes up is a new one each time it starts.
 

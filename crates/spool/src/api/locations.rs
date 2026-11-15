@@ -27,12 +27,28 @@ pub(super) async fn link_find(State(app): State<App>, Path(id): Path<u32>) -> R<
 
 /// Link with the Spool at an address by the code it gave. The key the two agree is handed
 /// back for the link's settings, which are saved as any others are.
-pub(super) async fn link_pair(Json(b): Json<Value>) -> R<Value> {
-    let (url, code) = (b["url"].as_str().unwrap_or_default(), b["code"].as_str().unwrap_or_default());
-    match crate::remote::pair(url, code).await {
-        Ok(key) => Ok(Json(json!({"key": key}))),
-        Err(why) => Err(ApiError(StatusCode::BAD_REQUEST, why)),
-    }
+/// Link with another Spool by the code it gave. The two agree a key between themselves and
+/// Spool keeps the link at once: the key is never handed to the browser to save.
+pub(super) async fn link_pair(State(app): State<App>, Json(b): Json<Value>) -> R<Value> {
+    let (url, code) = (b["url"].as_str().unwrap_or_default().trim().trim_end_matches('/').to_string(), b["code"].as_str().unwrap_or_default());
+    let name = b["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(String::from).or_else(|| reqwest::Url::parse(&url).ok().and_then(|u| u.host_str().map(String::from))).unwrap_or_default();
+    let key = crate::remote::pair(&url, code).await.map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;
+    let (_, id) = app
+        .settings
+        .update(|g| {
+            let old = g.links.clone();
+            let mut list = old.clone();
+            match list.iter_mut().find(|l| l.url.trim_end_matches('/') == url) {
+                Some(l) => l.key = key.clone(),
+                None => list.push(crate::settings::LinkConf { name: name.clone(), url: url.clone(), key: key.clone(), play_near: true, ..Default::default() }),
+            }
+            (g.links, g.link_seq) = crate::remote::tidy_links(list, &old, g.link_seq).map_err(|e| anyhow::anyhow!(e))?;
+            Ok(g.links.iter().find(|l| l.url.trim_end_matches('/') == url).map(|l| l.id).unwrap_or(0))
+        })
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
+    app.sync_remotes();
+    app.emit(Event::Locations);
+    Ok(Json(json!({"id": id, "name": name})))
 }
 
 /// Start looking through a location for films and shows to bring in. Nothing is changed.

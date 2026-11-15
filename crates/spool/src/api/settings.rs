@@ -13,7 +13,11 @@ fn at<'a>(v: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
 
 /// The settings as a browser sees them.
 pub(super) async fn get_settings(State(app): State<App>) -> Json<Value> {
-    let mut g = serde_json::to_value(app.settings.general()).unwrap_or_default();
+    // The main location first, there even before it has folders.
+    let mut settings = app.settings.general();
+    settings.main_mut();
+    settings.locations.sort_by_key(|l| l.id != 0);
+    let mut g = serde_json::to_value(settings).unwrap_or_default();
     let mut set = serde_json::Map::new();
     for path in SECRETS {
         if let Some(v) = at(&mut g, path) {
@@ -26,12 +30,7 @@ pub(super) async fn get_settings(State(app): State<App>) -> Json<Value> {
         l["key"] = json!("");
     }
     // Worked out by Spool, never set.
-    for k in ["required_volume", "link_seq"] {
-        g.as_object_mut().map(|o| o.remove(k));
-    }
-    for l in g["locations"].as_array_mut().into_iter().flatten() {
-        l.as_object_mut().map(|o| o.remove("volume"));
-    }
+    g.as_object_mut().map(|o| o.remove("link_seq"));
     g["secrets"] = Value::Object(set);
     Json(g)
 }
@@ -60,7 +59,7 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
     let bad = |why: String| ApiError(StatusCode::BAD_REQUEST, why);
     // What Spool works out for itself is not taken from a browser.
     if let Some(o) = change.as_object_mut() {
-        for k in ["required_volume", "link_seq", "secrets"] {
+        for k in ["link_seq", "secrets"] {
             o.remove(k);
         }
     }
@@ -89,11 +88,10 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
         *g = new;
         Ok(old)
     });
-    let (g, old) = match result {
-        Ok(r) => r,
-        Err(e) if e.to_string().starts_with(MOUNT) => return Err(ApiError(StatusCode::CONFLICT, e.to_string())),
-        Err(e) => return Err(bad(format!("{e:#}"))),
-    };
+    let (g, old) = result.map_err(|e| bad(format!("{e:#}")))?;
+    if g.paused != old.paused {
+        app.queue_pause(g.paused);
+    }
     if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password || g.opensubtitles_api_key != old.opensubtitles_api_key {
         *app.subtitle_login.lock() = None;
     }
@@ -102,7 +100,8 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
     }
     // A main folder given inside a folder that is there is made, so one folder chosen for the
     // whole library is enough. One whose parent is not there is left: its disk may be away.
-    for (new, before) in [(&g.movie_root, &old.movie_root), (&g.series_root, &old.series_root), (&g.music_root, &old.music_root), (&g.audiobook_root, &old.audiobook_root), (&g.video_root, &old.video_root)] {
+    let (main, was) = (g.main(), old.main());
+    for (new, before) in [(&main.movie_root, &was.movie_root), (&main.series_root, &was.series_root), (&main.music_root, &was.music_root), (&main.audiobook_root, &was.audiobook_root), (&main.video_root, &was.video_root)] {
         let dir = std::path::Path::new(new.as_str());
         if new != before && !new.is_empty() && !dir.exists() && dir.parent().is_some_and(|p| p.is_dir()) {
             if let Err(e) = std::fs::create_dir(dir) {
@@ -110,7 +109,7 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
             }
         }
     }
-    let moved = g.locations != old.locations || g.movie_root != old.movie_root || g.series_root != old.series_root || g.music_root != old.music_root || g.audiobook_root != old.audiobook_root || g.video_root != old.video_root || g.required_volume != old.required_volume;
+    let moved = g.locations != old.locations;
     if moved {
         // Look at what was just described, off to one side: a share that is slow to answer
         // must not hold up the reply.
@@ -128,26 +127,16 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
     Ok(Json(json!({"ok": true})).into_response())
 }
 
-const MOUNT: &str = "the media volume is not mounted";
-
 /// Check the settings as they would be, and put in what Spool works out for itself.
 fn settle(app: &App, old: &General, g: &mut General) -> Result<(), String> {
+    // Checked against each other as they would be, whichever changed.
+    let list = std::mem::take(&mut g.locations);
+    g.locations = app.tidy_locations(list)?;
     // The disk each set of folders needs is Spool's to work out.
-    g.required_volume = crate::app::disk_needed([&g.movie_root, &g.series_root, &g.music_root, &g.audiobook_root, &g.video_root], &old.required_volume);
     for l in &mut g.locations {
-        let known = old.locations.iter().find(|o| o.id == l.id && l.id != 0).map(|o| o.volume.as_str()).unwrap_or("");
+        let known = old.locations.iter().find(|o| o.id == l.id).map(|o| o.volume.as_str()).unwrap_or("");
         l.volume = crate::app::disk_needed([&l.movie_root, &l.series_root, &l.music_root, &l.audiobook_root, &l.video_root], known);
     }
-    if g.mode == crate::settings::Mode::Active && old.mode != g.mode {
-        let disk = &g.required_volume;
-        if !disk.is_empty() && !std::path::Path::new(disk).is_dir() {
-            return Err(MOUNT.into());
-        }
-        tracing::warn!("Spool is now active: it will download and write to the library");
-    }
-    // Checked against the main folders as they would be, whichever changed.
-    let list = std::mem::take(&mut g.locations);
-    g.locations = app.tidy_locations(g, list)?;
     for h in &mut g.links {
         if h.key.is_empty() {
             h.key = old.links.iter().find(|o| o.id == h.id && h.id != 0).map(|o| o.key.clone()).unwrap_or_default();
@@ -197,15 +186,6 @@ pub(super) async fn mcp_access(State(app): State<App>, Json(b): Json<Value>) -> 
 /// Whether the read-only key is on, without it.
 pub(super) async fn mcp_status(State(app): State<App>) -> Json<Value> {
     Json(json!({"read_key": !app.settings.access().mcp_read_key.is_empty()}))
-}
-
-pub(super) async fn get_naming(State(app): State<App>) -> Json<spool_core::naming::NamingConfig> {
-    Json(app.settings.naming())
-}
-
-pub(super) async fn put_naming(State(app): State<App>, Json(n): Json<spool_core::naming::NamingConfig>) -> R<Value> {
-    app.settings.set_naming(&n)?;
-    Ok(Json(json!({"ok": true})))
 }
 
 pub(super) async fn get_servers(State(app): State<App>) -> Json<Value> {
@@ -354,7 +334,7 @@ pub(super) async fn run_task(State(app): State<App>, Path(name): Path<String>) -
 pub(super) async fn setup(State(app): State<App>) -> R<Value> {
     let g = app.settings.general();
     let main = app.placement().0.into_iter().find(|(l, _)| l.id == 0);
-    let has_folders = !g.movie_root.is_empty() || !g.series_root.is_empty();
+    let has_folders = g.locations.iter().any(|l| !l.movie_root.is_empty() || !l.series_root.is_empty());
     let reachable = main.as_ref().is_some_and(|(_, on)| *on);
     let providers = app.settings.servers().iter().any(|s| s.enabled && !s.host.trim().is_empty());
     let indexers = app.db.indexers()?.iter().any(|i| !i.url.trim().is_empty() && (i.enable_rss || i.enable_search));

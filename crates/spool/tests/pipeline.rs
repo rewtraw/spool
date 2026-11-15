@@ -8,7 +8,12 @@ use spool::acquire::Scope;
 use spool::app::App;
 use spool::db::Db;
 use spool::models::*;
-use spool::settings::Mode;
+/// Whether a test's Spool is running or paused.
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Active,
+    Shadow,
+}
 use spool_core::profile::QualityProfile;
 use spool_core::{Quality, QualityModel};
 use spool_nntp::testing::{bytes, FakeServer, Post};
@@ -136,9 +141,10 @@ impl World {
         let db = Db::open(&root.join("data/spool.db")).unwrap();
         let app = App::start_with(&root.join("data"), db, sources).await.unwrap();
         let mut g = app.settings.general();
-        g.mode = mode;
-        g.movie_root = root.join("Movies").to_string_lossy().to_string();
-        g.series_root = root.join("TV Shows").to_string_lossy().to_string();
+        g.paused = mode == Mode::Shadow;
+        let main = g.main_mut();
+        main.movie_root = root.join("Movies").to_string_lossy().to_string();
+        main.series_root = root.join("TV Shows").to_string_lossy().to_string();
         g.downloads_dir = root.join("downloads").to_string_lossy().to_string();
         // How much room the machine running the tests happens to have is not what is being
         // tested; the tests about room set this for themselves.
@@ -615,7 +621,7 @@ async fn anime_without_the_household_language_is_fetched_again_with_it_once() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn shadow_mode_decides_but_touches_nothing() {
+async fn a_paused_spool_decides_but_touches_nothing() {
     let video = video_or_skip!();
     let mut w = World::new(Mode::Shadow).await;
     let movie = w.movie("Shadow Play", 2021, "tt2222222");
@@ -630,7 +636,7 @@ async fn shadow_mode_decides_but_touches_nothing() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(w.app.db.title_acquisitions(movie.id).unwrap().is_empty());
     assert!(w.app.engine.jobs().is_empty());
-    assert_eq!(w.usenet.total_served(), 0, "nothing is downloaded in shadow mode");
+    assert_eq!(w.usenet.total_served(), 0, "nothing is downloaded while paused");
     assert!(tree(&w.root.join("Movies")).is_empty());
     let would: Vec<_> = w.app.db.history(Some(movie.id), 10).unwrap().into_iter().filter(|h| h.kind == "would_grab").collect();
     assert_eq!(would.len(), 1, "the same release is noted once, however often it is seen");
@@ -734,7 +740,7 @@ async fn nothing_is_written_while_the_media_volume_is_missing() {
     w.release("Unplugged.2023.1080p.BluRay.x264-GRP", &[("u.mkv", &video)]);
     // A plain directory is not a mount point, which is what a disconnected disk looks like.
     let mut g = w.app.settings.general();
-    g.required_volume = w.root.join("Movies").to_string_lossy().to_string();
+    g.main_mut().volume = w.root.join("Movies").to_string_lossy().to_string();
     w.app.settings.set_general(&g).unwrap();
     assert!(!w.app.volume_ok());
 
@@ -745,11 +751,11 @@ async fn nothing_is_written_while_the_media_volume_is_missing() {
     assert!(!w.root.join("downloads").exists(), "no download folders are created either");
 
     // The disk is there when the download starts and gone by the time it finishes.
-    g.required_volume = String::new();
+    g.main_mut().volume = String::new();
     w.app.settings.set_general(&g).unwrap();
     w.usenet.state.lock().delay_ms = 40;
     assert_eq!(w.app.search(movie.id, Scope::Movie, false, true).await.unwrap().grabbed.len(), 1);
-    g.required_volume = w.root.join("Movies").to_string_lossy().to_string();
+    g.main_mut().volume = w.root.join("Movies").to_string_lossy().to_string();
     w.app.settings.set_general(&g).unwrap();
     let mut waiting = None;
     for _ in 0..300 {
@@ -764,7 +770,7 @@ async fn nothing_is_written_while_the_media_volume_is_missing() {
     assert_eq!(waiting.state, AcqState::Downloading);
     assert!(tree(&w.root.join("Movies")).is_empty(), "no folders are created on the wrong disk");
 
-    g.required_volume = String::new();
+    g.main_mut().volume = String::new();
     w.app.settings.set_general(&g).unwrap();
     w.app.reconcile_all().await.unwrap();
     w.wait_state(movie.id, AcqState::Imported).await;
@@ -1395,7 +1401,7 @@ async fn an_ai_session_can_inspect_and_operate_spool_over_mcp() {
     assert_eq!(detail["files"][0]["quality"], "bluray-1080p");
     assert_eq!(detail["saved_releases"][0]["kept_as"], "grabbed");
     let (_, status) = tool(&router, "read-key", "status", serde_json::json!({})).await;
-    assert_eq!((status["mode"].as_str(), status["movies"].as_i64()), (Some("active"), Some(1)));
+    assert_eq!((status["paused"].as_bool(), status["movies"].as_i64()), (Some(false), Some(1)));
     let (_, act) = tool(&router, "read-key", "activity", serde_json::json!({})).await;
     assert_eq!(act["finished"][0]["state"], "imported");
 
@@ -3167,12 +3173,12 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     let mut g = general();
     g["tmdb_api_key"] = json!("key");
     // A location may not share a folder with another.
-    g["locations"] = json!([{"name": "Inside", "movie_root": w.root.join("Movies/sub")}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Inside", "movie_root": w.root.join("Movies/sub")}]);
     let (status, refused) = put(g.clone()).await;
     assert_eq!(status, 400, "{refused}");
-    g["locations"] = json!([{"name": "Elsewhere", "movie_root": there.join("films"), "series_root": format!("{}/", there.join("tv").display()), "manage": false}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Elsewhere", "movie_root": there.join("films"), "series_root": format!("{}/", there.join("tv").display()), "manage": false}]);
     assert_eq!(put(g).await.0, 200);
-    let place = w.app.settings.general().locations[0].clone();
+    let place = w.app.settings.general().locations.into_iter().find(|l| l.id != 0).unwrap();
     assert_eq!((place.id, place.series_root.as_str()), (1, there.join("tv").to_str().unwrap()));
     let (_, places) = call(&api, "GET", "/api/locations", Value::Null).await;
     assert_eq!(places.as_array().unwrap().iter().map(|p| (p["id"].as_u64().unwrap(), p["online"].as_bool().unwrap(), p["manage"].as_bool().unwrap())).collect::<Vec<_>>(), [(0, true, true), (1, true, false)]);
@@ -3273,7 +3279,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     // Allowed to manage the location, Spool treats it as it does the main one, and can be
     // told to put new titles there.
     let mut g = general();
-    g["locations"][0]["manage"] = json!(true);
+    g["locations"][1]["manage"] = json!(true);
     g["new_titles_location"] = json!(1);
     assert_eq!(put(g).await.0, 200);
     assert_eq!(listed(api.clone(), heat.id).await["read_only"], false);
@@ -3306,7 +3312,7 @@ async fn a_new_title_is_kept_on_the_location_the_user_chooses() {
     }
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["tmdb_api_key"] = json!("key");
-    g["locations"] = json!([{"name": "Shelf", "movie_root": shelf.join("films"), "manage": true}, {"name": "Vault", "movie_root": vault.join("films"), "manage": false}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Shelf", "movie_root": shelf.join("films"), "manage": true}, {"name": "Vault", "movie_root": vault.join("films"), "manage": false}]);
     assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     let add = |tmdb: u32, location: Value| {
         let api = api.clone();
@@ -3344,6 +3350,7 @@ async fn spool_can_say_whether_it_is_busy_whether_a_location_works_and_whether_a
     let keep_id = w.app.db.save_profile(&mut keep).unwrap();
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["locations"] = json!([
+        g["locations"][0].clone(),
         {"name": "Shelf", "movie_root": shelf, "manage": true},
         {"name": "Vault", "movie_root": vault, "manage": false, "movie_profile": keep_id},
         {"name": "Gone", "movie_root": w.root.join("nowhere/films"), "manage": false},
@@ -3433,7 +3440,7 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
         std::fs::create_dir_all(d).unwrap();
     }
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
-    g["locations"] = json!([{"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
     assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     let lay = |path: PathBuf, bytes: &[u8]| {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -3612,7 +3619,7 @@ async fn a_title_may_be_held_in_two_places_and_played_from_whichever_is_there() 
     lay(there.join("tv/Example World/Season 01/Example.World.S01E02.720p.HDTV.x264-GRP.mkv"));
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["tmdb_api_key"] = json!("key");
-    g["locations"] = json!([{"name": "Elsewhere", "movie_root": there.join("films"), "series_root": there.join("tv"), "manage": false}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Elsewhere", "movie_root": there.join("films"), "series_root": there.join("tv"), "manage": false}]);
     assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     let finished = |api: axum::Router| async move {
         for _ in 0..200 {
@@ -3809,7 +3816,7 @@ async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, Path
 
     let api = spool::api::router(w.app.clone());
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
-    g["locations"] = json!([{"name": "Shelf", "movie_root": mnt.join("films"), "manage": true}, {"name": "Vault", "movie_root": mnt.join("vault"), "manage": false}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Shelf", "movie_root": mnt.join("films"), "manage": true}, {"name": "Vault", "movie_root": mnt.join("vault"), "manage": false}]);
     g["links"] = json!([{"name": "Nas", "url": url, "key": key, "folders": [{"here": mnt, "there": nas}]}]);
     let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
@@ -4065,18 +4072,21 @@ async fn a_helper_is_linked_with_a_code_and_not_without() {
     // The right code, however it is written: the two agree a key nobody copied.
     let (status, said) = pair(url.clone(), "1234-5678").await;
     assert_eq!(status, 200, "{said}");
-    let key = said["key"].as_str().unwrap().to_string();
-    assert!(key.len() >= 40, "{key}");
+    assert!(said.get("key").is_none(), "the key is kept by Spool, not handed to the browser: {said}");
+    let link = w.app.settings.general().links[0].clone();
+    let key = link.key.clone();
+    assert!(key.len() >= 40 && link.url == url, "{link:?}");
     let hello: Value = http.get(format!("{url}/link")).bearer_auth(&key).send().await.unwrap().json().await.unwrap();
     assert_eq!(hello["grants"]["work"].as_bool(), Some(true));
     // Linked, it takes no more codes, not even the right one.
     let (status, said) = pair(url.clone(), "1234 5678").await;
     assert!(status == 400 && said["error"].as_str().unwrap().contains("linked already"), "{said}");
 
-    // Spool uses the key as it would one that was typed in.
-    let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
-    g["links"] = json!([{"name": "Nas", "url": url, "key": key, "folders": [{"here": nas, "there": nas}]}]);
+    // Spool keeps the link, and uses it once its folders are known.
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
+    g["links"][0]["folders"] = json!([{"here": nas, "there": nas}]);
     assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
+    assert_eq!(w.app.settings.general().links[0].key, key, "sending the links back blank keeps the key");
     w.app.ask_remotes().await;
     assert!(w.app.remotes()[0].seen().usable, "{:?}", w.app.remotes()[0].seen());
 
@@ -4547,7 +4557,7 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     let root = w.root.join("worker");
     let api = spool::api::router(w.app.clone());
     let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
-    g["locations"] = json!([{"name": "Worker", "movie_root": root.join("films"), "manage": true}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Worker", "movie_root": root.join("films"), "manage": true}]);
     g["links"] = json!([{"name": "Worker", "url": url, "key": KEY, "folders": [{"here": root, "there": root}], "play_near": true}]);
     let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
@@ -5041,7 +5051,7 @@ async fn a_title_on_a_location_spool_only_reads_gets_its_compact_version_somewhe
         std::fs::create_dir_all(d).unwrap();
     }
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
-    g["locations"] = json!([{"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
+    g["locations"] = json!([g["locations"][0].clone(), {"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
     let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
     let kept = vault.join("Alpha (2001)");
@@ -5584,7 +5594,7 @@ async fn a_video_from_a_site_is_filed_under_its_channel_with_its_captions() {
     }
     std::env::set_var("SPOOL_YT_DLP", &script);
     let mut g = w.app.settings.general();
-    g.video_root = w.root.join("Videos").to_string_lossy().to_string();
+    g.main_mut().video_root = w.root.join("Videos").to_string_lossy().to_string();
     w.app.settings.set_general(&g).unwrap();
     std::fs::create_dir_all(w.root.join("Videos")).unwrap();
     w.app.spawn_videos();

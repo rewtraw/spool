@@ -168,7 +168,7 @@
     const preferred = t.kind === 'movie' ? app.status?.default_movie_profile : app.status?.default_series_profile;
     profileId = of.find((p) => p.id === preferred)?.id ?? of[0]?.id ?? 0;
     monitored = true;
-    searchNow = app.status?.mode === 'active';
+    searchNow = true;
     placeId = places.find((p) => p.new_titles)?.id ?? 0;
     usualProfile();
   }
@@ -383,8 +383,8 @@
         </label>
       {/if}
       <label class="check"><input type="checkbox" bind:checked={monitored} /> Monitor, and get it when an acceptable release appears</label>
-      <label class="check"><input type="checkbox" bind:checked={searchNow} disabled={!monitored || app.status?.mode !== 'active'} /> Search for it right away</label>
-      {#if app.status?.mode !== 'active'}<p class="faint small">Spool is in shadow mode, so nothing will be downloaded.</p>{/if}
+      <label class="check"><input type="checkbox" bind:checked={searchNow} disabled={!monitored} /> Search for it right away</label>
+      {#if app.status?.paused}<p class="faint small">Spool is paused: what it finds waits in line until it is set going.</p>{/if}
       {#if !profiles.length}<p class="faint small">There is no quality profile for {addingKind === 'movie' ? 'movies' : 'series'} yet. Create one in Settings first.</p>{/if}
       <div class="row end">
         <button class="btn ghost" onclick={() => (adding = null)}>Cancel</button>

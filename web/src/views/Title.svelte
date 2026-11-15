@@ -70,7 +70,7 @@
   const fileById = $derived(new Map((t?.files ?? []).map((f) => [f.id, f])));
   const accepted = $derived(t?.decisions.filter((d) => d.accepted) ?? []);
   const rejected = $derived(t?.decisions.filter((d) => !d.accepted) ?? []);
-  const isActive = $derived(app.status?.mode === 'active');
+  const paused = $derived(!!app.status?.paused);
   const ceiling = $derived((app.profiles.find((p) => p.id === t?.profile_id)?.target_size_gb?.[1] ?? 0) * 1024 ** 3);
   // Files above the profile's size target, and by how much: what a smaller copy could save.
   const oversize = $derived.by(() => {
@@ -106,7 +106,7 @@
   async function search(scope: { season?: number; episode?: number; smaller?: boolean } = {}, grab = true, key = 'all') {
     searching = key;
     searchMessage = '';
-    const r = await act(() => api.post(`/titles/${id}/search`, { ...scope, grab: grab && isActive }));
+    const r = await act(() => api.post(`/titles/${id}/search`, { ...scope, grab }));
     searching = '';
     if (r) {
       searchMessage = r.message;
@@ -432,10 +432,10 @@
         <div class="row wrap">
           {#if !locked}
           <button class="btn primary" disabled={!!searching} onclick={() => search({}, true, 'all')}>
-            {searching === 'all' ? 'Searching…' : !isActive ? 'Search' : t.kind === 'movie' ? 'Search and download' : 'Get missing episodes'}
+            {searching === 'all' ? 'Searching…' : t.kind === 'movie' ? 'Search and download' : 'Get missing episodes'}
           </button>
-          {#if isActive}<button class="btn" disabled={!!searching} onclick={() => search({}, false, 'look')}>{searching === 'look' ? 'Searching…' : 'Show releases'}</button>{/if}
-          {#if isActive && oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ smaller: true }, true, 'smaller')}>{searching === 'smaller' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
+          <button class="btn" disabled={!!searching} onclick={() => search({}, false, 'look')}>{searching === 'look' ? 'Searching…' : 'Show releases'}</button>
+          {#if oversize.count}<button class="btn" disabled={!!searching} title="Replace {oversize.count === 1 ? 'the file' : `${oversize.count} files`} over this profile's size target with a smaller copy, even at lower quality" onclick={() => search({ smaller: true }, true, 'smaller')}>{searching === 'smaller' ? 'Searching…' : `Find a smaller copy (${bytes(oversize.bytes)} over target)`}</button>{/if}
           {/if}
           {#if t.kind === 'series' && t.files.length}
             {#if compacting}<button class="btn ghost" onclick={() => cancelCompact()}>Cancel compact versions</button>
@@ -445,7 +445,7 @@
           <button class="btn ghost" onclick={async () => { const r = await act(() => api.post(`/titles/${id}/scan`)); if (r) { searchMessage = `Scan: ${r.files_found} files on disk, ${r.files_added} added, ${r.files_missing} missing`; load(); } }}>Rescan folder</button>
           <button class="btn ghost danger" onclick={() => (confirmDelete = true)}>Remove</button>
         </div>
-        {#if !isActive}<p class="faint small">Shadow mode: searching shows what Spool would choose, and downloads nothing.</p>{/if}
+        {#if paused}<p class="faint small">Spool is paused: a download asked for here waits in line until it is set going.</p>{/if}
         {#if searchMessage}<p class="muted" role="status">{searchMessage}</p>{/if}
         {/if}
       </div>
@@ -631,7 +631,7 @@
                   {#if d.accepted}<span class="chip ok">{d.id === accepted[0]?.id ? 'Best choice' : 'Acceptable'}</span>{#if ceiling && d.release.size > ceiling}<div class="faint small">Over the profile's size target; used only if nothing smaller fits.</div>{/if}
                   {:else}{#each d.rejections as r}<div class="reason">{r.message}</div>{/each}{/if}
                 </td>
-                <td>{#if isActive}<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn small" onclick={() => grab(d)}>{d.accepted ? 'Download' : 'Download anyway'}</button>{#if t.kind === 'movie' && t.files.length}<button class="btn small ghost" title="Download this and keep it beside the file you already have, as another version of the film" onclick={() => grab(d, true)}>Keep both</button>{/if}</div>{/if}</td>
+                <td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn small" onclick={() => grab(d)}>{d.accepted ? 'Download' : 'Download anyway'}</button>{#if t.kind === 'movie' && t.files.length}<button class="btn small ghost" title="Download this and keep it beside the file you already have, as another version of the film" onclick={() => grab(d, true)}>Keep both</button>{/if}</div></td>
               </tr>
             {/each}
           </tbody>
@@ -666,7 +666,7 @@
                 </td>
                 <td>
                   <div class="row saved-actions">
-                    {#if isActive}<button class="btn small" onclick={() => grabSaved(n)}>Download</button>{#if t.kind === 'movie' && t.files.length}<button class="btn small ghost" title="Download this and keep it beside the file you already have, as another version of the film" onclick={() => grabSaved(n, true)}>Keep both</button>{/if}{/if}
+                    <button class="btn small" onclick={() => grabSaved(n)}>Download</button>{#if t.kind === 'movie' && t.files.length}<button class="btn small ghost" title="Download this and keep it beside the file you already have, as another version of the film" onclick={() => grabSaved(n, true)}>Keep both</button>{/if}
                     <button class="btn small ghost" onclick={() => checkSaved(n)}>Check</button>
                     <button class="btn small ghost" onclick={() => removeSaved(n)}>Remove</button>
                   </div>

@@ -7,6 +7,8 @@
   import { conf, loadSettings, saveSettings, pick } from '../../lib/settings.svelte';
 
   const general = $derived(conf.g);
+  // The main location: Settings sends it first, there even before it has folders.
+  const main = $derived(conf.g?.locations?.[0]);
 
   // ---- further locations, and bringing in what is already on them
   let places = $state<any[]>([]);
@@ -45,20 +47,20 @@
   let codes = $state<Record<number, string>>({});
   let linking = $state<number | null>(null);
   async function linkWithCode(h: any, i: number) {
-    // Once the other side has taken the key it takes no more codes, so nothing that
-    // would stop the settings being saved is left to find out afterwards.
-    if (!h.name?.trim() || !h.url?.trim()) {
-      toast('Give it a name and an address first.', 'error');
+    if (!h.url?.trim()) {
+      toast('Give it an address first.', 'error');
       return;
     }
     linking = i;
-    const got = await act(() => api.post<{ key: string }>('/links/pair', { url: h.url, code: codes[i] }));
+    // Spool keeps the link itself; only the links are read back, so nothing else typed here is lost.
+    const got = await act(() => api.post<{ id: number; name: string }>('/links/pair', { name: h.name, url: h.url, code: codes[i] }));
     linking = null;
     if (!got) return;
-    h.key = got.key;
     codes[i] = '';
-    if (await save()) toast(`Linked with ${h.name}.`);
-    else toast(`Linked with ${h.name}, but the settings were not saved. Put right what is wrong and save: the key is kept on this page until you do.`, 'error');
+    const fresh = await api.get<any>('/settings').catch(() => null);
+    if (fresh) general.links = fresh.links;
+    toast(`Linked with ${got.name}.`);
+    setTimeout(loadLinks, 1500);
   }
   function addLink(from?: { name: string; url: string }) {
     (general.links ??= []).push({ id: 0, name: from?.name ?? '', url: from?.url ?? '', key: '', folders: [], play_near: true, make: 'always' });
@@ -130,7 +132,7 @@
   function useWhole() {
     const at = whole.trim().replace(/\/+$/, '');
     if (!at.startsWith('/')) return toast('A full path, starting with /', 'error');
-    Object.assign(general, { movie_root: `${at}/Movies`, series_root: `${at}/TV Shows`, music_root: `${at}/Music`, audiobook_root: `${at}/Audiobooks`, video_root: `${at}/Videos` });
+    Object.assign(main, { movie_root: `${at}/Movies`, series_root: `${at}/TV Shows`, music_root: `${at}/Music`, audiobook_root: `${at}/Audiobooks`, video_root: `${at}/Videos` });
     if (!general.downloads_dir) general.downloads_dir = `${at}/Downloads`;
     save();
   }
@@ -143,7 +145,7 @@
   async function save() {
     for (const l of general.locations) (l.movie_profile = Number(l.movie_profile) || 0), (l.series_profile = Number(l.series_profile) || 0);
     // What is on the page is kept when it cannot be saved: it may hold a key just agreed.
-    const change = pick(general, ['movie_root', 'series_root', 'music_root', 'audiobook_root', 'video_root', 'locations', 'links', 'new_titles_location', 'downloads_dir', 'min_free_gb', 'backup_dir'], ['new_titles_location', 'min_free_gb']);
+    const change = pick(general, ['locations', 'links', 'new_titles_location', 'downloads_dir', 'min_free_gb', 'backup_dir'], ['new_titles_location', 'min_free_gb']);
     if (!(await saveSettings(change))) return false;
     loadPlaces();
     setTimeout(loadLinks, 1500);
@@ -158,23 +160,23 @@
       <b>{main?.name ?? 'Library'}</b>
       {#if main}<span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', 'the main location', general.new_titles_location === 0 ? 'new titles go here' : '', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>{/if}
     </div>
-    {#if general.movie_root || general.series_root || general.music_root || general.audiobook_root || general.video_root}<div class="mono small faint where">{[general.movie_root, general.series_root, general.music_root, general.audiobook_root, general.video_root].filter(Boolean).join(' · ')}</div>{/if}
-    {#if !general.movie_root && !general.series_root}
+    {#if main.movie_root || main.series_root || main.music_root || main.audiobook_root || main.video_root}<div class="mono small faint where">{[main.movie_root, main.series_root, main.music_root, main.audiobook_root, main.video_root].filter(Boolean).join(' · ')}</div>{/if}
+    {#if !main.movie_root && !main.series_root}
       <label class="field">One folder for the whole library
         <div class="row"><input class="input mono grow" bind:value={whole} placeholder="/Volumes/Media" /><button class="btn primary" type="button" disabled={!whole.trim()} onclick={useWhole}>Use it</button></div>
         <span class="hint">Movies, TV Shows, Music, Audiobooks, Videos and Downloads are made inside it. Or give each folder below.</span>
       </label>
     {/if}
-    <details open={!general.movie_root && !general.series_root}>
+    <details open={!main.movie_root && !main.series_root}>
     <summary class="small">Folders</summary>
     <div class="cols">
-      <label class="field">Movies<input class="input mono" bind:value={general.movie_root} placeholder="/Volumes/Media/Movies" /></label>
-      <label class="field">Series<input class="input mono" bind:value={general.series_root} placeholder="/Volumes/Media/TV Shows" /></label>
+      <label class="field">Movies<input class="input mono" bind:value={main.movie_root} placeholder="/Volumes/Media/Movies" /></label>
+      <label class="field">Series<input class="input mono" bind:value={main.series_root} placeholder="/Volumes/Media/TV Shows" /></label>
     </div>
-    <label class="field">Music <span class="faint">(optional; a folder for each album)</span><input class="input mono" bind:value={general.music_root} placeholder="/Volumes/Media/Music" /></label>
-    <label class="field">Audiobooks <span class="faint">(optional; a folder for each author)</span><input class="input mono" bind:value={general.audiobook_root} placeholder="/Volumes/Media/Audiobooks" /></label>
-    <label class="field">Videos <span class="faint">(optional; from YouTube and other sites, a folder for each channel)</span><input class="input mono" bind:value={general.video_root} placeholder="/Volumes/Media/Videos" /></label>
-    <span class="hint">{general.required_volume ? `These are on the disk at ${general.required_volume}. While it is not mounted, Spool pauses instead of writing somewhere else.` : 'Spool works out which disk these are on, and pauses while a disk that can be unplugged is not there.'}</span>
+    <label class="field">Music <span class="faint">(optional; a folder for each album)</span><input class="input mono" bind:value={main.music_root} placeholder="/Volumes/Media/Music" /></label>
+    <label class="field">Audiobooks <span class="faint">(optional; a folder for each author)</span><input class="input mono" bind:value={main.audiobook_root} placeholder="/Volumes/Media/Audiobooks" /></label>
+    <label class="field">Videos <span class="faint">(optional; from YouTube and other sites, a folder for each channel)</span><input class="input mono" bind:value={main.video_root} placeholder="/Volumes/Media/Videos" /></label>
+    <span class="hint">{main.volume ? `These are on the disk at ${main.volume}. While it is not mounted, Spool pauses instead of writing somewhere else.` : 'Spool works out which disk these are on, and pauses while a disk that can be unplugged is not there.'}</span>
     <label class="check"><input type="radio" bind:group={general.new_titles_location} value={0} /> New titles go here</label>
     </details>
     {#if main}{@render checked(0)}{/if}
@@ -342,7 +344,7 @@
       <div class="machine">
         <div class="row wrap"><b>This machine</b><span class="small faint">decides everything, and serves the library</span></div>
         {@render mainCard()}
-        {#each general.locations as l, i (i)}{#if !linkFor(l)}{@render placeCard(l, i)}{/if}{/each}
+        {#each general.locations as l, i (i)}{#if i > 0 && !linkFor(l)}{@render placeCard(l, i)}{/if}{/each}
         <div><button class="btn" type="button" onclick={() => addPlace()}>Add a location</button></div>
       </div>
       {#each general.links ?? [] as h, hi (hi)}
@@ -363,7 +365,7 @@
             {/if}
           </div>
           {@render linkCard(h, hi)}
-          {#each general.locations as l, i (i)}{#if linkFor(l) === h}{@render placeCard(l, i)}{/if}{/each}
+          {#each general.locations as l, i (i)}{#if i > 0 && linkFor(l) === h}{@render placeCard(l, i)}{/if}{/each}
           <datalist id={`shared-${hi}`}>{#each sharedHere(h) as folder}<option value={folder}></option>{/each}</datalist>
           <div><button class="btn" type="button" disabled={!(h.folders ?? []).length} onclick={() => addPlaceOn(h)}>Add a location on {h.name || 'it'}</button></div>
         </div>

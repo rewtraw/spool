@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a class="on" aria-current="page" href="getting-started.html">Getting started</a><a class="sub" href="#install-it">Install it</a><a class="sub" href="#the-first-settings">The first settings</a><a class="sub" href="#shadow-mode-then-active">Shadow mode, then active</a><a class="sub" href="#coming-from-radarr-sonarr-and-sabnzbd">Coming from Radarr, Sonarr and SABnzbd</a><a class="sub" href="#running-it-as-a-service">Running it as a service</a><a class="sub" href="#the-command-line">The command line</a><a class="sub" href="#where-spool-keeps-its-data">Where Spool keeps its data</a><a class="sub" href="#next">Next</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="videos.html">Videos and lists</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a class="on" aria-current="page" href="getting-started.html">Getting started</a><a class="sub" href="#install-it">Install it</a><a class="sub" href="#the-first-settings">The first settings</a><a class="sub" href="#pausing-it">Pausing it</a><a class="sub" href="#coming-from-radarr-sonarr-and-sabnzbd">Coming from Radarr, Sonarr and SABnzbd</a><a class="sub" href="#running-it-as-a-service">Running it as a service</a><a class="sub" href="#the-command-line">The command line</a><a class="sub" href="#where-spool-keeps-its-data">Where Spool keeps its data</a><a class="sub" href="#next">Next</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="videos.html">Videos and lists</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -168,12 +168,12 @@ cargo run --release -p spool -- serve            # http://localhost:7979
 </tr>
 </tbody></table></div>
 <p>What Spool does by itself, with a button to do each now, is under Activity, Upkeep, beside how the library stands with Plex, the music folders and the book index. What is using the disks, and compact versions to make, are under Activity, Space.</p>
-<h2 id="shadow-mode-then-active"><a href="#shadow-mode-then-active">Shadow mode, then active</a></h2>
-<p>Spool starts in <strong>shadow mode</strong>. It reads the indexer feeds and records what it would download and why, and changes nothing: no downloads, no moved files, no deletions. This is the time to add a few titles, open one, and read the verdicts it gives each release.</p>
-<p>When the choices look right, switch to <strong>active</strong> under Settings, General, Mode, or from the command line:</p>
-<pre><code class="language-sh">spool mode active
+<h2 id="pausing-it"><a href="#pausing-it">Pausing it</a></h2>
+<p><strong>Pause</strong>, at the top of Activity, stops Spool doing anything by itself: it still reads the indexer feeds and notes what it would download and why, but downloads nothing of its own accord, and downloads under way wait. What someone asks for while it is paused is put in line, to start when it is set going again. A pause lasts until <strong>Resume</strong>, through restarts. From the command line:</p>
+<pre><code class="language-sh">spool pause
+spool resume
 </code></pre>
-<p>Stop Radarr and Sonarr from managing the same folders first. Two programs filing into one library will fight over the same files.</p>
+<p><code>spool migrate</code>, which brings a library over from Radarr and Sonarr, leaves Spool paused, so that it can be looked over before it starts: add a few titles, open one and read the verdicts it gives each release. Stop Radarr and Sonarr from managing the same folders before resuming. Two programs filing into one library will fight over the same files.</p>
 <p>Titles are added under <strong>Discover</strong>. One search looks for films and series together: the kind you chose is listed first and the other below it, so a film and the series of the same name are both in front of you.</p>
 <p>If you already have a library, read <a href="your-library.html">Your library and what Spool does to it</a> before going active.</p>
 <h2 id="coming-from-radarr-sonarr-and-sabnzbd"><a href="#coming-from-radarr-sonarr-and-sabnzbd">Coming from Radarr, Sonarr and SABnzbd</a></h2>
@@ -221,7 +221,7 @@ spool shadow-report    # does Spool read past releases as Radarr and Sonarr did?
 <p>If the library is on a removable disk, set <code>SPOOL_SIGN_IDENTITY</code> to a stable code-signing identity. macOS ties the permission to read a removable disk to the program&#39;s signature, and the first read under launchd shows a consent prompt on that Mac&#39;s screen. Spool reports that it is waiting for the prompt instead of hanging.</p>
 <h2 id="the-command-line"><a href="#the-command-line">The command line</a></h2>
 <pre><code class="language-sh">spool serve [--bind 0.0.0.0:7979]   # run the service
-spool mode active|shadow            # start or stop making changes
+spool pause | spool resume          # stop or start doing things by itself
 spool migrate ...                   # import from Radarr, Sonarr and SABnzbd
 spool check-paths                   # are existing files where Spool would put them?
 spool shadow-report ...             # compare with Radarr&#39;s and Sonarr&#39;s history

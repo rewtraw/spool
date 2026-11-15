@@ -329,7 +329,7 @@ impl App {
                 report.unsupported.push("Radarr imports extra files (subtitles); Spool imports video only".into());
             }
             if let Some(root) = self.arr(radarr, "rootfolder").await?.as_array().and_then(|a| a.first()).map(|r| st(r, "path")) {
-                general.movie_root = map_path(&root);
+                general.main_mut().movie_root = map_path(&root);
             }
             for ix in self.arr(radarr, "indexer").await?.as_array().into_iter().flatten() {
                 self.merge_indexer(ix, &secrets, false, &mut report)?;
@@ -460,7 +460,7 @@ impl App {
                 report.unsupported.push("Sonarr uses a multi-episode naming style other than \"Extend\"".into());
             }
             if let Some(root) = self.arr(sonarr, "rootfolder").await?.as_array().and_then(|a| a.first()).map(|r| st(r, "path")) {
-                general.series_root = map_path(&root);
+                general.main_mut().series_root = map_path(&root);
             }
             for ix in self.arr(sonarr, "indexer").await?.as_array().into_iter().flatten() {
                 self.merge_indexer(ix, &secrets, true, &mut report)?;
@@ -597,11 +597,15 @@ impl App {
         }
 
         // The volume everything lives on must be mounted before Spool touches media.
-        if general.required_volume.is_empty() {
-            if let Some(rest) = general.movie_root.strip_prefix("/Volumes/").or_else(|| general.series_root.strip_prefix("/Volumes/")) {
-                general.required_volume = format!("/Volumes/{}", rest.split('/').next().unwrap_or(""));
+        let main = general.main_mut();
+        if main.volume.is_empty() {
+            if let Some(rest) = main.movie_root.strip_prefix("/Volumes/").or_else(|| main.series_root.strip_prefix("/Volumes/")) {
+                main.volume = format!("/Volumes/{}", rest.split('/').next().unwrap_or(""));
             }
         }
+        // Radarr and Sonarr may still be managing the same folders: Spool starts paused, to be
+        // set going once they are stopped.
+        general.paused = true;
         self.settings.set_general(&general)?;
         self.settings.set_naming(&naming)?;
         self.apply_engine_config();

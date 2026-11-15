@@ -3,15 +3,6 @@
 use serde::{Deserialize, Serialize};
 use spool_core::naming::NamingConfig;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    /// Watch and decide, but never download or touch the library.
-    #[default]
-    Shadow,
-    Active,
-}
-
 /// A further place the library lives, beside the main one. See [`crate::locations`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -40,7 +31,13 @@ pub struct Location {
     pub series_profile: i64,
 }
 
-/// A helper on the machine that holds some of the disks. See [`crate::remote`].
+impl Location {
+    /// A main location with no folders yet.
+    pub fn main() -> Location {
+        Location { id: 0, name: "Library".into(), manage: true, ..Default::default() }
+    }
+}
+
 /// One folder on a linked machine: where it is there, and where the same folder is here.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -72,6 +69,21 @@ pub struct LinkConf {
 }
 
 impl General {
+    /// The main location: the first place the library is, always managed, and where new
+    /// titles go when the place chosen for them cannot take them. A new Spool has one with
+    /// no folders yet.
+    pub fn main(&self) -> Location {
+        self.locations.iter().find(|l| l.id == 0).cloned().unwrap_or_else(Location::main)
+    }
+
+    /// The main location, to change, made first if there is none.
+    pub fn main_mut(&mut self) -> &mut Location {
+        if !self.locations.iter().any(|l| l.id == 0) {
+            self.locations.insert(0, Location::main());
+        }
+        self.locations.iter_mut().find(|l| l.id == 0).expect("just made")
+    }
+
     /// Whether Plex is to be used: it is turned on, and there is an address and a token for it.
     pub fn plex_ready(&self) -> bool {
         self.plex_on && !self.plex_url.is_empty() && !self.plex_token.is_empty()
@@ -103,21 +115,13 @@ impl MakeWhen {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct General {
-    pub mode: Mode,
-    pub movie_root: String,
-    pub series_root: String,
-    /// The main location's music folder; empty when it holds none.
-    pub music_root: String,
-    /// The main location's audiobooks folder; empty when it holds none.
-    pub audiobook_root: String,
-    /// The main location's videos folder; empty when it holds none.
-    pub video_root: String,
+    /// Paused: nothing is searched for or fetched by itself, and downloads wait. What Spool
+    /// would have fetched is noted; what someone asks for is put in line, to start on resuming.
+    pub paused: bool,
     /// How yt-dlp signs in to sites that want it, Instagram above all: the name of a browser on
     /// this machine to borrow the sign-in of ("safari", "chrome", "firefox"), or the full path of
     /// a cookies.txt file. Empty signs in nowhere. See [`crate::videos`].
     pub video_cookies: String,
-    /// The volume that must be mounted before Spool reads or writes media. Empty disables the check.
-    pub required_volume: String,
     pub downloads_dir: String,
     /// Language releases must be in, lower-case. Empty accepts any.
     pub language: String,
@@ -146,7 +150,7 @@ pub struct General {
     /// Profiles preselected when adding a title. Zero means the first one.
     pub default_movie_profile: i64,
     pub default_series_profile: i64,
-    /// Further places the library lives, beside the folders above.
+    /// Every place the library lives: the main one (see [`General::main`]) and any others.
     pub locations: Vec<Location>,
     /// The location new titles are put in; zero is the main one, which is also used whenever
     /// the chosen one cannot take them.
@@ -165,14 +169,8 @@ pub struct General {
 impl Default for General {
     fn default() -> Self {
         General {
-            mode: Mode::Shadow,
-            movie_root: String::new(),
-            series_root: String::new(),
-            music_root: String::new(),
-            audiobook_root: String::new(),
-            video_root: String::new(),
+            paused: false,
             video_cookies: String::new(),
-            required_volume: String::new(),
             downloads_dir: String::new(),
             language: "english".into(),
             tmdb_api_key: String::new(),

@@ -100,7 +100,7 @@ fn obj(props: Value, required: &[&str]) -> Value {
 }
 
 const TOOLS: &[Tool] = &[
-    Tool { name: "status", read: true, destructive: false, description: "Overall state: mode, library size, free disk space, warnings, what is downloading now, and open attention items (things that failed and need a decision).", schema: || obj(json!({}), &[]) },
+    Tool { name: "status", read: true, destructive: false, description: "Overall state: whether Spool is paused, library size, free disk space, warnings, what is downloading now, and open attention items (things that failed and need a decision).", schema: || obj(json!({}), &[]) },
     Tool {
         name: "find_title",
         read: true,
@@ -561,7 +561,7 @@ impl Mcp {
                 let attention = self.get("/api/attention").await?;
                 let queue: Vec<Value> = act["items"].as_array().into_iter().flatten().filter(|r| r["job"].is_object() || r["acquisition"]["state"] == "importing").map(|r| acquisition_row(&r["acquisition"], &r["job"], &r["title"])).collect();
                 Ok(json!({
-                    "mode": s["mode"], "version": s["version"], "movies": s["movies"], "series": s["series"], "library_gb": gb(&s["library_bytes"]), "free_gb": gb(&s["free_bytes"]), "free_on": s["free_on"],
+                    "paused": s["paused"], "version": s["version"], "movies": s["movies"], "series": s["series"], "library_gb": gb(&s["library_bytes"]), "free_gb": gb(&s["free_bytes"]), "free_on": s["free_on"],
                     "media_volume_ok": s["volume_ok"], "queue_paused": s["queue_paused"], "warnings": s["warnings"], "downloading": queue,
                     "indexers": self.get("/api/indexers").await?.as_array().into_iter().flatten().map(|i| json!({"name": i["name"], "requests_today": i["usage"]["requests"], "request_limit": i["usage"]["request_limit"], "downloads_today": i["usage"]["grabs"], "download_limit": i["usage"]["grab_limit"], "limits_from": i["usage"]["source"], "failing": i["failing"]})).collect::<Vec<_>>(),
                     "attention": attention.as_array().into_iter().flatten().map(|x| json!({"attention_id": x["item"]["id"], "title": x["title"], "title_id": x["item"]["title_id"], "message": x["item"]["message"], "release": x["item"]["data"]["release"], "reason": x["item"]["data"]["reason"], "since": when(&x["item"]["ts"])})).collect::<Vec<_>>(),

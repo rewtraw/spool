@@ -3,7 +3,7 @@
 use crate::db::Db;
 use crate::models::Play;
 use crate::metadata::Metadata;
-use crate::settings::{Mode, Settings};
+use crate::settings::Settings;
 use parking_lot::Mutex;
 use serde::Serialize;
 use spool_nntp::{Engine, EngineConfig, JobStatus};
@@ -462,6 +462,10 @@ impl App {
             settings.set_access(&access)?;
         }
         let engine = Engine::start(engine_config(&settings, data_dir)).await?;
+        // A Spool paused stays paused across a restart.
+        if settings.general().paused {
+            engine.pause_all();
+        }
         let http = http_client();
         let mut meta = Metadata::new(http.clone());
         if let Some((tmdb, tvmaze)) = sources {
@@ -532,12 +536,20 @@ impl App {
         let _ = self.events.send(e);
     }
 
-    pub fn mode(&self) -> Mode {
-        self.settings.general().mode
+    /// Whether Spool is paused. See [`crate::settings::General::paused`].
+    pub fn paused(&self) -> bool {
+        self.settings.general().paused
     }
 
-    pub fn is_active(&self) -> bool {
-        self.mode() == Mode::Active
+    /// Pause Spool or set it going again: the setting, the downloads here and on the helpers.
+    pub fn set_paused(&self, paused: bool) -> anyhow::Result<()> {
+        self.settings.update(|g| {
+            g.paused = paused;
+            Ok(())
+        })?;
+        self.queue_pause(paused);
+        self.emit(Event::Task { name: "pause".into(), running: false, message: if paused { "Paused" } else { "Running" }.into() });
+        Ok(())
     }
 
     /// Push current settings into the download engine.
@@ -548,7 +560,7 @@ impl App {
     /// True when the volume media lives on is mounted. Spool never writes media otherwise, so a
     /// missing external disk cannot turn into files on the internal one.
     pub fn volume_ok(&self) -> bool {
-        let required = self.settings.general().required_volume;
+        let required = self.settings.general().main().volume;
         if required.is_empty() {
             return true;
         }
@@ -587,7 +599,7 @@ impl App {
 
     /// Why the media volume cannot be used right now, in words for the user.
     pub fn volume_problem(&self) -> Option<String> {
-        let required = self.settings.general().required_volume;
+        let required = self.settings.general().main().volume;
         if required.is_empty() || self.volume_ok() {
             return None;
         }

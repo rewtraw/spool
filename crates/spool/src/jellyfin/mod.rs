@@ -414,10 +414,11 @@ impl Call {
                 Err(r) => r,
             },
             (true, ["library", "virtualfolders"]) => {
-                let g = self.app.settings.general();
+                let places = self.app.locations();
+                let roots = |kind: crate::models::Kind| places.iter().map(|l| l.root(kind).to_string()).filter(|r| !r.is_empty()).collect::<Vec<_>>();
                 Json(json!([
-                    {"Name": "Movies", "Locations": [g.movie_root], "CollectionType": "movies", "ItemId": Id::Movies.to_string(), "RefreshStatus": "Idle", "LibraryOptions": {}},
-                    {"Name": "Shows", "Locations": [g.series_root], "CollectionType": "tvshows", "ItemId": Id::Shows.to_string(), "RefreshStatus": "Idle", "LibraryOptions": {}},
+                    {"Name": "Movies", "Locations": roots(crate::models::Kind::Movie), "CollectionType": "movies", "ItemId": Id::Movies.to_string(), "RefreshStatus": "Idle", "LibraryOptions": {}},
+                    {"Name": "Shows", "Locations": roots(crate::models::Kind::Series), "CollectionType": "tvshows", "ItemId": Id::Shows.to_string(), "RefreshStatus": "Idle", "LibraryOptions": {}},
                 ]))
                 .into_response()
             }

@@ -317,7 +317,7 @@ async fn status(State(app): State<App>) -> R<Value> {
     }
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
-        "mode": g.mode,
+        "paused": g.paused,
         "default_movie_profile": g.default_movie_profile,
         "default_series_profile": g.default_series_profile,
         "volume_ok": app.volume_ok(),
@@ -487,7 +487,6 @@ fn api_routes() -> Router<App> {
         .route("/api/settings", get(get_settings).patch(patch_settings))
         .route("/api/settings/mcp", get(mcp_status).post(mcp_access))
         .route("/api/setup", get(setup))
-        .route("/api/settings/naming", get(get_naming).put(put_naming))
         .route("/api/settings/servers", get(get_servers).put(put_servers))
         .route("/api/servers/test", post(test_server))
         .route("/api/profiles", get(list_profiles).post(save_profile))
@@ -498,7 +497,6 @@ fn api_routes() -> Router<App> {
         .route("/api/indexers/{id}", put(save_indexer).delete(delete_indexer))
         .route("/api/indexers/{id}/test", post(test_indexer))
         .route("/api/tasks/{name}", post(run_task))
-        .route("/api/check-paths", get(check_paths))
         .route("/api/space", get(space))
         .route("/api/titles/{id}/free", post(free_title))
         .route("/api/recycle", get(recycle_info))

@@ -4,8 +4,8 @@ This page is for anyone pointing Spool at films and shows they already have. It 
 
 ## The short answer
 
-- In shadow mode, and on a location marked as only read, Spool changes nothing on disk.
-- On a location it manages, in active mode, Spool adds files, replaces a film or episode with a better copy when the title's profile allows it, and deletes what you tell it to. Replaced and deleted files wait in a recycle folder for seven days.
+- While paused, Spool changes nothing on disk by itself; on a location marked as only read it changes nothing at all.
+- On a location it manages, Spool adds files, replaces a film or episode with a better copy when the title's profile allows it, and deletes what you tell it to. Replaced and deleted files wait in a recycle folder for seven days.
 - It never moves or renames the files already in your library, and never touches trailers, extras, artwork or a media server's notes, with one small exception described [below](#one-exception-files-named-after-the-film).
 
 The real risks are an unwanted upgrade and a folder matched to the wrong film. Both are avoided by bringing titles in unmonitored and looking before you switch things on.
@@ -24,7 +24,7 @@ The third way works on further locations, not on the main folders. If your only 
 
 ## What Spool changes, and when
 
-Everything in this table needs active mode and a location Spool manages.
+Everything in this table needs a location Spool manages, and what Spool does by itself waits while it is paused.
 
 | What | When | Where the old file goes |
 | --- | --- | --- |
@@ -41,7 +41,7 @@ A title that is not monitored is never searched for, downloaded or upgraded. Rem
 
 ## What Spool never does
 
-- **Move or rename files already in the library.** `spool check-paths`, and the same check under Settings, Maintenance, only report where files differ from the naming format.
+- **Move or rename files already in the library.** `spool check-paths` only reports where files differ from the naming format.
 - **Touch what else is in the folder.** Trailers, featurettes, samples, posters, backdrops, theme music, `.nfo` files and `.plexmatch` are recognised and left alone. An upgrade replaces the film's main file and nothing else. Second versions of a film are left alone too. [Files Spool recognises](local-files.md) lists every name.
 - **Write to a location marked as only read.** No downloads, upgrades, renames, subtitles or deletions happen there.
 - **Write when the disk is missing.** If the disk named in the settings is not mounted, Spool pauses. It does not create stand-in folders somewhere else.
@@ -88,9 +88,9 @@ Plex, Jellyfin and Kodi attach artwork and notes to a film by name: `Film (1999)
 
 ## A careful way in
 
-1. Install Spool and leave it in shadow mode.
+1. Install Spool and pause it (Activity, **Pause**).
 2. Bring the library in by one of the three ways above, unmonitored, or as a location that is only read.
 3. Open a few titles. Check the details are right and that the page lists the files you expect, with any extras under "Also in the folder".
-4. Run the check under Settings, Maintenance, File locations to see how your naming compares with Spool's.
+4. Run `spool check-paths` to see how your naming compares with Spool's.
 5. Add a title you do not have, monitored, and read the verdicts Spool gives its releases.
-6. Switch to active. Monitor more as you come to trust it.
+6. Resume. Monitor more as you come to trust it.

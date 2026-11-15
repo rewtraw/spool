@@ -102,8 +102,10 @@ enum Command {
     },
     /// Write a consistent copy of the database.
     Backup { dest: PathBuf },
-    /// Switch between shadow and active mode.
-    Mode { mode: String },
+    /// Pause Spool: nothing is searched for or fetched by itself, and downloads wait.
+    Pause,
+    /// Set Spool going again.
+    Resume,
 }
 
 fn data_dir(cli: &Cli) -> PathBuf {
@@ -220,7 +222,7 @@ async fn main() -> Result<()> {
             let _ = app.port.set(listener.local_addr()?.port());
             // Players get their own port, on the same interface as the web app.
             spool::jellyfin::spawn(app.clone(), bind.rsplit_once(':').map(|(host, _)| host.trim_matches(['[', ']']).to_string()).unwrap_or_else(|| "0.0.0.0".into()));
-            tracing::info!(%bind, mode = ?app.mode(), data = %dir.display(), "Spool is running");
+            tracing::info!(%bind, paused = app.paused(), data = %dir.display(), "Spool is running");
             let engine = app.engine.clone();
             let books = app.clone();
             axum::serve(listener, spool::api::router(app).into_make_service_with_connect_info::<std::net::SocketAddr>())
@@ -352,16 +354,13 @@ async fn main() -> Result<()> {
             db.backup(&dest)?;
             println!("Wrote {}", dest.display());
         }
-        Command::Mode { mode } => {
-            let settings = spool::settings::Settings::new(db);
-            let mut g = settings.general();
-            g.mode = match mode.as_str() {
-                "active" => spool::settings::Mode::Active,
-                "shadow" => spool::settings::Mode::Shadow,
-                other => anyhow::bail!("unknown mode {other}; use shadow or active"),
-            };
-            settings.set_general(&g)?;
-            println!("Mode is now {mode}. Restart the service for it to take effect.");
+        command @ (Command::Pause | Command::Resume) => {
+            let paused = matches!(command, Command::Pause);
+            spool::settings::Settings::new(db).update(|g| {
+                g.paused = paused;
+                Ok(())
+            })?;
+            println!("{}", if paused { "Spool is paused. A running Spool pauses its downloads when it next starts." } else { "Spool will run again. A running Spool resumes when it next starts." });
         }
     }
     Ok(())

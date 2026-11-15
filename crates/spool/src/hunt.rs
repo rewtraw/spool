@@ -176,8 +176,8 @@ impl App {
             h.note = format!("{lately} releases did not do in the last hour. The next is tried in an hour.");
             return Ok(None);
         }
-        if !self.is_active() {
-            h.note = "Spool is not downloading right now.".into();
+        if self.paused() {
+            h.note = "Spool is paused.".into();
             return Ok(None);
         }
         if let Some(why) = s.no_folder {

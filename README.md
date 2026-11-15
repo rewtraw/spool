@@ -35,7 +35,7 @@ The guides are at **[rewtraw.github.io/spool/guide](https://rewtraw.github.io/sp
 
 | | |
 | --- | --- |
-| [Getting started](docs/getting-started.md) | Installing, the first settings, shadow mode, migrating, running as a service |
+| [Getting started](docs/getting-started.md) | Installing, the first settings, pausing, migrating, running as a service |
 | [Your library and what Spool does to it](docs/your-library.md) | What it changes, what it never touches, how to undo things |
 | [A library in more than one place](docs/locations.md) | Further disks and NAS shares, managed or only read |
 | [Compact versions](docs/compact.md) | Smaller copies made on the machine's video hardware, kept beside the originals |
@@ -88,7 +88,7 @@ Then, in Settings:
 2. **Usenet**: one or more providers.
 3. **Indexers**: one or more Newznab indexers.
 
-Spool starts in **shadow mode**: it reads the indexer feeds and records what it would download, and changes nothing. Switch to active in Settings, or with `spool mode active`, once nothing else manages the same folders.
+Brought over from Radarr and Sonarr, Spool starts paused: it reads the indexer feeds and notes what it would download, and downloads nothing by itself. **Resume** on Activity, or `spool resume`, sets it going once nothing else manages the same folders.
 
 ### Coming from Radarr, Sonarr and SABnzbd
 
@@ -98,7 +98,7 @@ Spool starts in **shadow mode**: it reads the indexer feeds and records what it 
 
 ```sh
 spool serve [--bind 0.0.0.0:7979]   # run the service
-spool mode active|shadow            # start or stop making changes
+spool pause | spool resume          # stop or start doing things by itself
 spool migrate ...                   # import from Radarr, Sonarr and SABnzbd
 spool check-paths                   # are existing files where Spool would put them?
 spool download x.nzb --out DIR      # run one NZB through the engine, outside the library

@@ -6,7 +6,7 @@ Spool finds, downloads, verifies, files and plays movies and television, in one 
 
 | Guide | What it covers |
 | --- | --- |
-| [Getting started](getting-started.md) | Installing Spool, the first settings, shadow mode, and running it as a service. |
+| [Getting started](getting-started.md) | Installing Spool, the first settings, pausing it, and running it as a service. |
 | [Your library and what Spool does to it](your-library.md) | Bringing in a library you already have, what Spool changes and what it never touches, and how to undo things. Read this before pointing Spool at files you care about. |
 
 ## Using it

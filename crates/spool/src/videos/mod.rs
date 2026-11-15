@@ -569,7 +569,7 @@ impl App {
             let _ = app.db.with(|c| c.execute("UPDATE videos SET state = 'queued', data = json_set(data, '$.state', 'queued') WHERE state IN ('fetching', 'filing')", []));
             let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             loop {
-                while running.load(std::sync::atomic::Ordering::SeqCst) < AT_ONCE && app.is_active() {
+                while running.load(std::sync::atomic::Ordering::SeqCst) < AT_ONCE && !app.paused() {
                     let Some((v, stop)) = app.claim_video() else { break };
                     running.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     let (app2, running2) = (app.clone(), running.clone());

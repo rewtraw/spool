@@ -17,7 +17,6 @@
 
   const SOURCE: Record<string, string> = { grabbed: 'Downloaded', runner_up: 'Fallback', manual: 'Added by hand' };
   const keyOf = (g: Group) => `${g.kind}:${g.tmdb_id ?? 0}:${g.tvdb_id ?? 0}`;
-  const isActive = $derived(app.status?.mode === 'active');
 
   async function load() {
     data = await api.get('/archive').catch(() => data);
@@ -171,7 +170,7 @@
                       </td>
                       <td>
                         <div class="row tight">
-                          {#if isActive && g.title_id}<button class="btn small" onclick={() => download(g, r)}>Download</button>{/if}
+                          {#if g.title_id}<button class="btn small" onclick={() => download(g, r)}>Download</button>{/if}
                           <button class="btn small ghost" onclick={() => check(r)}>Check</button>
                           <button class="btn small ghost" onclick={() => remove(r)}>Remove</button>
                         </div>

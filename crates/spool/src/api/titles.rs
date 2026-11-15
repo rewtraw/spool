@@ -383,9 +383,6 @@ pub(super) async fn bulk_titles(State(app): State<App>, Json(b): Json<Value>) ->
             }
         }
         "search" | "smaller" | "refresh" => {
-            if action != "refresh" && !app.is_active() {
-                return Err(ApiError(StatusCode::CONFLICT, "Spool is in shadow mode and does not download".into()));
-            }
             let n = ids.len();
             let what = match action.as_str() {
                 "search" => "Searching",
@@ -473,9 +470,6 @@ pub(super) async fn search_title(State(app): State<App>, Path(id): Path<i64>, Js
 pub(super) async fn grab_decision(State(app): State<App>, Path(id): Path<i64>, body: Option<Json<Value>>) -> R<Value> {
     let d = app.db.decision(id)?.ok_or_else(|| not_found("release"))?;
     let t = app.db.title(d.title_id)?.ok_or_else(|| not_found("title"))?;
-    if !app.is_active() {
-        return Err(ApiError(StatusCode::CONFLICT, "Spool is in shadow mode and does not download".into()));
-    }
     // A film can keep a second version beside the one it has; a series cannot.
     let another = t.kind == Kind::Movie && body.is_some_and(|b| b.0["another_version"].as_bool().unwrap_or(false));
     let a = app.grab(&d, &t, if another { crate::acquire::ANOTHER_VERSION_REASON } else { crate::acquire::BY_HAND_REASON }, true).await?;

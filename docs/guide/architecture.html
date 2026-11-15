@@ -208,7 +208,7 @@
 <h2 id="storage"><a href="#storage">Storage</a></h2>
 <p>One SQLite database in WAL mode holds everything, in a &quot;columns plus JSON document&quot; shape: the columns that are queried are real columns and the rest of each record is JSON. Saved NZBs are gzip files beside it. The database contains indexer keys and Usenet passwords. It is created readable only by its owner, and so are its backups.</p>
 <h2 id="locations"><a href="#locations">Locations</a></h2>
-<p>The library always has a main location: the two folders in the general settings, on the volume named there. Further locations sit beside it, each with folders of its own and each either managed or only read. A title belongs to the location whose folder holds its own, so nothing about a title says where it is except its path.</p>
+<p>The library always has a main location: the first in the list of locations, always managed, and where new titles go when the place chosen for them cannot take them. Further locations sit beside it, each with folders of its own and each either managed or only read. A title belongs to the location whose folder holds its own, so nothing about a title says where it is except its path.</p>
 <p>Two rules follow from that, and every part of Spool that touches files asks the same question of them (<code>title_locked</code>):</p>
 <ul>
 <li><strong>Away means left alone.</strong> A location that cannot be reached takes its titles offline. They are not scanned, searched for or offered to players, and a file that cannot be seen is never recorded as gone. Whether a location is there is looked at on a thread of its own with a short wait, because a network share that has gone can keep a caller waiting indefinitely.</li>
@@ -242,8 +242,8 @@
 <p>A caller whose count is older than the oldest removal still remembered, or is one this database never gave out, is told to read everything again.</p>
 <h2 id="safety-rules-the-code-enforces"><a href="#safety-rules-the-code-enforces">Safety rules the code enforces</a></h2>
 <ul>
-<li>If the required volume is not mounted or not readable, nothing is downloaded, imported or created. Spool never makes stand-in folders on another disk.</li>
-<li>Spool starts in shadow mode: it records what it would do and touches nothing until switched to active.</li>
+<li>If the main location&#39;s disk is not mounted or not readable, nothing is downloaded, imported or created. Spool never makes stand-in folders on another disk.</li>
+<li>While paused, Spool records what it would do and starts nothing by itself; downloads wait.</li>
 <li>Downloads that the disk cannot hold wait in the queue instead of starting.</li>
 <li>A release that fails is blocklisted and the next acceptable one is tried.</li>
 <li>Deleting files through the MCP endpoint needs an explicit confirmation.</li>
