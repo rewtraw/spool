@@ -88,6 +88,11 @@ impl Placement {
         self.0.iter().filter_map(|p| p.0.holds(path).map(|depth| (depth, p))).max_by_key(|(depth, _)| *depth).map(|(_, p)| p)
     }
 
+    /// The location whose music folder holds a path.
+    pub fn music_of(&self, path: &str) -> Option<&(Location, bool)> {
+        self.0.iter().filter(|p| !p.0.music_root.is_empty() && !path.is_empty() && Path::new(path).starts_with(&p.0.music_root)).max_by_key(|p| p.0.music_root.len())
+    }
+
     fn main_online(&self) -> bool {
         self.0.first().is_some_and(|p| p.1)
     }

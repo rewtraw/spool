@@ -27,9 +27,13 @@
   let grouped = $state<boolean>(saved.grouped ?? false);
   /** Only what is kept on this location, as its home or as a copy; empty for everywhere. */
   let place = $state<string>(saved.place ?? '');
-  const placeNames = $derived([...new Set(app.titles.flatMap((t) => [t.location, ...(t.also_on ?? [])]).filter(Boolean) as string[])].sort());
-  /** The location kept to, where its picker shows: albums and books have none, so it leaves them be. */
-  const atPlace = $derived(place && placeNames.includes(place) && (scope === 'all' || scope === 'video') ? place : '');
+  // The albums in the music folders; above the locations, which count those their folders are on.
+  let albums = $state<any[]>([]);
+  const placeNames = $derived([...new Set([...app.titles.flatMap((t) => [t.location, ...(t.also_on ?? [])]), ...albums.map((a) => a.location)].filter(Boolean) as string[])].sort());
+  /** Whether a tab keeps to a location: books have none, and channels are not split by one. */
+  const placed = (s: Scope) => s === 'all' || s === 'video' || s === 'music';
+  /** The location kept to, where its picker shows. */
+  const atPlace = $derived(place && placeNames.includes(place) && placed(scope) ? place : '');
   /** Anime, films and series alike: what AniList has an entry for. */
   const isAnime = (t: Title) => !!t.anilist?.length;
   const onPlace = (t: Title, name: string) => t.location === name || (t.also_on ?? []).includes(name);
@@ -43,7 +47,6 @@
   });
 
   // ---- music and books, beside the titles every page already has
-  let albums = $state<any[]>([]);
   let wants = $state<any[]>([]);
   let books = $state<Book[]>([]);
   let othersLoaded = $state(false);
@@ -74,6 +77,8 @@
     status: { label: string; tone: string };
     t?: Title;
     lossless?: boolean;
+    /** The location an album's folder is on. */
+    location?: string | null;
     state?: string;
   };
 
@@ -118,7 +123,7 @@
       out.push({
         key: `a${a.id}`, type: 'album', label: 'Album', name: a.title, sortName: sortable(a.title), by: a.artist, year: a.year, added: a.added_at, size: a.bytes,
         href: `#/album/${a.id}`, cover: a.has_cover ? `/api/music/albums/${a.id}/art?size=300` : null, square: true, have: true,
-        status: { label: (a.format ?? '').toUpperCase(), tone: '' }, lossless,
+        status: { label: (a.format ?? '').toUpperCase(), tone: '' }, lossless, location: a.location,
       });
     }
     // An album wanted and since filed is shown once, as the album.
@@ -176,7 +181,7 @@
       if (atPlace && !onPlace(t, atPlace)) return false;
       // Someone who only watches is shown what there is to watch.
       if (!app.manages && !have(t)) return false;
-    } else if (atPlace) return false;
+    } else if (atPlace && (i.type !== 'album' || i.location !== atPlace)) return false;
     switch (show) {
       case 'have': return i.have;
       case 'wanted': return !i.have && (!t || (t.monitored && t.available));
@@ -340,8 +345,8 @@
     bulkProfile = '';
   }
 
-  // The counts say what each tab will show: Everything and Film & TV keep to the location chosen,
-  // and the tabs without its picker do not.
+  // The counts say what each tab will show: Everything, Film & TV and Music keep to the location
+  // chosen, and the tabs without its picker do not.
   const kept = $derived(place && placeNames.includes(place) ? place : '');
   const inPlace = $derived(kept ? app.titles.filter((t) => onPlace(t, kept)) : app.titles);
   const seen = $derived(app.manages ? inPlace : inPlace.filter(have));
@@ -353,14 +358,29 @@
     movie: seen.filter((t) => t.kind === 'movie').length,
     series: seen.filter((t) => t.kind === 'series' && !t.channel).length,
     anime: seen.filter(isAnime).length,
-    music: albums.length + wants.filter((w) => w.state !== 'have').length,
+    music: kept ? albums.filter((a) => a.location === kept).length : albums.length + wants.filter((w) => w.state !== 'have').length,
     books: books.length,
   });
   const scopes = $derived(
-    ([['all', 'Everything', counts.video + counts.channelsHere + (kept ? 0 : counts.music + counts.books)], ['video', 'Film & TV', counts.video], ['channels', 'Channels', counts.channels], ['music', 'Music', counts.music], ['books', 'Books', counts.books]] as [Scope, string, number][]).filter(
+    ([['all', 'Everything', counts.video + counts.channelsHere + counts.music + (kept ? 0 : counts.books)], ['video', 'Film & TV', counts.video], ['channels', 'Channels', counts.channels], ['music', 'Music', counts.music], ['books', 'Books', counts.books]] as [Scope, string, number][]).filter(
       ([k, , n]) => (k !== 'books' || app.manages) && (k !== 'channels' || n > 0),
     ),
   );
+  // How much room what is here takes, by kind, keeping to the location where the tab does.
+  const sizes = $derived.by(() => {
+    const at = placed(scope) ? kept : '';
+    const here = items.filter((i) => i.have && (!at || (i.t ? onPlace(i.t, at) : i.type === 'album' && i.location === at)));
+    const sum = (f: (i: Item) => boolean) => here.filter(f).reduce((n, i) => n + i.size, 0);
+    const all: [string, number][] = [
+      ['Movies', sum((i) => i.t?.kind === 'movie')],
+      ['Series', sum((i) => i.t?.kind === 'series' && !i.t.channel)],
+      ['Channels', sum((i) => !!i.t?.channel)],
+      ['Music', sum((i) => i.type === 'album')],
+      ['Books', at ? 0 : sum((i) => i.type === 'book')],
+    ];
+    const shown = scope === 'all' ? all : scope === 'video' ? all.slice(0, 2) : scope === 'channels' ? [all[2]] : scope === 'music' ? [all[3]] : [all[4]];
+    return { parts: shown.filter(([, n]) => n > 0), total: shown.reduce((n, [, b]) => n + b, 0) };
+  });
   const noun = $derived(scope === 'video' ? ['title', 'titles'] : scope === 'channels' ? ['channel', 'channels'] : scope === 'music' ? ['album', 'albums'] : scope === 'books' ? ['book', 'books'] : ['item', 'items']);
   const discoverKind: Record<Scope, string> = { all: 'all', video: 'all', channels: 'videos', music: 'music', books: 'books' };
 </script>
@@ -395,7 +415,7 @@
   <select class="input narrow" bind:value={show} aria-label="Show">
     {#each SHOWS[scope] as [k, label]}<option value={k}>{label}</option>{/each}
   </select>
-  {#if placeNames.length > 1 && (scope === 'all' || scope === 'video')}
+  {#if placeNames.length > 1 && placed(scope)}
     <select class="input narrow" bind:value={place} aria-label="Location">
       <option value="">Every location</option>
       {#each placeNames as name}<option value={name}>{name}</option>{/each}
@@ -413,6 +433,11 @@
   </div>
 </div>
 
+{#if sizes.total > 0 && app.titlesLoaded && othersLoaded}
+  <p class="faint sizes">
+    {#if sizes.parts.length > 1}{#each sizes.parts as [label, n], i}{i ? ' · ' : ''}{label} {bytes(n)}{/each} · {/if}{sizes.parts.length > 1 ? 'all ' : ''}{bytes(sizes.total)}{atPlace ? ` on ${atPlace}` : ''}
+  </p>
+{/if}
 {#if !app.titlesLoaded || (scope !== 'video' && !othersLoaded)}
   <div class="empty">Loading…</div>
 {:else if !filtered.length}
@@ -620,6 +645,10 @@
     tbody tr:hover {
       background: var(--raised);
     }
+  }
+  .sizes {
+    margin: -6px 0 14px;
+    font-size: 13px;
   }
   .count {
     margin-top: 18px;

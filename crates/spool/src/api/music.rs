@@ -8,7 +8,19 @@ pub(super) async fn music(State(app): State<App>) -> R<Value> {
     let lib = app.music.library();
     let mut albums: Vec<_> = lib.albums.iter().collect();
     albums.sort_by_key(|a| (a.artist.to_lowercase(), a.year, a.title.to_lowercase()));
-    Ok(Json(json!({"status": app.music_status(), "albums": albums.into_iter().map(|a| subsonic::web_album(&lib, a)).collect::<Vec<_>>()})))
+    // Which location's music folder each is in, once there is more than one place, as titles say.
+    let places = app.placement();
+    let albums: Vec<Value> = albums
+        .into_iter()
+        .map(|a| {
+            let mut v = subsonic::web_album(&lib, a);
+            if places.0.len() > 1 {
+                v["location"] = json!(places.music_of(&a.folder).map(|p| p.0.name.clone()));
+            }
+            v
+        })
+        .collect();
+    Ok(Json(json!({"status": app.music_status(), "albums": albums})))
 }
 
 pub(super) async fn music_album(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
