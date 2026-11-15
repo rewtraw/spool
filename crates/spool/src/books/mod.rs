@@ -74,6 +74,9 @@ pub struct Candidate {
     pub by_id: bool,
     /// "epub" or "pdf".
     pub format: String,
+    /// Chosen by a person, who is taken at their word: a translation's title need not match the
+    /// original's.
+    pub picked: bool,
 }
 
 impl Candidate {
@@ -468,7 +471,7 @@ impl App {
         let Some(mut b) = self.db.book(id)? else { bail!("no such book") };
         let c = b.candidates.iter().find(|c| c.md5 == md5).cloned().unwrap_or(Candidate { md5: md5.clone(), title: b.title.clone(), author: b.authors.first().cloned().unwrap_or_default(), ..Default::default() });
         b.turned_down.retain(|t| t.md5 != md5);
-        b.chosen = Some(c);
+        b.chosen = Some(Candidate { picked: true, ..c });
         b.state = BookState::Fetching;
         b.note.clear();
         self.db.save_book(&mut b)?;
@@ -770,7 +773,7 @@ impl App {
                 return Ok(());
             }
         };
-        if !is_the_book(b, &opened) {
+        if !c.picked && !is_the_book(b, &opened) {
             let _ = std::fs::remove_file(&dest);
             let by = opened.authors.first().map(|a| format!(" by {a}")).unwrap_or_default();
             self.turn_down(b, &c.md5, format!("the EPUB says it is \u{201c}{}\u{201d}{by}", opened.title));

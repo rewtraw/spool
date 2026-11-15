@@ -236,7 +236,7 @@ impl Shelf {
             let score = (t * 0.65 + a * 0.35 + if by_id { 0.15 } else { 0.0 }).min(1.0);
             // An index built before PDFs were kept holds EPUBs alone.
             let format = Some(text(f.format)).filter(|s| !s.is_empty()).unwrap_or_else(|| "epub".into());
-            let c = Candidate { md5: md5.clone(), title, author, lang, size: num(f.size), year: num(f.year) as i32, score: (score * 1000.0).round() / 1000.0, by_id, format };
+            let c = Candidate { md5: md5.clone(), title, author, lang, size: num(f.size), year: num(f.year) as i32, score: (score * 1000.0).round() / 1000.0, by_id, format, picked: false };
             match found.get(&md5) {
                 Some(old) if old.score >= c.score => {}
                 _ => {
