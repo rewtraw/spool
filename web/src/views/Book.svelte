@@ -3,7 +3,7 @@
   // Spool finds an EPUB of it in its index of Anna's Archive, downloads it, checks it and
   // hands it to Florilegium; or a PDF, when there is no EPUB, which Florilegium converts.
   import { api, type Book, type Candidate } from '../lib/api';
-  import { act, go } from '../lib/state.svelte';
+  import { act, go, toast } from '../lib/state.svelte';
   import { ago, bytes, clock } from '../lib/format';
   import { player, playBook, chapterAt } from '../lib/player.svelte';
 
@@ -39,8 +39,15 @@
   });
 
   async function choose(hash: string) {
-    if (await act(() => api.post(`/books/${id}/choose`, { md5: hash }), 'Downloading it')) {
-      md5 = '';
+    const got = await act(() => api.post<Book>(`/books/${id}/choose`, { md5: hash }));
+    if (!got) return;
+    md5 = '';
+    // A file of another work is added as that book, and this one keeps waiting.
+    if (got.id !== id) {
+      toast(got.state === 'have' ? `That is “${got.title}”, already here` : `Added as “${got.title}” and downloading it`);
+      go(`book/${got.id}`);
+    } else {
+      toast('Downloading it');
       load();
     }
   }

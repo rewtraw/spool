@@ -463,20 +463,53 @@ impl App {
     }
 
     /// Take this file for the book: one of those offered, or any by its MD5.
-    pub fn choose_book_file(&self, id: i64, md5: &str) -> Result<Book> {
+    /// Download a file chosen by hand. A file that is another work, chosen from among those the
+    /// index offered, is added as that book under its own name, and this one keeps waiting; the
+    /// book it is fetched as is answered.
+    pub async fn choose_book_file(&self, id: i64, md5: &str) -> Result<Book> {
         let md5 = md5.trim().to_lowercase();
         if md5.len() != 32 || !md5.chars().all(|c| c.is_ascii_hexdigit()) {
             bail!("an MD5 is 32 hexadecimal characters");
         }
         let Some(mut b) = self.db.book(id)? else { bail!("no such book") };
-        let c = b.candidates.iter().find(|c| c.md5 == md5).cloned().unwrap_or(Candidate { md5: md5.clone(), title: b.title.clone(), author: b.authors.first().cloned().unwrap_or_default(), ..Default::default() });
+        let listed = b.candidates.iter().find(|c| c.md5 == md5).cloned();
+        let c = Candidate { picked: true, ..listed.clone().unwrap_or(Candidate { md5: md5.clone(), title: b.title.clone(), author: b.authors.first().cloned().unwrap_or_default(), ..Default::default() }) };
+        if let Some(listed) = &listed {
+            if let Some(work) = self.other_work(&b, listed).await {
+                let mut other = self.add_book_as(&work, Some(&b.language), b.account_id, true, false, None).await?;
+                if other.state != BookState::Have {
+                    other.turned_down.retain(|t| t.md5 != md5);
+                    other.chosen = Some(c);
+                    other.state = BookState::Fetching;
+                    other.note.clear();
+                    self.db.save_book(&mut other)?;
+                    self.nudge_book(other.id);
+                }
+                return Ok(other);
+            }
+        }
         b.turned_down.retain(|t| t.md5 != md5);
-        b.chosen = Some(Candidate { picked: true, ..c });
+        b.chosen = Some(c);
         b.state = BookState::Fetching;
         b.note.clear();
         self.db.save_book(&mut b)?;
         self.nudge_book(id);
         Ok(b)
+    }
+
+    /// The Open Library work a file is, when it is not this book: its name is unlike the book's,
+    /// and looking it up by name and author finds another work. A translation, named in its own
+    /// language, is found to be the same work.
+    async fn other_work(&self, b: &Book, c: &Candidate) -> Option<String> {
+        if c.by_id || text::title_alike(&wanted_title(b), &c.title) >= 0.75 {
+            return None;
+        }
+        // "Title (Series Book 3)" is looked up as "Title".
+        let title = c.title.split(['(', '[']).next().unwrap_or(&c.title).trim();
+        let author = c.author.split([';', ',', '&']).next().unwrap_or("").trim();
+        let works = openlibrary::search(&self.http, &format!("{title} {author}")).await.ok()?;
+        let w = works.into_iter().find(|w| text::title_alike(title, &w.title) >= 0.75)?;
+        (w.ol_work != b.ol_work).then_some(w.ol_work)
     }
 
     /// Look for the book again from the start.

@@ -62,7 +62,7 @@ pub(super) struct Choose {
 }
 
 pub(super) async fn choose_book(State(app): State<App>, Path(id): Path<i64>, Json(c): Json<Choose>) -> R<Value> {
-    Ok(Json(json!(app.choose_book_file(id, &c.md5)?)))
+    Ok(Json(json!(app.choose_book_file(id, &c.md5).await?)))
 }
 
 pub(super) async fn retry_book(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
