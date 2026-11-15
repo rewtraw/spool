@@ -42,8 +42,6 @@ pub async fn seed(app: &App, root: &Path) -> Result<usize> {
     g["movie_root"] = at("Movies").into();
     g["series_root"] = at("Series").into();
     g["downloads_dir"] = at("Downloads").into();
-    // Out of the way of a real Spool, or a Jellyfin, on the same machine.
-    g["players_port"] = 18096.into();
     g["locations"] = json!([
         {"id": 1, "name": "Shelf", "movie_root": at("Shelf/Films"), "series_root": at("Shelf/Series"), "manage": true},
         {"id": 2, "name": "Vault", "movie_root": at("Vault/Films"), "manage": false},

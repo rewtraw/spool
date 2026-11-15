@@ -723,6 +723,18 @@ const MIGRATIONS: &[&str] = &[
         checked_at INTEGER NOT NULL
     );
     "#,
+    r#"
+    -- The keys that let other programs in are kept apart from the settings, and what used to
+    -- be settings and is now fixed (see settings::fixed) is let go.
+    INSERT INTO settings(key, value)
+        SELECT 'access', json_object('api_key', COALESCE(json_extract(value, '$.api_key'), ''), 'mcp_read_key', COALESCE(json_extract(value, '$.mcp_read_key'), ''))
+        FROM settings WHERE key = 'general'
+        ON CONFLICT(key) DO NOTHING;
+    UPDATE settings SET value = json_remove(value, '$.api_key', '$.mcp_read_key', '$.recycle_days', '$.retention_days', '$.proper_policy',
+        '$.rss_interval_minutes', '$.backlog_batch', '$.backlog_interval_minutes', '$.ffprobe_path', '$.opensubtitles_url', '$.players_port',
+        '$.space_wait_gb', '$.direct_unpack', '$.post_parallel', '$.archive_runner_ups') WHERE key = 'general';
+    DELETE FROM settings WHERE key = 'size_limits';
+    "#,
 ];
 
 impl Db {
@@ -776,6 +788,12 @@ impl Db {
             .flatten()
             .and_then(|v| serde_json::from_str(&v).ok())
             .unwrap_or_default()
+    }
+
+    /// A setting, None when it was never saved, or an error when what was saved cannot be read.
+    pub fn get_setting_checked<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        let raw = self.with(|c| c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get::<_, String>(0)).optional())?;
+        raw.map(|v| serde_json::from_str(&v).with_context(|| format!("the saved {key} settings"))).transpose()
     }
 
     pub fn set_setting<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {

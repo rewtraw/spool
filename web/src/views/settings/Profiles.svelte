@@ -1,7 +1,7 @@
 <script lang="ts">
-  // The Profiles tab: quality profiles and the hard size limits.
+  // Quality profiles: what a title may be downloaded in, where upgrades stop, and the size
+  // to aim for.
   import { api } from '../../lib/api';
-  import { bytes } from '../../lib/format';
   import { act, loadProfiles } from '../../lib/state.svelte';
 
   let profiles = $state<any[]>([]);
@@ -35,37 +35,9 @@
   }
   let editing = $state<number | null>(null);
 
-  // ---- size limits (megabytes per minute of runtime; blank means no limit)
-  let limits = $state<Record<string, { min: any; max: any }>>({});
-  let showLimits = $state(false);
-  async function loadLimits() {
-    const raw = await api.get('/settings/size-limits');
-    const out: Record<string, { min: any; max: any }> = {};
-    // Every quality gets a row for both kinds, so each box has something to bind to.
-    for (const q of qualities) for (const kind of ['movie', 'tv']) out[`${kind}:${q.key}`] = { min: '', max: '' };
-    for (const [k, v] of Object.entries<any>(raw)) out[k] = { min: v.min || '', max: v.max ?? '' };
-    limits = out;
-  }
-  async function saveLimits() {
-    const body: Record<string, any> = {};
-    for (const [k, v] of Object.entries(limits)) {
-      const min = Number(v.min) || 0;
-      const max = v.max === '' || v.max == null ? null : Number(v.max) || null;
-      if (min > 0 || max) body[k] = { min, max, preferred: null };
-    }
-    await act(() => api.put('/settings/size-limits', body), 'Saved');
-    loadLimits();
-  }
-  const gbFor = (mbPerMin: any, minutes: number) => (Number(mbPerMin) > 0 ? `${((Number(mbPerMin) * minutes) / 1024).toFixed(1)} GB` : '');
-
-
-  // How each profile fits what is on disk.
-  let fit = $state<any[]>([]);
   async function load() {
-    api.get<any[]>('/profiles/fit').then((f) => (fit = f)).catch(() => {});
     profiles = await api.get('/profiles');
     qualities = await api.get('/qualities');
-    await loadLimits();
   }
   load().catch(() => {});
 </script>
@@ -118,54 +90,4 @@
       </fieldset>
     {/each}
     <div class="row"><button class="btn" onclick={() => { newProfile('movie'); editing = profiles.length - 1; }}>New movie profile</button><button class="btn" onclick={() => { newProfile('tv'); editing = profiles.length - 1; }}>New series profile</button></div>
-
-    {#if fit.length}
-      <fieldset class="card">
-        <legend>How the profiles fit what is on disk</legend>
-        <p class="muted">A profile says what a title's files should be. Where the files are something else, nothing happens while the title is not monitored; once it is, Spool works to make them what the profile says.</p>
-        <div class="scroll-x">
-          <table class="table">
-            <thead><tr><th>Location</th><th>Profile</th><th>Titles</th><th>Monitored</th><th>Files</th><th>Quality not allowed</th><th>Over size target</th><th>Would upgrade</th></tr></thead>
-            <tbody>
-              {#each fit as f}
-                <tr>
-                  <td>{f.location || 'Library'}</td><td><b>{f.profile}</b> <span class="faint small">{f.kind}</span></td><td>{f.titles}</td><td>{f.monitored}</td><td>{f.files}</td>
-                  <td class:warn={f.not_allowed > 0}>{f.not_allowed || ''}</td><td class:warn={f.over_target > 0}>{f.over_target ? `${f.over_target} (${bytes(f.over_bytes)})` : ''}</td><td>{f.below_cutoff || ''}</td>
-                </tr>
-                {#if f.note}<tr><td colspan="8" class="small warn">{f.note}</td></tr>{/if}
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </fieldset>
-    {/if}
-    <fieldset class="card">
-      <legend>Hard size limits</legend>
-      <p class="muted">These reject a release outright, whatever its profile, when it is smaller or larger than a quality should be. They are in megabytes per minute of runtime, so they scale with length. Leave a box empty for no limit. To steer toward a size without rejecting anything, use a profile's size target instead.</p>
-      <div><button class="btn small" onclick={() => (showLimits = !showLimits)}>{showLimits ? 'Hide' : 'Show'} limits</button></div>
-      {#if showLimits}
-        <div class="scroll-x">
-          <table class="table limits">
-            <thead>
-              <tr><th></th><th colspan="2">Movies</th><th colspan="2">Series</th></tr>
-              <tr><th>Quality</th><th>At least</th><th>At most</th><th>At least</th><th>At most</th></tr>
-            </thead>
-            <tbody>
-              {#each [...qualities].sort((a, b) => b.weight - a.weight) as q (q.key)}
-                {#if limits[`movie:${q.key}`] && limits[`tv:${q.key}`]}
-                  <tr>
-                    <td>{q.movie}</td>
-                    <td><input class="input" type="number" min="0" bind:value={limits[`movie:${q.key}`].min} /></td>
-                    <td><input class="input" type="number" min="0" bind:value={limits[`movie:${q.key}`].max} title={gbFor(limits[`movie:${q.key}`].max, 120) ? `${gbFor(limits[`movie:${q.key}`].max, 120)} for a two-hour film` : ''} /></td>
-                    <td><input class="input" type="number" min="0" bind:value={limits[`tv:${q.key}`].min} /></td>
-                    <td><input class="input" type="number" min="0" bind:value={limits[`tv:${q.key}`].max} title={gbFor(limits[`tv:${q.key}`].max, 45) ? `${gbFor(limits[`tv:${q.key}`].max, 45)} for a 45-minute episode` : ''} /></td>
-                  </tr>
-                {/if}
-              {/each}
-            </tbody>
-          </table>
-        </div>
-        <div><button class="btn primary" onclick={saveLimits}>Save limits</button></div>
-      {/if}
-    </fieldset>
   </div>

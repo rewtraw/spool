@@ -19,7 +19,7 @@ pub fn reply(address: &str, id: &str) -> String {
     json!({"Address": address, "Id": id, "Name": super::SERVER_NAME, "EndpointAddress": null}).to_string()
 }
 
-pub async fn answer(app: App, port: u32) {
+pub async fn answer(app: App, port: u16) {
     let socket = match UdpSocket::bind(("0.0.0.0", PORT)).await {
         Ok(s) => s,
         Err(e) => {

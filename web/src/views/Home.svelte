@@ -168,7 +168,7 @@
 
 {#if asks.length}
   <section>
-    <div class="row"><div class="section-title grow">Asked for</div><a class="more" href="#/settings/players">Everything asked for</a></div>
+    <div class="row"><div class="section-title grow">Asked for</div><a class="more" href="#/settings/people">Everything asked for</a></div>
     <div class="stack">
       {#each asks as a (a.id)}
         <div class="card attention asked">
@@ -208,7 +208,7 @@
                 <button class="btn small" onclick={() => resolve(a, 'retry')}>Import anyway</button>
                 <button class="btn small" onclick={() => resolve(a, 'discard')}>Discard and find another</button>
               {/if}
-              {#if a.item.kind === 'space'}<a class="btn small" href="#/settings/space">See what can be removed</a>{/if}
+              {#if a.item.kind === 'space'}<a class="btn small" href="#/activity/space">See what can be removed</a>{/if}
               <button class="btn small ghost" onclick={() => resolve(a, 'dismiss')}>Dismiss</button>
             </div>
           </div>

@@ -123,8 +123,6 @@ impl Conf {
 pub struct Pushed {
     pub servers: Vec<ServerConfig>,
     pub speed_limit: u64,
-    pub direct_unpack: bool,
-    pub post_parallel: usize,
 }
 
 /// A folder being moved from one place on the helper's disks to another.
@@ -315,8 +313,8 @@ impl Helper {
             incomplete_dir: conf.downloads.join("incomplete"),
             complete_dir: conf.downloads.join("complete"),
             speed_limit: pushed.speed_limit,
-            direct_unpack: pushed.direct_unpack,
-            post_parallel: pushed.post_parallel.max(1),
+            direct_unpack: true,
+            post_parallel: crate::settings::fixed::POST_PARALLEL,
             ..Default::default()
         }
     }

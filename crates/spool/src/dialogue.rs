@@ -776,7 +776,7 @@ impl App {
             list
         };
         // A pause after failing is lifted when what OpenSubtitles is reached with changes.
-        let account = format!("{}\n{}\n{}\n{}", g.opensubtitles_username, g.opensubtitles_password, g.opensubtitles_api_key, g.opensubtitles_url);
+        let account = format!("{}\n{}\n{}\n{}", g.opensubtitles_username, g.opensubtitles_password, g.opensubtitles_api_key, self.opensubtitles_api.lock());
         let paused = {
             let mut p = self.dialogue.fetch_paused.lock();
             if p.as_ref().is_some_and(|(until, _, was)| now() >= *until || *was != account) {

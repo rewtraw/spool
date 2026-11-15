@@ -1,44 +1,26 @@
 <script lang="ts">
-  // Settings: the tabs, and the one that is open. Each tab is a component beside this file's
-  // folder, with its own state; what they share in looks is in settings/settings.css.
+  // Settings: where the library is, what the household wants, what Spool connects to, and who
+  // uses it. Reports and tasks are under Activity. Each tab is a component in settings/.
   import { route } from '../lib/state.svelte';
-  import './settings/settings.css';
-  import General from './settings/General.svelte';
-  import Library from './settings/Library.svelte';
-  import Players from './settings/Players.svelte';
-  import Usenet from './settings/Usenet.svelte';
-  import Indexers from './settings/Indexers.svelte';
-  import Profiles from './settings/Profiles.svelte';
-  import Naming from './settings/Naming.svelte';
-  import Plex from './settings/Plex.svelte';
-  import Space from './settings/Space.svelte';
-  import Compact from './settings/Compact.svelte';
-  import Maintenance from './settings/Maintenance.svelte';
-  import Music from './settings/Music.svelte';
-  import Books from './settings/Books.svelte';
+  import '../lib/panes.css';
+  import Storage from './settings/Storage.svelte';
+  import Preferences from './settings/Preferences.svelte';
+  import Connections from './settings/Connections.svelte';
+  import People from './settings/People.svelte';
 
-  const tabs = [['general', 'General'], ['library', 'Library'], ['players', 'Players'], ['usenet', 'Usenet'], ['indexers', 'Indexers'], ['profiles', 'Profiles'], ['naming', 'Naming'], ['plex', 'Plex'], ['music', 'Music'], ['books', 'Books'], ['compact', 'Compact versions'], ['space', 'Disk space'], ['maintenance', 'Maintenance']];
-  const tab = $derived(route.arg || 'general');
+  const tabs = [['storage', 'Storage'], ['preferences', 'Preferences'], ['connections', 'Connections'], ['people', 'People']];
+  const tab = $derived(tabs.some(([id]) => id === route.arg) ? route.arg : 'storage');
 </script>
 
-<div class="settings">
+<div class="panes">
   <header class="head"><h1>Settings</h1></header>
   <div class="tabs" role="tablist">
     {#each tabs as [id, label]}<a role="tab" aria-selected={tab === id} class:on={tab === id} href="#/settings/{id}">{label}</a>{/each}
   </div>
 
-  {#if tab === 'general'}<General />
-  {:else if tab === 'library'}<Library />
-  {:else if tab === 'players'}<Players />
-  {:else if tab === 'usenet'}<Usenet />
-  {:else if tab === 'indexers'}<Indexers />
-  {:else if tab === 'profiles'}<Profiles />
-  {:else if tab === 'naming'}<Naming />
-  {:else if tab === 'plex'}<Plex />
-  {:else if tab === 'compact'}<Compact />
-  {:else if tab === 'space'}<Space />
-  {:else if tab === 'music'}<Music />
-  {:else if tab === 'books'}<Books />
-  {:else if tab === 'maintenance'}<Maintenance />
+  {#if tab === 'storage'}<Storage />
+  {:else if tab === 'preferences'}<Preferences />
+  {:else if tab === 'connections'}<Connections />
+  {:else if tab === 'people'}<People />
   {/if}
 </div>

@@ -74,8 +74,7 @@
   }
 
   async function saveCookies() {
-    const g = await api.get<any>('/settings/general');
-    await act(() => api.put('/settings/general', { ...g, video_cookies: cookies.trim() }), 'Saved');
+    await act(() => api.patch('/settings', { video_cookies: cookies.trim() }), 'Saved');
     load();
   }
 
@@ -96,7 +95,7 @@
 {#if ready && !ready.yt_dlp}
   <div class="card notice warn">yt-dlp is not installed on the machine Spool runs on, and it does the fetching. Install it there with <span class="mono">brew install yt-dlp</span>, then come back.</div>
 {:else if ready && !ready.folder}
-  <div class="card notice warn">There is no videos folder to file them in. Add one to a location in <a class="link" href="#/settings/library">Settings → Library</a>.</div>
+  <div class="card notice warn">There is no videos folder to file them in. Add one to a location in <a class="link" href="#/settings/storage">Settings → Storage</a>.</div>
 {/if}
 
 <form class="card get" onsubmit={(e) => { e.preventDefault(); get(); }}>

@@ -316,7 +316,7 @@ impl App {
         let host = own_address(r.ip).ok_or_else(|| anyhow!("no address of this machine reaches {}", r.name))?;
         // The players' door when it is open: the home network may be kept from the app's port.
         let g = self.settings.general();
-        let port = if g.players_enabled { g.players_port as u16 } else { self.port.get().copied().unwrap_or(7979) };
+        let port = if g.players_enabled { crate::settings::fixed::players_port() } else { self.port.get().copied().unwrap_or(7979) };
         let host = match host {
             IpAddr::V6(v6) => format!("[{v6}]"),
             v4 => v4.to_string(),

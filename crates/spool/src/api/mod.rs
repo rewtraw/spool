@@ -86,15 +86,6 @@ fn mask(s: &str) -> String {
     }
 }
 
-/// Keep the stored secret when the client sends the mask back.
-fn unmask(new: String, old: &str) -> String {
-    if new == MASK {
-        old.to_string()
-    } else {
-        new
-    }
-}
-
 // ---------------------------------------------------------------- auth
 
 fn session_cookie(headers: &HeaderMap) -> Option<String> {
@@ -125,9 +116,9 @@ fn sign_in_required(accounts: &[Account]) -> bool {
 }
 
 fn who(app: &App, headers: &HeaderMap) -> Option<Who> {
-    let g = app.settings.general();
     if let Some(key) = headers.get("x-api-key").and_then(|k| k.to_str().ok()) {
-        if !g.api_key.is_empty() && same(key, &g.api_key) {
+        let api_key = app.settings.access().api_key;
+        if !api_key.is_empty() && same(key, &api_key) {
             return Some(Who { account: None, manages: true });
         }
     }
@@ -283,7 +274,7 @@ async fn session(State(app): State<App>, headers: HeaderMap) -> Response {
         "signed_in": w.is_some(),
         "me": me,
         "manages": w.is_some_and(|w| w.manages),
-        "players": g.players_enabled.then_some(g.players_port),
+        "players": g.players_enabled.then(crate::settings::fixed::players_port),
     }));
     match cookie {
         Some(c) => ([(header::SET_COOKIE, c)], body).into_response(),
@@ -350,7 +341,7 @@ async fn players(State(app): State<App>) -> Json<Value> {
     let g = app.settings.general();
     Json(json!({
         "enabled": g.players_enabled,
-        "port": g.players_port,
+        "port": crate::settings::fixed::players_port(),
         "status": *app.player_status.lock(),
         "signed_in": app.players.lock().len(),
         "playing": app.playing_now(),
@@ -493,10 +484,10 @@ fn api_routes() -> Router<App> {
         .route("/api/blocklist", get(blocklist))
         .route("/api/blocklist/{id}", delete(delete_blocklist))
         .route("/api/calendar", get(calendar))
-        .route("/api/settings/general", get(get_general).put(put_general))
+        .route("/api/settings", get(get_settings).patch(patch_settings))
+        .route("/api/settings/mcp", get(mcp_status).post(mcp_access))
         .route("/api/settings/naming", get(get_naming).put(put_naming))
         .route("/api/settings/servers", get(get_servers).put(put_servers))
-        .route("/api/settings/size-limits", get(get_size_limits).put(put_size_limits))
         .route("/api/servers/test", post(test_server))
         .route("/api/profiles", get(list_profiles).post(save_profile))
         .route("/api/profiles/{id}", put(save_profile).delete(delete_profile))

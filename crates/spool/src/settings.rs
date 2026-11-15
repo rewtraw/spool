@@ -1,10 +1,7 @@
 //! User-editable configuration, stored in the settings table.
 
 use serde::{Deserialize, Serialize};
-use spool_core::decision::ProperPolicy;
 use spool_core::naming::NamingConfig;
-use spool_core::profile::SizeLimit;
-use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -122,16 +119,8 @@ pub struct General {
     /// The volume that must be mounted before Spool reads or writes media. Empty disables the check.
     pub required_volume: String,
     pub downloads_dir: String,
-    /// Days a replaced or deleted file is kept before it is removed. Zero deletes at once.
-    pub recycle_days: u32,
-    pub retention_days: u32,
-    pub proper_policy: ProperPolicy,
     /// Language releases must be in, lower-case. Empty accepts any.
     pub language: String,
-    pub rss_interval_minutes: u32,
-    /// How many missing titles to search per backlog run. Keeps indexer API use predictable.
-    pub backlog_batch: u32,
-    pub backlog_interval_minutes: u32,
     pub tmdb_api_key: String,
     pub plex_url: String,
     pub plex_token: String,
@@ -140,10 +129,6 @@ pub struct General {
     pub plex_on: bool,
     /// Whether Spool writes its collections into Plex, as collection tags on the items.
     pub plex_collections: bool,
-    pub ffprobe_path: String,
-    pub api_key: String,
-    /// A second key that may only use the read-only MCP tools. Empty disables it.
-    pub mcp_read_key: String,
     /// A second folder, ideally on another disk, that also gets each nightly database backup.
     pub backup_dir: String,
     /// Languages every file should have subtitles in, as codes or names: "en", "en, es".
@@ -153,24 +138,11 @@ pub struct General {
     pub opensubtitles_api_key: String,
     pub opensubtitles_username: String,
     pub opensubtitles_password: String,
-    /// Where the OpenSubtitles API is, when not the usual place.
-    pub opensubtitles_url: String,
     /// Serve the library to players that speak Jellyfin's protocol, such as Infuse.
     pub players_enabled: bool,
-    /// The port players connect to. Jellyfin's own is 8096.
-    pub players_port: u32,
     /// Spool stops starting downloads when the downloads disk would drop below this many
     /// gigabytes free once the download has finished.
     pub min_free_gb: u32,
-    /// How far past the free space Spool may queue downloads of its own accord, in gigabytes.
-    /// They wait, without downloading, until there is room.
-    pub space_wait_gb: u32,
-    /// Unpack uncompressed RAR posts while they download.
-    pub direct_unpack: bool,
-    /// Finished downloads verified and unpacked at once. Takes effect when Spool restarts.
-    pub post_parallel: u32,
-    /// How many runner-up releases to save alongside each one Spool downloads.
-    pub archive_runner_ups: u32,
     /// Profiles preselected when adding a title. Zero means the first one.
     pub default_movie_profile: i64,
     pub default_series_profile: i64,
@@ -202,35 +174,20 @@ impl Default for General {
             video_cookies: String::new(),
             required_volume: String::new(),
             downloads_dir: String::new(),
-            recycle_days: 7,
-            retention_days: 0,
-            proper_policy: ProperPolicy::PreferAndUpgrade,
             language: "english".into(),
-            rss_interval_minutes: 15,
-            backlog_batch: 5,
-            backlog_interval_minutes: 360,
             tmdb_api_key: String::new(),
             plex_url: String::new(),
             plex_token: String::new(),
             plex_on: true,
             plex_collections: false,
-            ffprobe_path: String::new(),
-            api_key: String::new(),
-            mcp_read_key: String::new(),
             backup_dir: String::new(),
             subtitle_languages: String::new(),
             subtitles_auto: false,
             opensubtitles_api_key: String::new(),
             opensubtitles_username: String::new(),
             opensubtitles_password: String::new(),
-            opensubtitles_url: String::new(),
             players_enabled: false,
-            players_port: 8096,
             min_free_gb: 20,
-            space_wait_gb: 100,
-            direct_unpack: true,
-            post_parallel: 2,
-            archive_runner_ups: 2,
             default_movie_profile: 0,
             default_series_profile: 0,
             locations: vec![],
@@ -243,35 +200,66 @@ impl Default for General {
     }
 }
 
-/// Size limits keyed by "movie:bluray-1080p" / "tv:webdl-720p".
-pub type SizeLimits = HashMap<String, SizeLimit>;
+/// The keys that let other programs in, kept apart from the settings: they are never sent to
+/// a browser with them, and nothing typed into Settings changes them.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Access {
+    /// Full use of the API and of MCP. Made at first start.
+    pub api_key: String,
+    /// The read-only MCP tools alone. Empty turns it off.
+    pub mcp_read_key: String,
+    /// Signs the tickets that let a player on this device play one file. Made at first start.
+    pub ticket_key: String,
+}
 
 #[derive(Clone)]
 pub struct Settings {
     db: crate::db::Db,
+    /// Held while the settings are read, changed and written, so two changes made at once
+    /// each keep the other's.
+    writing: std::sync::Arc<parking_lot::Mutex<()>>,
 }
 
 impl Settings {
     pub fn new(db: crate::db::Db) -> Settings {
-        Settings { db }
+        Settings { db, writing: Default::default() }
     }
     pub fn general(&self) -> General {
-        self.db.get_setting("general")
+        match self.db.get_setting_checked::<General>("general") {
+            Ok(g) => g.unwrap_or_default(),
+            Err(e) => {
+                // Said loudly rather than passed over: the defaults stand in until it is put right.
+                tracing::error!(error = %e, "the saved settings cannot be read; using the defaults");
+                General::default()
+            }
+        }
     }
+    /// Write the settings whole. Changes go through [`Settings::update`].
     pub fn set_general(&self, g: &General) -> anyhow::Result<()> {
+        let _held = self.writing.lock();
         self.db.set_setting("general", g)
+    }
+    /// Change the settings as they stand when the change is made, and write them, with no
+    /// other change able to come between the reading and the writing.
+    pub fn update<T>(&self, change: impl FnOnce(&mut General) -> anyhow::Result<T>) -> anyhow::Result<(General, T)> {
+        let _held = self.writing.lock();
+        let mut g = self.general();
+        let out = change(&mut g)?;
+        self.db.set_setting("general", &g)?;
+        Ok((g, out))
+    }
+    pub fn access(&self) -> Access {
+        self.db.get_setting("access")
+    }
+    pub fn set_access(&self, a: &Access) -> anyhow::Result<()> {
+        self.db.set_setting("access", a)
     }
     pub fn naming(&self) -> NamingConfig {
         self.db.get_setting("naming")
     }
     pub fn set_naming(&self, n: &NamingConfig) -> anyhow::Result<()> {
         self.db.set_setting("naming", n)
-    }
-    pub fn size_limits(&self) -> SizeLimits {
-        self.db.get_setting("size_limits")
-    }
-    pub fn set_size_limits(&self, s: &SizeLimits) -> anyhow::Result<()> {
-        self.db.set_setting("size_limits", s)
     }
     pub fn servers(&self) -> Vec<spool_nntp::ServerConfig> {
         self.db.get_setting("usenet_servers")
@@ -284,6 +272,30 @@ impl Settings {
     }
     pub fn set_speed_limit(&self, v: u64) -> anyhow::Result<()> {
         self.db.set_setting("speed_limit", &v)
+    }
+}
+
+/// What used to be settings, and is now simply how Spool works.
+pub mod fixed {
+    /// How often the indexers' feeds of new releases are read.
+    pub const RSS_MINUTES: i64 = 15;
+    /// How often missing titles are searched for, and how many each time: few enough to keep
+    /// within any indexer's allowance, which is guarded besides.
+    pub const BACKLOG_MINUTES: i64 = 360;
+    pub const BACKLOG_BATCH: usize = 5;
+    /// Days a replaced or deleted file waits in the recycle folder.
+    pub const RECYCLE_DAYS: i64 = 7;
+    /// How far past the free space downloads Spool finds by itself may queue, waiting for room.
+    pub const SPACE_WAIT_BYTES: u64 = 100 << 30;
+    /// Runner-up releases saved to the archive beside each one downloaded.
+    pub const RUNNER_UPS: usize = 2;
+    /// Finished downloads verified and unpacked at once.
+    pub const POST_PARALLEL: usize = 2;
+
+    /// The port players connect to: Jellyfin's own, unless `SPOOL_PLAYERS_PORT` names another
+    /// (the demo does, to keep out of the way of a real server).
+    pub fn players_port() -> u16 {
+        std::env::var("SPOOL_PLAYERS_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8096)
     }
 }
 

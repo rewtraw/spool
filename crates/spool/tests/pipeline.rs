@@ -808,35 +808,11 @@ async fn unidentified_download_waits_in_the_attention_inbox_until_resolved() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn with_recycling_off_replaced_and_deleted_files_are_removed_at_once() {
-    let video = video_or_skip!();
-    let mut w = World::new(Mode::Active).await;
-    let mut g = w.app.settings.general();
-    g.recycle_days = 0;
-    w.app.settings.set_general(&g).unwrap();
-
+async fn a_deleted_file_waits_in_the_recycle_folder_until_emptied() {
+    let w = World::new(Mode::Active).await;
     let mut movie = w.movie("No Bin", 2018, "tt1212121");
     movie.path = w.root.join("Movies/No Bin (2018)").to_string_lossy().to_string();
     w.app.db.save_title(&mut movie).unwrap();
-    std::fs::create_dir_all(&movie.path).unwrap();
-    std::fs::write(Path::new(&movie.path).join("old.mkv"), b"old file").unwrap();
-    let old: MediaFile = serde_json::from_value(serde_json::json!({"title_id": movie.id, "rel_path": "old.mkv", "size": 8, "quality": {"quality": "hdtv-1080p"}})).unwrap();
-    w.app.db.with(|c| c.execute("INSERT INTO files(title_id, rel_path, size, data) VALUES (?1, 'old.mkv', 8, ?2)", rusqlite::params![movie.id, serde_json::to_string(&old).unwrap()])).unwrap();
-
-    w.release("No.Bin.2018.1080p.BluRay.x264-NEW", &[("new.mkv", &video)]);
-    w.app.search(movie.id, Scope::Movie, false, true).await.unwrap();
-    w.wait_state(movie.id, AcqState::Imported).await;
-    assert_eq!(tree(&w.root.join("Movies")), ["No Bin (2018)/No Bin (2018) {imdb-tt1212121} [Bluray-1080p][AAC 2.0][x264]-NEW.mkv"], "the old file is gone and nothing was recycled");
-
-    let file = w.app.db.files(movie.id).unwrap().remove(0);
-    w.app.delete_file(file.id).unwrap();
-    assert!(tree(&w.root.join("Movies")).is_empty());
-    assert!(!Path::new(&movie.path).exists(), "the empty title folder is removed too");
-    assert_eq!(w.app.recycle_usage(), (0, 0));
-
-    // With recycling on, a deleted file is parked, counted, and can be emptied on demand.
-    g.recycle_days = 7;
-    w.app.settings.set_general(&g).unwrap();
     std::fs::create_dir_all(&movie.path).unwrap();
     std::fs::write(Path::new(&movie.path).join("again.mkv"), b"12345").unwrap();
     let again: MediaFile = serde_json::from_value(serde_json::json!({"title_id": movie.id, "rel_path": "again.mkv", "size": 5, "quality": {"quality": "hdtv-1080p"}})).unwrap();
@@ -844,7 +820,7 @@ async fn with_recycling_off_replaced_and_deleted_files_are_removed_at_once() {
     let file = w.app.db.files(movie.id).unwrap().remove(0);
     w.app.delete_file(file.id).unwrap();
     assert_eq!(w.app.recycle_usage(), (1, 5));
-    assert_eq!(w.app.clean_recycle(false).unwrap(), 0, "today's files are kept for the configured days");
+    assert_eq!(w.app.clean_recycle(false).unwrap(), 0, "today's files are kept for a week");
     assert_eq!(w.app.clean_recycle(true).unwrap(), 5);
     assert_eq!(w.app.recycle_usage(), (0, 0));
 }
@@ -1123,7 +1099,7 @@ async fn someone_who_plays_can_ask_for_a_title_and_see_when_it_is_ready() {
     w.app.db.add_account("Ada", &spool::settings::hash_password("her-own").unwrap()).unwrap();
     let (api, jf) = (spool::api::router(w.app.clone()), spool::jellyfin::router(w.app.clone()));
     // Someone has a password, so the app is asked through its key.
-    let key = w.app.settings.general().api_key;
+    let key = w.app.settings.access().api_key;
     let by = Some(("x-api-key", key.as_str()));
     let read = |bytes: &[u8]| serde_json::from_slice::<Value>(bytes).unwrap_or(Value::Null);
 
@@ -1368,10 +1344,9 @@ async fn an_ai_session_can_inspect_and_operate_spool_over_mcp() {
     let mut me = w.app.db.account(1).unwrap().unwrap();
     me.password = spool::settings::hash_password("pw").unwrap();
     w.app.db.save_account(&me).unwrap();
-    let mut g = w.app.settings.general();
-    g.api_key = "full-key".into();
-    g.mcp_read_key = "read-key".into();
-    w.app.settings.set_general(&g).unwrap();
+    let mut a = w.app.settings.access();
+    (a.api_key, a.mcp_read_key) = ("full-key".into(), "read-key".into());
+    w.app.settings.set_access(&a).unwrap();
     let router = spool::api::router(w.app.clone());
 
     // No key, no entry; the web sign-in is a separate matter.
@@ -2469,7 +2444,7 @@ async fn subtitles_come_with_the_release_and_can_be_found_and_checked() {
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut g = w.app.settings.general();
     g.opensubtitles_api_key = "os-key".into();
-    g.opensubtitles_url = format!("http://{addr}");
+    *w.app.opensubtitles_api.lock() = format!("http://{addr}");
     g.subtitle_languages = "en, es".into();
     w.app.settings.set_general(&g).unwrap();
 
@@ -2576,7 +2551,7 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
     let t = Some(token.as_str());
     // A player's token opens the library and nothing of Spool's own.
     let app_api = spool::api::router(w.app.clone());
-    assert_eq!(player(&app_api, "GET", &format!("/api/settings/general?api_key={token}"), t, Value::Null).await.0, 401);
+    assert_eq!(player(&app_api, "GET", &format!("/api/settings?api_key={token}"), t, Value::Null).await.0, 401);
 
     // The two libraries, then the films in one: names and paths in whatever capitals.
     let (_, _, body) = player(&jf, "GET", &format!("/Users/{user}/Views"), t, Value::Null).await;
@@ -2690,7 +2665,7 @@ async fn a_player_can_sign_in_browse_play_and_report_what_it_watched() {
 
     // Each person has an account of their own. Another is added, and has watched nothing
     // of what the first has: the film the first finished is unplayed to them.
-    let key = w.app.settings.general().api_key;
+    let key = w.app.settings.access().api_key;
     let by = Some(("x-api-key", key.as_str()));
     let (status, added) = call_as(&app_api, by, "POST", "/api/accounts", json!({"name": "Ada", "password": "her-own"})).await;
     assert_eq!((status, added["id"].as_i64()), (200, Some(2)), "{added}");
@@ -2822,7 +2797,7 @@ async fn each_person_signs_in_as_themselves_and_keeps_what_they_watched() {
     assert_eq!(page["watched"]["done"], true);
     assert!(page.get("decisions").is_none() && page.get("acquisitions").is_none(), "how it was got is not theirs to see");
     // and changes nothing else.
-    for (method, uri) in [("GET", "/api/settings/general"), ("GET", "/api/accounts"), ("PATCH", &format!("/api/titles/{}", movie.id) as &str), ("DELETE", &format!("/api/titles/{}", movie.id)), ("POST", "/api/tasks/rss")] {
+    for (method, uri) in [("GET", "/api/settings"), ("GET", "/api/accounts"), ("PATCH", &format!("/api/titles/{}", movie.id) as &str), ("DELETE", &format!("/api/titles/{}", movie.id)), ("POST", "/api/tasks/rss")] {
         assert_eq!(call_as(&router, as_ada, method, uri, json!({})).await.0, 403, "{method} {uri}");
     }
     assert!(w.app.db.title(movie.id).unwrap().is_some());
@@ -2830,7 +2805,7 @@ async fn each_person_signs_in_as_themselves_and_keeps_what_they_watched() {
     // Unmarked, it is to watch again; a program with the key is nobody, so has nothing to mark.
     assert_eq!(call_as(&router, as_ada, "POST", "/api/watched", json!({"title_id": movie.id, "played": false})).await.0, 200);
     assert!(!w.app.db.watched(2, "movie", movie.id).unwrap().played && w.app.db.watched(1, "movie", movie.id).unwrap().played);
-    let key = w.app.settings.general().api_key;
+    let key = w.app.settings.access().api_key;
     let by_key = Some(("x-api-key", key.as_str()));
     assert_eq!(call_as(&router, by_key, "POST", "/api/watched", json!({"title_id": movie.id, "played": true})).await.0, 400);
 
@@ -2838,7 +2813,7 @@ async fn each_person_signs_in_as_themselves_and_keeps_what_they_watched() {
     assert_eq!(call_as(&router, by_key, "PUT", "/api/accounts/1", json!({"manages": false})).await.0, 409);
     assert_eq!(call_as(&router, by_key, "DELETE", "/api/accounts/1", Value::Null).await.0, 409);
     assert_eq!(call_as(&router, by_key, "PUT", "/api/accounts/2", json!({"manages": true})).await.0, 200);
-    assert_eq!(call_as(&router, as_ada, "GET", "/api/settings/general", Value::Null).await.0, 200, "what someone may do follows them at once");
+    assert_eq!(call_as(&router, as_ada, "GET", "/api/settings", Value::Null).await.0, 200, "what someone may do follows them at once");
     assert_eq!(call_as(&router, by_key, "PUT", "/api/accounts/1", json!({"manages": false})).await.0, 200);
 
     // A new password signs a person out of every browser.
@@ -3163,7 +3138,7 @@ async fn a_second_location_is_brought_in_read_or_managed_and_left_alone_while_aw
     let w = World::with_sources(Mode::Active, Some((&source, &source))).await;
     let api = spool::api::router(w.app.clone());
     let general = || serde_json::to_value(w.app.settings.general()).unwrap();
-    let put = |v: Value| { let api = api.clone(); async move { call(&api, "PUT", "/api/settings/general", v).await } };
+    let put = |v: Value| { let api = api.clone(); async move { call(&api, "PATCH", "/api/settings", v).await } };
 
     // A library that already exists somewhere else, named the ways people name things.
     let (there, away) = (w.root.join("Elsewhere"), w.root.join("Elsewhere.away"));
@@ -3332,7 +3307,7 @@ async fn a_new_title_is_kept_on_the_location_the_user_chooses() {
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["tmdb_api_key"] = json!("key");
     g["locations"] = json!([{"name": "Shelf", "movie_root": shelf.join("films"), "manage": true}, {"name": "Vault", "movie_root": vault.join("films"), "manage": false}]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     let add = |tmdb: u32, location: Value| {
         let api = api.clone();
         let profile = w.profile("movie");
@@ -3373,7 +3348,7 @@ async fn spool_can_say_whether_it_is_busy_whether_a_location_works_and_whether_a
         {"name": "Vault", "movie_root": vault, "manage": false, "movie_profile": keep_id},
         {"name": "Gone", "movie_root": w.root.join("nowhere/films"), "manage": false},
     ]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
 
     // Nothing is under way, so a restart interrupts nothing; a player playing changes that.
     let (_, idle) = call(&api, "GET", "/api/busy", Value::Null).await;
@@ -3421,9 +3396,9 @@ async fn spool_can_say_whether_it_is_busy_whether_a_location_works_and_whether_a
     assert_eq!(row["not_allowed"].as_u64(), Some(1), "{row}");
 
     // An assistant can ask the same things.
-    let mut g = w.app.settings.general();
-    g.api_key = "full-key".into();
-    w.app.settings.set_general(&g).unwrap();
+    let mut a = w.app.settings.access();
+    a.api_key = "full-key".into();
+    w.app.settings.set_access(&a).unwrap();
     let mcp_router = spool::api::router(w.app.clone());
     let (failed, said) = tool(&mcp_router, "full-key", "restart_check", json!({})).await;
     assert!(!failed && said["busy"] == false, "{said}");
@@ -3459,7 +3434,7 @@ async fn a_title_is_moved_to_another_location_whole_and_a_read_only_place_keeps_
     }
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["locations"] = json!([{"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     let lay = |path: PathBuf, bytes: &[u8]| {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
@@ -3638,7 +3613,7 @@ async fn a_title_may_be_held_in_two_places_and_played_from_whichever_is_there() 
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["tmdb_api_key"] = json!("key");
     g["locations"] = json!([{"name": "Elsewhere", "movie_root": there.join("films"), "series_root": there.join("tv"), "manage": false}]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     let finished = |api: axum::Router| async move {
         for _ in 0..200 {
             let (_, f) = call(&api, "GET", "/api/locations/1/found", Value::Null).await;
@@ -3836,7 +3811,7 @@ async fn with_helper(w: &World) -> (spool::helper::Helper, String, PathBuf, Path
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["locations"] = json!([{"name": "Shelf", "movie_root": mnt.join("films"), "manage": true}, {"name": "Vault", "movie_root": mnt.join("vault"), "manage": false}]);
     g["links"] = json!([{"name": "Nas", "url": url, "key": key, "folders": [{"here": mnt, "there": nas}]}]);
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
     (helper, url, nas, mnt)
@@ -3855,8 +3830,8 @@ async fn a_helper_downloads_and_files_on_its_own_disks() {
     let (_, helpers) = call(&api, "GET", "/api/links", Value::Null).await;
     assert_eq!((helpers[0]["name"].as_str(), helpers[0]["serves"].to_string().as_str(), helpers[0]["seen"]["usable"].as_bool(), helpers[0]["seen"]["downloads_seen"].as_bool()), (Some("Nas"), r#"["Shelf","Vault"]"#, Some(true), Some(true)), "{helpers}");
     // Its key is not handed back to the browser.
-    let (_, general) = call(&api, "GET", "/api/settings/general", Value::Null).await;
-    assert_eq!((general["links"][0]["key"].as_str(), general["links"][0]["id"].as_u64(), general["link_seq"].as_u64()), (Some("********"), Some(1), Some(1)), "{}", general["links"]);
+    let (_, general) = call(&api, "GET", "/api/settings", Value::Null).await;
+    assert_eq!((general["links"][0]["key"].as_str(), general["links"][0]["key_set"].as_bool(), general["links"][0]["id"].as_u64(), general.get("link_seq")), (Some(""), Some(true), Some(1), None), "{}", general["links"]);
     assert!(general.get("helpers").is_none(), "and is kept under the name it has now");
     // And the helper was given the Usenet servers to download with.
     let saved: Value = serde_json::from_slice(&std::fs::read(w.root.join("helper-data/helper.json")).unwrap()).unwrap();
@@ -3904,7 +3879,7 @@ async fn a_helper_downloads_and_files_on_its_own_disks() {
     // With the helper away, what it was doing is waited for, and new downloads run here.
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["links"][0]["url"] = json!("http://127.0.0.1:9");
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     w.app.ask_remotes().await;
     let (_, helpers) = call(&api, "GET", "/api/links", Value::Null).await;
     assert_eq!(helpers[0]["seen"]["reachable"].as_bool(), Some(false), "{helpers}");
@@ -4101,7 +4076,7 @@ async fn a_helper_is_linked_with_a_code_and_not_without() {
     // Spool uses the key as it would one that was typed in.
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["links"] = json!([{"name": "Nas", "url": url, "key": key, "folders": [{"here": nas, "there": nas}]}]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     w.app.ask_remotes().await;
     assert!(w.app.remotes()[0].seen().usable, "{:?}", w.app.remotes()[0].seen());
 
@@ -4325,9 +4300,9 @@ async fn a_linked_machine_looks_through_its_own_folders() {
     for (here, there) in [("Movies", "films"), ("Old films", "vault"), ("dl", "downloads")] {
         std::os::unix::fs::symlink(nas.join(there), shares.join(here)).unwrap();
     }
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     (g["links"][0]["folders"], g["links"][0]["key"]) = (json!([]), json!(KEY));
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
     let link = w.app.remotes()[0].clone();
@@ -4410,9 +4385,9 @@ async fn a_film_on_a_linked_machine_is_played_from_it_on_a_ticket() {
     let send_from = |near: Value| {
         let (api, app) = (api.clone(), w.app.clone());
         async move {
-            let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+            let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
             g["links"][0]["play_near"] = near;
-            let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+            let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
             assert_eq!(status, 200, "{said}");
             app.ask_remotes().await;
         }
@@ -4571,10 +4546,10 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     // Spool takes one that only works for what it is: nobody is sent to it for a film.
     let root = w.root.join("worker");
     let api = spool::api::router(w.app.clone());
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     g["locations"] = json!([{"name": "Worker", "movie_root": root.join("films"), "manage": true}]);
     g["links"] = json!([{"name": "Worker", "url": url, "key": KEY, "folders": [{"here": root, "there": root}], "play_near": true}]);
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
     let seen = w.app.remotes()[0].seen();
@@ -4582,23 +4557,23 @@ async fn a_link_does_only_what_it_was_started_allowing() {
     assert!(w.app.play_direct(&root.join("films/Alpha (2001)/Alpha (2001).mkv"), &["127.0.0.1".parse().unwrap()]).is_none(), "nobody is sent to a helper that does not hand out files");
 
     // Two links are never given the same folder, and a number once given is not given again.
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     let mut second = g["links"][0].clone();
     (second["id"], second["name"], second["key"], second["folders"]) = (json!(0), json!("Twin"), json!(KEY), json!([{"here": root.join("films"), "there": root.join("films")}]));
     g["links"].as_array_mut().unwrap().push(second);
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert!(status == 400 && said["error"].as_str().unwrap().contains("each folder is one helper's"), "{status} {said}");
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     let kept = g["links"][0].clone();
     g["links"] = json!([]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     // Sent with the number the removed link had, as a page left open since before would.
     let mut again = kept;
     again["key"] = json!(KEY);
     assert_eq!(again["id"], 1);
     g["links"] = json!([again]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     let g = w.app.settings.general();
     assert_eq!((g.links[0].id, g.link_seq), (2, 2), "a download that ran on the link that was removed is never taken for the new one's");
 }
@@ -4635,9 +4610,9 @@ async fn a_report_that_cannot_be_read_and_an_answer_that_is_lost_cost_nothing() 
     let url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, stand_in).await.unwrap() });
     let api = spool::api::router(w.app.clone());
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     g["links"] = json!([{"name": "Nas", "url": url, "key": "a-key-of-sufficient-length", "folders": [{"here": root, "there": root}]}]);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     w.app.ask_remotes().await;
     assert!(matches!(w.app.job_lookup("@1:j1"), spool::remote::Found::Job(_)));
     assert!(matches!(w.app.job_lookup("@1:never"), spool::remote::Found::Gone), "a helper that answers plainly is believed about what it does not have");
@@ -4720,7 +4695,7 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
     assert_eq!(http.get(format!("{url}/link/work/v1/info")).bearer_auth(KEY).send().await.unwrap().status().as_u16(), 403);
     assert_eq!(http.get(format!("{url}/link/make/v1/info")).send().await.unwrap().status().as_u16(), 401, "nothing is said without the key");
     // It reads a film only from where the app says films are read, on the machine that asked.
-    for path in ["/api/settings/general", "/link/source/1?ticket=x y", "http://elsewhere/link/source/1"] {
+    for path in ["/api/settings", "/link/source/1?ticket=x y", "http://elsewhere/link/source/1"] {
         let asked = http.post(format!("{url}/link/make/v1/jobs")).bearer_auth(KEY).json(&json!({"id": "one", "port": 1, "path": path, "compact": {}, "info": {}, "bytes": 0})).send().await.unwrap();
         assert_eq!(asked.status().as_u16(), 400, "{path}");
     }
@@ -4745,9 +4720,9 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
 
     // Linked, it is known for what it is: it works on nothing and holds nothing, and makes
     // compact versions if it has video hardware to make them on.
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     g["links"] = json!([{"name": "Maker", "url": url, "key": KEY, "folders": [], "play_near": false, "make": "never"}]);
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
     let r = w.app.remotes()[0].clone();
@@ -4764,9 +4739,9 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
         return;
     }
 
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     g["links"][0]["make"] = json!("always");
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     w.app.ask_remotes().await;
     assert!(w.app.remotes()[0].makes());
     let (status, said) = call(&api, "POST", "/api/compact", json!({"title_ids": [films[0].id, films[1].id]})).await;
@@ -4856,9 +4831,9 @@ async fn a_linked_machine_makes_compact_versions_and_hands_them_back() {
 
     // Films kept on a linked machine's disks are read from them one at a time, however many
     // machines there are to make them: two at once keep a NAS too busy to answer anyone else.
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     g["links"][0]["folders"] = json!([{"here": w.root.join("Movies").to_string_lossy(), "there": "/mnt/movies"}]);
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
     w.app.ask_remotes().await;
     let compact = w.app.db.files(films[0].id).unwrap().into_iter().find(|f| f.compact_of.is_some()).unwrap();
@@ -4899,9 +4874,9 @@ async fn only_what_arrives_is_put_in_line_and_turning_that_off_takes_it_out() {
     let rate = w.app.db.files(films[0].id).unwrap()[0].media_info.as_ref().unwrap().bit_rate;
     // Held, so that what is in line stays there to be looked at.
     assert_eq!(call(&api, "POST", "/api/compact/hold", json!({"hold": true})).await.0, 200);
-    let (_, mut g) = call(&api, "GET", "/api/settings/general", Value::Null).await;
+    let (_, mut g) = call(&api, "GET", "/api/settings", Value::Null).await;
     g["compact"] = json!({"height": 120, "video_kbps": (rate / 4000).max(10), "audio_kbps": 0, "auto": true});
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g.clone()).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g.clone()).await.0, 200);
     let waiting = || async {
         let (_, a) = call(&api, "GET", "/api/activity", Value::Null).await;
         let mut ids: Vec<i64> = a["compact"]["waiting"].as_array().map(|w| w.iter().filter_map(|n| n["file_id"].as_i64()).collect()).unwrap_or_default();
@@ -4918,7 +4893,7 @@ async fn only_what_arrives_is_put_in_line_and_turning_that_off_takes_it_out() {
 
     // Turned off, what it put in line leaves, and what was asked for stays.
     g["compact"]["auto"] = json!(false);
-    assert_eq!(call(&api, "PUT", "/api/settings/general", g).await.0, 200);
+    assert_eq!(call(&api, "PATCH", "/api/settings", g).await.0, 200);
     assert_eq!(waiting().await, [file(1)]);
     w.app.compact_arrivals(films[2].id, &[file(2)]);
     assert_eq!(waiting().await, [file(1)], "nothing more while it is off");
@@ -5067,7 +5042,7 @@ async fn a_title_on_a_location_spool_only_reads_gets_its_compact_version_somewhe
     }
     let mut g = serde_json::to_value(w.app.settings.general()).unwrap();
     g["locations"] = json!([{"name": "Shelf", "movie_root": shelf, "manage": true}, {"name": "Vault", "movie_root": vault, "manage": false}]);
-    let (status, said) = call(&api, "PUT", "/api/settings/general", g).await;
+    let (status, said) = call(&api, "PATCH", "/api/settings", g).await;
     assert_eq!(status, 200, "{said}");
     let kept = vault.join("Alpha (2001)");
     std::fs::create_dir_all(&kept).unwrap();
@@ -5446,7 +5421,8 @@ async fn subtitles_that_cannot_be_fetched_for_the_index_are_not_taken_as_missing
         .route("/file.srt", get(move || async move { srt }));
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut g = w.app.settings.general();
-    (g.opensubtitles_api_key, g.opensubtitles_url, g.opensubtitles_username, g.opensubtitles_password) = ("os-key".into(), format!("http://{addr}"), "someone@example.com".into(), "wrong".into());
+    *w.app.opensubtitles_api.lock() = format!("http://{addr}");
+    (g.opensubtitles_api_key, g.opensubtitles_username, g.opensubtitles_password) = ("os-key".into(), "someone@example.com".into(), "wrong".into());
     w.app.settings.set_general(&g).unwrap();
     // Films with no subtitles to read, enough that failing on each says it is not them.
     for (name, imdb) in [("Quiet", "tt0000001"), ("Hush", "tt0000002"), ("Still", "tt0000003")] {
@@ -5502,7 +5478,8 @@ async fn a_file_that_fails_alone_does_not_stop_subtitles_being_fetched_for_the_r
         .route("/file.srt", get(move || async move { srt }));
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let mut g = w.app.settings.general();
-    (g.opensubtitles_api_key, g.opensubtitles_url, g.opensubtitles_username, g.opensubtitles_password) = ("os-key".into(), format!("http://{addr}"), "someone".into(), "right".into());
+    *w.app.opensubtitles_api.lock() = format!("http://{addr}");
+    (g.opensubtitles_api_key, g.opensubtitles_username, g.opensubtitles_password) = ("os-key".into(), "someone".into(), "right".into());
     w.app.settings.set_general(&g).unwrap();
     // The first made is fine; the three after it, asked about first, cannot be written beside.
     for (name, imdb) in [("Fine", "tt0000001"), ("Torn", "tt0000002"), ("Ripped", "tt0000003"), ("Rent", "tt0000004")] {
@@ -5655,4 +5632,32 @@ async fn a_video_from_a_site_is_filed_under_its_channel_with_its_captions() {
     let again = w.app.videos_add("https://www.youtube.com/watch?v=abc123", spool::videos::Take::Newest, false).await.unwrap();
     assert_eq!((again.added, again.already), (0, 1));
     std::env::remove_var("SPOOL_YT_DLP");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_change_only_what_is_sent_and_keep_their_secrets() {
+    use serde_json::{json, Value};
+    let w = World::new(Mode::Active).await;
+    let api = spool::api::router(w.app.clone());
+    let (status, _) = call(&api, "PATCH", "/api/settings", json!({"tmdb_api_key": "secret-one", "books": {"annas_key": "secret-two"}})).await;
+    assert_eq!(status, 200);
+    // Two pages saving at once each keep what the other changed.
+    let (a, b) = tokio::join!(call(&api, "PATCH", "/api/settings", json!({"min_free_gb": 33})), call(&api, "PATCH", "/api/settings", json!({"books": {"languages": "en, fr"}})));
+    assert_eq!((a.0, b.0), (200, 200));
+    let (_, g) = call(&api, "GET", "/api/settings", Value::Null).await;
+    assert_eq!((g["min_free_gb"].as_u64(), g["books"]["languages"].as_str()), (Some(33), Some("en, fr")));
+    // Secrets come back blank, with whether they are set, and a blank one sent back keeps them.
+    assert_eq!((g["tmdb_api_key"].as_str(), g["secrets"]["tmdb_api_key"].as_bool(), g["secrets"]["books.annas_key"].as_bool()), (Some(""), Some(true), Some(true)));
+    assert!(g.get("api_key").is_none() && g.get("mcp_read_key").is_none(), "the keys that let programs in are not settings");
+    assert_eq!(call(&api, "PATCH", "/api/settings", g.clone()).await.0, 200, "what was read can be sent back whole");
+    let s = w.app.settings.general();
+    assert_eq!((s.tmdb_api_key.as_str(), s.books.annas_key.as_str()), ("secret-one", "secret-two"));
+    // Null clears one.
+    assert_eq!(call(&api, "PATCH", "/api/settings", json!({"tmdb_api_key": null})).await.0, 200);
+    assert!(w.app.settings.general().tmdb_api_key.is_empty());
+    // A setting that does not exist, or a value of the wrong kind, is refused and changes nothing.
+    assert_eq!(call(&api, "PATCH", "/api/settings", json!({"recycle_days": 3})).await.0, 400);
+    assert_eq!(call(&api, "PATCH", "/api/settings", json!({"min_free_gb": "lots", "language": "french"})).await.0, 400);
+    assert_eq!(w.app.settings.general().language, "english");
+    assert_eq!(call(&api, "PATCH", "/api/settings", json!({"default_movie_profile": 999})).await.0, 400);
 }

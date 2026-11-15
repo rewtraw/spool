@@ -138,7 +138,7 @@ pub(super) async fn space(State(app): State<App>) -> R<Value> {
         "kept_free": g.min_free_gb as u64 * (1 << 30),
         "library": files.values().map(|f| f.1).sum::<u64>(),
         "locations": app.location_report(),
-        "recycled": {"files": recycled_files, "bytes": recycled_bytes, "days": g.recycle_days},
+        "recycled": {"files": recycled_files, "bytes": recycled_bytes, "days": crate::settings::fixed::RECYCLE_DAYS},
         "waiting": {"count": waiting.len(), "bytes": waiting.iter().map(|j| j.total_bytes).sum::<u64>()},
         "titles": rows.into_iter().take(150).map(|r| r.1).collect::<Vec<_>>(),
     })))
@@ -159,13 +159,12 @@ pub(super) async fn free_title(State(app): State<App>, Path(id): Path<i64>) -> R
     t.monitored = false;
     app.db.save_title(&mut t)?;
     app.emit(Event::Title { id });
-    let recycled = app.settings.general().recycle_days > 0;
-    Ok(Json(json!({"title": t.title, "files": files.len(), "bytes": bytes, "recycled": recycled})))
+    Ok(Json(json!({"title": t.title, "files": files.len(), "bytes": bytes, "recycled": true})))
 }
 
 pub(super) async fn recycle_info(State(app): State<App>) -> Json<Value> {
     let (files, bytes) = app.recycle_usage();
-    Json(json!({"files": files, "bytes": bytes, "days": app.settings.general().recycle_days}))
+    Json(json!({"files": files, "bytes": bytes, "days": crate::settings::fixed::RECYCLE_DAYS}))
 }
 
 pub(super) async fn recycle_empty(State(app): State<App>) -> R<Value> {

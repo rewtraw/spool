@@ -246,9 +246,11 @@ impl App {
     }
 
     /// Check a list of further locations as someone has edited it, and give new ones their ids.
-    pub fn tidy_locations(&self, list: Vec<Location>) -> Result<Vec<Location>, String> {
-        let g = self.settings.general();
-        let mut next: u32 = self.db.get_setting::<u32>("location_seq").max(g.locations.iter().map(|l| l.id).max().unwrap_or(0));
+    /// The further locations as they would be beside the main folders of `g`: tidied, numbered,
+    /// and refused when they overlap.
+    pub fn tidy_locations(&self, g: &crate::settings::General, list: Vec<Location>) -> Result<Vec<Location>, String> {
+        let saved = self.settings.general();
+        let mut next: u32 = self.db.get_setting::<u32>("location_seq").max(saved.locations.iter().map(|l| l.id).max().unwrap_or(0));
         let clean = |s: &str| {
             let s = s.trim();
             if s.len() > 1 { s.trim_end_matches('/').to_string() } else { s.to_string() }
@@ -273,7 +275,7 @@ impl App {
             out.push(l);
         }
         // A folder inside another location's folder would leave its titles belonging to both.
-        let main = Location { id: 0, name: "the main library".into(), movie_root: g.movie_root, series_root: g.series_root, music_root: g.music_root, audiobook_root: g.audiobook_root, video_root: g.video_root, ..Default::default() };
+        let main = Location { id: 0, name: "the main library".into(), movie_root: g.movie_root.clone(), series_root: g.series_root.clone(), music_root: g.music_root.clone(), audiobook_root: g.audiobook_root.clone(), video_root: g.video_root.clone(), ..Default::default() };
         let all: Vec<&Location> = std::iter::once(&main).chain(out.iter()).collect();
         for (i, a) in all.iter().enumerate() {
             for b in all.iter().skip(i + 1) {

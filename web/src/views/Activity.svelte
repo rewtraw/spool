@@ -3,6 +3,9 @@
   import { app, act, route, go, toast } from '../lib/state.svelte';
   import { ago, bytes, duration, pct, qualityName, STATE_LABEL } from '../lib/format';
   import JobLine from '../components/JobLine.svelte';
+  import '../lib/panes.css';
+  import Space from './activity/Space.svelte';
+  import Upkeep from './activity/Upkeep.svelte';
 
   const tab = $derived(route.arg || 'queue');
   let data = $state<any>({ items: [], downloads: [], paused: false });
@@ -194,7 +197,7 @@
 </header>
 
 <div class="tabs" role="tablist">
-  {#each [['queue', 'Queue'], ['history', 'History'], ['blocklist', 'Blocklist']] as [id, label]}
+  {#each [['queue', 'Queue'], ['history', 'History'], ['blocklist', 'Blocklist'], ['space', 'Space'], ['upkeep', 'Upkeep']] as [id, label]}
     <a role="tab" aria-selected={tab === id} class:on={tab === id} href="#/activity/{id}">{label}</a>
   {/each}
 </div>
@@ -424,6 +427,10 @@
       </table>
     </div>
   {/if}
+{:else if tab === 'space'}
+  <div class="panes"><Space /></div>
+{:else if tab === 'upkeep'}
+  <div class="panes"><Upkeep /></div>
 {:else}
   {#if !blocklist.length && loaded}<div class="card empty">No releases are blocklisted.</div>{:else}
     {#if blocklist.length > 1}<div class="row" style="justify-content:flex-end;margin-bottom:10px"><button class="btn small" onclick={clearBlocklist}>Allow all {blocklist.length} again</button></div>{/if}

@@ -1,21 +1,10 @@
 //! Release selection: every candidate gets a list of plain-language reasons it was rejected, or
 //! none if it is acceptable. The rules follow Radarr's and Sonarr's decision specifications.
 
-use crate::profile::{QualityProfile, SizeLimit};
-use crate::quality::{Flavor, QualityModel};
+use crate::profile::QualityProfile;
+use crate::quality::{Flavor, Quality, QualityModel};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProperPolicy {
-    /// Grab a proper or repack to replace the same quality.
-    PreferAndUpgrade,
-    /// Prefer them when choosing, but never replace an existing file for one.
-    DoNotUpgrade,
-    /// Treat them like any other release.
-    DoNotPrefer,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rejection {
@@ -118,7 +107,6 @@ pub struct ExistingFile {
 pub struct Context<'a> {
     pub flavor: Flavor,
     pub profile: &'a QualityProfile,
-    pub size_limit: Option<SizeLimit>,
     /// Total runtime the release should cover, in minutes. Zero skips the size check.
     pub runtime_minutes: u32,
     /// Files already on disk for the wanted items.
@@ -134,8 +122,6 @@ pub struct Context<'a> {
     pub available: bool,
     /// Season packs only: every episode of the season has aired.
     pub season_complete: bool,
-    pub retention_days: u32,
-    pub proper_policy: ProperPolicy,
     /// Language the user wants, lower-case, or None to accept any.
     pub wanted_language: Option<&'a str>,
     /// The language the title was made in, lower-case, when known.
@@ -173,8 +159,8 @@ fn upgrade_rejection(ctx: &Context, new: &QualityModel, new_group: &Option<Strin
             if !better_revision {
                 return Some(reject("not_an_upgrade", format!("{what} is already {}", name(&current.quality))));
             }
-            if ctx.proper_policy != ProperPolicy::PreferAndUpgrade {
-                return Some(reject("proper_upgrades_off", format!("{what} is already {} and proper/repack upgrades are off", name(&current.quality))));
+            if !p.upgrade_allowed {
+                return Some(reject("upgrades_not_allowed", format!("{what} is already {}, and the profile does not allow upgrades", name(&current.quality))));
             }
             if new.revision.is_repack {
                 if let (Some(a), Some(b)) = (new_group, &current.release_group) {
@@ -197,6 +183,19 @@ fn upgrade_rejection(ctx: &Context, new: &QualityModel, new_group: &Option<Strin
     }
 }
 
+/// The fewest megabytes a minute a release of a quality can honestly be: below it, it is
+/// mislabelled, a sample or a fake. How big a release should be otherwise is the profile's
+/// size target to say.
+fn smallest_mb_per_minute(q: Quality) -> f64 {
+    match (q.resolution(), matches!(q, Quality::Remux1080p | Quality::Remux2160p)) {
+        (_, true) | (2160, _) => 35.0,
+        (1080, _) => 4.0,
+        (720, _) => 3.0,
+        (1..=576, _) => 2.0,
+        _ => 1.0,
+    }
+}
+
 /// Evaluate one candidate. An empty result means it is acceptable.
 pub fn evaluate(c: &Candidate, ctx: &Context) -> Vec<Rejection> {
     let mut out = Vec::new();
@@ -206,16 +205,10 @@ pub fn evaluate(c: &Candidate, ctx: &Context) -> Vec<Rejection> {
         out.push(reject("quality_not_wanted", format!("{qname} is not wanted in profile \"{}\"", ctx.profile.name)));
     }
 
-    if let (Some(limit), true) = (ctx.size_limit, ctx.runtime_minutes > 0) {
-        let runtime = ctx.runtime_minutes as f64;
-        let size = mb(c.size_bytes);
-        if c.size_bytes > 0 && size < limit.min * runtime {
-            out.push(reject("too_small", format!("{} is smaller than the {:.0} MB minimum for {qname} at {} minutes", fmt_size(c.size_bytes), limit.min * runtime, ctx.runtime_minutes)));
-        }
-        if let Some(max) = limit.max {
-            if max > 0.0 && size > max * runtime {
-                out.push(reject("too_large", format!("{} is larger than the {:.1} GB maximum for {qname} at {} minutes", fmt_size(c.size_bytes), max * runtime / 1024.0, ctx.runtime_minutes)));
-            }
+    if ctx.runtime_minutes > 0 && c.size_bytes > 0 {
+        let least = smallest_mb_per_minute(c.quality.quality) * ctx.runtime_minutes as f64;
+        if mb(c.size_bytes) < least {
+            out.push(reject("too_small", format!("{} is smaller than the {least:.0} MB a {qname} release of {} minutes can be", fmt_size(c.size_bytes), ctx.runtime_minutes)));
         }
     }
 
@@ -266,10 +259,6 @@ pub fn evaluate(c: &Candidate, ctx: &Context) -> Vec<Rejection> {
         out.push(reject("blocklisted", "this release failed before and is blocklisted"));
     }
 
-    if ctx.retention_days > 0 && c.age_days > ctx.retention_days as f64 {
-        out.push(reject("beyond_retention", format!("posted {:.0} days ago, beyond the {} day retention", c.age_days, ctx.retention_days)));
-    }
-
     // A better picture is not worth losing the language the household listens in.
     if !c.speaks_wanted && ctx.existing.iter().any(|e| e.speaks_wanted) && !out.iter().any(|r| r.code == "not_an_upgrade") {
         out.push(reject("loses_language", format!("the file on disk has {} to listen to, and this release does not say it has", ctx.wanted_language.unwrap_or("your language"))));
@@ -312,12 +301,12 @@ pub fn evaluate(c: &Candidate, ctx: &Context) -> Vec<Rejection> {
 /// With one, anything that fits the target outranks anything that does not, so a 60 GB remux is
 /// only chosen when no smaller release is acceptable. Among releases that fit, quality still
 /// leads, then the codec preference, then how close the size is to the target.
-pub fn compare(a: &Candidate, b: &Candidate, profile: &QualityProfile, policy: ProperPolicy) -> Ordering {
+pub fn compare(a: &Candidate, b: &Candidate, profile: &QualityProfile) -> Ordering {
     let age_bucket = |d: f64| if d < 1.0 { 0 } else { (d.log10().round() as i64) + 1 };
     let size_bucket = |s: u64| s / (200 * 1024 * 1024);
     let gb = |c: &Candidate| c.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0) / c.item_count.max(1) as f64;
     let quality = profile.compare(b.quality.quality, a.quality.quality);
-    let revision = if policy == ProperPolicy::DoNotPrefer { Ordering::Equal } else { b.quality.revision.rank().cmp(&a.quality.revision.rank()) };
+    let revision = b.quality.revision.rank().cmp(&a.quality.revision.rank());
     let codec = if profile.prefer_direct_play {
         b.playback.score().cmp(&a.playback.score())
     } else if profile.prefer_efficient_codec {
@@ -366,7 +355,7 @@ mod tests {
     }
 
     fn ctx<'a>(p: &'a QualityProfile, existing: &'a [ExistingFile]) -> Context<'a> {
-        Context { flavor: Flavor::Movie, profile: p, size_limit: None, runtime_minutes: 110, existing, queued: &[], blocklisted: false, smaller: false, monitored: true, available: true, season_complete: true, retention_days: 0, proper_policy: ProperPolicy::PreferAndUpgrade, wanted_language: Some("english"), original_language: None, user_invoked: false }
+        Context { flavor: Flavor::Movie, profile: p, runtime_minutes: 110, existing, queued: &[], blocklisted: false, smaller: false, monitored: true, available: true, season_complete: true, wanted_language: Some("english"), original_language: None, user_invoked: false }
     }
 
     fn codes(r: Vec<Rejection>) -> Vec<String> {
@@ -404,9 +393,9 @@ mod tests {
         let mut proper = cand(Quality::Bluray1080p);
         proper.quality.revision = Revision { version: 2, real: 0, is_repack: false };
         assert!(evaluate(&proper, &ctx(&p, &have)).is_empty());
-        let mut c = ctx(&p, &have);
-        c.proper_policy = ProperPolicy::DoNotUpgrade;
-        assert_eq!(codes(evaluate(&proper, &c)), ["proper_upgrades_off"]);
+        let mut fixed = p.clone();
+        fixed.upgrade_allowed = false;
+        assert_eq!(codes(evaluate(&proper, &ctx(&fixed, &have))), ["upgrades_not_allowed"], "a profile that does not upgrade takes no proper either");
         let mut repack = proper.clone();
         repack.quality.revision.is_repack = true;
         repack.release_group = Some("OTHER".into());
@@ -416,14 +405,13 @@ mod tests {
     #[test]
     fn size_language_and_misc() {
         let p = QualityProfile::default_hd("movie");
-        let mut c = ctx(&p, &[]);
-        c.size_limit = Some(SizeLimit { min: 5.0, max: Some(50.0), preferred: None });
+        let c = ctx(&p, &[]);
         let mut small = cand(Quality::Bluray1080p);
         small.size_bytes = 100 << 20;
-        assert_eq!(codes(evaluate(&small, &c)), ["too_small"]);
+        assert_eq!(codes(evaluate(&small, &c)), ["too_small"], "100 MB is no 1080p film of 110 minutes");
         let mut big = cand(Quality::Bluray1080p);
         big.size_bytes = 40 << 30;
-        assert_eq!(codes(evaluate(&big, &c)), ["too_large"]);
+        assert!(evaluate(&big, &c).is_empty(), "how big is too big is the profile's size target to say");
         let mut german = cand(Quality::Bluray1080p);
         german.languages = vec!["german".into()];
         assert_eq!(codes(evaluate(&german, &ctx(&p, &[]))), ["wrong_language"]);
@@ -445,7 +433,7 @@ mod tests {
     }
 
     fn best(mut v: Vec<Candidate>, p: &QualityProfile) -> Candidate {
-        v.sort_by(|a, b| compare(a, b, p, ProperPolicy::PreferAndUpgrade));
+        v.sort_by(|a, b| compare(a, b, p));
         v.remove(0)
     }
 
@@ -522,7 +510,7 @@ mod tests {
         // AV1 drops below everything playable, even a lower quality, but is still there as a last resort.
         let ranked = {
             let mut v = vec![named(q, 12, "M.2020.2160p.WEB-DL.AV1.DDP5.1-A"), named(Quality::Bluray1080p, 12, "M.2020.1080p.BluRay.DD5.1.x264-B")];
-            v.sort_by(|a, b| compare(a, b, &p, ProperPolicy::PreferAndUpgrade));
+            v.sort_by(|a, b| compare(a, b, &p));
             v
         };
         assert_eq!(ranked[0].quality.quality, Quality::Bluray1080p);
@@ -551,7 +539,7 @@ mod tests {
         let mut proper = cand(Quality::Bluray1080p);
         proper.quality.revision.version = 2;
         let mut v = vec![web.clone(), blu.clone(), proper.clone()];
-        v.sort_by(|a, b| compare(a, b, &p, ProperPolicy::PreferAndUpgrade));
+        v.sort_by(|a, b| compare(a, b, &p));
         assert_eq!(v[0].quality.revision.version, 2);
         assert_eq!(v[2].quality.quality, Quality::Webdl1080p);
     }
@@ -597,7 +585,7 @@ mod tests {
         let plain = cand(Quality::Webdl1080p);
         let dub = Candidate { dubbed: true, ..cand(Quality::Bluray1080p) };
         // Better quality does not rescue it.
-        assert_eq!(compare(&plain, &dub, &p, ProperPolicy::PreferAndUpgrade), Ordering::Less);
+        assert_eq!(compare(&plain, &dub, &p), Ordering::Less);
         assert!(evaluate(&dub, &ctx(&p, &[])).is_empty(), "still acceptable");
     }
 
@@ -606,7 +594,7 @@ mod tests {
         let p = QualityProfile::default_hd("movie");
         let dual = cand(Quality::Webdl1080p);
         let japanese_only = Candidate { speaks_wanted: false, ..cand(Quality::Bluray1080p) };
-        assert_eq!(compare(&dual, &japanese_only, &p, ProperPolicy::PreferAndUpgrade), Ordering::Less);
+        assert_eq!(compare(&dual, &japanese_only, &p), Ordering::Less);
         assert!(evaluate(&japanese_only, &ctx(&p, &[])).is_empty(), "still acceptable");
         // Nor is a file that has it replaced by a better one that does not.
         let have = [ExistingFile { quality: QualityModel::new(Quality::Webdl1080p), release_group: None, size_bytes: 0, speaks_wanted: true, language_wanting: false }];

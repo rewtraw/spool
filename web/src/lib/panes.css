@@ -1,39 +1,40 @@
-/* What the Settings tabs share. The tabs are components of their own, so these rules are
-   plain CSS under the page's wrapper and not scoped to one of them. */
-.settings .usage {
+/* Forms, figures and lists shared by Settings and the pages of Activity. The pages are
+   components of their own, so these rules sit under a wrapper with the class panes rather
+   than being scoped to one. */
+.panes .usage {
   padding: 8px 0 2px;
   font-size: 14.5px;
 }
-.settings .figures {
+.panes .figures {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 18px 28px;
   padding: 18px 22px;
 }
-.settings .figures div {
+.panes .figures div {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
-.settings .figures b {
+.panes .figures b {
   font: 600 22px/1.2 var(--serif);
   font-variant-numeric: tabular-nums;
 }
-.settings .figures span {
+.panes .figures span {
   color: var(--muted);
   font-size: 12.5px;
 }
-.settings .head {
+.panes .head {
   margin-bottom: 16px;
 }
-.settings .tabs {
+.panes .tabs {
   display: flex;
   gap: 22px;
   border-bottom: 1px solid var(--line);
   margin-bottom: 22px;
   overflow-x: auto;
 }
-.settings .tabs a {
+.panes .tabs a {
   padding: 9px 0;
   color: var(--muted);
   font-weight: 550;
@@ -41,14 +42,14 @@
   margin-bottom: -1px;
   white-space: nowrap;
 }
-.settings .tabs a.on {
+.panes .tabs a.on {
   color: var(--text);
   border-color: var(--accent);
 }
-.settings .form {
+.panes .form {
   max-width: 860px;
 }
-.settings fieldset {
+.panes fieldset {
   margin: 0;
   padding: 18px;
   display: grid;
@@ -57,60 +58,60 @@
   gap: 14px;
   min-width: 0;
 }
-.settings legend {
+.panes legend {
   font: 600 17px var(--serif);
   padding: 0 6px;
   margin-left: -6px;
 }
-.settings .cols {
+.panes .cols {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
 }
-.settings .narrow {
+.panes .narrow {
   max-width: 420px;
 }
-.settings .hint {
+.panes .hint {
   font-size: 12.5px;
   color: var(--faint);
 }
-.settings .radio {
+.panes .radio {
   display: flex;
   gap: 11px;
   align-items: flex-start;
   cursor: pointer;
 }
-.settings .radio input {
+.panes .radio input {
   margin-top: 4px;
   accent-color: var(--accent);
 }
-.settings .radio span {
+.panes .radio span {
   display: grid;
 }
-.settings .radio small {
+.panes .radio small {
   color: var(--muted);
   font-size: 13.5px;
 }
-.settings .confirm {
+.panes .confirm {
   padding: 14px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--warn) 14%, transparent);
   display: grid;
   gap: 12px;
 }
-.settings .result {
+.panes .result {
   font-size: 13.5px;
   color: var(--ok);
 }
-.settings .result.bad {
+.panes .result.bad {
   color: var(--bad);
 }
-.settings .qlist {
+.panes .qlist {
   border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
 }
-.settings .q {
+.panes .q {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -118,58 +119,58 @@
   border-bottom: 1px solid var(--line);
   font-size: 14px;
 }
-.settings .q:last-child {
+.panes .q:last-child {
   border-bottom: none;
 }
-.settings .q.off span {
+.panes .q.off span {
   color: var(--faint);
 }
-.settings .list {
+.panes .list {
   overflow: hidden;
 }
-.settings .place {
+.panes .place {
   display: grid;
   gap: 12px;
   padding: 16px 0;
   border-top: 1px solid var(--line);
 }
 /* A machine that holds some of the library, with the locations on it set in from its name. */
-.settings .machine {
+.panes .machine {
   display: grid;
   gap: 4px;
   padding: 14px 0 6px;
   border-top: 1px solid var(--line);
 }
-.settings .machine > .place {
+.panes .machine > .place {
   margin-left: 14px;
   padding: 14px 0 14px 16px;
   border-top: 0;
   border-left: 2px solid var(--line);
 }
-.settings .machine > div:last-child {
+.panes .machine > div:last-child {
   margin-left: 14px;
   padding: 8px 0 8px 16px;
 }
-.settings .place .where {
+.panes .place .where {
   overflow-wrap: anywhere;
 }
-.settings .machine details > summary {
+.panes .machine details > summary {
   cursor: pointer;
   color: var(--muted, inherit);
 }
-.settings .machine details[open] {
+.panes .machine details[open] {
   display: grid;
   gap: 12px;
 }
-.settings .checks {
+.panes .checks {
   display: grid;
   gap: 4px;
   margin-top: 4px;
 }
-.settings .place .warn {
+.panes .place .warn {
   color: var(--warn);
 }
-.settings .found {
+.panes .found {
   display: grid;
   gap: 10px;
   padding: 14px 16px;
@@ -177,53 +178,53 @@
   border-radius: 10px;
   background: var(--raised);
 }
-.settings .found p {
+.panes .found p {
   margin: 0;
 }
-.settings .found summary {
+.panes .found summary {
   cursor: pointer;
   font-weight: 550;
 }
-.settings .found .item {
+.panes .found .item {
   display: grid;
   gap: 6px;
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
 }
-.settings .found .item:last-child {
+.panes .found .item:last-child {
   border-bottom: none;
 }
-.settings .task {
+.panes .task {
   display: flex;
   gap: 14px;
   align-items: center;
   padding: 13px 16px;
   border-bottom: 1px solid var(--line);
 }
-.settings .task:last-child {
+.panes .task:last-child {
   border-bottom: none;
 }
-.settings .small {
+.panes .small {
   font-size: 12.5px;
 }
-.settings .limits td {
+.panes .limits td {
   padding: 4px 8px;
   vertical-align: middle;
 }
-.settings .limits .input {
+.panes .limits .input {
   width: 92px;
   height: 30px;
 }
-.settings .link {
+.panes .link {
   color: var(--accent);
   font-weight: 550;
 }
-.settings code {
+.panes code {
   font-family: var(--mono);
   font-size: 12px;
 }
-.settings .diff {
+.panes .diff {
   padding: 8px 0;
   border-top: 1px solid var(--line);
 }

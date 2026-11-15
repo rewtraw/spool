@@ -187,6 +187,8 @@ pub struct Inner {
     /// The OpenSubtitles sign-in in use and when it was made, or the account details last
     /// refused and why, which are not tried again until they change.
     pub subtitle_login: Mutex<Option<(Result<String, (String, String)>, i64)>>,
+    /// Where OpenSubtitles' API is. Tests put a stand-in here.
+    pub opensubtitles_api: Mutex<String>,
     /// How many subtitles OpenSubtitles will still hand over today, and when that starts
     /// again, as it last said.
     pub subtitle_allowance: Mutex<Option<(i64, i64)>>,
@@ -448,11 +450,16 @@ impl App {
                 db.save_account(&a)?;
             }
         }
-        // API and MCP access always go through a key, so there is always one.
-        let mut g = settings.general();
-        if g.api_key.is_empty() {
-            g.api_key = crate::settings::new_key();
-            settings.set_general(&g)?;
+        // API and MCP access always go through a key, so there is always one; and the tickets
+        // players are given are signed with a key of their own.
+        let mut access = settings.access();
+        if access.api_key.is_empty() || access.ticket_key.is_empty() {
+            for k in [&mut access.api_key, &mut access.ticket_key] {
+                if k.is_empty() {
+                    *k = crate::settings::new_key();
+                }
+            }
+            settings.set_access(&access)?;
         }
         let engine = Engine::start(engine_config(&settings, data_dir)).await?;
         let http = http_client();
@@ -500,6 +507,7 @@ impl App {
             login_failures: Tries::default(),
             space_blocked: Mutex::new(HashMap::new()),
             subtitle_login: Mutex::new(None),
+            opensubtitles_api: Mutex::new("https://api.opensubtitles.com/api/v1".into()),
             subtitle_allowance: Mutex::new(None),
             dialogue: crate::dialogue::Index::open(&data_dir.join("dialogue.db"))?,
             players: Default::default(),
@@ -774,8 +782,8 @@ pub fn engine_config(settings: &Settings, data_dir: &Path) -> EngineConfig {
         par2_path: String::new(),
         sevenzip_path: String::new(),
         speed_limit: settings.speed_limit(),
-        direct_unpack: g.direct_unpack,
-        post_parallel: g.post_parallel as usize,
+        direct_unpack: true,
+        post_parallel: crate::settings::fixed::POST_PARALLEL,
     }
 }
 

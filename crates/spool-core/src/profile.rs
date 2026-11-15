@@ -99,11 +99,3 @@ impl QualityProfile {
         }
     }
 }
-
-/// Size limits for one quality, in megabytes per minute of runtime.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SizeLimit {
-    pub min: f64,
-    pub max: Option<f64>,
-    pub preferred: Option<f64>,
-}

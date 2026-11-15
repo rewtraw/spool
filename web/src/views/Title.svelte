@@ -369,7 +369,7 @@
         {#if app.manages && locked}
           <div class="notice lockednote">
             <b>No searching here.</b> {locked}
-            {#if t.read_only && !t.offline && !t.moving}To get a different copy of it, use <b>Move to…</b> above to put it on a location Spool manages, or turn on "Let Spool change files here" for {t.location} under <a class="link" href="#/settings/general">Settings</a>.{/if}
+            {#if t.read_only && !t.offline && !t.moving}To get a different copy of it, use <b>Move to…</b> above to put it on a location Spool manages, or turn on "Let Spool change files here" for {t.location} under <a class="link" href="#/settings/storage">Settings</a>.{/if}
           </div>
         {/if}
         {#if (t.kind === 'movie' && (t.tmdb_id || t.imdb_id)) || t.plex?.url || infuse}

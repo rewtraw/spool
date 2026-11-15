@@ -233,7 +233,7 @@ impl Call {
     fn address(&self) -> String {
         match self.header("host") {
             Some(host) => format!("{}://{host}", self.header("x-forwarded-proto").unwrap_or("http")),
-            None => format!("http://localhost:{}", self.app.settings.general().players_port),
+            None => format!("http://localhost:{}", crate::settings::fixed::players_port()),
         }
     }
 
@@ -245,7 +245,7 @@ impl Call {
         if full {
             for (k, v) in [
                 ("OperatingSystemDisplayName", json!("")), ("HasPendingRestart", json!(false)), ("IsShuttingDown", json!(false)), ("SupportsLibraryMonitor", json!(false)),
-                ("WebSocketPortNumber", json!(self.app.settings.general().players_port)), ("CompletedInstallations", json!([])), ("CanSelfRestart", json!(false)),
+                ("WebSocketPortNumber", json!(crate::settings::fixed::players_port())), ("CompletedInstallations", json!([])), ("CanSelfRestart", json!(false)),
                 ("CanLaunchWebBrowser", json!(false)), ("HasUpdateAvailable", json!(false)), ("EncoderLocation", json!("System")), ("SystemArchitecture", json!(std::env::consts::ARCH)),
                 ("PackageName", json!("spool")), ("CastReceiverApplications", json!([])),
             ] {
@@ -728,11 +728,11 @@ pub fn router(app: App) -> Router {
 /// Keep the players' door in step with the settings: open it, move it or close it as they change.
 pub fn spawn(app: App, host: String) {
     tokio::spawn(async move {
-        let mut open: Option<(u32, Vec<tokio::task::JoinHandle<()>>)> = None;
-        let mut refused: Option<u32> = None;
+        let mut open: Option<(u16, Vec<tokio::task::JoinHandle<()>>)> = None;
+        let mut refused: Option<u16> = None;
         loop {
             let g = app.settings.general();
-            let want = g.players_enabled.then_some(g.players_port);
+            let want = g.players_enabled.then(crate::settings::fixed::players_port);
             if want != open.as_ref().map(|o| o.0) {
                 if let Some((_, tasks)) = open.take() {
                     tasks.iter().for_each(|t| t.abort());
@@ -743,7 +743,7 @@ pub fn spawn(app: App, host: String) {
                         refused = None;
                         *app.player_status.lock() = String::new();
                     }
-                    Some(port) => match tokio::net::TcpListener::bind((host.as_str(), port as u16)).await {
+                    Some(port) => match tokio::net::TcpListener::bind((host.as_str(), port)).await {
                         Ok(listener) => {
                             refused = None;
                             *app.player_status.lock() = format!("Listening on port {port}.");

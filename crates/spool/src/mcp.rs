@@ -47,7 +47,7 @@ pub fn routes(app: App, api: Router) -> Router {
 }
 
 fn access(app: &App, headers: &HeaderMap) -> Option<Access> {
-    let g = app.settings.general();
+    let g = app.settings.access();
     // Unlike the web app, this endpoint is never open: Spool makes itself a key at first start.
     let given = headers
         .get(header::AUTHORIZATION)

@@ -222,7 +222,7 @@ pub(super) async fn get_title(State(app): State<App>, who: Option<axum::Extensio
     // A film, or each episode held, can be handed to a player on the device the app is open on.
     if v["offline"].as_bool() != Some(true) {
         let sources = app.compact_sources(&t)?;
-        let port = app.settings.general().players_port;
+        let port = crate::settings::fixed::players_port();
         if t.kind == Kind::Movie {
             if let Some(file) = sources.first() {
                 v["play"] = json!({"port": port, "path": app.play_path(file)});

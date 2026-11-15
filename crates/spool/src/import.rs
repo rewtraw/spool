@@ -103,10 +103,6 @@ pub(crate) fn move_file(src: &Path, dst: &Path) -> Result<()> {
 
 impl App {
     pub(crate) fn ffprobe_path(&self) -> Option<PathBuf> {
-        let configured = self.settings.general().ffprobe_path;
-        if !configured.is_empty() {
-            return Some(PathBuf::from(configured));
-        }
         ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe", "/usr/bin/ffprobe"].iter().map(PathBuf::from).find(|p| p.is_file()).or_else(|| {
             std::env::var("PATH").ok().and_then(|p| p.split(':').map(|d| Path::new(d).join("ffprobe")).find(|p| p.is_file()))
         })
@@ -118,12 +114,8 @@ impl App {
         probe_with(&tool, path, scene_name).await.map(Some)
     }
 
-    /// Where a replaced or deleted file is parked. Empty when files are deleted outright.
+    /// Where a replaced or deleted file is parked.
     pub(crate) fn recycle_path(&self, title: &Title, file_abs: &Path) -> PathBuf {
-        let g = self.settings.general();
-        if g.recycle_days == 0 {
-            return PathBuf::new();
-        }
         // Beside the library folder the title is in, so recycling never crosses to another disk.
         let root = self.placement().of(&title.path).map(|(l, _)| l.root(title.kind).to_string()).filter(|r| !r.is_empty() && Path::new(&title.path).starts_with(r)).unwrap_or_default();
         let root = if root.is_empty() { Path::new(&title.path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default() } else { root };
@@ -775,19 +767,18 @@ impl App {
     /// Delete recycled files. With `all`, everything; otherwise only what is older than the
     /// configured number of days. Returns bytes freed.
     pub fn clean_recycle(&self, all: bool) -> Result<u64> {
-        let g = self.settings.general();
         let roots = self.recycle_roots();
         if roots.is_empty() {
             bail!("the media volume is not mounted");
         }
-        let cutoff = (chrono::Local::now() - chrono::Duration::days(g.recycle_days as i64)).format("%Y%m%d").to_string();
+        let cutoff = (chrono::Local::now() - chrono::Duration::days(crate::settings::fixed::RECYCLE_DAYS)).format("%Y%m%d").to_string();
         let mut freed = 0;
         for root in roots {
             let Ok(rd) = std::fs::read_dir(&root) else { continue };
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();
                 let dated = name.len() == 8 && name.chars().all(|c| c.is_ascii_digit());
-                if all || g.recycle_days == 0 || (dated && name < cutoff) {
+                if all || (dated && name < cutoff) {
                     let mut inside = vec![];
                     walk(&e.path(), &mut inside);
                     let size: u64 = inside.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum();

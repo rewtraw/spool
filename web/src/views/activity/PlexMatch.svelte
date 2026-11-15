@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The Plex tab: what each library has that the other lacks.
+  // What Plex has that Spool does not, and the other way round. Shown only when Plex is used.
   import { api } from '../../lib/api';
   import { act, toast } from '../../lib/state.svelte';
   import { ago } from '../../lib/format';
@@ -30,9 +30,7 @@
 </script>
 
   <div class="stack form">
-    {#if plex && !plex.configured}
-      <div class="card empty">{plex.off ? 'Plex is turned off. Turn it on' : 'Plex is not set up. Add its address and token'} under <a class="link" href="#/settings/general">General</a>.</div>
-    {:else if plex}
+    {#if plex?.configured}
       <fieldset class="card">
         <legend>Library match</legend>
         <p class="muted">

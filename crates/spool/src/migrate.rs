@@ -10,10 +10,9 @@ use crate::db::now;
 use crate::models::*;
 use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
-use spool_core::decision::ProperPolicy;
 use spool_core::mediainfo::MediaInfo;
 use spool_core::naming::ColonReplacement;
-use spool_core::profile::{ProfileItem, QualityProfile, SizeLimit};
+use spool_core::profile::{ProfileItem, QualityProfile};
 use spool_core::{Quality, QualityModel, Revision};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -287,7 +286,6 @@ impl App {
         };
         let mut general = self.settings.general();
         let mut naming = self.settings.naming();
-        let mut limits = self.settings.size_limits();
         let colon = |v: &Value| match v {
             Value::String(s) => match s.as_str() {
                 "delete" => ColonReplacement::Delete,
@@ -316,11 +314,6 @@ impl App {
                     report.profiles += 1;
                 }
             }
-            for d in self.arr(radarr, "qualitydefinition").await?.as_array().into_iter().flatten() {
-                if let Some(q) = Quality::from_name(&st(&d["quality"], "name")) {
-                    limits.insert(format!("movie:{}", q.key()), SizeLimit { min: d["minSize"].as_f64().unwrap_or(0.0), max: d["maxSize"].as_f64(), preferred: d["preferredSize"].as_f64() });
-                }
-            }
             let n = self.arr(radarr, "config/naming").await?;
             naming.rename = n["renameMovies"].as_bool().unwrap_or(true);
             naming.replace_illegal_characters = n["replaceIllegalCharacters"].as_bool().unwrap_or(true);
@@ -332,16 +325,8 @@ impl App {
                 naming.movie_folder_format = f;
             }
             let mm = self.arr(radarr, "config/mediamanagement").await?;
-            general.proper_policy = match st(&mm, "downloadPropersAndRepacks").as_str() {
-                "doNotUpgrade" => ProperPolicy::DoNotUpgrade,
-                "doNotPrefer" => ProperPolicy::DoNotPrefer,
-                _ => ProperPolicy::PreferAndUpgrade,
-            };
             if mm["importExtraFiles"].as_bool().unwrap_or(false) {
                 report.unsupported.push("Radarr imports extra files (subtitles); Spool imports video only".into());
-            }
-            if let Ok(ic) = self.arr(radarr, "config/indexer").await {
-                general.retention_days = num(&ic, "retention") as u32;
             }
             if let Some(root) = self.arr(radarr, "rootfolder").await?.as_array().and_then(|a| a.first()).map(|r| st(r, "path")) {
                 general.movie_root = map_path(&root);
@@ -462,11 +447,6 @@ impl App {
                 if let Some(conv) = profile(p, "tv", &mut report) {
                     profile_map.insert(p["id"].as_i64().unwrap_or(0), self.save_profile_by_name(conv)?);
                     report.profiles += 1;
-                }
-            }
-            for d in self.arr(sonarr, "qualitydefinition").await?.as_array().into_iter().flatten() {
-                if let Some(q) = Quality::from_name(&st(&d["quality"], "name")) {
-                    limits.insert(format!("tv:{}", q.key()), SizeLimit { min: d["minSize"].as_f64().unwrap_or(0.0), max: d["maxSize"].as_f64(), preferred: d["preferredSize"].as_f64() });
                 }
             }
             let n = self.arr(sonarr, "config/naming").await?;
@@ -624,7 +604,6 @@ impl App {
         }
         self.settings.set_general(&general)?;
         self.settings.set_naming(&naming)?;
-        self.settings.set_size_limits(&limits)?;
         self.apply_engine_config();
         report.unsupported.sort();
         report.unsupported.dedup();

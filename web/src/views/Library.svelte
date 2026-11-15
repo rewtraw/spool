@@ -412,7 +412,7 @@
 {:else if !filtered.length}
   <div class="card empty">
     {#if items.some((i) => inScope(i, scope))}Nothing matches these filters.
-    {:else if scope === 'music'}No music yet. Add a music folder to a location in <a class="link" href="#/settings/library">Settings → Library</a>, or <a class="link" href="#/discover?kind=music">find an album</a> to want.
+    {:else if scope === 'music'}No music yet. Add a music folder to a location in <a class="link" href="#/settings/storage">Settings → Storage</a>, or <a class="link" href="#/discover?kind=music">find an album</a> to want.
     {:else if scope === 'books'}No books yet. <a class="link" href="#/discover?kind=books">Find one</a> to add.
     {:else}The library is empty. Add a title to get started.{/if}
   </div>

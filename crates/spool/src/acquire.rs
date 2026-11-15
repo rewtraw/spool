@@ -4,9 +4,9 @@ use crate::app::{App, Event};
 use crate::models::*;
 use crate::names::plain;
 use crate::newznab::{self, Query};
-use crate::settings::Mode;
+use crate::settings::{fixed, Mode};
 use anyhow::{anyhow, bail, Result};
-use spool_core::decision::{self, Candidate, Context, ExistingFile, ProperPolicy, Rejection};
+use spool_core::decision::{self, Candidate, Context, ExistingFile, Rejection};
 use spool_core::matching;
 use spool_core::profile::QualityProfile;
 use spool_core::{Quality, QualityModel};
@@ -72,8 +72,8 @@ struct Judged {
 
 /// Acceptable releases first, then the rest, each in the order Spool would choose them, so
 /// the best of what was turned down is easy to find and take by hand.
-fn rank(judged: &mut [Judged], profile: &QualityProfile, policy: ProperPolicy) {
-    judged.sort_by(|a, b| b.record.accepted.cmp(&a.record.accepted).then_with(|| decision::compare(&a.candidate, &b.candidate, profile, policy)));
+fn rank(judged: &mut [Judged], profile: &QualityProfile) {
+    judged.sort_by(|a, b| b.record.accepted.cmp(&a.record.accepted).then_with(|| decision::compare(&a.candidate, &b.candidate, profile)));
 }
 
 /// The episode numbers a release's name gives for this film, when it names any: a number
@@ -571,11 +571,9 @@ impl App {
 
         let held = held(tc, &covered, &g.language);
         let queued: Vec<QualityModel> = tc.active.iter().filter(|a| t.kind == Kind::Movie || a.episode_ids.iter().any(|id| covered_ids.contains(id))).map(|a| a.quality).collect();
-        let limits = self.settings.size_limits();
         let ctx = Context {
             flavor: t.kind.flavor(),
             profile: &tc.profile,
-            size_limit: limits.get(&format!("{}:{}", t.kind.profile_kind(), quality.quality.key())).copied(),
             runtime_minutes: held.runtime,
             existing: &held.existing,
             queued: &queued,
@@ -584,8 +582,6 @@ impl App {
             monitored: held.monitored,
             available: held.available,
             season_complete: held.season_complete,
-            retention_days: g.retention_days,
-            proper_policy: g.proper_policy,
             wanted_language: if g.language.is_empty() { None } else { Some(g.language.as_str()) },
             original_language: t.original_language.as_deref(),
             user_invoked: user,
@@ -598,7 +594,6 @@ impl App {
     /// Judge stored releases again against the library as it is now. A verdict recorded before a
     /// file arrived, or before a profile changed, would otherwise keep saying "acceptable".
     pub fn rejudge(&self, tc: &TitleContext, stored: Vec<DecisionRecord>) -> Vec<DecisionRecord> {
-        let policy = self.settings.general().proper_policy;
         let mut judged: Vec<Judged> = stored
             .into_iter()
             .map(|d| {
@@ -608,7 +603,7 @@ impl App {
                 fresh
             })
             .collect();
-        rank(&mut judged, &tc.profile, policy);
+        rank(&mut judged, &tc.profile);
         judged.into_iter().map(|j| j.record).collect()
     }
 
@@ -845,7 +840,6 @@ impl App {
         let mut grabbed: Vec<Acquisition> = vec![];
         let mut grab_errors: Vec<String> = vec![];
         let mut blocked: Vec<(u64, String)> = vec![];
-        let policy = self.settings.general().proper_policy;
         // A chosen release that turns out to be gone from Usenet is set aside and the choice
         // made again from what is left, a few times at most.
         let mut dead: HashSet<String> = HashSet::new();
@@ -858,7 +852,7 @@ impl App {
                 .filter(|j| if j.record.episode_ids.is_empty() { grabbed.is_empty() } else { !j.record.episode_ids.iter().any(|id| claimed.contains(id)) })
                 .collect();
             let mut any_gone = false;
-            for j in pick(&live, &tc.profile, policy) {
+            for j in pick(&live, &tc.profile) {
                 match self.grab(&j.record, &tc.title, if tc.smaller { SMALLER_REASON } else { SEARCH_REASON }, may_queue).await {
                     Ok(Some(a)) => grabbed.push(a),
                     Ok(None) => {}
@@ -1033,7 +1027,7 @@ impl App {
 
         let (grabbed, grab_errors, blocked) = if grab { self.grab_best(&tc, &judged, may_queue).await } else { (vec![], vec![], vec![]) };
         if !grabbed.is_empty() {
-            self.archive_runner_ups(&tc.title, runner_ups(&judged, &grabbed, &tc.profile, self.settings.general().proper_policy, self.settings.general().archive_runner_ups as usize));
+            self.archive_runner_ups(&tc.title, runner_ups(&judged, &grabbed, &tc.profile, fixed::RUNNER_UPS));
         }
         // Read again: a search takes a while, and the title may have been written meanwhile.
         let mut t2 = self.db.title(title_id)?.unwrap_or_else(|| tc.title.clone());
@@ -1056,7 +1050,7 @@ impl App {
         };
         // What this search found, in the order Spool would choose, under the ids they were kept as.
         let ids: HashMap<String, i64> = self.db.decisions(title_id)?.into_iter().map(|d| (d.release.title, d.id)).collect();
-        rank(&mut judged, &tc.profile, self.settings.general().proper_policy);
+        rank(&mut judged, &tc.profile);
         // A release found by more than one query was judged each time; it is listed once.
         let mut seen = HashSet::new();
         judged.retain(|j| seen.insert(j.record.release.title.clone()));
@@ -1104,11 +1098,11 @@ impl App {
                 let judged: Vec<Judged> = releases.iter().map(|r| self.judge(&tc, r, "rss", None, false)).collect();
                 considered += judged.len();
                 self.db.record_decisions(&judged.iter().map(|j| j.record.clone()).collect::<Vec<_>>())?;
-                for j in pick(&judged.iter().collect::<Vec<_>>(), &tc.profile, g.proper_policy) {
+                for j in pick(&judged.iter().collect::<Vec<_>>(), &tc.profile) {
                     match self.grab(&j.record, &tc.title, FEED_REASON, false).await {
                         Ok(Some(a)) => {
                             grabbed += 1;
-                            self.archive_runner_ups(&tc.title, runner_ups(&judged, std::slice::from_ref(&a), &tc.profile, g.proper_policy, g.archive_runner_ups as usize));
+                            self.archive_runner_ups(&tc.title, runner_ups(&judged, std::slice::from_ref(&a), &tc.profile, fixed::RUNNER_UPS));
                         }
                         Ok(None) => {}
                         Err(e) if e.downcast_ref::<NoSpace>().is_some() => tracing::debug!(release = %j.record.release.title, "{e}"),
@@ -1293,7 +1287,7 @@ impl App {
         // account is bounded, so a long backlog cannot pile up behind a full disk.
         if !user {
             let pending: u64 = jobs.iter().filter(|j| !j.state.is_terminal()).map(|j| j.total_bytes.saturating_sub(j.done_bytes)).sum();
-            let cap = g.space_wait_gb as u64 * (1 << 30);
+            let cap = fixed::SPACE_WAIT_BYTES;
             if free < alone + reserve + pending && pending + release_bytes > free.saturating_sub(reserve) + cap {
                 return Err(NoSpace(format!("not enough free space: {:.0} GB free, {:.0} GB already queued, and this release is {:.0} GB", gb(free), gb(pending), gb(release_bytes))).into());
             }
@@ -1375,9 +1369,9 @@ impl App {
 }
 
 /// The best acceptable releases that were not chosen, for saving as fallbacks.
-fn runner_ups(judged: &[Judged], grabbed: &[Acquisition], profile: &QualityProfile, policy: decision::ProperPolicy, n: usize) -> Vec<DecisionRecord> {
+fn runner_ups(judged: &[Judged], grabbed: &[Acquisition], profile: &QualityProfile, n: usize) -> Vec<DecisionRecord> {
     let mut accepted: Vec<&Judged> = judged.iter().filter(|j| j.record.accepted && !grabbed.iter().any(|g| g.release.title == j.record.release.title)).collect();
-    accepted.sort_by(|a, b| decision::compare(&a.candidate, &b.candidate, profile, policy));
+    accepted.sort_by(|a, b| decision::compare(&a.candidate, &b.candidate, profile));
     accepted.into_iter().take(n).map(|j| j.record.clone()).collect()
 }
 
@@ -1424,9 +1418,9 @@ fn names_whole_series(t: &Title, release: &str) -> bool {
 /// as possible: a season pack, or one group's run of single episodes, whichever covers the most
 /// of what is wanted; quality decides between options that cover the same. Whatever is still
 /// uncovered is then filled the same way.
-fn pick<'a>(judged: &[&'a Judged], profile: &QualityProfile, policy: decision::ProperPolicy) -> Vec<&'a Judged> {
+fn pick<'a>(judged: &[&'a Judged], profile: &QualityProfile) -> Vec<&'a Judged> {
     let mut accepted: Vec<&'a Judged> = judged.iter().copied().filter(|j| j.record.accepted).collect();
-    accepted.sort_by(|a, b| decision::compare(&a.candidate, &b.candidate, profile, policy));
+    accepted.sort_by(|a, b| decision::compare(&a.candidate, &b.candidate, profile));
     let mut out: Vec<&'a Judged> = vec![];
     if let Some(movie) = accepted.iter().find(|j| j.record.episode_ids.is_empty()) {
         out.push(movie);

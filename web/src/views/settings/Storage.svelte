@@ -1,10 +1,12 @@
 <script lang="ts">
-  // The Library tab: each machine that holds some of the library, and the locations on it.
+  // Storage: each machine that holds some of the library and the locations on it, where
+  // downloads go, and how much room is kept free. It saves these settings alone.
   import { api } from '../../lib/api';
-  import { app, act, loadStatus, toast } from '../../lib/state.svelte';
+  import { app, act, toast } from '../../lib/state.svelte';
   import { bytes } from '../../lib/format';
+  import { conf, loadSettings, saveSettings, pick } from '../../lib/settings.svelte';
 
-  let general = $state<any>(null);
+  const general = $derived(conf.g);
 
   // ---- further locations, and bringing in what is already on them
   let places = $state<any[]>([]);
@@ -124,7 +126,7 @@
   const pickedOn = (id: number) => Object.entries(picks).filter(([folder]) => (foundBy[id]?.found ?? []).some((f: any) => f.folder === folder));
 
   async function load() {
-    general = await api.get('/settings/general');
+    await loadSettings();
     loadPlaces();
   }
   load().catch(() => {});
@@ -132,9 +134,9 @@
   async function save() {
     for (const l of general.locations) (l.movie_profile = Number(l.movie_profile) || 0), (l.series_profile = Number(l.series_profile) || 0);
     // What is on the page is kept when it cannot be saved: it may hold a key just agreed.
-    if ((await act(() => api.put('/settings/general', general), 'Saved')) === undefined) return false;
-    loadStatus();
-    load();
+    const change = pick(general, ['movie_root', 'series_root', 'music_root', 'audiobook_root', 'video_root', 'locations', 'links', 'new_titles_location', 'downloads_dir', 'min_free_gb', 'backup_dir'], ['new_titles_location', 'min_free_gb']);
+    if (!(await saveSettings(change))) return false;
+    loadPlaces();
     setTimeout(loadLinks, 1500);
     return true;
   }
@@ -371,6 +373,14 @@
       <div><button class="btn" type="button" onclick={() => addLink()}>Link another Spool</button></div>
       <p class="hint">A linked Spool is, today, a helper: a small Spool on a machine that holds some of the disks, such as a NAS. It downloads, unpacks and files onto its own disks, moves titles between them, looks through its own folders and can hand a film to a player itself, so that nothing crosses the network to this machine and back. Without one, or while one cannot be reached, a location on another machine works across the share. See the <a href="https://rewtraw.github.io/spool/guide/helper.html" target="_blank" rel="noreferrer">guide</a>.</p>
       <p class="hint">Titles already in the library stay where they are. When the place chosen for new titles cannot be reached, they go to this machine's main location. A title being added can be put somewhere else from its own box.</p>
+    </fieldset>
+
+    <fieldset class="card">
+      <legend>Downloads and room</legend>
+      <label class="field">Downloads<input class="input mono" bind:value={general.downloads_dir} placeholder="Beside Spool's data" /><span class="hint">Put this on the same disk as the library, so finished downloads are moved rather than copied.</span></label>
+      <label class="field narrow">Keep free (GB)<input class="input" type="number" min="0" bind:value={general.min_free_gb} /><span class="hint">No download is started that would leave less than this free once unpacked. What does not fit waits for room.</span></label>
+      <label class="field">Second backup folder<input class="input mono" bind:value={general.backup_dir} autocomplete="off" placeholder="None" /><span class="hint">The nightly backup of Spool's database is copied here too. Choose a folder on another disk.</span></label>
+      <p class="hint">Replaced and deleted files wait a week in a <code>.spool-recycle</code> folder beside them; Activity, Space, empties it sooner.</p>
     </fieldset>
 
     <div><button class="btn primary" type="submit">Save</button></div>

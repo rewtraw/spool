@@ -286,7 +286,7 @@
   {#key link}<ListsFollow initial={link} />{/key}
 {:else}
 {#if error && video}
-  <div class="card empty">{error}{#if error.includes('TMDB')} <a class="link" href="#/settings">Open Settings</a>{/if}</div>
+  <div class="card empty">{error}{#if error.includes('TMDB')} <a class="link" href="#/settings/connections">Open Settings</a>{/if}</div>
 {/if}
 {#if searching && nothing}
   <div class="empty">Searching…</div>
@@ -351,7 +351,7 @@
   {/if}
 {:else}
   {#if !results.length && !error}
-    <div class="card empty">{kind === 'movie' && found.movies_error ? found.movies_error : `No ${kind === 'movie' ? 'movies' : 'series'} found for “${query.trim()}”.`}{#if kind === 'movie' && found.movies_error?.includes('TMDB')} <a class="link" href="#/settings">Open Settings</a>{/if}</div>
+    <div class="card empty">{kind === 'movie' && found.movies_error ? found.movies_error : `No ${kind === 'movie' ? 'movies' : 'series'} found for “${query.trim()}”.`}{#if kind === 'movie' && found.movies_error?.includes('TMDB')} <a class="link" href="#/settings/connections">Open Settings</a>{/if}</div>
   {/if}
   {#if results.length}<p class="faint source">{kind === 'movie' ? 'Films, from TMDB.' : 'Series, from TVmaze, and from TMDB where TVmaze has none.'} Anime is also looked up on AniList, under any of its names.</p>{/if}
   <div class="results">

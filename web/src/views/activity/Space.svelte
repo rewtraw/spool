@@ -1,5 +1,6 @@
 <script lang="ts">
-  // The Disk space tab: what is using the disk, and what could go.
+  // Space: what is using the disks, what could go, and compact versions.
+  import CompactLibrary from './CompactLibrary.svelte';
   import { api } from '../../lib/api';
   import { act, loadStatus, toast } from '../../lib/state.svelte';
   import { ago, bytes } from '../../lib/format';
@@ -142,4 +143,5 @@
         <p class="faint small">"Find smaller" looks for a copy that fits the title's profile size target and is at least a fifth smaller, accepting lower quality, and replaces the file when it arrives. Deleting files keeps the title in the library, unmonitored, so Spool does not fetch it again. "Kept" means its release is in the <a class="link" href="#/archive">Archive</a> and one click brings it back.</p>
       {/if}
     {/if}
+    <CompactLibrary />
   </div>

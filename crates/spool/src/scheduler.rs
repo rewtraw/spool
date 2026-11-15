@@ -54,7 +54,6 @@ impl App {
         if !self.is_active() {
             return Ok("skipped in shadow mode".into());
         }
-        let g = self.settings.general();
         let files = self.db.file_counts()?;
         let today = chrono::Local::now().date_naive();
         let nowt = chrono::Utc::now();
@@ -81,7 +80,7 @@ impl App {
         wanted.sort_by_key(|t| t.last_search_at);
         let total = wanted.len();
         let mut grabbed = 0;
-        let batch: Vec<_> = wanted.into_iter().take(g.backlog_batch as usize).collect();
+        let batch: Vec<_> = wanted.into_iter().take(crate::settings::fixed::BACKLOG_BATCH).collect();
         let searched = batch.len();
         for t in batch {
             let scope = if t.kind == Kind::Movie { Scope::Movie } else { Scope::Missing };
@@ -271,8 +270,8 @@ impl App {
                 let g = app.settings.general();
                 let due = |name: &str, every_minutes: i64, last: &std::collections::HashMap<&str, i64>| now() - last.get(name).copied().unwrap_or(0) >= every_minutes * 60;
                 for (name, every) in [
-                    ("rss", g.rss_interval_minutes.max(10) as i64),
-                    ("backlog", g.backlog_interval_minutes.max(60) as i64),
+                    ("rss", crate::settings::fixed::RSS_MINUTES),
+                    ("backlog", crate::settings::fixed::BACKLOG_MINUTES),
                     ("refresh", 6 * 60),
                     ("housekeeping", 24 * 60),
                     ("plex", 60),

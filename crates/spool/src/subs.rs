@@ -531,13 +531,6 @@ pub fn ffmpeg_installed() -> Option<PathBuf> {
 
 impl App {
     pub fn ffmpeg_path(&self) -> Option<PathBuf> {
-        let configured = self.settings.general().ffprobe_path;
-        if !configured.is_empty() {
-            let beside = Path::new(&configured).with_file_name("ffmpeg");
-            if beside.is_file() {
-                return Some(beside);
-            }
-        }
         ffmpeg_installed()
     }
 
@@ -820,7 +813,8 @@ impl App {
         if g.opensubtitles_api_key.is_empty() {
             bail!("no OpenSubtitles API key is set; add one in Settings");
         }
-        let base = if g.opensubtitles_url.is_empty() { "https://api.opensubtitles.com/api/v1" } else { g.opensubtitles_url.trim_end_matches('/') };
+        let base = self.opensubtitles_api.lock().trim_end_matches('/').to_string();
+        let base = base.as_str();
         Ok(self.http.request(method, format!("{base}{path}")).header("Api-Key", &g.opensubtitles_api_key).header("User-Agent", concat!("Spool v", env!("CARGO_PKG_VERSION"))).header("Accept", "application/json"))
     }
 
@@ -898,7 +892,7 @@ impl App {
         // OpenSubtitles takes one sign-in a second, so they are made one at a time, apart.
         static ONE_LOGIN: tokio::sync::Mutex<Option<Instant>> = tokio::sync::Mutex::const_new(None);
         let mut last = ONE_LOGIN.lock().await;
-        let account = format!("{}\n{}\n{}\n{}", g.opensubtitles_username, g.opensubtitles_password, g.opensubtitles_api_key, g.opensubtitles_url);
+        let account = format!("{}\n{}\n{}\n{}", g.opensubtitles_username, g.opensubtitles_password, g.opensubtitles_api_key, self.opensubtitles_api.lock());
         match self.subtitle_login.lock().clone() {
             Some((Ok(token), at)) if now() - at < 20 * 3600 => return Ok(Some(token)),
             Some((Err((refused, why)), _)) if refused == account => return Err(at_opensubtitles(why)),

@@ -2,62 +2,105 @@
 
 use super::*;
 
-pub(super) async fn get_general(State(app): State<App>) -> Json<General> {
-    let mut g = app.settings.general();
-    g.tmdb_api_key = mask(&g.tmdb_api_key);
-    g.plex_token = mask(&g.plex_token);
-    g.opensubtitles_api_key = mask(&g.opensubtitles_api_key);
-    g.opensubtitles_password = mask(&g.opensubtitles_password);
-    g.books.annas_key = mask(&g.books.annas_key);
-    g.books.florilegium_token = mask(&g.books.florilegium_token);
-    for h in &mut g.links {
-        h.key = mask(&h.key);
+/// The settings' secrets, by where they are in the settings. They are sent to a browser
+/// blank, with whether each is set; a change that leaves one blank or out keeps it, and null
+/// clears it.
+const SECRETS: &[&[&str]] = &[&["tmdb_api_key"], &["plex_token"], &["opensubtitles_api_key"], &["opensubtitles_password"], &["books", "annas_key"], &["books", "florilegium_token"]];
+
+fn at<'a>(v: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
+    path.iter().try_fold(v, |v, k| v.get_mut(*k))
+}
+
+/// The settings as a browser sees them.
+pub(super) async fn get_settings(State(app): State<App>) -> Json<Value> {
+    let mut g = serde_json::to_value(app.settings.general()).unwrap_or_default();
+    let mut set = serde_json::Map::new();
+    for path in SECRETS {
+        if let Some(v) = at(&mut g, path) {
+            set.insert(path.join("."), json!(v.as_str().is_some_and(|s| !s.is_empty())));
+            *v = json!("");
+        }
     }
+    for l in g["links"].as_array_mut().into_iter().flatten() {
+        l["key_set"] = json!(l["key"].as_str().is_some_and(|s| !s.is_empty()));
+        l["key"] = json!("");
+    }
+    // Worked out by Spool, never set.
+    for k in ["required_volume", "link_seq"] {
+        g.as_object_mut().map(|o| o.remove(k));
+    }
+    for l in g["locations"].as_array_mut().into_iter().flatten() {
+        l.as_object_mut().map(|o| o.remove("volume"));
+    }
+    g["secrets"] = Value::Object(set);
     Json(g)
 }
 
-pub(super) async fn put_general(State(app): State<App>, Json(mut g): Json<General>) -> Result<Response, ApiError> {
-    let old = app.settings.general();
-    g.tmdb_api_key = unmask(g.tmdb_api_key, &old.tmdb_api_key);
-    g.plex_token = unmask(g.plex_token, &old.plex_token);
-    g.opensubtitles_api_key = unmask(g.opensubtitles_api_key, &old.opensubtitles_api_key);
-    g.opensubtitles_password = unmask(g.opensubtitles_password, &old.opensubtitles_password);
-    g.books.annas_key = unmask(g.books.annas_key, &old.books.annas_key);
-    g.books.florilegium_token = unmask(g.books.florilegium_token, &old.books.florilegium_token);
-    if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password {
+/// Lay a change over what is there: objects field by field, anything else in its place.
+fn merge(into: &mut Value, change: Value) -> Result<(), String> {
+    match change {
+        Value::Object(fields) => {
+            for (k, v) in fields {
+                let Some(slot) = into.get_mut(&k) else { return Err(format!("there is no setting called {k}")) };
+                if slot.is_object() && v.is_object() {
+                    merge(slot, v)?;
+                } else {
+                    *slot = v;
+                }
+            }
+            Ok(())
+        }
+        _ => Err("a change to the settings is an object of the settings to change".into()),
+    }
+}
+
+/// Change some settings: only those sent, laid over the settings as they are at that moment,
+/// checked as a whole and written at once.
+pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Json<Value>) -> Result<Response, ApiError> {
+    let bad = |why: String| ApiError(StatusCode::BAD_REQUEST, why);
+    // What Spool works out for itself is not taken from a browser.
+    if let Some(o) = change.as_object_mut() {
+        for k in ["required_volume", "link_seq", "secrets"] {
+            o.remove(k);
+        }
+    }
+    // A secret sent blank is left as it is, and one sent as null is cleared.
+    for path in SECRETS {
+        let (last, parent) = path.split_last().expect("a path");
+        if let Some(o) = at(&mut change, parent).and_then(Value::as_object_mut) {
+            match o.get(*last) {
+                Some(Value::String(s)) if s.is_empty() => {
+                    o.remove(*last);
+                }
+                Some(Value::Null) => {
+                    o.insert(last.to_string(), json!(""));
+                }
+                _ => {}
+            }
+        }
+    }
+    let watch = app.clone();
+    let result = app.settings.update(|g| {
+        let old = g.clone();
+        let mut v = serde_json::to_value(&*g)?;
+        merge(&mut v, change).map_err(|e| anyhow::anyhow!(e))?;
+        let mut new: General = serde_json::from_value(v).map_err(|e| anyhow::anyhow!("{e}"))?;
+        settle(&watch, &old, &mut new).map_err(|e| anyhow::anyhow!(e))?;
+        *g = new;
+        Ok(old)
+    });
+    let (g, old) = match result {
+        Ok(r) => r,
+        Err(e) if e.to_string().starts_with(MOUNT) => return Err(ApiError(StatusCode::CONFLICT, e.to_string())),
+        Err(e) => return Err(bad(format!("{e:#}"))),
+    };
+    if g.opensubtitles_username != old.opensubtitles_username || g.opensubtitles_password != old.opensubtitles_password || g.opensubtitles_api_key != old.opensubtitles_api_key {
         *app.subtitle_login.lock() = None;
     }
-    if g.mode == crate::settings::Mode::Active && old.mode != g.mode {
-        if !app.volume_ok() {
-            return Err(ApiError(StatusCode::CONFLICT, "the media volume is not mounted".into()));
-        }
-        tracing::warn!("Spool is now active: it will download and write to the library");
-    }
-    // The disk each pair of folders needs is Spool's to work out, whatever was sent.
-    g.required_volume = crate::app::disk_needed([&g.movie_root, &g.series_root, &g.music_root, &g.audiobook_root, &g.video_root], &old.required_volume);
-    for l in &mut g.locations {
-        let known = old.locations.iter().find(|o| o.id == l.id && l.id != 0).map(|o| o.volume.as_str()).unwrap_or("");
-        l.volume = crate::app::disk_needed([&l.movie_root, &l.series_root, &l.music_root, &l.audiobook_root, &l.video_root], known);
-    }
-    let moved = g.locations != old.locations || g.movie_root != old.movie_root || g.series_root != old.series_root || g.music_root != old.music_root || g.audiobook_root != old.audiobook_root || g.video_root != old.video_root || g.required_volume != old.required_volume;
-    if g.locations != old.locations {
-        g.locations = app.tidy_locations(std::mem::take(&mut g.locations)).map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;
-    }
-    for h in &mut g.links {
-        h.key = unmask(std::mem::take(&mut h.key), old.links.iter().find(|o| o.id == h.id && h.id != 0).map(|o| o.key.as_str()).unwrap_or(""));
-    }
-    // The count of links given out is Spool's own to keep, whatever was sent.
-    g.link_seq = old.link_seq;
-    if g.links != old.links {
-        (g.links, g.link_seq) = crate::remote::tidy_links(std::mem::take(&mut g.links), &old.links, old.link_seq).map_err(|why| ApiError(StatusCode::BAD_REQUEST, why))?;
-    }
-    if g.new_titles_location != 0 && !g.locations.iter().any(|l| l.id == g.new_titles_location && l.manage) {
-        g.new_titles_location = 0;
-    }
-    app.settings.set_general(&g)?;
     if old.compact.auto && !g.compact.auto {
         app.drop_automatic_compacts();
     }
+    let moved = g.locations != old.locations || g.movie_root != old.movie_root || g.series_root != old.series_root || g.music_root != old.music_root || g.audiobook_root != old.audiobook_root || g.video_root != old.video_root || g.required_volume != old.required_volume;
     if moved {
         // Look at what was just described, off to one side: a share that is slow to answer
         // must not hold up the reply.
@@ -66,9 +109,84 @@ pub(super) async fn put_general(State(app): State<App>, Json(mut g): Json<Genera
         app.location_changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         app.emit(Event::Locations);
     }
-    app.apply_engine_config();
-    app.sync_remotes();
+    if g.downloads_dir != old.downloads_dir {
+        app.apply_engine_config();
+    }
+    if g.links != old.links {
+        app.sync_remotes();
+    }
     Ok(Json(json!({"ok": true})).into_response())
+}
+
+const MOUNT: &str = "the media volume is not mounted";
+
+/// Check the settings as they would be, and put in what Spool works out for itself.
+fn settle(app: &App, old: &General, g: &mut General) -> Result<(), String> {
+    // The disk each set of folders needs is Spool's to work out.
+    g.required_volume = crate::app::disk_needed([&g.movie_root, &g.series_root, &g.music_root, &g.audiobook_root, &g.video_root], &old.required_volume);
+    for l in &mut g.locations {
+        let known = old.locations.iter().find(|o| o.id == l.id && l.id != 0).map(|o| o.volume.as_str()).unwrap_or("");
+        l.volume = crate::app::disk_needed([&l.movie_root, &l.series_root, &l.music_root, &l.audiobook_root, &l.video_root], known);
+    }
+    if g.mode == crate::settings::Mode::Active && old.mode != g.mode {
+        let disk = &g.required_volume;
+        if !disk.is_empty() && !std::path::Path::new(disk).is_dir() {
+            return Err(MOUNT.into());
+        }
+        tracing::warn!("Spool is now active: it will download and write to the library");
+    }
+    // Checked against the main folders as they would be, whichever changed.
+    let list = std::mem::take(&mut g.locations);
+    g.locations = app.tidy_locations(g, list)?;
+    for h in &mut g.links {
+        if h.key.is_empty() {
+            h.key = old.links.iter().find(|o| o.id == h.id && h.id != 0).map(|o| o.key.clone()).unwrap_or_default();
+        }
+    }
+    g.link_seq = old.link_seq;
+    if g.links != old.links {
+        (g.links, g.link_seq) = crate::remote::tidy_links(std::mem::take(&mut g.links), &old.links, old.link_seq)?;
+    }
+    if g.new_titles_location != 0 && !g.locations.iter().any(|l| l.id == g.new_titles_location && l.manage) {
+        g.new_titles_location = 0;
+    }
+    let profiles = app.db.profiles().map_err(|e| e.to_string())?;
+    for (id, kind, what) in [(g.default_movie_profile, "movie", "new films"), (g.default_series_profile, "tv", "new series")] {
+        if id != 0 && !profiles.iter().any(|p| p.id == id && p.kind == kind) {
+            return Err(format!("the profile for {what} is not one of the {} profiles", if kind == "movie" { "film" } else { "series" }));
+        }
+    }
+    if g.compact.location != 0 && !g.locations.iter().any(|l| l.id == g.compact.location && l.manage) {
+        return Err("compact versions can only be kept on a location Spool may change".into());
+    }
+    Ok(())
+}
+
+/// A key for an AI session, and the command that sets one up with it, asked for when it is to
+/// be used rather than sent with the settings. The read-only key is made, or made again, here.
+pub(super) async fn mcp_access(State(app): State<App>, Json(b): Json<Value>) -> R<Value> {
+    let mut a = app.settings.access();
+    let key = match b["access"].as_str() {
+        Some("read") => {
+            if b["new"].as_bool() == Some(true) || a.mcp_read_key.is_empty() {
+                a.mcp_read_key = crate::settings::new_key();
+                app.settings.set_access(&a)?;
+            }
+            a.mcp_read_key
+        }
+        Some("none") => {
+            a.mcp_read_key.clear();
+            app.settings.set_access(&a)?;
+            return Ok(Json(json!({"ok": true})));
+        }
+        _ => a.api_key,
+    };
+    Ok(Json(json!({"key": key})))
+}
+
+/// Whether the read-only key is on, without it.
+pub(super) async fn mcp_status(State(app): State<App>) -> Json<Value> {
+    Json(json!({"read_key": !app.settings.access().mcp_read_key.is_empty()}))
 }
 
 pub(super) async fn get_naming(State(app): State<App>) -> Json<spool_core::naming::NamingConfig> {
@@ -77,20 +195,6 @@ pub(super) async fn get_naming(State(app): State<App>) -> Json<spool_core::namin
 
 pub(super) async fn put_naming(State(app): State<App>, Json(n): Json<spool_core::naming::NamingConfig>) -> R<Value> {
     app.settings.set_naming(&n)?;
-    Ok(Json(json!({"ok": true})))
-}
-
-pub(super) async fn get_size_limits(State(app): State<App>) -> Json<crate::settings::SizeLimits> {
-    Json(app.settings.size_limits())
-}
-
-pub(super) async fn put_size_limits(State(app): State<App>, Json(mut limits): Json<crate::settings::SizeLimits>) -> R<Value> {
-    // An entry with no minimum and no maximum says nothing; drop it.
-    limits.retain(|_, l| l.min > 0.0 || l.max.is_some_and(|m| m > 0.0));
-    for l in limits.values_mut() {
-        l.max = l.max.filter(|m| *m > 0.0);
-    }
-    app.settings.set_size_limits(&limits)?;
     Ok(Json(json!({"ok": true})))
 }
 

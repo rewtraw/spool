@@ -1,11 +1,12 @@
 <script lang="ts">
-  // The Players tab: serving the library to players, and the people who play: an account
-  // for each, the players each is signed in on, and what they have watched.
+  // People: serving the library to players, and the people who play: an account for each,
+  // the players each is signed in on, what they have watched, and what they asked for.
   import { api } from '../../lib/api';
   import { act, app, toast } from '../../lib/state.svelte';
   import { ago, duration } from '../../lib/format';
 
-  let general = $state<any>(null);
+  import { conf, loadSettings, saveSettings } from '../../lib/settings.svelte';
+  const general = $derived(conf.g);
   let door = $state<any>(null);
   let people = $state<any>({ accounts: [], recent: [] });
   let asks = $state<any[]>([]);
@@ -20,7 +21,7 @@
     asks = a;
   }
   async function load() {
-    general = await api.get('/settings/general');
+    await loadSettings();
     door = await api.get('/players').catch(() => null);
     await loadPeople();
   }
@@ -31,7 +32,7 @@
   });
 
   async function saveDoor() {
-    await act(() => api.put('/settings/general', { ...general, players_port: Number(general.players_port) }), 'Saved');
+    await saveSettings({ players_enabled: general.players_enabled });
     // The players' door follows the settings within a few seconds.
     setTimeout(load, 4000);
   }
@@ -85,9 +86,8 @@
       <p class="muted">Spool can serve the library to a player on a television or a phone, such as Infuse on Apple TV. It answers as a Jellyfin server would: the player shows Spool's posters and details, plays each file as it is, and tells Spool what has been watched. Nothing is converted, so the player has to be able to play the files itself.</p>
       <label class="check"><input type="checkbox" bind:checked={general.players_enabled} /> Serve the library to players</label>
       {#if general.players_enabled}
-        <label class="field narrow">Port<input class="input mono" type="number" min="1024" max="65535" bind:value={general.players_port} /><span class="hint">8096 is the one players expect.</span></label>
-        <p class="muted">In the player, add a media server of the Jellyfin kind. On the same network it should appear by itself as <b>Spool</b>; otherwise give it the address <code>{location.hostname}:{general.players_port}</code>, and sign in as one of the people below. A player that shows a list of people to choose from is given their names.{#if door?.status}{' '}{door.status}{/if}</p>
-        <p class="muted">The same address in a browser, <a href="http://{location.hostname}:{general.players_port}/" target="_blank" rel="noreferrer"><code>http://{location.hostname}:{general.players_port}</code></a>, is where the people below ask for a film or a series the library has not got, and see when it is ready to play.</p>
+        <p class="muted">In the player, add a media server of the Jellyfin kind. On the same network it should appear by itself as <b>Spool</b>; otherwise give it the address <code>{location.hostname}:{(door?.port ?? 8096)}</code>, and sign in as one of the people below. A player that shows a list of people to choose from is given their names.{#if door?.status}{' '}{door.status}{/if}</p>
+        <p class="muted">The same address in a browser, <a href="http://{location.hostname}:{(door?.port ?? 8096)}/" target="_blank" rel="noreferrer"><code>http://{location.hostname}:{(door?.port ?? 8096)}</code></a>, is where the people below ask for a film or a series the library has not got, and see when it is ready to play.</p>
       {/if}
       <div><button class="btn primary" type="submit">Save</button></div>
     </fieldset>
@@ -118,14 +118,14 @@
               <button class="btn small" type="button" disabled={!edits[a.id].password} onclick={() => change(a, { password: edits[a.id].password }, 'Password changed')}>Set password</button>
               {#if a.has_password}<button class="btn small ghost" type="button" onclick={() => confirm(`Let ${a.name} sign in with no password?\n\nAnyone who can reach Spool and knows the name could then sign in as ${a.name}.`) && change(a, { password: '' }, 'Password removed')}>Remove password</button>{/if}
               <button class="btn small ghost" type="button" onclick={() => change(a, { enabled: !a.enabled }, a.enabled ? `${a.name} may no longer sign in` : `${a.name} may sign in again`)}>{a.enabled ? 'Stop sign-in' : 'Allow sign-in'}</button>
-              {#if general.plex_token && general.plex_on}<button class="btn small ghost" type="button" onclick={() => fromPlex(a)}>Bring watched from Plex</button>{/if}
+              {#if general.secrets?.plex_token && general.plex_on}<button class="btn small ghost" type="button" onclick={() => fromPlex(a)}>Bring watched from Plex</button>{/if}
               <span class="grow"></span>
               <button class="btn small ghost danger" type="button" onclick={() => remove(a)}>Remove {a.name}</button>
             </div>
             <label class="check small"><input type="checkbox" checked={a.manages} onchange={(e) => change(a, { manages: e.currentTarget.checked }, e.currentTarget.checked ? `${a.name} runs Spool` : `${a.name} can watch and ask, and change nothing else`)} /> {a.name} runs Spool: settings, downloads and deleting</label>
             <label class="check small"><input type="checkbox" checked={a.adds} onchange={(e) => change(a, { adds: e.currentTarget.checked }, e.currentTarget.checked ? `What ${a.name} asks for is added at once` : `What ${a.name} asks for waits for you`)} /> Add what {a.name} asks for at once, without waiting for an answer</label>
             <label class="check small"><input type="checkbox" checked={a.compact_away} onchange={(e) => change(a, { compact_away: e.currentTarget.checked }, e.currentTarget.checked ? `Away from home, ${a.name} gets compact versions only` : `${a.name} gets everything, at home and away`)} /> Away from home, give {a.name} compact versions only</label>
-            {#if a.compact_away}<p class="hint">{lacking ? `${lacking} have no compact version, and are hidden from ${a.name} while away.` : 'Everything has a compact version, so nothing is hidden.'} <a href="#/settings/compact">Compact versions</a></p>{/if}
+            {#if a.compact_away}<p class="hint">{lacking ? `${lacking} have no compact version, and are hidden from ${a.name} while away.` : 'Everything has a compact version, so nothing is hidden.'} <a href="#/settings/preferences">Compact versions</a></p>{/if}
             {#if a.devices.length}
               <div class="list">
                 {#each a.devices as d (d.id)}

@@ -772,8 +772,7 @@ impl App {
 
     /// What the helpers are given of Spool's settings.
     fn pushed(&self) -> Pushed {
-        let g = self.settings.general();
-        Pushed { servers: self.settings.servers(), speed_limit: self.settings.speed_limit(), direct_unpack: g.direct_unpack, post_parallel: g.post_parallel as usize }
+        Pushed { servers: self.settings.servers(), speed_limit: self.settings.speed_limit() }
     }
 
     /// Ask one helper how things stand, and act on what has changed.
@@ -899,11 +898,13 @@ impl App {
         if found == r.conf.folders {
             return;
         }
-        let mut g = self.settings.general();
-        let Some(link) = g.links.iter_mut().find(|l| l.id == r.conf.id) else { return };
-        tracing::info!(helper = %r.conf.name, folders = found.len(), "found its folders among those on this machine");
-        link.folders = found;
-        if self.settings.set_general(&g).is_ok() {
+        let saved = self.settings.update(|g| {
+            let Some(link) = g.links.iter_mut().find(|l| l.id == r.conf.id) else { return Ok(false) };
+            link.folders = found;
+            Ok(true)
+        });
+        if let Ok((_, true)) = saved {
+            tracing::info!(helper = %r.conf.name, "found its folders among those on this machine");
             self.sync_remotes();
             self.emit(Event::Locations);
         }
@@ -1219,14 +1220,14 @@ impl App {
     /// there with a ticket for that file, good for as long as a ticket is. It is how the
     /// app hands a film to a player on the device the app is open on.
     pub fn play_path(&self, file: &MediaFile) -> String {
-        let ticket = Signer::new(&self.settings.general().api_key).issue(PLAY_HERE, &file.id.to_string(), crate::db::now().max(0) as u64);
+        let ticket = Signer::new(&self.settings.access().ticket_key).issue(PLAY_HERE, &file.id.to_string(), crate::db::now().max(0) as u64);
         let name = Path::new(&file.rel_path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         format!("/spool/play/{}?ticket={ticket}", urlencoding::encode(&name))
     }
 
     /// The file a ticket from [`App::play_path`] is for, if the ticket is good.
     pub fn played_on(&self, token: &str) -> Option<i64> {
-        let t = Signer::new(&self.settings.general().api_key).verify(token, crate::db::now().max(0) as u64).ok()?;
+        let t = Signer::new(&self.settings.access().ticket_key).verify(token, crate::db::now().max(0) as u64).ok()?;
         (t.share == PLAY_HERE).then(|| t.rel.parse().ok()).flatten()
     }
 

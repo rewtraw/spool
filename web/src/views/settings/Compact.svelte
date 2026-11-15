@@ -1,157 +1,55 @@
 <script lang="ts">
-  // The Compact versions tab: how they are made, where they go, and how the library stands.
+  // Compact versions: how they are made, where those of read-only titles go, and whether
+  // whatever arrives gets one. How the library stands is on Activity's Space page.
   import { api } from '../../lib/api';
-  import { act, toast } from '../../lib/state.svelte';
-  import { bytes, duration } from '../../lib/format';
+  import { bytes } from '../../lib/format';
+  import { conf, saveSettings } from '../../lib/settings.svelte';
 
-  let general = $state<any>(null);
-  let report = $state<any>(null);
   let places = $state<any[]>([]);
-  let asking = $state(false);
-  const c = $derived(general?.compact);
+  let means = $state('');
+  api.get<any[]>('/locations').then((p) => (places = p)).catch(() => {});
+  api.get<any>('/compact').then((r) => (means = r.means ?? '')).catch(() => {});
+  const c = $derived(conf.g?.compact);
   const managed = $derived(places.filter((p) => p.id && p.manage));
   const readOnly = $derived(places.filter((p) => p.id && !p.manage));
-  const making = $derived(report?.making?.now?.length > 0 || report?.making?.waiting_count > 0);
   // A film of two hours at these settings, to give the numbers some meaning.
   const twoHours = $derived(c ? ((c.video_kbps + c.audio_kbps) * 1000 * 7200) / 8 : 0);
+  const PRESETS: [number, number, string][] = [[1080, 8000, '1080p, 8 Mb/s'], [1080, 4000, '1080p, 4 Mb/s'], [2160, 20000, '4K, 20 Mb/s'], [720, 3000, '720p, 3 Mb/s']];
 
-  async function load() {
-    [general, places] = await Promise.all([api.get<any>('/settings/general'), api.get<any[]>('/locations').catch(() => [])]);
-    loadReport();
-  }
-  async function loadReport() {
-    report = await api.get<any>('/compact').catch(() => report);
-  }
-  $effect(() => {
-    load();
-  });
-  $effect(() => {
-    if (!making) return;
-    const timer = setInterval(loadReport, 5000);
-    return () => clearInterval(timer);
-  });
-
-  function preset(height: number, kbps: number) {
-    general.compact.height = height;
-    general.compact.video_kbps = kbps;
-  }
   async function save() {
-    for (const k of ['height', 'video_kbps', 'audio_kbps', 'location']) general.compact[k] = Number(general.compact[k]) || 0;
-    await act(() => api.put('/settings/general', general), 'Saved');
-    load();
-  }
-  // How many to make at a go, when not all of them.
-  let some = $state(10);
-  async function batch() {
-    const n = Math.min(Math.max(1, Math.floor(Number(some)) || 0), report?.would?.files ?? 0);
-    if (!n) return;
-    asking = true;
-    const r = await act(() => api.post<any>('/compact/everything', { count: n }));
-    asking = false;
-    if (r) toast(`${r.queued} in line. Progress is in Activity.`);
-    loadReport();
-  }
-  async function everything() {
-    const w = report?.would;
-    if (!w?.files) return;
-    if (!confirm(`Make ${w.files} compact ${w.files === 1 ? 'version' : 'versions'}?\n\nThey will take about ${bytes(w.bytes)} and are made one at a time in the background. The originals are not touched. The line can be cancelled in Activity at any time.`)) return;
-    asking = true;
-    const r = await act(() => api.post<any>('/compact/everything'));
-    asking = false;
-    if (r) toast(`${r.queued} in line. Progress is in Activity.`);
-    loadReport();
-  }
-  async function cancelAll() {
-    await act(() => api.post('/compact/cancel', {}), 'The waiting compact versions are cancelled');
-    loadReport();
+    const x = conf.g.compact;
+    await saveSettings({ compact: { height: Number(x.height) || 0, video_kbps: Number(x.video_kbps) || 0, audio_kbps: Number(x.audio_kbps) || 0, location: Number(x.location) || 0, software: x.software, auto: x.auto } });
   }
 </script>
 
-{#if !general}
-  <div class="empty">Loading…</div>
-{:else}
-  <form class="stack" onsubmit={(e) => { e.preventDefault(); save(); }}>
+{#if c}
+  <form onsubmit={(e) => { e.preventDefault(); save(); }}>
     <fieldset class="card">
       <legend>Compact versions</legend>
-      <p class="muted">A compact version is a smaller copy of a film or an episode that Spool makes and keeps beside the original, for playing away from home or over a slow connection. The original is never touched. A player is offered both: in Infuse, hold Play and choose <b>Version</b>.</p>
-      <p class="small" class:warn={report && !report.means?.includes('hardware')}>Made with {report?.means ?? '…'}.</p>
-    </fieldset>
-
-    <fieldset class="card">
-      <legend>How they are made</legend>
+      <p class="muted">A smaller copy of a film or an episode, kept beside the original, for playing away from home or over a slow connection. The original is never touched; a player is offered both. <span class:warn={means && !means.includes('hardware')}>{means ? `Made with ${means}.` : ''}</span></p>
       <div class="row wrap">
-        <button class="btn small" type="button" class:primary={c.height === 1080 && c.video_kbps === 8000} onclick={() => preset(1080, 8000)}>1080p, 8 Mb/s</button>
-        <button class="btn small" type="button" class:primary={c.height === 1080 && c.video_kbps === 4000} onclick={() => preset(1080, 4000)}>1080p, 4 Mb/s</button>
-        <button class="btn small" type="button" class:primary={c.height === 2160 && c.video_kbps === 20000} onclick={() => preset(2160, 20000)}>4K, 20 Mb/s</button>
-        <button class="btn small" type="button" class:primary={c.height === 720 && c.video_kbps === 3000} onclick={() => preset(720, 3000)}>720p, 3 Mb/s</button>
+        {#each PRESETS as [h, k, label]}<button class="btn small" type="button" class:primary={c.height === h && c.video_kbps === k} onclick={() => ((c.height = h), (c.video_kbps = k))}>{label}</button>{/each}
       </div>
-      <div class="cols">
-        <label class="field">Picture height<input class="input" type="number" min="240" max="4320" step="1" bind:value={general.compact.height} /><span class="hint">The picture is made to fit a screen this high: 1080 fits within 1920 by 1080. A picture that fits already is not made bigger.</span></label>
-        <label class="field">Picture, kilobits a second<input class="input" type="number" min="200" max="80000" step="100" bind:value={general.compact.video_kbps} /><span class="hint">A two-hour film comes to about {bytes(twoHours)} at these settings.</span></label>
-      </div>
-      <label class="field narrow">Surround sound, kilobits a second<input class="input" type="number" min="128" max="1536" step="32" bind:value={general.compact.audio_kbps} /><span class="hint">Sound that is already small (AAC, Dolby Digital, Dolby Digital Plus) is copied as it is. The rest, such as TrueHD and DTS-HD, becomes Dolby Digital Plus at this rate, in 5.1.</span></label>
-      <p class="hint">The picture is HEVC, ten-bit where the original is, with HDR10 kept. Dolby Vision over an HDR10 layer comes out as HDR10. Subtitles, chapters and fonts are carried over. A file less than half again as big as its compact version would be is left alone.</p>
-      <label class="check"><input type="checkbox" bind:checked={general.compact.software} /> Use the processor when the video hardware cannot do a file</label>
-      <span class="hint">Much slower, and it keeps the processor busy. Off, such a file is reported and left.</span>
-    </fieldset>
-
-    <fieldset class="card">
-      <legend>Where and when</legend>
-      <p class="muted">A compact version is kept beside its original wherever Spool may write.</p>
+      <span class="hint">A two-hour film comes to about {bytes(twoHours)}. HEVC, ten-bit where the original is, HDR10 kept; subtitles, chapters and fonts carried over.</span>
+      <details>
+        <summary class="small">Exact sizes</summary>
+        <div class="cols">
+          <label class="field">Picture height<input class="input" type="number" min="240" max="4320" step="1" bind:value={c.height} /></label>
+          <label class="field">Picture, kilobits a second<input class="input" type="number" min="200" max="80000" step="100" bind:value={c.video_kbps} /></label>
+          <label class="field">Surround sound, kilobits a second<input class="input" type="number" min="128" max="1536" step="32" bind:value={c.audio_kbps} /><span class="hint">Sound already small is copied as it is.</span></label>
+        </div>
+      </details>
+      <label class="check"><input type="checkbox" bind:checked={c.auto} /> Make one of whatever arrives, when it would gain from one</label>
+      <label class="check"><input type="checkbox" bind:checked={c.software} /> Use the processor when the video hardware cannot do a file</label>
       {#if readOnly.length}
         <label class="field narrow">For titles on {readOnly.map((p) => p.name).join(' and ')}, which Spool only reads
-          <select class="input" bind:value={general.compact.location}>
+          <select class="input" bind:value={c.location}>
             <option value={0}>Make none</option>
             {#each managed as p}<option value={p.id}>Keep them on {p.name}{p.free != null ? ` (${bytes(p.free)} free)` : ''}</option>{/each}
           </select>
-          <span class="hint">They are put in a folder of the title's name there, which becomes one more place the title is held.</span>
         </label>
       {/if}
-      <label class="check"><input type="checkbox" bind:checked={general.compact.auto} onchange={(e) => { const f = e.currentTarget.form; if (f?.reportValidity()) save(); }} /> Make one of whatever arrives, when it would gain from one</label>
-      <span class="hint">Each download that is filed is put in line. What is already in the library is not; use the button below for that. Turning this off takes out of line what it put there.</span>
+      <div><button class="btn primary">Save</button></div>
     </fieldset>
-
-    <div><button class="btn primary" type="submit">Save</button></div>
   </form>
-
-  <div class="stack" style="margin-top:24px">
-  <fieldset class="card">
-    <legend>The library</legend>
-    {#if !report}
-      <p class="muted">Working it out…</p>
-    {:else}
-      <p><b>{report.made.files}</b> compact {report.made.files === 1 ? 'version' : 'versions'}{#if report.made.files}, {bytes(report.made.bytes)} beside {bytes(report.made.original_bytes)} of originals{/if}.</p>
-      {#if making}
-        <p class="muted">{report.making.now.length ? `Making ${report.making.now.map((n: any) => `${n.title}${n.episode ? ` ${n.episode}` : ''}${n.by ? ` on ${n.by}` : ''}`).join(', ')}` : 'Starting'}{report.making.waiting_count ? `, with ${report.making.waiting_count} waiting` : ''}. <a class="link" href="#/activity">Progress is in Activity</a>.</p>
-        {#if report.making.waiting_count}<div><button class="btn small ghost" type="button" onclick={cancelAll}>Cancel all waiting</button></div>{/if}
-      {/if}
-      {#if report.would.files}
-        <p style="margin-top:12px"><b>{report.would.files}</b> more {report.would.files === 1 ? 'file' : 'files'} would gain from one at the saved settings: about {bytes(report.would.bytes)} from {bytes(report.would.original_bytes)}, and {duration(report.would.running_secs)} of film to get through.</p>
-        <div class="row wrap">
-          {#if report.would.files > 1}
-            <input class="input some" type="number" min="1" max={report.would.files} step="1" aria-label="How many to make" bind:value={some} />
-            <button class="btn" type="button" disabled={asking} onclick={batch}>Make that many, biggest first</button>
-          {/if}
-          <button class="btn" class:ghost={report.would.files > 1} type="button" disabled={asking} onclick={everything}>{asking ? 'Putting them in line…' : `Make all ${report.would.files}`}</button>
-        </div>
-      {:else if !making}
-        <p class="muted" style="margin-top:12px">Nothing else in the library would gain from one at the saved settings.</p>
-      {/if}
-      {#if Object.keys(report.why_not ?? {}).length}
-        <details style="margin-top:14px">
-          <summary>Files that get none, and why</summary>
-          <div class="list">
-            {#each Object.entries(report.why_not) as [why, n]}<div class="item"><b>{n}</b> <span class="muted">{why}</span></div>{/each}
-          </div>
-        </details>
-      {/if}
-    {/if}
-  </fieldset>
-  </div>
 {/if}
-
-<style>
-  .some {
-    width: 5.5em;
-  }
-</style>
