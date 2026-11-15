@@ -1,6 +1,6 @@
 //! The search index of the books Anna's Archive holds, built on this machine from the
-//! metadata it publishes (see [`super::dump`]). Only EPUBs in the languages read here are
-//! kept: a few hundred megabytes for every English one. A book is found by its ISBN or
+//! metadata it publishes (see [`super::dump`]). Only EPUBs and the PDFs of books, in the
+//! languages read here, are kept. A book is found by its ISBN or
 //! Open Library edition when the file carries one, and otherwise by its title and author,
 //! forgiving of typos, then re-ranked by how alike the names are.
 
@@ -29,6 +29,8 @@ struct Fields {
     lang: Field,
     size: Field,
     year: Field,
+    /// "epub" or "pdf". Last, so an index built before it opens with it absent.
+    format: Field,
 }
 
 fn schema() -> (Schema, Fields) {
@@ -44,6 +46,7 @@ fn schema() -> (Schema, Fields) {
         lang: sb.add_text_field("lang", STRING | STORED),
         size: sb.add_u64_field("size", STORED | FAST),
         year: sb.add_u64_field("year", STORED),
+        format: sb.add_text_field("format", STRING | STORED),
     };
     (sb.build(), f)
 }
@@ -59,6 +62,8 @@ pub struct Record {
     pub year: u64,
     pub isbns: Vec<String>,
     pub ols: Vec<String>,
+    /// "epub" or "pdf".
+    pub format: String,
 }
 
 /// Writes a new index beside the one in use.
@@ -94,6 +99,7 @@ impl Builder {
         d.add_text(f.lang, &r.lang);
         d.add_u64(f.size, r.size);
         d.add_u64(f.year, r.year);
+        d.add_text(f.format, &r.format);
         self.writer.add_document(d)?;
         self.count += 1;
         Ok(())
@@ -228,7 +234,9 @@ impl Shelf {
             // book's. It counts when the title agrees as well.
             let by_id = by_id && t >= 0.6;
             let score = (t * 0.65 + a * 0.35 + if by_id { 0.15 } else { 0.0 }).min(1.0);
-            let c = Candidate { md5: md5.clone(), title, author, lang, size: num(f.size), year: num(f.year) as i32, score: (score * 1000.0).round() / 1000.0, by_id };
+            // An index built before PDFs were kept holds EPUBs alone.
+            let format = Some(text(f.format)).filter(|s| !s.is_empty()).unwrap_or_else(|| "epub".into());
+            let c = Candidate { md5: md5.clone(), title, author, lang, size: num(f.size), year: num(f.year) as i32, score: (score * 1000.0).round() / 1000.0, by_id, format };
             match found.get(&md5) {
                 Some(old) if old.score >= c.score => {}
                 _ => {
@@ -237,7 +245,7 @@ impl Shelf {
             }
         }
         let mut out: Vec<Candidate> = found.into_values().collect();
-        out.sort_by(|a, b| b.score.total_cmp(&a.score).then(b.by_id.cmp(&a.by_id)).then(b.size.cmp(&a.size)));
+        out.sort_by(|a, b| b.score.total_cmp(&a.score).then(b.by_id.cmp(&a.by_id)).then(a.is_pdf().cmp(&b.is_pdf())).then(b.size.cmp(&a.size)));
         out.truncate(15);
         Ok(out)
     }
@@ -265,7 +273,7 @@ mod tests {
     use super::*;
 
     fn rec(md5: &str, title: &str, author: &str, isbn: &str) -> Record {
-        Record { md5: md5.into(), title: title.into(), author: author.into(), lang: "en".into(), size: 500_000, year: 2000, isbns: if isbn.is_empty() { vec![] } else { vec![isbn.into()] }, ols: vec![] }
+        Record { md5: md5.into(), title: title.into(), author: author.into(), lang: "en".into(), size: 500_000, year: 2000, isbns: if isbn.is_empty() { vec![] } else { vec![isbn.into()] }, ols: vec![], format: "epub".into() }
     }
 
     #[test]

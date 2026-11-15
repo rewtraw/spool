@@ -1,7 +1,7 @@
 //! Florilegium, where books are read and quoted, and kept in sync with Spool both ways.
 //!
 //! A book Spool gets is handed over: the EPUB goes onto its shelf and into its library at
-//! once, and Florilegium marks any entry of its reading list that names the book as got.
+//! once (a PDF is converted to one there first), and Florilegium marks any entry of its reading list that names the book as got.
 //! The other way, every entry of the reading list not yet got is wanted here as an EPUB, and
 //! a book already on the shelf is never fetched again. The shelf is read, not copied: Spool
 //! keeps it in memory and reads it again every few minutes.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 #[serde(default)]
 pub struct Receipt {
     pub at: i64,
-    /// "shelved", or "exists" when it had these very bytes already.
+    /// "shelved", "exists" when it had these very bytes already, or "converted" from a PDF.
     pub status: String,
     pub shelf_id: Option<i64>,
     pub book_id: Option<i64>,
@@ -55,6 +55,80 @@ pub async fn send(http: &reqwest::Client, base: &str, token: &str, file: &Path, 
         }
         _ => bail!("Florilegium's answer could not be read"),
     }
+}
+
+/// Send a PDF for Florilegium to make an EPUB of, and add to its shelf and library without
+/// a review. `client` names the upload, so sending it again after a lost answer gives the
+/// same job. Gives the job.
+#[allow(clippy::too_many_arguments)]
+pub async fn send_pdf(http: &reqwest::Client, base: &str, token: &str, file: &Path, name: &str, client: &str, title: &str, author: &str) -> Result<String> {
+    let bytes = tokio::fs::read(file).await?;
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string()).mime_str("application/pdf")?;
+    let form = reqwest::multipart::Form::new()
+        .text("client_id", client.to_string())
+        .text("title", title.to_string())
+        .text("author", author.to_string())
+        .text("library", "1")
+        .text("auto_publish", "1")
+        .part("file", part);
+    let mut req = http.post(format!("{}/pdf-imports", base.trim_end_matches('/'))).multipart(form).timeout(std::time::Duration::from_secs(300));
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.map_err(|e| anyhow::anyhow!("Florilegium could not be reached: {}", e.without_url()))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        bail!("Florilegium turned the token down");
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|_| anyhow::anyhow!("Florilegium answered {status} with something that is not its API"))?;
+    if !status.is_success() {
+        bail!("Florilegium said: {}", body["error"].as_str().unwrap_or(status.as_str()));
+    }
+    if body["job"]["auto_publish"].as_bool() != Some(true) {
+        bail!("this Florilegium cannot add a converted PDF without a review; update it");
+    }
+    body["job"]["id"].as_str().map(String::from).ok_or_else(|| anyhow::anyhow!("Florilegium's answer could not be read"))
+}
+
+/// Where a conversion stands.
+#[derive(Clone, Debug, Default)]
+pub struct Conversion {
+    /// queued, converting, review, finalizing, completed, cancelled or failed.
+    pub state: String,
+    pub done: u64,
+    pub total: u64,
+    pub error: Option<String>,
+    pub shelf_id: Option<i64>,
+    pub book_id: Option<i64>,
+}
+
+/// A conversion, or None when Florilegium has no such job.
+pub async fn conversion(http: &reqwest::Client, base: &str, token: &str, job: &str) -> Result<Option<Conversion>> {
+    let mut req = http.get(format!("{}/pdf-imports/{job}", base.trim_end_matches('/'))).timeout(std::time::Duration::from_secs(15));
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.map_err(|e| anyhow::anyhow!("Florilegium could not be reached: {}", e.without_url()))?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        bail!("Florilegium turned the token down");
+    }
+    if !status.is_success() {
+        bail!("Florilegium answered {status}");
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|_| anyhow::anyhow!("Florilegium answered with something that is not its API"))?;
+    let j = &body["job"];
+    Ok(Some(Conversion {
+        state: j["state"].as_str().unwrap_or("").to_string(),
+        done: j["done"].as_u64().unwrap_or(0),
+        total: j["total"].as_u64().unwrap_or(0),
+        error: j["error"].as_str().filter(|e| !e.is_empty()).map(String::from),
+        shelf_id: j["result"]["shelf_id"].as_i64(),
+        book_id: j["result"]["book_id"].as_i64(),
+    }))
 }
 
 /// A book on Florilegium's shelf, as far as telling it from others goes.

@@ -1,7 +1,7 @@
 <script lang="ts">
   // One book: where it stands, the files the index offers for it, and what can be done.
   // Spool finds an EPUB of it in its index of Anna's Archive, downloads it, checks it and
-  // hands it to Florilegium.
+  // hands it to Florilegium; or a PDF, when there is no EPUB, which Florilegium converts.
   import { api, type Book, type Candidate } from '../lib/api';
   import { act, go } from '../lib/state.svelte';
   import { ago, bytes, clock } from '../lib/format';
@@ -105,7 +105,7 @@
         {#if !b.audio}<button class="btn small" onclick={wantAudio}>Want the audiobook</button>{/if}
         {#if !b.epub}<button class="btn small" onclick={wantEpub}>Want the EPUB</button>{/if}
         {#if b.epub && (b.state === 'wanted' || b.state === 'choose')}<button class="btn small" onclick={retry}>Look again</button>{/if}
-        {#if b.file}<a class="btn small" href="/api/books/{b.id}/file">Download EPUB</a>{/if}
+        {#if b.file}<a class="btn small" href="/api/books/{b.id}/file">Download {b.file.endsWith('.pdf') ? 'PDF' : 'EPUB'}</a>{/if}
         {#if b.file && florilegium && b.state !== 'sending'}<button class="btn small" onclick={resend}>{b.receipt ? 'Send again' : 'Send to Florilegium'}</button>{/if}
         {#if b.epub && b.state !== 'choose'}<button class="btn small ghost" onclick={() => (showFiles = !showFiles)}>{showFiles ? 'Hide files' : 'Files'}</button>{/if}
         <button class="btn small ghost danger" onclick={remove}>Remove</button>
@@ -156,7 +156,7 @@
         <div class="file">
           <div class="grow">
             <div class="clamp">{c.title}</div>
-            <div class="faint small">{c.author || 'No author given'} · {c.lang || '?'} · {c.year || '?'} · {bytes(c.size)} · {sure(c)} sure{c.by_id ? ' · ISBN matches' : ''}</div>
+            <div class="faint small">{c.format === 'pdf' ? 'PDF' : 'EPUB'} · {c.author || 'No author given'} · {c.lang || '?'} · {c.year || '?'} · {bytes(c.size)} · {sure(c)} sure{c.by_id ? ' · ISBN matches' : ''}</div>
           </div>
           <button class="btn small" onclick={() => choose(c.md5)}>Use this</button>
         </div>

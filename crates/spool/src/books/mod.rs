@@ -1,7 +1,9 @@
 //! Books. A book is found in Open Library's catalogue and added by its work; Spool looks
 //! for an EPUB of it in the index of Anna's Archive it keeps (see [`index`] and [`dump`]),
 //! downloads it with a member's key, checks it is the book and can be read, keeps a copy,
-//! and hands it to Florilegium, where books are read.
+//! and hands it to Florilegium, where books are read. A book with no EPUB is got as a PDF,
+//! when one is clearly the book: Spool keeps the PDF, and Florilegium makes an EPUB of it,
+//! reading a scan with its own OCR, and adds that without asking for a review.
 //!
 //! A book goes Wanted → Fetching → Sending → Have. When the index offers files that could
 //! be the book but none clearly is, it waits at Choose for someone to pick one. A file that
@@ -70,6 +72,14 @@ pub struct Candidate {
     pub score: f64,
     /// Matched by ISBN or Open Library edition as well as by name.
     pub by_id: bool,
+    /// "epub" or "pdf".
+    pub format: String,
+}
+
+impl Candidate {
+    pub fn is_pdf(&self) -> bool {
+        self.format == "pdf"
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,11 +139,13 @@ pub struct Book {
     pub candidates: Vec<Candidate>,
     pub chosen: Option<Candidate>,
     pub turned_down: Vec<TurnedDown>,
-    /// The EPUB kept in Spool's books folder, by its name there.
+    /// The EPUB, or the PDF, kept in Spool's books folder, by its name there.
     pub file: String,
     /// What the EPUB says it is.
     pub opened_title: String,
     pub receipt: Option<florilegium::Receipt>,
+    /// The job in which Florilegium is making an EPUB of the PDF sent it.
+    pub conversion: Option<String>,
     pub added_at: i64,
     pub updated_at: i64,
     pub searched_at: i64,
@@ -271,7 +283,7 @@ impl Books {
 }
 
 /// A name a file can have, from a book's author and title.
-fn file_name(b: &Book, md5: &str) -> String {
+fn file_name(b: &Book, md5: &str, ext: &str) -> String {
     let clean = |s: &str| s.chars().map(|c| if "/\\:*?\"<>|".contains(c) || c.is_control() { ' ' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
     // Bounded in bytes: a file name may be at most 255 of them, and a title in another
     // script takes three to a letter.
@@ -289,15 +301,26 @@ fn file_name(b: &Book, md5: &str) -> String {
     let title = bounded(clean(&b.title), 140);
     let short = &md5[..8.min(md5.len())];
     if author.is_empty() {
-        format!("{title} [{short}].epub")
+        format!("{title} [{short}].{ext}")
     } else {
-        format!("{author} - {title} [{short}].epub")
+        format!("{author} - {title} [{short}].{ext}")
     }
 }
 
-/// The file to take without asking: the likeliest, when it is sure enough and nothing that
-/// is another book comes close behind it.
+/// The file to take without asking: an EPUB that [`pick_of`] takes, or failing one, a PDF
+/// it takes. A PDF that is clearly the book is better than EPUBs that may not be.
 pub fn pick(c: &[Candidate]) -> Option<usize> {
+    let of = |pdf: bool| {
+        let idx: Vec<usize> = (0..c.len()).filter(|&i| c[i].is_pdf() == pdf).collect();
+        let these: Vec<Candidate> = idx.iter().map(|&i| c[i].clone()).collect();
+        pick_of(&these).map(|i| idx[i])
+    };
+    of(false).or_else(|| of(true))
+}
+
+/// The likeliest, when it is sure enough and nothing that is another book comes close
+/// behind it.
+fn pick_of(c: &[Candidate]) -> Option<usize> {
     let top = c.first()?;
     if top.by_id && top.score >= 0.8 {
         return Some(0);
@@ -468,6 +491,8 @@ impl App {
         }
         b.state = BookState::Sending;
         b.note.clear();
+        // A PDF is converted again: Florilegium keeps what it read of the pages, so it is quick.
+        b.conversion = None;
         self.db.save_book(&mut b)?;
         self.nudge_book(id);
         Ok(b)
@@ -522,6 +547,7 @@ impl App {
         let incoming = self.books.dir.join("incoming");
         let _ = std::fs::remove_file(incoming.join(format!("{md5}.part")));
         let _ = std::fs::remove_file(incoming.join(format!("{md5}.epub")));
+        let _ = std::fs::remove_file(incoming.join(format!("{md5}.pdf")));
     }
 
     /// Take a book as far as it can go now.
@@ -680,7 +706,8 @@ impl App {
         }
         let incoming = self.books.dir.join("incoming");
         std::fs::create_dir_all(&incoming)?;
-        let dest = incoming.join(format!("{}.epub", c.md5));
+        let ext = if c.is_pdf() { "pdf" } else { "epub" };
+        let dest = incoming.join(format!("{}.{ext}", c.md5));
         match annas::fetch(&self.http, &g.books.annas_key, &c.md5, &dest, 200_000_000).await {
             Ok(allowance) => {
                 if let Some(a) = allowance {
@@ -706,7 +733,17 @@ impl App {
             }
         }
         let path = dest.clone();
-        let opened = tokio::task::spawn_blocking(move || epub::open(&path)).await?;
+        let opened = if c.is_pdf() {
+            // A PDF says little reliably of what it is: the index's match is relied on.
+            let head = tokio::fs::read(&dest).await.map(|b| b.get(..1024).unwrap_or(&b).to_vec()).unwrap_or_default();
+            if memchr::memmem::find(&head, b"%PDF-").is_some() {
+                Ok(epub::Opened { title: c.title.clone(), ..Default::default() })
+            } else {
+                Err(anyhow::anyhow!("it is not a PDF"))
+            }
+        } else {
+            tokio::task::spawn_blocking(move || epub::open(&path)).await?
+        };
         let opened = match opened {
             Ok(o) => o,
             Err(e) => {
@@ -723,13 +760,14 @@ impl App {
         }
         let files = self.books.files_dir();
         std::fs::create_dir_all(&files)?;
-        let name = file_name(b, &c.md5);
+        let name = file_name(b, &c.md5, ext);
         std::fs::rename(&dest, files.join(&name))?;
         if !b.file.is_empty() && b.file != name {
             let _ = std::fs::remove_file(files.join(&b.file));
         }
         b.file = name;
         b.opened_title = opened.title;
+        b.conversion = None;
         b.state = BookState::Sending;
         b.note.clear();
         tracing::info!(book = %b.title, md5 = %c.md5, "downloaded a book");
@@ -745,6 +783,9 @@ impl App {
             return Ok(());
         }
         let path = self.books.files_dir().join(&b.file);
+        if b.file.ends_with(".pdf") {
+            return self.send_pdf(b, &g.books.florilegium_url, &g.books.florilegium_token, &path).await;
+        }
         match florilegium::send(&self.http, &g.books.florilegium_url, &g.books.florilegium_token, &path, &b.file).await {
             Ok(r) => {
                 tracing::info!(book = %b.title, status = %r.status, "sent a book to Florilegium");
@@ -754,6 +795,51 @@ impl App {
                 b.note.clear();
             }
             Err(e) => b.note = format!("{e:#}. It is sent again later."),
+        }
+        Ok(())
+    }
+
+    /// Hand a PDF to Florilegium to make an EPUB of and add, then follow the conversion: it
+    /// takes minutes for a book with text, longer for a scan. The PDF stays here as it came.
+    async fn send_pdf(&self, b: &mut Book, base: &str, token: &str, path: &std::path::Path) -> Result<()> {
+        let Some(job) = b.conversion.clone() else {
+            let author = b.authors.first().cloned().unwrap_or_default();
+            let client = format!("spool-book-{}-{}", b.id, now());
+            match florilegium::send_pdf(&self.http, base, token, path, &b.file, &client, &wanted_title(b), &author).await {
+                Ok(job) => {
+                    tracing::info!(book = %b.title, job = %job, "sent a PDF to Florilegium to convert");
+                    b.conversion = Some(job);
+                    b.note = "Florilegium is making an EPUB of the PDF.".into();
+                }
+                Err(e) => b.note = format!("{e:#}. It is sent again later."),
+            }
+            return Ok(());
+        };
+        let c = match florilegium::conversion(&self.http, base, token, &job).await {
+            Ok(Some(c)) => c,
+            Ok(None) => {
+                // Florilegium has no such job any more: sent again.
+                b.conversion = None;
+                b.note = "Florilegium lost the conversion; the PDF is sent again.".into();
+                return Ok(());
+            }
+            Err(e) => {
+                b.note = format!("{e:#}. It is asked again later.");
+                return Ok(());
+            }
+        };
+        match c.state.as_str() {
+            "completed" => {
+                tracing::info!(book = %b.title, "Florilegium made an EPUB of a PDF and added it");
+                let _ = self.db.add_history(None, "book_got", serde_json::json!({"book_id": b.id, "book": b.title, "authors": b.authors, "release": b.file, "florilegium": true, "converted": true}));
+                b.receipt = Some(florilegium::Receipt { at: now(), status: "converted".into(), shelf_id: c.shelf_id, book_id: c.book_id });
+                b.state = BookState::Have;
+                b.note.clear();
+            }
+            "failed" | "cancelled" => b.note = format!("Florilegium could not make an EPUB of the PDF: {}. Send it again to try once more.", c.error.as_deref().unwrap_or(&c.state)),
+            "review" => b.note = format!("Florilegium could not add the conversion by itself{}; it waits for a review there.", c.error.map(|e| format!(" ({e})")).unwrap_or_default()),
+            _ if c.total > 0 => b.note = format!("Florilegium is making an EPUB of the PDF: {} of {} pages.", c.done, c.total),
+            _ => b.note = "Florilegium is making an EPUB of the PDF.".into(),
         }
         Ok(())
     }
@@ -792,6 +878,14 @@ mod tests {
         assert_eq!(pick(&[cand("a", "Viridian Gate Online: Insurrection", "J A Hunter", 0.93, false), cand("b", "Viridian Gate Online: Vindication", "J A Hunter", 0.9, false)]), None, "another subtitle may be another book");
         assert_eq!(pick(&[cand("a", "Miss Marple", "Agatha Christie", 0.9, false), cand("b", "Miss Marple Omnibus", "Agatha Christie", 0.86, false)]), None);
         assert_eq!(pick(&[cand("a", "Dune", "Frank Herbert", 0.8, false)]), None);
+    }
+
+    #[test]
+    fn a_pdf_is_taken_only_when_no_epub_will_do() {
+        let pdf = |md5: &str, title: &str, score: f64, by_id: bool| Candidate { format: "pdf".into(), ..cand(md5, title, "Joscelyn Godwin", score, by_id) };
+        assert_eq!(pick(&[pdf("p", "Arktos", 0.98, true), cand("e", "Arktos", "Joscelyn Godwin", 0.95, false)]), Some(1), "an EPUB of the book comes first");
+        assert_eq!(pick(&[cand("e", "The Forbidden Book", "Joscelyn Godwin", 0.81, false), pdf("p", "Arktos", 0.98, true)]), Some(1), "a PDF that is the book beats EPUBs that may not be");
+        assert_eq!(pick(&[pdf("p", "Arktos", 0.7, false)]), None, "a PDF is asked about as an EPUB would be");
     }
 
     #[test]

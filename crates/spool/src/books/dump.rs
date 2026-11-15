@@ -2,7 +2,9 @@
 //! behind a check for a browser, so books are not looked up there: every month or two it
 //! shares a snapshot of its own search index as a torrent, and Spool reads the part of it
 //! that describes files (about 170 GB across a dozen compressed files) one file at a time,
-//! keeping only the EPUBs in the languages read here, and deleting each file once read.
+//! keeping only the EPUBs, and the PDFs of books, in the languages read here, and deleting
+//! each file once read. A PDF is taken only when a book has no EPUB: Florilegium makes one
+//! of it.
 
 use super::index::{Builder, Record};
 use super::text::isbn13;
@@ -188,6 +190,7 @@ struct Unified {
     title_best: Option<String>,
     author_best: Option<String>,
     extension_best: Option<String>,
+    content_type_best: Option<String>,
     filesize_best: Option<serde_json::Value>,
     year_best: Option<serde_json::Value>,
     most_likely_language_codes: Vec<String>,
@@ -211,21 +214,25 @@ fn number(v: &Option<serde_json::Value>) -> u64 {
     }
 }
 
-/// The EPUBs in one of the snapshot's files, read line by line: one JSON document a line.
-/// Gives how many lines were read.
+/// What is not a book, though it may be a PDF: papers, magazines, standards, scores, comics.
+const NOT_BOOKS: &[&str] = &["journal_article", "magazine", "standards_document", "musical_score", "book_comic"];
+
+/// The EPUBs and the PDFs of books in one of the snapshot's files, read line by line: one
+/// JSON document a line. Gives how many lines were read.
 pub fn read_records(input: impl Read, languages: &[String], mut each: impl FnMut(Record) -> Result<()>) -> Result<u64> {
     let mut r = std::io::BufReader::with_capacity(1 << 20, input);
     let mut line = Vec::with_capacity(1 << 16);
     let mut n = 0;
     let epub = memchr::memmem::Finder::new(b"\"epub\"");
+    let pdf = memchr::memmem::Finder::new(b"\"pdf\"");
     loop {
         line.clear();
         if r.read_until(b'\n', &mut line)? == 0 {
             break;
         }
         n += 1;
-        // Most files are not EPUBs; those are passed over before being read.
-        if epub.find(&line).is_none() {
+        // Most files are neither; those are passed over before being read.
+        if epub.find(&line).is_none() && pdf.find(&line).is_none() {
             continue;
         }
         let parsed: Line = match serde_json::from_slice(&line) {
@@ -236,9 +243,11 @@ pub fn read_records(input: impl Read, languages: &[String], mut each: impl FnMut
             },
         };
         let u = parsed.source.file_unified_data;
-        if u.extension_best.as_deref() != Some("epub") {
-            continue;
-        }
+        let format = match u.extension_best.as_deref() {
+            Some("epub") => "epub",
+            Some("pdf") if !u.content_type_best.as_deref().is_some_and(|t| NOT_BOOKS.contains(&t)) => "pdf",
+            _ => continue,
+        };
         let Some(md5) = u.identifiers_unified.md5.first().filter(|m| m.len() == 32).cloned() else { continue };
         let lang = u.most_likely_language_codes.first().or(u.language_codes.first()).cloned().unwrap_or_default();
         if !lang.is_empty() && !languages.is_empty() && !languages.contains(&lang) {
@@ -251,7 +260,7 @@ pub fn read_records(input: impl Read, languages: &[String], mut each: impl FnMut
         let mut isbns: Vec<String> = u.identifiers_unified.isbn13.iter().filter_map(|i| isbn13(i)).collect();
         isbns.sort();
         isbns.dedup();
-        each(Record { md5, title, author: u.author_best.unwrap_or_default(), lang, size: number(&u.filesize_best), year: number(&u.year_best), isbns, ols: u.identifiers_unified.ol })?;
+        each(Record { md5, title, author: u.author_best.unwrap_or_default(), lang, size: number(&u.filesize_best), year: number(&u.year_best), isbns, ols: u.identifiers_unified.ol, format: format.into() })?;
     }
     Ok(n)
 }
@@ -445,11 +454,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn epubs_in_the_languages_read_are_kept() {
+    fn epubs_and_book_pdfs_in_the_languages_read_are_kept() {
         let lines = [
             r#"{"_id":"md5:1","_source":{"file_unified_data":{"title_best":"The Left Hand of Darkness","author_best":"Le Guin, Ursula K.","extension_best":"epub","filesize_best":523000,"year_best":"1969","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["0123456789abcdef0123456789abcdef"],"isbn13":["9780441478125"],"ol":["OL24215271M"]}}}}"#,
-            r#"{"_id":"md5:2","_source":{"file_unified_data":{"title_best":"A paper","extension_best":"pdf","identifiers_unified":{"md5":["11111111111111111111111111111111"]}}}}"#,
+            r#"{"_id":"md5:2","_source":{"file_unified_data":{"title_best":"A paper","extension_best":"pdf","content_type_best":"journal_article","identifiers_unified":{"md5":["11111111111111111111111111111111"]}}}}"#,
             r#"{"_id":"md5:3","_source":{"file_unified_data":{"title_best":"Le Petit Prince","extension_best":"epub","most_likely_language_codes":["fr"],"identifiers_unified":{"md5":["22222222222222222222222222222222"]}}}}"#,
+            r#"{"_id":"md5:4","_source":{"file_unified_data":{"title_best":"Arktos","author_best":"Godwin, Joscelyn","extension_best":"pdf","content_type_best":"book_nonfiction","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["33333333333333333333333333333333"]}}}}"#,
+            r#"{"_id":"md5:5","_source":{"file_unified_data":{"title_best":"A scan","extension_best":"djvu","identifiers_unified":{"md5":["44444444444444444444444444444444"]}}}}"#,
             "not json at all \"epub\"",
         ]
         .join("\n");
@@ -459,8 +470,9 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(n, 4);
-        assert_eq!(got.len(), 1);
+        assert_eq!(n, 6);
+        assert_eq!(got.len(), 2);
+        assert_eq!((got[0].format.as_str(), got[1].format.as_str(), got[1].title.as_str()), ("epub", "pdf", "Arktos"));
         assert_eq!(got[0].isbns, vec!["9780441478125"]);
         assert_eq!(got[0].size, 523000);
         assert_eq!(got[0].year, 1969);

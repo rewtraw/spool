@@ -81,10 +81,11 @@ pub(super) async fn book_file(State(app): State<App>, Path(id): Path<i64>, req: 
     }
     let head = req.method() == axum::http::Method::HEAD;
     let mut response = crate::serve::send_file(&app.books.files_dir().join(&b.file), req.headers(), head).await;
-    if let Ok(v) = "application/epub+zip".parse() {
+    let ext = if b.file.ends_with(".pdf") { "pdf" } else { "epub" };
+    if let Ok(v) = (if ext == "pdf" { "application/pdf" } else { "application/epub+zip" }).parse() {
         response.headers_mut().insert(header::CONTENT_TYPE, v);
     }
-    clips::to_save(&mut response, b.file.rsplit_once(" [").map(|(n, _)| format!("{n}.epub")).as_deref().unwrap_or(&b.file));
+    clips::to_save(&mut response, b.file.rsplit_once(" [").map(|(n, _)| format!("{n}.{ext}")).as_deref().unwrap_or(&b.file));
     response
 }
 

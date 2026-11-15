@@ -176,6 +176,7 @@ export interface Candidate {
   year: number;
   score: number;
   by_id: boolean;
+  format?: string;
 }
 
 export interface Book {
