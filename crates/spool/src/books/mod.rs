@@ -354,6 +354,13 @@ pub fn wanted_title(b: &Book) -> String {
 }
 
 /// Whether what an EPUB says it is agrees with the book it was got for.
+/// Whether a file plainly is this book: matched by ISBN, or with every word of the book's name
+/// in its own. Sharing a few, as "Western Esotericism: A Guide for the Perplexed" does with
+/// "Dictionary of Gnosis & Western Esotericism", is not enough.
+fn names_this_book(b: &Book, c: &Candidate) -> bool {
+    c.by_id || text::cover(&text::core_title(&b.title), &text::words(&c.title).join(" ")) >= 0.9
+}
+
 pub fn is_the_book(b: &Book, o: &epub::Opened) -> bool {
     if !o.isbns.is_empty() && o.isbns.iter().any(|i| b.isbns.contains(i)) {
         return true;
@@ -501,7 +508,7 @@ impl App {
     /// and looking it up by name and author finds another work. A translation, named in its own
     /// language, is found to be the same work.
     async fn other_work(&self, b: &Book, c: &Candidate) -> Option<String> {
-        if c.by_id || text::title_alike(&wanted_title(b), &c.title) >= 0.75 {
+        if names_this_book(b, c) {
             return None;
         }
         // "Title (Series Book 3)" is looked up as "Title".
@@ -940,6 +947,18 @@ mod tests {
 
     fn cand(md5: &str, title: &str, author: &str, score: f64, by_id: bool) -> Candidate {
         Candidate { md5: md5.into(), title: title.into(), author: author.into(), score, by_id, ..Default::default() }
+    }
+
+    #[test]
+    fn a_file_names_the_book_only_with_all_its_words() {
+        let book = |title: &str| Book { title: title.into(), ..Default::default() };
+        let dictionary = book("Dictionary of Gnosis & Western Esotericism");
+        assert!(!names_this_book(&dictionary, &cand("a", "Western Esotericism: a Guide for the Perplexed", "Hanegraaff", 0.9, false)));
+        assert!(names_this_book(&book("Faust"), &cand("b", "Faust, Part One", "Goethe", 0.9, false)));
+        assert!(names_this_book(&book("Uri"), &cand("c", "Uri (Bantam edition)", "Puharich", 0.9, false)));
+        // A translation is not known by its name; Open Library is asked.
+        assert!(!names_this_book(&book("Die Leiden des jungen Werthers"), &cand("d", "The Sorrows of Young Werther", "Goethe", 0.9, false)));
+        assert!(names_this_book(&dictionary, &cand("e", "Anything", "", 0.5, true)));
     }
 
     #[test]
