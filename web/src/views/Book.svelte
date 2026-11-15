@@ -106,7 +106,7 @@
         {#if !b.epub}<button class="btn small" onclick={wantEpub}>Want the EPUB</button>{/if}
         {#if b.epub && (b.state === 'wanted' || b.state === 'choose')}<button class="btn small" onclick={retry}>Look again</button>{/if}
         {#if b.file}<a class="btn small" href="/api/books/{b.id}/file">Download {b.file.endsWith('.pdf') ? 'PDF' : 'EPUB'}</a>{/if}
-        {#if b.file && florilegium && b.state !== 'sending'}<button class="btn small" onclick={resend}>{b.receipt ? 'Send again' : 'Send to Florilegium'}</button>{/if}
+        {#if b.file && florilegium && (b.state !== 'sending' || b.conversion)}<button class="btn small" onclick={resend}>{b.receipt ? 'Send again' : 'Send to Florilegium'}</button>{/if}
         {#if b.epub && b.state !== 'choose'}<button class="btn small ghost" onclick={() => (showFiles = !showFiles)}>{showFiles ? 'Hide files' : 'Files'}</button>{/if}
         <button class="btn small ghost danger" onclick={remove}>Remove</button>
       </div>

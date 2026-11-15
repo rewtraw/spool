@@ -146,6 +146,9 @@ pub struct Book {
     pub receipt: Option<florilegium::Receipt>,
     /// The job in which Florilegium is making an EPUB of the PDF sent it.
     pub conversion: Option<String>,
+    /// How many times it was asked to be sent again: names each upload of a PDF, so an upload
+    /// whose answer was lost is the same job when retried, and a resend is a new one.
+    pub sends: u32,
     pub added_at: i64,
     pub updated_at: i64,
     pub searched_at: i64,
@@ -450,6 +453,9 @@ impl App {
         if let (Some(reading), false) = (b.florilegium_want, b.state == BookState::Have) {
             self.florilegium_let_go(reading);
         }
+        if b.state != BookState::Have {
+            self.cancel_conversion(b.conversion.clone());
+        }
         self.db.delete_book(id)
     }
 
@@ -492,7 +498,11 @@ impl App {
         b.state = BookState::Sending;
         b.note.clear();
         // A PDF is converted again: Florilegium keeps what it read of the pages, so it is quick.
+        if b.state != BookState::Have {
+            self.cancel_conversion(b.conversion.take());
+        }
         b.conversion = None;
+        b.sends += 1;
         self.db.save_book(&mut b)?;
         self.nudge_book(id);
         Ok(b)
@@ -733,14 +743,22 @@ impl App {
             }
         }
         let path = dest.clone();
-        let opened = if c.is_pdf() {
+        // What it is, by what it begins with: a file chosen by its MD5 alone may be either.
+        let head = {
+            use tokio::io::AsyncReadExt;
+            let mut buf = vec![0u8; 1024];
+            let n = match tokio::fs::File::open(&dest).await {
+                Ok(mut f) => f.read(&mut buf).await.unwrap_or(0),
+                Err(_) => 0,
+            };
+            buf.truncate(n);
+            buf
+        };
+        let pdf = memchr::memmem::find(&head, b"%PDF-").is_some();
+        let ext = if pdf { "pdf" } else { "epub" };
+        let opened = if pdf {
             // A PDF says little reliably of what it is: the index's match is relied on.
-            let head = tokio::fs::read(&dest).await.map(|b| b.get(..1024).unwrap_or(&b).to_vec()).unwrap_or_default();
-            if memchr::memmem::find(&head, b"%PDF-").is_some() {
-                Ok(epub::Opened { title: c.title.clone(), ..Default::default() })
-            } else {
-                Err(anyhow::anyhow!("it is not a PDF"))
-            }
+            Ok(epub::Opened { title: c.title.clone(), ..Default::default() })
         } else {
             tokio::task::spawn_blocking(move || epub::open(&path)).await?
         };
@@ -767,7 +785,7 @@ impl App {
         }
         b.file = name;
         b.opened_title = opened.title;
-        b.conversion = None;
+        self.cancel_conversion(b.conversion.take());
         b.state = BookState::Sending;
         b.note.clear();
         tracing::info!(book = %b.title, md5 = %c.md5, "downloaded a book");
@@ -799,12 +817,29 @@ impl App {
         Ok(())
     }
 
+    /// Stop a conversion no longer wanted, so it does not add a book after all. One that has
+    /// finished, or is being added, is left as it is.
+    fn cancel_conversion(&self, job: Option<String>) {
+        let Some(job) = job else { return };
+        let g = self.settings.general();
+        if g.books.florilegium_url.is_empty() {
+            return;
+        }
+        let http = self.http.clone();
+        tokio::spawn(async move {
+            if let Err(e) = florilegium::cancel(&http, &g.books.florilegium_url, &g.books.florilegium_token, &job).await {
+                tracing::info!(job = %job, error = %e, "a conversion in Florilegium was not stopped");
+            }
+        });
+    }
+
     /// Hand a PDF to Florilegium to make an EPUB of and add, then follow the conversion: it
     /// takes minutes for a book with text, longer for a scan. The PDF stays here as it came.
     async fn send_pdf(&self, b: &mut Book, base: &str, token: &str, path: &std::path::Path) -> Result<()> {
         let Some(job) = b.conversion.clone() else {
             let author = b.authors.first().cloned().unwrap_or_default();
-            let client = format!("spool-book-{}-{}", b.id, now());
+            let md5 = b.chosen.as_ref().map(|c| c.md5.as_str()).unwrap_or("");
+            let client = format!("spool-book-{}-{md5}-{}", b.id, b.sends);
             match florilegium::send_pdf(&self.http, base, token, path, &b.file, &client, &wanted_title(b), &author).await {
                 Ok(job) => {
                     tracing::info!(book = %b.title, job = %job, "sent a PDF to Florilegium to convert");

@@ -192,6 +192,7 @@ export interface Book {
   state: 'wanted' | 'choose' | 'fetching' | 'sending' | 'have';
   note: string;
   candidates: Candidate[];
+  conversion?: string | null;
   chosen: Candidate | null;
   turned_down: { md5: string; why: string; at: number }[];
   file: string;

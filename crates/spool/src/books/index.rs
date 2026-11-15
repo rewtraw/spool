@@ -246,7 +246,13 @@ impl Shelf {
         }
         let mut out: Vec<Candidate> = found.into_values().collect();
         out.sort_by(|a, b| b.score.total_cmp(&a.score).then(b.by_id.cmp(&a.by_id)).then(a.is_pdf().cmp(&b.is_pdf())).then(b.size.cmp(&a.size)));
-        out.truncate(15);
+        // The best of each kind, so PDFs that score higher cannot crowd out the EPUB taken first.
+        let (mut epubs, mut pdfs) = (0, 0);
+        out.retain(|c| {
+            let n = if c.is_pdf() { &mut pdfs } else { &mut epubs };
+            *n += 1;
+            *n <= 15
+        });
         Ok(out)
     }
 }

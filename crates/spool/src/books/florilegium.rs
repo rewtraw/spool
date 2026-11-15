@@ -102,6 +102,20 @@ pub struct Conversion {
     pub book_id: Option<i64>,
 }
 
+/// Stop a conversion.
+pub async fn cancel(http: &reqwest::Client, base: &str, token: &str, job: &str) -> Result<()> {
+    let mut req = http.post(format!("{}/pdf-imports/{job}/cancel", base.trim_end_matches('/'))).json(&serde_json::json!({})).timeout(std::time::Duration::from_secs(15));
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    let status = req.send().await.map_err(|e| anyhow::anyhow!("Florilegium could not be reached: {}", e.without_url()))?.status();
+    // Not found, or finished already (409): nothing to stop.
+    if !status.is_success() && status != reqwest::StatusCode::NOT_FOUND && status != reqwest::StatusCode::CONFLICT {
+        bail!("Florilegium answered {status}");
+    }
+    Ok(())
+}
+
 /// A conversion, or None when Florilegium has no such job.
 pub async fn conversion(http: &reqwest::Client, base: &str, token: &str, job: &str) -> Result<Option<Conversion>> {
     let mut req = http.get(format!("{}/pdf-imports/{job}", base.trim_end_matches('/'))).timeout(std::time::Duration::from_secs(15));
