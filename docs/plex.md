@@ -4,23 +4,23 @@ Spool can [serve a television by itself](players.md), and it also works beside a
 
 ## Connecting
 
-Under Settings, General, Connections, enter Plex's address, such as `http://127.0.0.1:32400`, and a Plex token. `spool migrate` brings the token over from Radarr if it had one.
+Under Settings, Connections, Plex, enter Plex's address, such as `http://127.0.0.1:32400`, and a Plex token. `spool migrate` brings the token over from Radarr if it had one.
 
 ## Turning it off
 
-**Use Plex**, under Settings, General, turns all of this off without forgetting the address and token. Off, Spool asks nothing of Plex and shows nothing from it: no refresh when a folder changes, no hourly read, no Open in Plex links, no Plex tab. Turn it back on and it carries on from where it was. Plex itself is not touched either way.
+**Use Plex**, in the same place, turns all of this off without forgetting the address and token. Off, Spool asks nothing of Plex and shows nothing from it: no refresh when a folder changes, no hourly read, no Open in Plex links, no Plex tab. Turn it back on and it carries on from where it was. Plex itself is not touched either way.
 
 ## What Spool does with Plex
 
 - **Matches titles.** Once an hour Spool reads Plex's films and shows and matches them to its own titles. A matched title has an Open in Plex link on its page.
 - **Asks for a rescan after an import.** When files change, Spool asks Plex to rescan the folders concerned, not the whole library, so a new film appears in Plex without waiting for its own schedule.
-- **Knows what has been watched.** Settings, Disk space shows, for the largest titles, whether Plex says they were watched and when. That is what makes "delete what I have watched" a safe thing to ask for.
+- **Knows what has been watched.** Activity, Space shows, for the largest titles, whether Plex says they were watched and when. That is what makes "delete what I have watched" a safe thing to ask for.
 
 Spool changes nothing in Plex beyond asking for a rescan, unless you turn on **Write Spool's collections into Plex** under the same settings. It then adds a collection tag to each title that is part of one of [Spool's collections](collections.md), beside the tags the title already has.
 
-## The Plex tab
+## Comparing the two
 
-Settings, Plex compares the two libraries.
+Activity, Upkeep compares the two libraries.
 
 | List | Meaning | What you can do |
 | --- | --- | --- |

@@ -10,8 +10,9 @@
 
   // What is typed into the secrets, until saved. A secret left blank is kept; one cleared is
   // sent as null.
-  let typed = $state<Record<string, string>>({});
-  let cleared = $state<Record<string, boolean>>({});
+  const SECRETS = ['tmdb_api_key', 'plex_token', 'opensubtitles_api_key', 'opensubtitles_password', 'books.annas_key', 'books.florilegium_token'];
+  let typed = $state<Record<string, string>>(Object.fromEntries(SECRETS.map((k) => [k, ''])));
+  let cleared = $state<Record<string, boolean>>(Object.fromEntries(SECRETS.map((k) => [k, false])));
   const secret = (k: string) => (cleared[k] ? null : typed[k] || undefined);
   const set = (k: string) => !!conf.g?.secrets?.[k];
   function forget(keys: string[]) {

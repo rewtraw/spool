@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a class="on" aria-current="page" href="api.html">The HTTP API</a><a class="sub" href="#signing-in">Signing in</a><a class="sub" href="#status">Status</a><a class="sub" href="#before-restarting">Before restarting</a><a class="sub" href="#asking-what-changed">Asking what changed</a><a class="sub" href="#following-events">Following events</a><a class="sub" href="#doing-things">Doing things</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="videos.html">Videos and lists</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a class="on" aria-current="page" href="api.html">The HTTP API</a><a class="sub" href="#signing-in">Signing in</a><a class="sub" href="#status">Status</a><a class="sub" href="#before-restarting">Before restarting</a><a class="sub" href="#asking-what-changed">Asking what changed</a><a class="sub" href="#following-events">Following events</a><a class="sub" href="#doing-things">Doing things</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -114,11 +114,11 @@
 <p>The web app talks to Spool over a JSON API under <code>/api</code>, and other programs can use it too. It is the app&#39;s own API: it is not versioned, and it changes when the app does. The parts described here are the ones meant for other programs.</p>
 <p>For an AI assistant, use the <a href="assistants.html">MCP endpoint</a> instead.</p>
 <h2 id="signing-in"><a href="#signing-in">Signing in</a></h2>
-<p>While nobody under Settings, Players, People has a password, the API is open to anyone who can reach the address, and Status warns of it.</p>
+<p>While nobody under Settings, People has a password, the API is open to anyone who can reach the address, and Status warns of it.</p>
 <p>Once anyone has one, send Spool&#39;s key with each request:</p>
 <pre><code class="language-sh">curl -H &quot;X-Api-Key: &lt;key&gt;&quot; http://localhost:7979/api/status
 </code></pre>
-<p>The key is the one in the command that Settings, General, AI access copies. A program with the key may do anything, and is nobody in particular, so it has nothing watched of its own.</p>
+<p>The key is the one in the command that Settings, Connections, AI access copies. A program with the key may do anything, and is nobody in particular, so it has nothing watched of its own.</p>
 <p>The web app signs in as a person: <code>POST /api/login</code> with <code>{&quot;name&quot;: ..., &quot;password&quot;: ...}</code> sets a cookie for that browser, and <code>POST /api/logout</code> clears it. <code>GET /api/session</code> says whether sign-in is asked for (<code>required</code>), who is signed in (<code>me</code>) and whether they run Spool (<code>manages</code>). While the app is open, it signs the browser in as the first person who runs Spool, so the browser stays theirs once passwords are given.</p>
 <p>Someone who does not run Spool may read the library (<code>GET</code> of <code>/api/titles</code>, a title, <code>/api/collections</code> and artwork), keep what they have watched, and sign out. Anything else gets <code>403</code>. A title&#39;s page leaves out, for them, the releases weighed, what was downloaded and from where.</p>
 <p>Five wrong passwords in a row from one address shut sign-in to that address for a minute. Other addresses can still sign in, and a right password doesn&#39;t make up for the wrong guesses before it.</p>
@@ -225,7 +225,7 @@
 </tr>
 <tr>
 <td><code>POST /api/tasks/{name}</code></td>
-<td>Run a scheduled task now: <code>rss</code>, <code>backlog</code>, <code>refresh</code>, <code>scan</code>, <code>housekeeping</code>, <code>plex</code> or <code>subtitles</code>.</td>
+<td>Run a scheduled task now: <code>rss</code>, <code>backlog</code>, <code>refresh</code>, <code>scan</code>, <code>housekeeping</code>, <code>plex</code>, <code>anime</code>, <code>subtitles</code>, <code>music</code>, <code>music_wants</code>, <code>books</code>, <code>book_index</code>, <code>videos</code> or <code>lists</code>.</td>
 </tr>
 <tr>
 <td><code>POST /api/titles/{id}/search</code></td>

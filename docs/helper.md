@@ -80,7 +80,7 @@ Spool reads what was downloaded before it files it: which file is the film, how 
 
 ### 3. Tell Spool about the helper
 
-Under Settings, Library, choose **Link another Spool**:
+Under Settings, Storage, choose **Link another Spool**:
 
 | Field | What to put |
 | --- | --- |
@@ -117,7 +117,7 @@ Run it as the apps user (568), which is the user a share from TrueNAS usually ma
 
 ## Being found
 
-A helper says on the home network that it is there, every few seconds, and Spool lists the ones it hears under Settings, Library, as **Found on this network**, each with its address and whether it is waiting to be linked. **Link it** starts a link with the name and address filled in; the code or the key is still yours to give.
+A helper says on the home network that it is there, every few seconds, and Spool lists the ones it hears under Settings, Storage, as **Found on this network**, each with its address and whether it is waiting to be linked. **Link it** starts a link with the name and address filled in; the code or the key is still yours to give.
 
 - **Hearing of one links nothing.** Anything on a network can say it is a Spool. What is heard is an address to try, and what shows that the machine at it is yours is that it holds the code it gave you, or the key you gave it. With a code, a machine that is not the one you meant learns nothing from the attempt. A key, typed in, is sent to whatever is at the address, so with something found prefer its code.
 - **What it says** is its name, its port and whether it is waiting to be linked. No code, no key, no folders, nothing of the library. It says so to a group address of Spool's own (`239.255.77.79`, port 7977), which stays on the network it is said on, and not through Bonjour: on a NAS that belongs to a service that shares it with nobody.
@@ -131,7 +131,7 @@ A helper says on the home network that it is there, every few seconds, and Spool
 A helper can be started without a key. It then does nothing for anybody until it has been linked, and says in its log how:
 
 ```
-this helper is not linked yet: in Spool, under Settings, Library, link another Spool and type this code  code="4821 0937"
+this helper is not linked yet: in Spool, under Settings, Storage, link another Spool and type this code  code="4821 0937"
 ```
 
 Type that code into Spool, beside the helper's address, and choose **Link**. The two agree a key between themselves, the helper writes it down, and from then on it is linked as if the key had been typed into both. The code is never sent, and neither is the key: each side sends the other one message made from the code, and only two that hold the same code come out with the same key.
@@ -153,7 +153,7 @@ A film on the NAS is played, without a helper, by way of Spool's machine: the NA
 
 The ticket names that one file, runs out after twelve hours, and is signed with a key made from the one Spool and the helper share. The helper hands a file to whoever comes with a ticket of Spool's and to nobody else; it has no sign-in and nothing to browse. It opens the file by going from the shared folder one name at a time and follows no link on the way, so a link placed in a shared folder leads nowhere. A library whose films are themselves links to somewhere else cannot be played from the helper; leave its players off the list below, and Spool goes on sending those films itself.
 
-**Which players are sent.** None, until you say. Under Settings, Library, each linked machine has **Send players on the same network straight to it**. On, a player on the same network as the machine is sent to it; every other player, and every player while it is off, gets the film through Spool as before. The same network means the same stretch of addresses as the one the machine answers Spool from: the first three numbers of an address such as `192.168.1.20`.
+**Which players are sent.** None, until you say. Under Settings, Storage, each linked machine has **Send players on the same network straight to it**. On, a player on the same network as the machine is sent to it; every other player, and every player while it is off, gets the film through Spool as before. The same network means the same stretch of addresses as the one the machine answers Spool from: the first three numbers of an address such as `192.168.1.20`.
 
 **A player that reaches Spool over Tailscale** is sent to the machine over Tailscale too, at home as well as away. A player at home may not be able to reach home addresses at all, as when its Tailscale goes out through an exit node without local network access. At home, Tailscale goes straight across the home network anyway. If the linked machine is not on your Tailscale, a player on Tailscale gets the film through Spool.
 

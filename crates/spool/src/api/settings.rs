@@ -100,6 +100,16 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
     if old.compact.auto && !g.compact.auto {
         app.drop_automatic_compacts();
     }
+    // A main folder given inside a folder that is there is made, so one folder chosen for the
+    // whole library is enough. One whose parent is not there is left: its disk may be away.
+    for (new, before) in [(&g.movie_root, &old.movie_root), (&g.series_root, &old.series_root), (&g.music_root, &old.music_root), (&g.audiobook_root, &old.audiobook_root), (&g.video_root, &old.video_root)] {
+        let dir = std::path::Path::new(new.as_str());
+        if new != before && !new.is_empty() && !dir.exists() && dir.parent().is_some_and(|p| p.is_dir()) {
+            if let Err(e) = std::fs::create_dir(dir) {
+                tracing::warn!(folder = %new, error = %e, "a library folder could not be made");
+            }
+        }
+    }
     let moved = g.locations != old.locations || g.movie_root != old.movie_root || g.series_root != old.series_root || g.music_root != old.music_root || g.audiobook_root != old.audiobook_root || g.video_root != old.video_root || g.required_volume != old.required_volume;
     if moved {
         // Look at what was just described, off to one side: a share that is slow to answer
@@ -337,4 +347,26 @@ pub(super) async fn run_task(State(app): State<App>, Path(name): Path<String>) -
         app2.run_task(&name).await;
     });
     Ok(Json(json!({"started": true})))
+}
+
+/// What Spool still needs before it can do its work, each with where to give it. Optional
+/// ones are worth doing but stop nothing.
+pub(super) async fn setup(State(app): State<App>) -> R<Value> {
+    let g = app.settings.general();
+    let main = app.placement().0.into_iter().find(|(l, _)| l.id == 0);
+    let has_folders = !g.movie_root.is_empty() || !g.series_root.is_empty();
+    let reachable = main.as_ref().is_some_and(|(_, on)| *on);
+    let providers = app.settings.servers().iter().any(|s| s.enabled && !s.host.trim().is_empty());
+    let indexers = app.db.indexers()?.iter().any(|i| !i.url.trim().is_empty() && (i.enable_rss || i.enable_search));
+    let signs_in = app.db.accounts()?.iter().any(|a| a.enabled && !a.password.is_empty());
+    let item = |id: &str, label: &str, done: bool, detail: &str, href: &str, optional: bool| json!({"id": id, "label": label, "done": done, "detail": detail, "href": href, "optional": optional});
+    let items = vec![
+        item("library", "Where the library is", has_folders && reachable, if !has_folders { "A folder for films and one for series, or one folder to hold both." } else if !reachable { "Its folders cannot be reached: is the disk there?" } else { "" }, "#/settings/storage", false),
+        item("usenet", "A Usenet provider", providers, "Its address and sign-in. Without one nothing can be downloaded.", "#/settings/connections", false),
+        item("indexer", "An indexer", indexers, "Its address and key. Without one no releases are found.", "#/settings/connections", false),
+        item("tmdb", "A TMDB key", !g.tmdb_api_key.is_empty(), "Free from themoviedb.org. Films are looked up with it; series need none.", "#/settings/connections", false),
+        item("person", "Someone to sign in as", signs_in, "A name and password, so nobody else who can reach Spool can change it.", "#/settings/people", true),
+    ];
+    let ready = items.iter().all(|i| i["done"] == true || i["optional"] == true);
+    Ok(Json(json!({"ready": ready, "items": items})))
 }

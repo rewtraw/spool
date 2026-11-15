@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a class="on" aria-current="page" href="getting-started.html">Getting started</a><a class="sub" href="#install-it">Install it</a><a class="sub" href="#the-first-settings">The first settings</a><a class="sub" href="#shadow-mode-then-active">Shadow mode, then active</a><a class="sub" href="#coming-from-radarr-sonarr-and-sabnzbd">Coming from Radarr, Sonarr and SABnzbd</a><a class="sub" href="#running-it-as-a-service">Running it as a service</a><a class="sub" href="#the-command-line">The command line</a><a class="sub" href="#where-spool-keeps-its-data">Where Spool keeps its data</a><a class="sub" href="#next">Next</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a class="on" aria-current="page" href="getting-started.html">Getting started</a><a class="sub" href="#install-it">Install it</a><a class="sub" href="#the-first-settings">The first settings</a><a class="sub" href="#shadow-mode-then-active">Shadow mode, then active</a><a class="sub" href="#coming-from-radarr-sonarr-and-sabnzbd">Coming from Radarr, Sonarr and SABnzbd</a><a class="sub" href="#running-it-as-a-service">Running it as a service</a><a class="sub" href="#the-command-line">The command line</a><a class="sub" href="#where-spool-keeps-its-data">Where Spool keeps its data</a><a class="sub" href="#next">Next</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="videos.html">Videos and lists</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -134,17 +134,15 @@ cargo run --release -p spool -- serve            # http://localhost:7979
 </code></pre>
 <p>Debian&#39;s and Ubuntu&#39;s <code>7zip</code> cannot open RAR archives. Spool unpacks the common uncompressed kind itself, so most posts are unaffected. For the rest, install 7-Zip from <a href="https://github.com/ip7z/7zip/releases">its own releases</a>, as the container image does.</p>
 <h2 id="the-first-settings"><a href="#the-first-settings">The first settings</a></h2>
-<p>Open the web app and go to Settings. Three tabs need filling in before Spool can do anything.</p>
+<p>Open the web app. Until Spool has what it needs, Home and Settings show <strong>Getting Spool ready</strong>, a short list in which each item links to where it is given:</p>
 <ol>
-<li><strong>General.</strong><ul>
-<li><em>Folders</em>: where movies and series live and where to download to. If the library is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.</li>
-<li><em>Connections</em>: a free <a href="https://www.themoviedb.org/settings/api">TMDB API key</a>, which Spool needs to look up movies. If anyone else can reach the address, add yourself under <em>Players</em>, People, with a password; from then on the app asks who you are.</li>
-</ul>
-</li>
-<li><strong>Usenet.</strong> One or more providers. Priority 0 is asked first; higher numbers only fill in missing articles. The Test button signs in and reports what it found.</li>
-<li><strong>Indexers.</strong> One or more Newznab indexers, each with its address and API key.</li>
+<li><strong>Where the library is</strong>, under Settings, Storage. For a new library, give one folder and Spool makes Movies, TV Shows, Music, Audiobooks, Videos and Downloads inside it. For a library you already have, give its folders instead. If it is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.</li>
+<li><strong>A Usenet provider</strong>, under Settings, Connections: its address and sign-in. Test signs in and says what it found.</li>
+<li><strong>An indexer</strong>, in the same place: a Newznab indexer&#39;s address and API key.</li>
+<li><strong>A TMDB key</strong>, in the same place, free from <a href="https://www.themoviedb.org/settings/api">themoviedb.org</a>. Films are looked up with it; series come from TVmaze, which needs none.</li>
+<li><strong>Someone to sign in as</strong>, under Settings, People, optional: once anyone has a password the app asks who you are, which matters as soon as anyone else can reach the address.</li>
 </ol>
-<p>The other tabs can wait:</p>
+<p>Everything else has a sensible value already. Settings has four tabs:</p>
 <div class="scroll"><table>
 <thead>
 <tr>
@@ -153,26 +151,23 @@ cargo run --release -p spool -- serve            # http://localhost:7979
 </tr>
 </thead>
 <tbody><tr>
-<td>Profiles</td>
-<td>Which qualities a title may be downloaded in, where upgrades stop, and a size to aim for.</td>
+<td>Storage</td>
+<td>Where the library is, on this machine and on linked ones, where downloads go, and how much room is kept free.</td>
 </tr>
 <tr>
-<td>Naming</td>
-<td>How imported files and folders are named. The formats use Radarr&#39;s and Sonarr&#39;s tokens.</td>
+<td>Preferences</td>
+<td>The household&#39;s language, subtitles, the quality profiles and the size to aim for, and compact versions.</td>
 </tr>
 <tr>
-<td>Plex</td>
-<td>What Plex has that Spool does not, and the other way round. See <a href="plex.html">Beside Plex</a>.</td>
+<td>Connections</td>
+<td>Usenet, indexers, TMDB, Plex, OpenSubtitles, books, signing in to video sites, and AI access.</td>
 </tr>
 <tr>
-<td>Disk space</td>
-<td>What is using the disk and what could go.</td>
-</tr>
-<tr>
-<td>Maintenance</td>
-<td>The scheduled tasks, each with a Run now button, and the recycle folder.</td>
+<td>People</td>
+<td>Who signs in, the players each uses, what they have watched and asked for, and serving the library to players.</td>
 </tr>
 </tbody></table></div>
+<p>What Spool does by itself, with a button to do each now, is under Activity, Upkeep, beside how the library stands with Plex, the music folders and the book index. What is using the disks, and compact versions to make, are under Activity, Space.</p>
 <h2 id="shadow-mode-then-active"><a href="#shadow-mode-then-active">Shadow mode, then active</a></h2>
 <p>Spool starts in <strong>shadow mode</strong>. It reads the indexer feeds and records what it would download and why, and changes nothing: no downloads, no moved files, no deletions. This is the time to add a few titles, open one, and read the verdicts it gives each release.</p>
 <p>When the choices look right, switch to <strong>active</strong> under Settings, General, Mode, or from the command line:</p>

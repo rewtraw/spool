@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A library in more than one place · Spool</title>
-<meta name="description" content="Spool always has a main location: the first one listed under This machine in Settings, Library. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.">
+<meta name="description" content="Spool always has a main location: the first one listed under This machine in Settings, Storage. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.">
 <link rel="icon" href="../assets/mark.svg">
 <style>
   :root {
@@ -106,12 +106,12 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#one-title-in-two-places">One title in two places</a><a class="sub" href="#moving-a-title-to-another-location">Moving a title to another location</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a class="on" aria-current="page" href="locations.html">More than one place</a><a class="sub" href="#managed-or-only-read">Managed, or only read</a><a class="sub" href="#adding-a-location">Adding a location</a><a class="sub" href="#bringing-in-what-is-already-there">Bringing in what is already there</a><a class="sub" href="#one-title-in-two-places">One title in two places</a><a class="sub" href="#moving-a-title-to-another-location">Moving a title to another location</a><a class="sub" href="#when-a-location-cannot-be-reached">When a location cannot be reached</a><a class="sub" href="#where-new-titles-go">Where new titles go</a><a class="sub" href="#mounting-a-share">Mounting a share</a><a class="sub" href="#limits">Limits</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="videos.html">Videos and lists</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
 <h1>A library in more than one place</h1>
-<p>Spool always has a main location: the first one listed under This machine in Settings, Library. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.</p>
+<p>Spool always has a main location: the first one listed under This machine in Settings, Storage. Beside it you can add further locations, each with folders of its own: another disk, or a share from a NAS mounted on the machine Spool runs on. The library shows them as one.</p>
 <p>This part of Spool is new. It is tested with folders that come and go; it has had little use yet with a network share over weeks.</p>
 <h2 id="managed-or-only-read"><a href="#managed-or-only-read">Managed, or only read</a></h2>
 <p>Each location has a box, &quot;Let Spool change files here&quot;.</p>
@@ -159,7 +159,7 @@
 <ol>
 <li><p><strong>Mount it first.</strong> Spool reads ordinary folders. A share from a NAS has to be mounted by the system, at the same path every time, before Spool can use it. See <a href="#mounting-a-share">Mounting a share</a>.</p>
 </li>
-<li><p>Under Settings, Library, choose <strong>Add a location</strong> and fill in:</p>
+<li><p>Under Settings, Storage, choose <strong>Add a location</strong> and fill in:</p>
 <div class="scroll"><table>
 <thead>
 <tr>
@@ -262,7 +262,7 @@
 <p>Spool checks each location on a thread of its own with a short wait, because a network share that has gone can otherwise keep a program waiting for minutes. A location that was there and is slow to answer is taken to be busy, as a NAS is while it reads and writes large files, and stays online. It goes offline when it says it is gone, or after a minute and a half without an answer.</p>
 <h2 id="where-new-titles-go"><a href="#where-new-titles-go">Where new titles go</a></h2>
 <p>Once there is a managed location beside the main one, &quot;Put new titles on&quot; chooses which receives titles you add, and the box for adding a title under Discover offers the same choice for that one title. Titles already in the library stay where they are. If the chosen location cannot be reached when a title is added, the title goes to the main library.</p>
-<p>The downloads folder is one folder, under Settings, General, Downloads. A download filed onto a different disk is copied there and checked instead of moved, which takes longer for a large file.</p>
+<p>The downloads folder is one folder, under Settings, Storage, Downloads and room. A download filed onto a different disk is copied there and checked instead of moved, which takes longer for a large file.</p>
 <h2 id="mounting-a-share"><a href="#mounting-a-share">Mounting a share</a></h2>
 <p>How to mount a share is the system&#39;s business, not Spool&#39;s. What matters to Spool is that it is mounted at the same path each time and comes back by itself after a restart.</p>
 <ul>

@@ -6,7 +6,7 @@ It is tested with [Infuse](https://firecore.com/infuse) on Apple TV and iPhone. 
 
 ## Turning it on
 
-Under Settings, Players:
+Under Settings, People:
 
 1. Tick **Serve the library to players**.
 2. Leave the **port** at 8096 unless something else uses it. It is the one players expect.
@@ -38,7 +38,7 @@ The link does nothing on a device without Infuse.
 - **Pictures for Movies and Shows.** The two views a player lists first are each given a picture made of the posters most lately added to them.
 - **Collections.** A series of films, or an anime's series and films together, as [Spool groups them](collections.md).
 - **Every file as it is.** Each version of a film is offered, with its subtitle files.
-- **Your language first.** A file with a track in the language chosen under Settings → General starts on it, as an anime with an English dub does, whichever track the file itself marks. Subtitles in that language come on when what is heard is another, and otherwise only those for signs and foreign lines. The player can still switch either.
+- **Your language first.** A file with a track in the language chosen under Settings → Preferences starts on it, as an anime with an English dub does, whichever track the file itself marks. Subtitles in that language come on when what is heard is another, and otherwise only those for signs and foreign lines. The player can still switch either.
 - **Your own artwork.** A poster or backdrop you keep in a title's folder is shown in place of the fetched one, and so are season posters and episode frames. See [Files Spool recognises](local-files.md#artwork).
 - **Trailers and extras.** Trailers and other extras in a title's folder are offered to the player. Whether and where they are shown is up to the player.
 - **What you have watched.** The player reports what was played and where you stopped, and Spool remembers it for next time and for other players.
@@ -64,7 +64,7 @@ Finding Spool by itself works only on the local network. Over a private network,
 
 ## People
 
-Each person has an account of their own, which they sign in to the web app and to a player with. What they have watched, where they stopped and what comes next are theirs: one person finishing a film does not mark it watched for another. Accounts are kept under Settings, Players.
+Each person has an account of their own, which they sign in to the web app and to a player with. What they have watched, where they stopped and what comes next are theirs: one person finishing a film does not mark it watched for another. Accounts are kept under Settings, People.
 
 - **Runs Spool.** Someone who runs Spool can change everything: settings, downloads, deleting. Anyone else can browse the library in the web app, mark what they have watched, and ask for more where players ask. There is always someone left who runs it; the first person added does.
 - **A password** is the account's own. One with none lets anyone who can reach Spool and knows the name sign in as them. Once anyone has a password, the web app asks everyone who they are; until then it is open, as the first person who runs Spool.
@@ -93,7 +93,7 @@ Each account has **Away from home, give them compact versions only**. On, a play
 
 ## Bringing what was watched in Plex
 
-With Plex set up under Settings, Plex, each account has **Bring watched from Plex**. Films and episodes Plex has as watched are marked watched for that account, and ones stopped part-way are given the place to carry on from.
+With Plex set up under Settings, Connections, each account has **Bring watched from Plex**. Films and episodes Plex has as watched are marked watched for that account, and ones stopped part-way are given the place to carry on from.
 
 - **It only adds.** Nothing watched here is unmarked, and a place kept here is not moved.
 - **Whose history it is.** Plex answers for whoever its token belongs to, which is the person who set Plex up. Other people in a Plex Home are not read.
@@ -103,7 +103,7 @@ With Plex set up under Settings, Plex, each account has **Bring watched from Ple
 
 The players' address, opened in a browser, is a page where the people who play ask for a film or a series the library has not got: `http://<the machine>:8096`. They choose who they are, give their password if the account has one, search by name and ask.
 
-- **What is asked for waits** under **Asked for** on Home and in Settings, Players, with who asked. **Add it** adds it to the library and looks for it, as adding it under Discover would; **Not this time** turns it down.
+- **What is asked for waits** under **Asked for** on Home and in Settings, People, with who asked. **Add it** adds it to the library and looks for it, as adding it under Discover would; **Not this time** turns it down.
 - **Whoever asked sees how it stands** on the same page: asked, on its way, ready to play, or not this time. A series is ready when its first episode is, and says how many it has.
 - **Added at once.** Each account has **Add what they ask for at once**. On, what that person asks for is added without waiting for you. It is off for a new account.
 - **Two people asking for the same thing** are answered together.
@@ -113,8 +113,8 @@ There is no message sent when something is ready: the page says so when it is ne
 
 ## Seeing what players are doing
 
-- **Now.** What is playing is at the top of Activity, with who is playing it, on what, and whether it comes from a linked machine or through Spool. The same is under each person in Settings, Players.
-- **Lately.** Settings, Players lists each sitting: who played what, on what, from where, for how long and whether to the end.
+- **Now.** What is playing is at the top of Activity, with who is playing it, on what, and whether it comes from a linked machine or through Spool. The same is under each person in Settings, People.
+- **Lately.** Settings, People lists each sitting: who played what, on what, from where, for how long and whether to the end.
 - **In all.** Each person has how long they have watched, how much of that in the last week, how many titles, and when they last played anything.
 
 A sitting is counted from what the player reports as it plays. Time it says it was paused is not counted.

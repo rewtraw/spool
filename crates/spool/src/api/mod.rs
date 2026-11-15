@@ -486,6 +486,7 @@ fn api_routes() -> Router<App> {
         .route("/api/calendar", get(calendar))
         .route("/api/settings", get(get_settings).patch(patch_settings))
         .route("/api/settings/mcp", get(mcp_status).post(mcp_access))
+        .route("/api/setup", get(setup))
         .route("/api/settings/naming", get(get_naming).put(put_naming))
         .route("/api/settings/servers", get(get_servers).put(put_servers))
         .route("/api/servers/test", post(test_server))

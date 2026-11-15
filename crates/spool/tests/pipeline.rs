@@ -5660,4 +5660,12 @@ async fn settings_change_only_what_is_sent_and_keep_their_secrets() {
     assert_eq!(call(&api, "PATCH", "/api/settings", json!({"min_free_gb": "lots", "language": "french"})).await.0, 400);
     assert_eq!(w.app.settings.general().language, "english");
     assert_eq!(call(&api, "PATCH", "/api/settings", json!({"default_movie_profile": 999})).await.0, 400);
+
+    // What is still needed is listed, the TMDB key just cleared among it.
+    let (_, setup) = call(&api, "GET", "/api/setup", Value::Null).await;
+    let tmdb = setup["items"].as_array().unwrap().iter().find(|i| i["id"] == "tmdb").unwrap().clone();
+    assert_eq!((tmdb["done"].as_bool(), setup["ready"].as_bool()), (Some(false), Some(false)), "{setup}");
+    assert_eq!(call(&api, "PATCH", "/api/settings", json!({"tmdb_api_key": "again"})).await.0, 200);
+    let (_, setup) = call(&api, "GET", "/api/setup", Value::Null).await;
+    assert!(setup["items"].as_array().unwrap().iter().any(|i| i["id"] == "tmdb" && i["done"] == true), "{setup}");
 }

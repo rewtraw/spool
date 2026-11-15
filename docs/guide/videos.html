@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Videos from YouTube and other sites, and lists that add themselves · Spool</title>
+<meta name="description" content="">
+<link rel="icon" href="../assets/mark.svg">
+<style>
+  :root {
+    --bg: #0d0d0f; --surface: #151518; --raised: #1d1d21; --line: #2a2a30;
+    --text: #efe9dc; --muted: #9d968a; --faint: #6f6a61;
+    --accent: #4d78ff; --accent-soft: rgba(77, 120, 255, 0.16);
+    --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f1e7; --surface: #fffdf8; --raised: #f0e9db; --line: #dcd3c1;
+      --text: #1b1a17; --muted: #635e54; --faint: #8d877b;
+      --accent: #1f4fd6; --accent-soft: rgba(31, 79, 214, 0.1);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 20px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16.5px/1.65 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 11px; font: 600 23px/1 var(--serif); }
+  .brand .mark { width: 30px; height: 30px; background: var(--accent); -webkit-mask: url(../assets/mark.svg) center / contain no-repeat; mask: url(../assets/mark.svg) center / contain no-repeat; }
+  .brand small { font: 500 15px/1 var(--sans); color: var(--muted); margin-left: 4px; }
+  header nav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
+  header nav a:hover { color: var(--text); }
+
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 56px; padding-top: 40px; }
+  .side { font-size: 14.5px; }
+  .side .inner { position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; display: grid; gap: 2px; padding-bottom: 24px; }
+  .side summary { display: none; }
+  .side p { margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); font-weight: 600; }
+  .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
+  .side a:hover { color: var(--text); }
+  .side a.on { color: var(--text); background: var(--accent-soft); font-weight: 600; }
+  .side a.sub { padding: 3px 10px 3px 22px; font-size: 13.5px; }
+
+  article { max-width: 740px; min-width: 0; }
+  h1 { font: 600 clamp(32px, 4.6vw, 44px)/1.1 var(--serif); letter-spacing: -0.012em; margin: 0 0 20px; text-wrap: balance; }
+  h2 { font: 600 26px/1.2 var(--serif); margin: 52px 0 12px; padding-top: 4px; }
+  h3 { font: 600 19px/1.3 var(--serif); margin: 34px 0 8px; }
+  h2 a:hover::after, h3 a:hover::after { content: ' #'; color: var(--faint); }
+  h1 + p { font-size: 18.5px; color: var(--muted); }
+  p, ul, ol { margin: 0 0 16px; }
+  ul, ol { padding-left: 24px; }
+  li { margin: 5px 0; }
+  li > p { margin-bottom: 8px; }
+  li > ul, li > ol, li > .scroll { margin-top: 8px; }
+  strong { font-weight: 600; }
+  article p a, article li a, article td a { color: var(--accent); }
+  article p a:hover, article li a:hover, article td a:hover { text-decoration: underline; }
+  code { font: 0.88em var(--mono); background: var(--raised); padding: 2px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+  pre { margin: 0 0 20px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font: 14px/1.7 var(--mono); overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+  .scroll { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); background: var(--surface); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { min-width: 150px; }
+
+  .around { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 56px; }
+  .around a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: 600 17px/1.3 var(--serif); }
+  .around a:hover { border-color: var(--muted); }
+  .around a span { display: block; font: 600 12px/1.6 var(--sans); letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); }
+  .around .next { text-align: right; }
+
+  footer { margin-top: 72px; padding: 26px 0 56px; border-top: 1px solid var(--line); color: var(--faint); font-size: 14.5px; display: flex; gap: 8px 26px; flex-wrap: wrap; }
+  footer a { color: var(--accent); }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; gap: 22px; padding-top: 20px; }
+    .brand small { display: none; }
+    .side { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+    .side summary { display: block; padding: 12px 16px; font-weight: 600; cursor: pointer; }
+    .side .inner { position: static; max-height: none; padding: 0 8px 12px; }
+    .side a.sub { display: none; }
+    h2 { margin-top: 40px; }
+  }
+</style>
+</head>
+<body>
+<!-- Made from docs/videos.md by web/scripts/build-docs.mjs. Change that file, not this one. -->
+<div class="wrap">
+  <header>
+    <a class="brand" href="../"><span class="mark"></span>Spool<small>Guides</small></a>
+    <nav>
+      <a href="./">All guides</a>
+      <a href="https://github.com/rewtraw/spool">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <details open>
+        <summary>Guides</summary>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a href="your-library.html">Your library</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a class="on" aria-current="page" href="videos.html">Videos and lists</a><a class="sub" href="#videos-by-their-links">Videos by their links</a><a class="sub" href="#lists-that-add-themselves">Lists that add themselves</a><a class="sub" href="#assistants">Assistants</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+      </details>
+    </aside>
+    <article>
+<h1>Videos from YouTube and other sites, and lists that add themselves</h1>
+<h2 id="videos-by-their-links"><a href="#videos-by-their-links">Videos by their links</a></h2>
+<p>Paste a link under <strong>Discover → Videos</strong>: a video on YouTube, a post on X or Instagram, a clip on TikTok or Vimeo, or a page on any of the well over a thousand other sites <a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a> reads. Pasting a link into the search on any other Discover tab takes you there too.</p>
+<p>Each video is fetched at the best quality the site has, with its picture and its captions, and filed under the channel or account that posted it:</p>
+<pre><code>Videos/
+  Some Channel/
+    poster.jpg
+    Season 2025/
+      Some Channel - 2025-11-14 - What it is called [dQw4w9WgXcQ].mkv
+      Some Channel - 2025-11-14 - What it is called [dQw4w9WgXcQ].en.srt
+      Some Channel - 2025-11-14 - What it is called [dQw4w9WgXcQ]-thumb.jpg
+</code></pre>
+<p>Spool keeps a channel as a series of its videos: a season for each year, an episode for each video, numbered by the day it was posted (the second video of 14 November is 111402). So everything Spool does with an episode it does with a video: players list and play them, subtitles show, <a href="clips.html">clips</a> can be cut from them and what is said in them can be searched for, watched state is kept, and <a href="compact.html">compact versions</a> can be made. Channels have a tab of their own in the Library.</p>
+<p>A channel is never searched for on the indexers, and Spool never asks TVmaze or TMDB about it. The id in brackets at the end of each name ties the file to its video when the folder is read again.</p>
+<h3 id="captions"><a href="#captions">Captions</a></h3>
+<p>Captions people wrote come before the ones a site makes from the speech, and of a site&#39;s own, the original before a translation. A site&#39;s own captions roll: each line is shown again with the next added below it, a word at a time. Spool makes them into one subtitle for each line, so a line is read once, shown once and found once. Only the languages wanted for subtitles (Settings → General) are kept, or the household&#39;s language when none are set. OpenSubtitles is not asked about these videos: it has nothing for them.</p>
+<h3 id="a-channel-an-account-or-a-playlist"><a href="#a-channel-an-account-or-a-playlist">A channel, an account or a playlist</a></h3>
+<p>A link to a channel, an account or a playlist brings its 10 newest videos, all of them, or none, as you choose. <strong>Follow</strong> keeps fetching what it posts: a followed channel is looked at every hour, and its new videos are fetched. What it had when it was followed and was not asked for is left alone. A channel can be followed or let go from its page, from the list of channels under Discover → Videos, or by an assistant.</p>
+<p>Following works best for YouTube. X and Instagram list an account&#39;s posts only to someone signed in, and change how they do it often; a single post from either is fetched without trouble.</p>
+<h3 id="signing-in"><a href="#signing-in">Signing in</a></h3>
+<p>Instagram, and some posts on X, are shown only to someone signed in. Under <strong>Discover → Videos → Signing in to sites</strong>, name a browser on the machine Spool runs on (<code>safari</code>, <code>chrome</code>, <code>firefox</code>) to borrow its sign-in, after signing in to the site there, or give the full path of a cookies.txt file exported from a browser.</p>
+<h3 id="what-it-needs"><a href="#what-it-needs">What it needs</a></h3>
+<ul>
+<li><strong>yt-dlp</strong>, on the machine Spool runs on: <code>brew install yt-dlp</code>, or <code>pip install yt-dlp</code>. Spool looks for it where package managers put it; <code>SPOOL_YT_DLP</code> names another. Keep it up to date: sites change, and yt-dlp follows them.</li>
+<li><strong>ffmpeg</strong>, to join a video&#39;s picture and sound, and <strong>deno</strong> or <strong>node</strong>, which yt-dlp needs to read YouTube. Spool runs yt-dlp with a search path that includes Homebrew&#39;s folders, so a service started by the system finds them.</li>
+<li><strong>A videos folder</strong>, set on a location under Settings → Storage, on a location Spool may change.</li>
+</ul>
+<p>Two videos are fetched at a time, into <code>spool-videos</code> beside the downloads folder, and filed through the same journal as a film, so a restart part-way through finishes the filing. Each one shows on the Activity page while it comes.</p>
+<h2 id="lists-that-add-themselves"><a href="#lists-that-add-themselves">Lists that add themselves</a></h2>
+<p>Paste a Letterboxd list under <strong>Discover → Lists</strong>: a critic&#39;s list, a festival&#39;s, the Criterion Collection, &quot;1001 Movies You Must See&quot;, anyone&#39;s watchlist. Every film on it the library lacks is added with the profile you choose, and looked for. The list is read again every six hours, and films put on it since are added.</p>
+<p>A film added from a list and later removed from the library is not added again. Films the list has that TMDB lists as series are left out, as are the few Letterboxd cannot tie to TMDB; the list says how many.</p>
+<p>Letterboxd has no API for this, so Spool reads its pages, one a second: each page of the list, then each film&#39;s own page once for its TMDB id, which is remembered for every list. A long list takes some minutes the first time and a few page reads after that. A private list cannot be read.</p>
+<h2 id="assistants"><a href="#assistants">Assistants</a></h2>
+<div class="scroll"><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>get_video</code></td>
+<td>Fetch a video by its link, or a channel&#39;s newest, all or none, and follow it.</td>
+</tr>
+<tr>
+<td><code>videos</code></td>
+<td>What is being fetched and how far it has got, what failed and why, and the channels.</td>
+</tr>
+<tr>
+<td><code>follow_channel</code></td>
+<td>Follow a channel, or stop.</td>
+</tr>
+<tr>
+<td><code>lists</code>, <code>follow_list</code></td>
+<td>The Letterboxd lists followed, and following another.</td>
+</tr>
+</tbody></table></div>
+<nav class="around" aria-label="Other guides"><a class="prev" href="compact.html"><span>Before</span>Compact versions</a><a class="next" href="clips.html"><span>Next</span>Clips</a></nav>
+    </article>
+  </div>
+  <footer>
+    <a href="https://github.com/rewtraw/spool/blob/main/docs/videos.md">Change this page on GitHub</a>
+    <a href="../">Spool's front page</a>
+    <span>Spool is free software under the GNU GPL v3.</span>
+  </footer>
+</div>
+<script>if (matchMedia('(max-width: 860px)').matches) document.querySelector('.side details').open = false;</script>
+</body>
+</html>

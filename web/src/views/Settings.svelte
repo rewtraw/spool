@@ -7,6 +7,7 @@
   import Preferences from './settings/Preferences.svelte';
   import Connections from './settings/Connections.svelte';
   import People from './settings/People.svelte';
+  import Setup from '../components/Setup.svelte';
 
   const tabs = [['storage', 'Storage'], ['preferences', 'Preferences'], ['connections', 'Connections'], ['people', 'People']];
   const tab = $derived(tabs.some(([id]) => id === route.arg) ? route.arg : 'storage');
@@ -14,6 +15,7 @@
 
 <div class="panes">
   <header class="head"><h1>Settings</h1></header>
+  <Setup />
   <div class="tabs" role="tablist">
     {#each tabs as [id, label]}<a role="tab" aria-selected={tab === id} class:on={tab === id} href="#/settings/{id}">{label}</a>{/each}
   </div>

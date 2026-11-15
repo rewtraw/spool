@@ -109,7 +109,7 @@ Data lives in `~/Library/Application Support/Spool` on macOS, `~/.local/share/sp
 
 ## Using it from an AI assistant
 
-Spool serves the [Model Context Protocol](https://modelcontextprotocol.io) at `/mcp`. It always requires a key, which Spool generates on first start; Settings → General → AI access copies the command to add it to Claude Code, and can create a second key limited to read-only tools.
+Spool serves the [Model Context Protocol](https://modelcontextprotocol.io) at `/mcp`. It always requires a key, which Spool generates on first start; Settings → Connections → AI access copies the command to add it to Claude Code, and can create a second key limited to read-only tools.
 
 ```sh
 claude mcp add --transport http --scope user spool http://localhost:7979/mcp --header "Authorization: Bearer <key>"

@@ -28,7 +28,7 @@ Not carried over:
 
 **Several titles.** In the library, select them and choose **Make compact versions** in the bar.
 
-**The whole library.** Settings, Compact versions shows how many files would gain from one, how much room they would take and how much film that is to get through, with a button to put them all in line. Beside it you can give a number and make only that many: the biggest files are taken first, since they gain the most, and asking again takes the next ones.
+**The whole library.** Activity, Space shows how many files would gain from one, how much room they would take and how much film that is to get through, with a button to put them all in line. Beside it you can give a number and make only that many: the biggest files are taken first, since they gain the most, and asking again takes the next ones.
 
 **Whatever arrives.** The same tab has "Make one of whatever arrives". Each download that is filed is then put in line, if it would gain from one: that file alone, not the rest of the title. It takes effect as soon as it is ticked or unticked, and unticking it takes out of line what it put there, stopping any being made. What you asked for by hand stays.
 
@@ -62,9 +62,9 @@ Such a machine holds none of the library and needs no shared folder. Spool gives
 deploy/maker.sh the-other-mac     # an SSH host, or "local" for the Mac you are sitting at
 ```
 
-It installs Spool there to start with the machine, allowed only to make, and prints a code. In Spool, under Settings, Library, the machine appears as found on the network: type the code and the two are linked. The machine needs ffmpeg (`brew install ffmpeg`) and room for one compact version at a time, a few gigabytes.
+It installs Spool there to start with the machine, allowed only to make, and prints a code. In Spool, under Settings, Storage, the machine appears as found on the network: type the code and the two are linked. The machine needs ffmpeg (`brew install ffmpeg`) and room for one compact version at a time, a few gigabytes.
 
-**When it is given work** is set on its card in Settings, Library: whenever there is any, overnight only (eleven until seven), or never. Overnight suits a machine somebody works at.
+**When it is given work** is set on its card in Settings, Storage: whenever there is any, overnight only (eleven until seven), or never. Overnight suits a machine somebody works at.
 
 What it is trusted with is small. It is started allowing `make` and nothing else, so it downloads nothing, files nothing and is shown nothing of the library. It reads only the one film it has been given, on a ticket made out for that film, and only from the machine that asked. It keeps what it makes in a folder of its own until Spool has taken it.
 
@@ -74,7 +74,7 @@ Only video hardware is used this way. A linked machine without it is given nothi
 
 ## The settings
 
-Under Settings, Compact versions.
+Under Settings, Preferences, Compact versions.
 
 | Setting | Meaning |
 | --- | --- |

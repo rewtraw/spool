@@ -125,6 +125,15 @@
   /** The folders on this location the user has settled. */
   const pickedOn = (id: number) => Object.entries(picks).filter(([folder]) => (foundBy[id]?.found ?? []).some((f: any) => f.folder === folder));
 
+  // A new library: one folder, and the rest is worked out beneath it.
+  let whole = $state('');
+  function useWhole() {
+    const at = whole.trim().replace(/\/+$/, '');
+    if (!at.startsWith('/')) return toast('A full path, starting with /', 'error');
+    Object.assign(general, { movie_root: `${at}/Movies`, series_root: `${at}/TV Shows`, music_root: `${at}/Music`, audiobook_root: `${at}/Audiobooks`, video_root: `${at}/Videos` });
+    if (!general.downloads_dir) general.downloads_dir = `${at}/Downloads`;
+    save();
+  }
   async function load() {
     await loadSettings();
     loadPlaces();
@@ -150,6 +159,12 @@
       {#if main}<span class="small" class:warn={!main.online}>{[main.online ? 'Reachable' : 'Cannot be reached', 'the main location', general.new_titles_location === 0 ? 'new titles go here' : '', `${main.titles} ${main.titles === 1 ? 'title' : 'titles'}`, main.bytes ? bytes(main.bytes) : '', main.free != null ? `${bytes(main.free)} free` : ''].filter(Boolean).join(' · ')}</span>{/if}
     </div>
     {#if general.movie_root || general.series_root || general.music_root || general.audiobook_root || general.video_root}<div class="mono small faint where">{[general.movie_root, general.series_root, general.music_root, general.audiobook_root, general.video_root].filter(Boolean).join(' · ')}</div>{/if}
+    {#if !general.movie_root && !general.series_root}
+      <label class="field">One folder for the whole library
+        <div class="row"><input class="input mono grow" bind:value={whole} placeholder="/Volumes/Media" /><button class="btn primary" type="button" disabled={!whole.trim()} onclick={useWhole}>Use it</button></div>
+        <span class="hint">Movies, TV Shows, Music, Audiobooks, Videos and Downloads are made inside it. Or give each folder below.</span>
+      </label>
+    {/if}
     <details open={!general.movie_root && !general.series_root}>
     <summary class="small">Folders</summary>
     <div class="cols">

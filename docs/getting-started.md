@@ -38,23 +38,24 @@ Debian's and Ubuntu's `7zip` cannot open RAR archives. Spool unpacks the common 
 
 ## The first settings
 
-Open the web app and go to Settings. Three tabs need filling in before Spool can do anything.
+Open the web app. Until Spool has what it needs, Home and Settings show **Getting Spool ready**, a short list in which each item links to where it is given:
 
-1. **General.**
-   - *Folders*: where movies and series live and where to download to. If the library is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.
-   - *Connections*: a free [TMDB API key](https://www.themoviedb.org/settings/api), which Spool needs to look up movies. If anyone else can reach the address, add yourself under *Players*, People, with a password; from then on the app asks who you are.
-2. **Usenet.** One or more providers. Priority 0 is asked first; higher numbers only fill in missing articles. The Test button signs in and reports what it found.
-3. **Indexers.** One or more Newznab indexers, each with its address and API key.
+1. **Where the library is**, under Settings, Storage. For a new library, give one folder and Spool makes Movies, TV Shows, Music, Audiobooks, Videos and Downloads inside it. For a library you already have, give its folders instead. If it is on a disk that can be unplugged, Spool works that out, and pauses while the disk is not there instead of writing somewhere else.
+2. **A Usenet provider**, under Settings, Connections: its address and sign-in. Test signs in and says what it found.
+3. **An indexer**, in the same place: a Newznab indexer's address and API key.
+4. **A TMDB key**, in the same place, free from [themoviedb.org](https://www.themoviedb.org/settings/api). Films are looked up with it; series come from TVmaze, which needs none.
+5. **Someone to sign in as**, under Settings, People, optional: once anyone has a password the app asks who you are, which matters as soon as anyone else can reach the address.
 
-The other tabs can wait:
+Everything else has a sensible value already. Settings has four tabs:
 
 | Tab | What it holds |
 | --- | --- |
-| Profiles | Which qualities a title may be downloaded in, where upgrades stop, and a size to aim for. |
-| Naming | How imported files and folders are named. The formats use Radarr's and Sonarr's tokens. |
-| Plex | What Plex has that Spool does not, and the other way round. See [Beside Plex](plex.md). |
-| Disk space | What is using the disk and what could go. |
-| Maintenance | The scheduled tasks, each with a Run now button, and the recycle folder. |
+| Storage | Where the library is, on this machine and on linked ones, where downloads go, and how much room is kept free. |
+| Preferences | The household's language, subtitles, the quality profiles and the size to aim for, and compact versions. |
+| Connections | Usenet, indexers, TMDB, Plex, OpenSubtitles, books, signing in to video sites, and AI access. |
+| People | Who signs in, the players each uses, what they have watched and asked for, and serving the library to players. |
+
+What Spool does by itself, with a button to do each now, is under Activity, Upkeep, beside how the library stands with Plex, the music folders and the book index. What is using the disks, and compact versions to make, are under Activity, Space.
 
 ## Shadow mode, then active
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Setup from '../components/Setup.svelte';
   import { api } from '../lib/api';
   import { app, act, go, loadTitles, signOut } from '../lib/state.svelte';
   import { ago, bytes, day, duration, pct, qualityName } from '../lib/format';
@@ -111,6 +112,8 @@
   {/if}
   {#if app.me && app.signInRequired}<div class="me faint small">{app.me.name} · <button class="link" onclick={signOut}>Sign out</button></div>{/if}
 </header>
+
+{#if app.manages}<Setup />{/if}
 
 {#if app.manages && app.status?.mode === 'shadow'}
   <div class="notice">

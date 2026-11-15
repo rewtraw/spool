@@ -34,7 +34,7 @@ The sources are not always right, and not every set you want is one they know. *
 | Where | What you get |
 | --- | --- |
 | Players that speak to Spool as a Jellyfin server, such as Infuse | Each collection is offered as a Jellyfin collection, films and series together, in the order they came out. How a player shows a collection that holds both films and series is up to the player. |
-| Plex | Off unless you turn it on: Settings, General, Connections, **Write Spool's collections into Plex**. Each title in a collection gets the collection's name as a collection tag, beside any tags it already has. Plex keeps collections per library, so one that holds films and series appears in both libraries under the same name. A tag you later remove in Plex is not put back. |
+| Plex | Off unless you turn it on: Settings, Connections, Plex, **Write Spool's collections into Plex**. Each title in a collection gets the collection's name as a collection tag, beside any tags it already has. Plex keeps collections per library, so one that holds films and series appears in both libraries under the same name. A tag you later remove in Plex is not put back. |
 | A Jellyfin or Emby server reading the same folders | Nothing is written for them. They build film collections from TMDB themselves. |
 
 ## What else anime gets

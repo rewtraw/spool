@@ -6,7 +6,7 @@ For an AI assistant, use the [MCP endpoint](assistants.md) instead.
 
 ## Signing in
 
-While nobody under Settings, Players, People has a password, the API is open to anyone who can reach the address, and Status warns of it.
+While nobody under Settings, People has a password, the API is open to anyone who can reach the address, and Status warns of it.
 
 Once anyone has one, send Spool's key with each request:
 
@@ -14,7 +14,7 @@ Once anyone has one, send Spool's key with each request:
 curl -H "X-Api-Key: <key>" http://localhost:7979/api/status
 ```
 
-The key is the one in the command that Settings, General, AI access copies. A program with the key may do anything, and is nobody in particular, so it has nothing watched of its own.
+The key is the one in the command that Settings, Connections, AI access copies. A program with the key may do anything, and is nobody in particular, so it has nothing watched of its own.
 
 The web app signs in as a person: `POST /api/login` with `{"name": ..., "password": ...}` sets a cookie for that browser, and `POST /api/logout` clears it. `GET /api/session` says whether sign-in is asked for (`required`), who is signed in (`me`) and whether they run Spool (`manages`). While the app is open, it signs the browser in as the first person who runs Spool, so the browser stays theirs once passwords are given.
 
@@ -112,7 +112,7 @@ The routes the web app uses are open to other programs as well. A few that are u
 | Request | Effect |
 | --- | --- |
 | `POST /api/queue/pause`, `POST /api/queue/resume` | Stop and start downloading. |
-| `POST /api/tasks/{name}` | Run a scheduled task now: `rss`, `backlog`, `refresh`, `scan`, `housekeeping`, `plex` or `subtitles`. |
+| `POST /api/tasks/{name}` | Run a scheduled task now: `rss`, `backlog`, `refresh`, `scan`, `housekeeping`, `plex`, `anime`, `subtitles`, `music`, `music_wants`, `books`, `book_index`, `videos` or `lists`. |
 | `POST /api/titles/{id}/search` | Search for a title now. |
 | `POST /api/titles/{id}/scan` | Rescan a title's folder. |
 | `POST /api/titles/move` | Move titles to another location: `{"ids": [...], "location": id}`. The answer says how many were put in line and names those refused, each with the reason. |

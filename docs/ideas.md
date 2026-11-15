@@ -147,7 +147,7 @@ A location stops meaning folders on this machine and comes to mean folders on so
 
 ## A door for Audiobookshelf's apps
 
-**What it is.** Spool fetches audiobooks and files them a folder for each book (see [books](../crates/spool/src/books/audio.rs)), and the web app plays them and keeps each person's place. Audiobookshelf's apps for iPhone and Android are better at it: chapters, a sleep timer, playing in the car, and downloading a book to listen to away from home. Spool could answer those apps as it answers Infuse, through a door that speaks their server's API.
+**What it is.** Spool fetches audiobooks and files them a folder for each book (see `crates/spool/src/books/audio.rs`), and the web app plays them and keeps each person's place. Audiobookshelf's apps for iPhone and Android are better at it: chapters, a sleep timer, playing in the car, and downloading a book to listen to away from home. Spool could answer those apps as it answers Infuse, through a door that speaks their server's API.
 
 **What it would take.** The routes the apps use to sign in, list libraries and books, stream a book and report where each person is. Each person's place is kept already (the `listening` table).
 

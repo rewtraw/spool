@@ -17,8 +17,8 @@ There are three ways in. None of them moves, renames or deletes anything.
 | You have | Use | What it does |
 | --- | --- | --- |
 | Radarr and Sonarr | `spool migrate` | Copies their catalog, profiles, indexers and Usenet servers. Titles keep the monitoring they had. See [Getting started](getting-started.md#coming-from-radarr-sonarr-and-sabnzbd). |
-| Plex | Settings, Plex, **Track in Spool** | Adds a title Plex has, unmonitored, pointing at the folder Plex plays it from. See [Beside Plex](plex.md). |
-| Folders and nothing else | Settings, General, More locations, **Look for films and shows** | Reads each folder's name and any notes inside it, and offers what it recognised for you to add. See [A library in more than one place](locations.md). |
+| Plex | Activity, Upkeep, **Track in Spool** | Adds a title Plex has, unmonitored, pointing at the folder Plex plays it from. See [Beside Plex](plex.md). |
+| Folders and nothing else | Settings, Storage, **Look for films and shows** on a location | Reads each folder's name and any notes inside it, and offers what it recognised for you to add. See [A library in more than one place](locations.md). |
 
 The third way works on further locations, not on the main folders. If your only library is a set of plain folders, give Spool an empty main folder for new titles and add the existing library as a location.
 
@@ -80,7 +80,7 @@ Plex, Jellyfin and Kodi attach artwork and notes to a film by name: `Film (1999)
 
 ## Getting something back
 
-- **The recycle folder.** Replaced and deleted files are moved to a `.spool-recycle` folder in the library they came from, and removed after the number of days set under Settings, General, Folders (seven unless you change it). Setting it to 0 deletes at once, with no way back.
+- **The recycle folder.** Replaced and deleted files are moved to a `.spool-recycle` folder in the library they came from, and removed after a week. Activity, Space empties it sooner.
 - **The import journal.** What an import will move and replace is written down before any file moves. An import interrupted by a restart or a power cut is finished at the next start.
 - **The archive.** Spool keeps the NZB of everything it downloads, so a file deleted to make room can be downloaded again while the post is still on Usenet.
 - **Backups.** The database is backed up each night into Spool's data folder, and to a second folder if you name one.

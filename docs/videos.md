@@ -38,7 +38,7 @@ Instagram, and some posts on X, are shown only to someone signed in. Under **Dis
 
 - **yt-dlp**, on the machine Spool runs on: `brew install yt-dlp`, or `pip install yt-dlp`. Spool looks for it where package managers put it; `SPOOL_YT_DLP` names another. Keep it up to date: sites change, and yt-dlp follows them.
 - **ffmpeg**, to join a video's picture and sound, and **deno** or **node**, which yt-dlp needs to read YouTube. Spool runs yt-dlp with a search path that includes Homebrew's folders, so a service started by the system finds them.
-- **A videos folder**, set on a location under Settings → Library, on a location Spool may change.
+- **A videos folder**, set on a location under Settings → Storage, on a location Spool may change.
 
 Two videos are fetched at a time, into `spool-videos` beside the downloads folder, and filed through the same journal as a film, so a restart part-way through finishes the filing. Each one shows on the Activity page while it comes.
 

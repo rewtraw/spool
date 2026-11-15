@@ -106,7 +106,7 @@
     <aside class="side">
       <details open>
         <summary>Guides</summary>
-        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a class="on" aria-current="page" href="your-library.html">Your library</a><a class="sub" href="#the-short-answer">The short answer</a><a class="sub" href="#bringing-in-a-library-you-already-have">Bringing in a library you already have</a><a class="sub" href="#what-spool-changes-and-when">What Spool changes, and when</a><a class="sub" href="#what-spool-never-does">What Spool never does</a><a class="sub" href="#what-can-go-wrong">What can go wrong</a><a class="sub" href="#getting-something-back">Getting something back</a><a class="sub" href="#a-careful-way-in">A careful way in</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
+        <nav class="inner" aria-label="Guides"><a class="home" href="./">All guides</a><p>Start here</p><a href="getting-started.html">Getting started</a><a class="on" aria-current="page" href="your-library.html">Your library</a><a class="sub" href="#the-short-answer">The short answer</a><a class="sub" href="#bringing-in-a-library-you-already-have">Bringing in a library you already have</a><a class="sub" href="#what-spool-changes-and-when">What Spool changes, and when</a><a class="sub" href="#what-spool-never-does">What Spool never does</a><a class="sub" href="#what-can-go-wrong">What can go wrong</a><a class="sub" href="#getting-something-back">Getting something back</a><a class="sub" href="#a-careful-way-in">A careful way in</a><p>Using it</p><a href="locations.html">More than one place</a><a href="helper.html">A helper on the NAS</a><a href="players.html">On a television</a><a href="plex.html">Beside Plex</a><a href="collections.html">Collections and anime</a><a href="compact.html">Compact versions</a><a href="videos.html">Videos and lists</a><a href="clips.html">Clips</a><a href="local-files.html">Files it recognises</a><a href="assistants.html">AI assistants</a><p>Reference</p><a href="api.html">The HTTP API</a><a href="architecture.html">How it is put together</a><a href="ideas.html">Ideas</a></nav>
       </details>
     </aside>
     <article>
@@ -136,12 +136,12 @@
 </tr>
 <tr>
 <td>Plex</td>
-<td>Settings, Plex, <strong>Track in Spool</strong></td>
+<td>Activity, Upkeep, <strong>Track in Spool</strong></td>
 <td>Adds a title Plex has, unmonitored, pointing at the folder Plex plays it from. See <a href="plex.html">Beside Plex</a>.</td>
 </tr>
 <tr>
 <td>Folders and nothing else</td>
-<td>Settings, General, More locations, <strong>Look for films and shows</strong></td>
+<td>Settings, Storage, <strong>Look for films and shows</strong> on a location</td>
 <td>Reads each folder&#39;s name and any notes inside it, and offers what it recognised for you to add. See <a href="locations.html">A library in more than one place</a>.</td>
 </tr>
 </tbody></table></div>
@@ -258,7 +258,7 @@
 <p><strong>An extra taken for the film.</strong> Spool tells extras from the film by the folder and file names media servers use. A featurette with an unmarked name, loose in a film&#39;s folder, looks like a second version of the film. It is kept and never replaced, and it is listed on the title&#39;s page as a version, where you can see it.</p>
 <h2 id="getting-something-back"><a href="#getting-something-back">Getting something back</a></h2>
 <ul>
-<li><strong>The recycle folder.</strong> Replaced and deleted files are moved to a <code>.spool-recycle</code> folder in the library they came from, and removed after the number of days set under Settings, General, Folders (seven unless you change it). Setting it to 0 deletes at once, with no way back.</li>
+<li><strong>The recycle folder.</strong> Replaced and deleted files are moved to a <code>.spool-recycle</code> folder in the library they came from, and removed after a week. Activity, Space empties it sooner.</li>
 <li><strong>The import journal.</strong> What an import will move and replace is written down before any file moves. An import interrupted by a restart or a power cut is finished at the next start.</li>
 <li><strong>The archive.</strong> Spool keeps the NZB of everything it downloads, so a file deleted to make room can be downloaded again while the post is still on Usenet.</li>
 <li><strong>Backups.</strong> The database is backed up each night into Spool&#39;s data folder, and to a second folder if you name one.</li>
