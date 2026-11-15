@@ -151,23 +151,32 @@
 
   {#if b.state === 'choose' || showFiles}
     <div class="section-title">Files in the index</div>
-    <div class="card files">
-      {#each b.candidates as c (c.md5)}
-        <div class="file">
-          <div class="grow">
-            <div class="clamp">{c.title}</div>
-            <div class="faint small">{c.format === 'pdf' ? 'PDF' : 'EPUB'} · {c.author || 'No author given'} · {c.lang || '?'} · {c.year || '?'} · {bytes(c.size)} · {sure(c)} sure{c.by_id ? ' · ISBN matches' : ''}</div>
-          </div>
-          <button class="btn small" onclick={() => choose(c.md5)}>Use this</button>
-        </div>
-      {:else}
-        <p class="faint small">The index offers no files for it.</p>
-      {/each}
-      <form class="row" onsubmit={(e) => { e.preventDefault(); choose(md5); }}>
-        <input class="input mono grow" placeholder="Or an MD5 from Anna's Archive" bind:value={md5} aria-label="MD5 of a file" />
-        <button class="btn small" disabled={md5.trim().length !== 32}>Use it</button>
-      </form>
-    </div>
+    {#if b.candidates.length}
+      <div class="card scroll-x">
+        <table class="table">
+          <thead><tr><th>File</th><th>Format</th><th>Language</th><th>Year</th><th>Size</th><th>Match</th><th></th></tr></thead>
+          <tbody>
+            {#each b.candidates as c, i (c.md5)}
+              <tr>
+                <td><div class="break name">{c.title}</div><div class="faint small">{c.author || 'No author given'}{c.by_id ? ' · ISBN matches' : ''}</div></td>
+                <td style="white-space:nowrap">{c.format === 'pdf' ? 'PDF' : 'EPUB'}</td>
+                <td class="muted">{c.lang || '?'}</td>
+                <td class="muted">{c.year || '?'}</td>
+                <td class="muted" style="white-space:nowrap">{bytes(c.size)}</td>
+                <td style="white-space:nowrap">{#if i === 0}<span class="chip ok">Best match</span>{:else}<span class="muted">{sure(c)} sure</span>{/if}</td>
+                <td><button class="btn small" onclick={() => choose(c.md5)}>Download</button></td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {:else}
+      <div class="card empty">The index offers no files for it.</div>
+    {/if}
+    <form class="row md5" onsubmit={(e) => { e.preventDefault(); choose(md5); }}>
+      <input class="input mono grow" placeholder="Or an MD5 from Anna's Archive" bind:value={md5} aria-label="MD5 of a file" />
+      <button class="btn small" disabled={md5.trim().length !== 32}>Download</button>
+    </form>
     {#if b.turned_down.length}
       <div class="section-title">Turned down</div>
       <div class="card files">
@@ -271,10 +280,11 @@
     display: grid;
     gap: 10px;
   }
-  .file {
-    display: flex;
-    gap: 10px;
-    align-items: center;
+  .name {
+    min-width: 220px;
+  }
+  .md5 {
+    margin-top: 10px;
   }
   .grow {
     flex: 1;
