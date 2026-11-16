@@ -183,6 +183,11 @@ fn from_match(p: &Pattern, c: &Captures, release_title: &str) -> Result<Option<P
             if first > last {
                 return Ok(None);
             }
+            // No episode is numbered nought beside a season's own number: "Gundam 00 - S01E25"
+            // is a name ending in a number, for another pattern to read.
+            if last == 0.0 && !episodes.is_empty() {
+                return Ok(None);
+            }
             if first.fract() != 0.0 || last.fract() != 0.0 {
                 if absolutes.len() != 1 {
                     return Ok(None);

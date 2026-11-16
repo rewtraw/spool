@@ -140,6 +140,16 @@ mod tests {
     }
 
     #[test]
+    fn a_number_after_the_name_is_another_show() {
+        let lib = [key(1, "Mobile Suit Gundam", 1979)];
+        let p = parse_episode_title("[T1GGR] Mobile Suit Gundam 00 - S01E25 - [Setsuna (25)] - [Bluray-1080p][AV1][Opus-2.0][EN+JA][4D71970D]").unwrap();
+        assert_eq!((p.series_title.as_str(), p.season_number(), p.episode_numbers.as_slice()), ("Mobile Suit Gundam 00", 1, &[25][..]));
+        assert_eq!(match_series(&p, &lib).map(|m| m.id), None);
+        let p = parse_episode_title("Mobile.Suit.Gundam.S01E25.1080p.CR.WEB-DL.AAC2.0.H.264-Bacate").unwrap();
+        assert_eq!(match_series(&p, &lib).map(|m| m.id), Some(1));
+    }
+
+    #[test]
     fn anime_film_names_as_indexers_write_them() {
         let lib = [key(1, "Legend of the Galactic Heroes: My Conquest Is the Sea of Stars", 1988), key(2, "Legend of the Galactic Heroes: Golden Wings", 1992)];
         for name in [
