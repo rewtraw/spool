@@ -122,7 +122,11 @@ pub fn retitled<'a>(name: &str, season: u32, number: u32, episodes: &'a [crate::
         })
     };
     let numbered = episodes.iter().find(|e| e.season == season && e.episode == number);
-    if numbered.is_some_and(says) {
+    // The episode numbered is believed when its title is the release's or shares a word with
+    // it: "Monster.S01E30.Decision" is episode 30, "A Certain Decision", not episode 53,
+    // whose title is "Decision" alone. Only a title that has nothing to do with the episode
+    // numbered moves it.
+    if numbered.is_some_and(|e| says(e) || says_episode(name, e) == Some(true)) {
         return None;
     }
     let mut named = episodes.iter().filter(|e| says(e));
@@ -135,6 +139,17 @@ pub fn retitled<'a>(name: &str, season: u32, number: u32, episodes: &'a [crate::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_title_that_is_part_of_the_numbered_episodes_does_not_move_it() {
+        let ep = |n: u32, title: &str| -> crate::models::Episode { serde_json::from_value(serde_json::json!({"title_id": 1, "season": 1, "episode": n, "title": title})).unwrap() };
+        let eps = [ep(30, "A Certain Decision"), ep(53, "Decision")];
+        assert!(retitled("Monster.S01E30.Decision.1080p.BluRay.DUAL.FLAC.2.0.x264-KITSUNE", 1, 30, &eps).is_none());
+        assert!(retitled("Monster.S01E53.Decision.1080p.BluRay.x264-KITSUNE", 1, 53, &eps).is_none());
+        // In an order of its own, with nothing of the numbered episode's title: moved.
+        let eps = [ep(12, "Double Dare"), ep(14, "The Long Night")];
+        assert_eq!(retitled("Show.S01E12.The.Long.Night.1080p.WEB", 1, 12, &eps).map(|e| e.episode), Some(14));
+    }
 
     #[test]
     fn a_name_says_whether_it_is_this_episode() {
