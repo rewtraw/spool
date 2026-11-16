@@ -49,6 +49,7 @@
       <div class="muted">{w.artist}{w.year ? ` · ${w.year}` : ''}{w.kind ? ` · ${w.kind}` : ''}</div>
       <div class="faint small">Wanted {ago(w.added_at)}{w.tracks ? ` · ${w.tracks[0] === w.tracks[1] ? w.tracks[0] : `${w.tracks[0]}–${w.tracks[1]}`} tracks` : ''}</div>
       {#if w.note}<div class="note">{w.note}</div>{/if}
+      {#if w.soulseek_note && w.state === 'wanted'}<div class="note">{w.soulseek_note}</div>{/if}
       {#if w.release}<div class="faint small mono">{w.release.title} · {w.release.indexer}{w.release.size ? ` · ${bytes(w.release.size)}` : ''}</div>{/if}
       {#if slsk}
         <div class="small">

@@ -25,8 +25,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch, Notify, Semaphore};
 use tokio::time::timeout;
 
-/// A file asked for is asked for again after this long, in case the asking was lost.
-pub(crate) const ASK_AGAIN: i64 = 600;
+/// A file asked for is asked for again after this long, in case its owner lost their queue.
+pub(crate) const ASK_AGAIN: i64 = 3600;
+/// Its owner could not be reached: tried again after this long, as Nicotine+ does.
+const UNREACHED_AGAIN: i64 = 180;
+/// The wait between searches made by themselves, until the server says otherwise.
+const WISHLIST_EVERY: u64 = 720;
 /// A connection to a peer that carries nothing for this long is closed.
 const PEER_IDLE: Duration = Duration::from_secs(300);
 /// The most a message from the server may be.
@@ -132,6 +136,10 @@ struct Inner {
     browsing: Arc<Semaphore>,
     /// Signed out because the account signed in somewhere else; not signed in again until asked.
     relogged: AtomicBool,
+    /// How long the server would have between searches made by themselves, in seconds, and
+    /// when the last was made.
+    wishlist_every: AtomicU64,
+    wishlist_at: Mutex<Option<std::time::Instant>>,
     kick: Notify,
 }
 
@@ -169,6 +177,8 @@ impl Client {
             conns: Arc::new(Semaphore::new(CONNECTIONS)),
             browsing: Arc::new(Semaphore::new(2)),
             relogged: AtomicBool::new(false),
+            wishlist_every: AtomicU64::new(WISHLIST_EVERY),
+            wishlist_at: Mutex::new(None),
             kick: Notify::new(),
         });
         tokio::spawn(inner.clone().server_loop());
@@ -219,8 +229,31 @@ impl Client {
         self.0.to_server(m);
     }
 
-    /// Search the network, and gather what peers send back for as long as `wait`.
+    /// Search the network for someone asking now, and gather what peers send back for as
+    /// long as `wait`.
     pub async fn search(&self, query: &str, wait: Duration) -> Result<Vec<SearchReply>> {
+        self.search_by(server::FILE_SEARCH, query, wait).await
+    }
+
+    /// Search the network for something wanted all along, as a wishlist search: no sooner
+    /// after the last than the server allows, which is usually twelve minutes. None when it
+    /// is too soon, and another's turn has been taken.
+    pub async fn wishlist_search(&self, query: &str, wait: Duration) -> Result<Option<Vec<SearchReply>>> {
+        if !self.online() {
+            bail!("not signed in to Soulseek");
+        }
+        {
+            let mut at = self.0.wishlist_at.lock();
+            let every = Duration::from_secs(self.0.wishlist_every.load(Ordering::Relaxed));
+            if at.is_some_and(|t| t.elapsed() < every) {
+                return Ok(None);
+            }
+            *at = Some(std::time::Instant::now());
+        }
+        self.search_by(server::WISHLIST_SEARCH, query, wait).await.map(Some)
+    }
+
+    async fn search_by(&self, code: u32, query: &str, wait: Duration) -> Result<Vec<SearchReply>> {
         if !self.online() {
             bail!("not signed in to Soulseek");
         }
@@ -228,7 +261,7 @@ impl Client {
         let token = i.next_token();
         let (tx, mut rx) = mpsc::unbounded_channel();
         i.searches.lock().insert(token, tx);
-        i.to_server(Out::new().u32(token).str(query).msg(server::FILE_SEARCH));
+        i.to_server(Out::new().u32(token).str(query).msg(code));
         let until = tokio::time::Instant::now() + wait;
         let mut out = vec![];
         while let Ok(Some(r)) = tokio::time::timeout_at(until, rx.recv()).await {
@@ -478,6 +511,12 @@ impl Inner {
                         list.push(i.str()?.to_lowercase());
                     }
                     *self.excluded.lock() = Arc::new(list);
+                }
+                server::WISHLIST_INTERVAL => {
+                    let secs = i.u32()?;
+                    if secs > 0 {
+                        self.wishlist_every.store(secs as u64, Ordering::Relaxed);
+                    }
                 }
                 server::CANT_CONNECT_TO_PEER => {
                     // The waiter learns at once that no connection is coming.
@@ -905,7 +944,8 @@ impl Inner {
                     match f.state {
                         FileState::Waiting if t - f.asked_at >= ASK_AGAIN => {
                             f.asked_at = t;
-                            f.place_asked_at = t;
+                            // Its place is asked for a minute after it is asked for.
+                            f.place_asked_at = t - 240;
                             asks.entry(job.user.clone()).or_default().push((f.name.clone(), true));
                         }
                         FileState::Waiting if t - f.place_asked_at >= 300 => {
@@ -933,8 +973,7 @@ impl Inner {
                         for job in j.list.iter_mut().filter(|j| j.user == user) {
                             job.note = format!("Could not reach {user}: {e}");
                             for f in job.files.iter_mut().filter(|f| f.state == FileState::Waiting) {
-                                // Tried again in two minutes rather than ten.
-                                f.asked_at = f.asked_at.min(now() - ASK_AGAIN + 120);
+                                f.asked_at = f.asked_at.min(now() - ASK_AGAIN + UNREACHED_AGAIN);
                             }
                         }
                         return;

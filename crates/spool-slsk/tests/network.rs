@@ -69,7 +69,7 @@ async fn server(unreachable: &'static [&'static str]) -> u16 {
                                 let _ = them.send(Out::new().str(&me).str(&kind).u32(ip).u32(my_port as u32).u32(token).bool(false).u32(0).u32(0).msg(server::CONNECT_TO_PEER));
                             }
                         }
-                        server::FILE_SEARCH => {
+                        server::FILE_SEARCH | server::WISHLIST_SEARCH => {
                             let (token, query) = (i.u32().unwrap(), i.str().unwrap());
                             for (user, (them, _)) in world.lock().await.users.iter() {
                                 if *user != me {
@@ -138,6 +138,10 @@ async fn share_and_fetch(unreachable: &'static [&'static str]) {
     assert_eq!((f.user.as_str(), f.path.as_str(), f.files.len()), ("sharer", "Music\\Can - Tago Mago", 2));
     assert_eq!(f.files[0].0.sample_rate, Some(44100));
     assert!(fetcher.search("kraftwerk", Duration::from_millis(500)).await.unwrap().is_empty());
+    // Searches made by themselves wait their turn: one, then none until the interval has passed.
+    let first = fetcher.wishlist_search("can tago mago", Duration::from_secs(2)).await.unwrap();
+    assert_eq!(first.map(|r| r.len()), Some(1));
+    assert!(fetcher.wishlist_search("can future days", Duration::from_millis(200)).await.unwrap().is_none());
 
     let dest = dir.path().join("got");
     let id = fetcher.download("sharer", &dest, f.files.iter().map(|(e, rel)| Fetch { name: e.path.clone(), size: e.size, rel: rel.clone() }).collect());

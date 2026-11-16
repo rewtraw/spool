@@ -88,7 +88,10 @@ pub(super) async fn music_find_artist(State(app): State<App>, Query(f): Query<Fi
 /// An album wanted, with how its download from Soulseek stands when it comes from there.
 fn want_row(app: &App, w: &crate::music::want::Want) -> Value {
     let soulseek = w.hunt.download().and_then(|job| app.soulseek_progress(job));
-    json!({"want": w, "cover": w.cover(), "soulseek": soulseek})
+    let mut want = json!(w);
+    // The folders kept to try are many files each: a browser is told how many there are.
+    want["soulseek_left"] = json!(w.hunt.soulseek_left.len());
+    json!({"want": want, "cover": w.cover(), "soulseek": soulseek})
 }
 
 pub(super) async fn music_wants(State(app): State<App>) -> R<Value> {

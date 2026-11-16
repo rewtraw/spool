@@ -12,9 +12,20 @@ Forward the port shown there, 2234 unless you change it, on your router to the m
 
 ## What is chosen
 
-Among the folders found, the one with the best copy is taken: FLAC before 320k. Between equal copies, someone who would send it at once comes first, then a short queue, then speed. A folder's path must name the album: as `Artist - Album`, or as the album's own folder inside one named for the artist, with anything after its name set off by a bracket or a dash.
+Among the folders found, the one with the best copy is taken: FLAC before 320k. Between equal copies, someone who would send it at once comes first, then a short queue, then speed. Someone whose queue was longer than 50 is passed over, and no more than two albums are asked of one person at once. A folder's path must name the album: as `Artist - Album`, as the album's own folder inside one named for the artist, or, for an album filed its own way as a series often is, with every word of the artist's name and the album's in it and exactly the album's tracks.
 
-A download that has had nothing come for an hour is given up, and the next folder tried. One that its owner refuses is passed over from then on.
+The other folders that would do are kept, and tried in turn when one does not, without searching again. A folder is given up, and the next tried, when its owner:
+
+- has not said where it is in their queue within fifteen minutes,
+- has it further back than 20th in their queue,
+- has not begun sending it within an hour, or
+- has sent nothing for an hour.
+
+One its owner refuses is passed over from then on. Time Spool is not signed in does not count against anyone.
+
+## How often it searches
+
+Searches Spool makes by itself are wishlist searches, which the server allows one of every twelve minutes or so; albums take turns, and each is looked for on Soulseek at most once a day. Look now, on an album's page, searches at once. The indexers are still asked every six hours.
 
 ## What others can see
 

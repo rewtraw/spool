@@ -60,6 +60,15 @@ pub struct Hunt {
     pub job_id: Option<String>,
     pub turned_down: Vec<TurnedDown>,
     pub searched_at: i64,
+    /// What came of looking on Soulseek, in words, beside the note on the indexers.
+    pub soulseek_note: String,
+    /// When it was last looked for on Soulseek, which is once a day unless asked.
+    pub soulseek_at: i64,
+    /// Folders found on Soulseek that would do, best first, kept to try in turn when one
+    /// does not, without searching again.
+    pub soulseek_left: Vec<spool_slsk::Folder>,
+    /// Someone asked for it to be looked for now: Soulseek is searched at once, not in turn.
+    pub asked_now: bool,
 }
 
 /// Not found is looked for again after this long.
@@ -82,6 +91,9 @@ impl Hunt {
         self.searched_at = 0;
         self.turned_down.clear();
         self.note = "Looking for it.".into();
+        self.soulseek_left.clear();
+        self.soulseek_note.clear();
+        self.asked_now = true;
         true
     }
 
@@ -89,6 +101,7 @@ impl Hunt {
     pub fn found(&mut self, note: &str) {
         self.state = HuntState::Have;
         self.note = note.into();
+        self.done_with_soulseek();
     }
 
     /// The download was filed.
@@ -96,6 +109,13 @@ impl Hunt {
         self.state = HuntState::Have;
         self.job_id = None;
         self.note.clear();
+        self.done_with_soulseek();
+    }
+
+    fn done_with_soulseek(&mut self) {
+        self.soulseek_left.clear();
+        self.soulseek_note.clear();
+        self.asked_now = false;
     }
 
     /// The download did not do. When the release is at fault it is passed over from now on.
@@ -103,10 +123,14 @@ impl Hunt {
         if let (true, Some(r)) = (release_at_fault, &self.release) {
             self.turned_down.push(TurnedDown { guid: r.guid.clone(), name: r.title.clone(), why: why.to_string(), at: now() });
         }
+        // A folder from Soulseek is followed by the next found there, not by asking the indexers again.
+        let from_soulseek = self.job_id.as_deref().is_some_and(crate::soulseek::is_job);
         self.state = HuntState::Wanted;
         self.job_id = None;
         self.release = None;
-        self.searched_at = 0;
+        if !from_soulseek {
+            self.searched_at = 0;
+        }
         self.note = format!("A download did not do: {why}. Trying the next.");
     }
 
@@ -171,7 +195,15 @@ impl App {
     /// Look for it, and start the best release found downloading. Gives the grade of the one
     /// started.
     pub(crate) async fn hunt_search<G: Ord + Copy>(&self, h: &mut Hunt, s: Search<'_, G>) -> Result<Option<G>> {
-        if now() - h.searched_at < AGAIN {
+        let look = s.soulseek.as_ref().filter(|_| self.soulseek_ready());
+        if s.soulseek.is_none() {
+            h.asked_now = false;
+        }
+        // The indexers are asked every six hours. Soulseek has turns of its own: once a day,
+        // at once when someone asks, and the next folder found there when one did not do.
+        let indexers_due = now() - h.searched_at >= AGAIN;
+        let soulseek_due = look.is_some() && (h.asked_now || !h.soulseek_left.is_empty() || now() - h.soulseek_at >= crate::soulseek::AGAIN);
+        if !indexers_due && !soulseek_due {
             return Ok(None);
         }
         // Each release that did not do cost a download from an indexer's daily allowance.
@@ -190,15 +222,41 @@ impl App {
             return Ok(None);
         }
         let indexers: Vec<_> = self.db.indexers()?.into_iter().filter(|i| i.enable_search).collect();
-        let soulseek = s.soulseek.as_ref().filter(|_| self.soulseek_ready());
-        if indexers.is_empty() && soulseek.is_none() {
+        if indexers.is_empty() && look.is_none() {
             h.note = "No indexer is set up to search.".into();
             return Ok(None);
         }
-        h.searched_at = now();
+        if indexers_due {
+            h.searched_at = now();
+            if let Some(started) = self.search_indexers(h, &s, &indexers).await? {
+                return Ok(Some(started));
+            }
+        }
+        if let Some(look) = look.filter(|_| soulseek_due) {
+            let asked = std::mem::take(&mut h.asked_now);
+            match self.soulseek_hunt(h, look, s.what, s.name, asked).await {
+                crate::soulseek::Looked::Started(g) => return Ok(Some(g)),
+                crate::soulseek::Looked::Nothing(why) => h.soulseek_note = why,
+                crate::soulseek::Looked::NotYet => {
+                    if h.soulseek_at == 0 {
+                        h.soulseek_note = "Waits its turn to be looked for on Soulseek.".into();
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Ask the indexers, and start the best release found. Gives its grade when one started;
+    /// otherwise the note says why not.
+    async fn search_indexers<G: Ord + Copy>(&self, h: &mut Hunt, s: &Search<'_, G>, indexers: &[crate::models::Indexer]) -> Result<Option<G>> {
+        if indexers.is_empty() {
+            h.note.clear();
+            return Ok(None);
+        }
         let (mut found, mut missed, mut trouble) = (vec![], vec![], vec![]);
         for (n, q) in s.queries.iter().enumerate() {
-            for ix in &indexers {
+            for ix in indexers {
                 match self.query_indexer(ix, q, false).await {
                     Ok(rs) => {
                         for r in rs {
@@ -239,29 +297,17 @@ impl App {
                 }
             };
         }
-        let from_indexers = if indexers.is_empty() {
-            String::new()
-        } else if found.is_empty() && !trouble.is_empty() {
-            format!("The indexers could not be searched: {}.", trouble.join("; "))
+        h.note = if found.is_empty() && !trouble.is_empty() {
+            format!("The indexers could not be searched: {}. It is looked for again later.", trouble.join("; "))
         } else if !found.is_empty() {
-            "None of the releases found would do.".into()
+            "None of the releases found would do. It is looked for again every six hours.".into()
         } else if !missed.is_empty() {
             // What was found and passed over, so it can be seen why.
             let some: Vec<&str> = missed.iter().take(3).map(String::as_str).collect();
-            format!("{} found, none of them this {}, such as: {}.", missed.len(), s.what, some.join("; "))
+            format!("{} found, none of them this {}, such as: {}. It is looked for again every six hours.", missed.len(), s.what, some.join("; "))
         } else {
-            s.none.to_string()
+            format!("{} It is looked for again every six hours.", s.none)
         };
-        let from_soulseek = match soulseek {
-            Some(look) => match self.soulseek_hunt(h, look, s.what, s.name).await {
-                crate::soulseek::Looked::Started(g) => return Ok(Some(g)),
-                crate::soulseek::Looked::Nothing(why) => why,
-            },
-            None => String::new(),
-        };
-        // Only the indexers' trouble, and nothing else to go on: it may pass sooner.
-        let again = if found.is_empty() && missed.is_empty() && !trouble.is_empty() && soulseek.is_none() { "It is looked for again later." } else { "It is looked for again every six hours." };
-        h.note = [from_indexers.as_str(), from_soulseek.as_str(), again].iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" ");
         Ok(None)
     }
 
@@ -448,6 +494,15 @@ mod tests {
         let mut h = Hunt { state: HuntState::Downloading, release: Some(rel("r", 0, 0)), ..Default::default() };
         h.failed("it went", false);
         assert!(h.turned_down.is_empty(), "the release was not at fault");
+    }
+
+    #[test]
+    fn a_folder_from_soulseek_that_did_not_do_is_followed_by_the_next_not_by_the_indexers() {
+        let mut h = Hunt { state: HuntState::Downloading, job_id: Some("slsk:4".into()), release: Some(rel("someone\\Can - Tago Mago", 0, 0)), searched_at: 9, ..Default::default() };
+        h.failed("nothing came", true);
+        assert_eq!((h.state, h.searched_at, h.turned_down.len()), (HuntState::Wanted, 9, 1));
+        h.search_again();
+        assert!(h.asked_now && h.soulseek_left.is_empty() && h.turned_down.is_empty());
     }
 
     #[test]

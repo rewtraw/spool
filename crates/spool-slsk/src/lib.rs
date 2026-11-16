@@ -20,7 +20,7 @@ pub use share::{Shared, Shares};
 
 /// One person's folder among search results: the files found in it, with where each goes
 /// in a copy of it. Disc folders ("CD1", "Disc 2") are counted as their album's.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Folder {
     pub user: String,
     /// Its path as they share it.

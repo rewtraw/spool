@@ -20,6 +20,8 @@ pub mod server {
     pub const EMBEDDED_MESSAGE: u32 = 93;
     pub const ACCEPT_CHILDREN: u32 = 100;
     pub const POSSIBLE_PARENTS: u32 = 102;
+    pub const WISHLIST_SEARCH: u32 = 103;
+    pub const WISHLIST_INTERVAL: u32 = 104;
     pub const SEND_UPLOAD_SPEED: u32 = 121;
     pub const BRANCH_LEVEL: u32 = 126;
     pub const BRANCH_ROOT: u32 = 127;

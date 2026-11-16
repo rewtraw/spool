@@ -82,6 +82,16 @@ impl Job {
         })
     }
 
+    /// Whether anything of it has come yet.
+    pub fn started(&self) -> bool {
+        self.files.iter().any(|f| f.got > 0 || f.state == FileState::Done)
+    }
+
+    /// The nearest it is to the front of its owner's queue, when they have said.
+    pub fn place(&self) -> Option<u32> {
+        self.files.iter().filter(|f| f.state == FileState::Waiting).filter_map(|f| f.place).min()
+    }
+
     pub fn got(&self) -> u64 {
         self.files.iter().map(|f| f.got.min(f.size)).sum()
     }
