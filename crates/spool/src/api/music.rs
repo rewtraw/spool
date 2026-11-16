@@ -85,12 +85,14 @@ pub(super) async fn music_find_artist(State(app): State<App>, Query(f): Query<Fi
     Ok(Json(app.artist_lookup(f.q.trim()).await?))
 }
 
-fn want_row(w: &crate::music::want::Want) -> Value {
-    json!({"want": w, "cover": w.cover()})
+/// An album wanted, with how its download from Soulseek stands when it comes from there.
+fn want_row(app: &App, w: &crate::music::want::Want) -> Value {
+    let soulseek = w.hunt.download().and_then(|job| app.soulseek_progress(job));
+    json!({"want": w, "cover": w.cover(), "soulseek": soulseek})
 }
 
 pub(super) async fn music_wants(State(app): State<App>) -> R<Value> {
-    Ok(Json(json!({"wants": app.db.music_wants()?.iter().map(want_row).collect::<Vec<_>>(), "counts": app.music_wants_status()})))
+    Ok(Json(json!({"wants": app.db.music_wants()?.iter().map(|w| want_row(&app, w)).collect::<Vec<_>>(), "counts": app.music_wants_status()})))
 }
 
 #[derive(Deserialize)]
@@ -103,11 +105,11 @@ pub(super) async fn want_album(State(app): State<App>, who: Option<axum::Extensi
     if mbid.len() != 36 || !mbid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         return Err(ApiError(StatusCode::BAD_REQUEST, "a MusicBrainz release group is named by its 36-character id".into()));
     }
-    Ok(Json(want_row(&app.want_album(mbid, Who::of(who).account).await?)))
+    Ok(Json(want_row(&app, &app.want_album(mbid, Who::of(who).account).await?)))
 }
 
 pub(super) async fn search_want(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
-    Ok(Json(want_row(&app.search_want(id).await?)))
+    Ok(Json(want_row(&app, &app.search_want(id).await?)))
 }
 
 pub(super) async fn remove_want(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {

@@ -4703,6 +4703,7 @@ dependencies = [
  "spake2",
  "spool-core",
  "spool-nntp",
+ "spool-slsk",
  "strsim",
  "tantivy",
  "tempfile",
@@ -4750,6 +4751,22 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "webpki-roots",
+]
+
+[[package]]
+name = "spool-slsk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "deunicode",
+ "flate2",
+ "md-5",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/spool-core", "crates/spool-nntp", "crates/spool"]
+members = ["crates/spool-core", "crates/spool-nntp", "crates/spool-slsk", "crates/spool"]
 
 [workspace.package]
 version = "0.1.0"

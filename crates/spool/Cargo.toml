@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 spool-core = { path = "../spool-core" }
 spool-nntp = { path = "../spool-nntp" }
+spool-slsk = { path = "../spool-slsk" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["multipart"] }
 tower = { version = "0.5", features = ["util"] }

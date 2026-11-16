@@ -19,6 +19,7 @@ Spool finds, downloads, verifies, files and plays movies and television, in one 
 | [Collections and anime](collections.md) | Series of films and an anime's series and films, grouped by themselves, in the library, on players and in Plex. |
 | [Compact versions](compact.md) | Smaller copies Spool makes and keeps beside the originals, for playing away from home. |
 | [Videos from YouTube and other sites, and lists that add themselves](videos.md) | Videos fetched by their links and filed under their channels, channels followed, and Letterboxd lists whose films are added as they appear. |
+| [Soulseek](soulseek.md) | Albums the indexers lack, found in other people's shared folders, and your music folders shared back. |
 | [Clips](clips.md) | Moments cut from films and episodes, made to play wherever they are sent, and found by what is said in them. |
 | [Beside Plex](plex.md) | What Spool reads from Plex and what it asks of it. |
 | [Files Spool recognises in a title's folder](local-files.md) | Every name it knows for trailers, extras, artwork, notes and theme music. |

@@ -164,6 +164,8 @@ pub struct General {
     pub compact: crate::compact::Compact,
     /// How books are got and where they go.
     pub books: crate::books::BookSettings,
+    /// The Soulseek account albums are also looked for with.
+    pub soulseek: crate::soulseek::SoulseekSettings,
 }
 
 impl Default for General {
@@ -194,6 +196,7 @@ impl Default for General {
             link_seq: 0,
             compact: Default::default(),
             books: Default::default(),
+            soulseek: Default::default(),
         }
     }
 }

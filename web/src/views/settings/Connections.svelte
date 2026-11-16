@@ -5,12 +5,13 @@
   import { act, toast } from '../../lib/state.svelte';
   import { conf, loadSettings, saveSettings } from '../../lib/settings.svelte';
   import Secret from '../../components/Secret.svelte';
+  import { bytes } from '../../lib/format';
   import Usenet from './Usenet.svelte';
   import Indexers from './Indexers.svelte';
 
   // What is typed into the secrets, until saved. A secret left blank is kept; one cleared is
   // sent as null.
-  const SECRETS = ['tmdb_api_key', 'plex_token', 'opensubtitles_api_key', 'opensubtitles_password', 'books.annas_key', 'books.florilegium_token'];
+  const SECRETS = ['tmdb_api_key', 'plex_token', 'opensubtitles_api_key', 'opensubtitles_password', 'books.annas_key', 'books.florilegium_token', 'soulseek.password'];
   let typed = $state<Record<string, string>>(Object.fromEntries(SECRETS.map((k) => [k, ''])));
   let cleared = $state<Record<string, boolean>>(Object.fromEntries(SECRETS.map((k) => [k, false])));
   const secret = (k: string) => (cleared[k] ? null : typed[k] || undefined);
@@ -35,6 +36,25 @@
     const b = conf.g.books;
     if (await saveSettings({ books: { languages: b.languages, florilegium_url: b.florilegium_url, annas_key: secret('books.annas_key'), florilegium_token: secret('books.florilegium_token') } })) forget(['books.annas_key', 'books.florilegium_token']);
   }
+  async function saveSoulseek() {
+    const s = conf.g.soulseek;
+    if (await saveSettings({ soulseek: { username: s.username.trim(), port: Number(s.port) || 2234, password: secret('soulseek.password') } })) {
+      forget(['soulseek.password']);
+      setTimeout(loadSoulseek, 2000);
+    }
+  }
+
+  // How Soulseek stands, looked at again while the page is open.
+  let slsk = $state<any>(null);
+  async function loadSoulseek() {
+    slsk = await api.get<any>('/soulseek').catch(() => null);
+  }
+  loadSoulseek();
+  $effect(() => {
+    const t = setInterval(loadSoulseek, 10000);
+    return () => clearInterval(t);
+  });
+
   async function saveSites() {
     await saveSettings({ video_cookies: conf.g.video_cookies.trim() });
   }
@@ -117,6 +137,33 @@
       </fieldset>
     </form>
 
+    <form onsubmit={(e) => { e.preventDefault(); saveSoulseek(); }}>
+      <fieldset class="card">
+        <legend>Soulseek</legend>
+        <p class="muted">Albums the indexers don't have are looked for in other people's shared folders. Your music folders are shared back, two uploads at a time.</p>
+        <div class="cols">
+          <label class="field">Username<input class="input" bind:value={g.soulseek.username} autocomplete="off" /></label>
+          <Secret label="Password" set={set('soulseek.password')} bind:value={typed['soulseek.password']} bind:cleared={cleared['soulseek.password']} />
+        </div>
+        <span class="hint">There is no sign-up: the first sign-in with a name nobody has taken makes the account. A forgotten password cannot be reset.</span>
+        <label class="field narrow">Port<input class="input mono" type="number" min="1024" max="65535" bind:value={g.soulseek.port} /><span class="hint">Forward this TCP port on the router to this machine so others can connect to Spool. It works without, reaching fewer people.</span></label>
+        {#if slsk?.on}
+          {@const s = slsk.status}
+          {#if s.problem}<div class="small"><span class="chip warn">{s.online ? 'Note' : 'Not signed in'}</span> {s.problem}</div>{/if}
+          {#if s.online}
+            <div class="small">
+              <span class="chip ok">Signed in</span>
+              Sharing {s.shared_files.toLocaleString()} files in {s.shared_folders.toLocaleString()} folders{s.uploading.length ? ` · sending ${s.uploading.length}` : ''}{s.queued_uploads ? `, ${s.queued_uploads} waiting` : ''}{s.uploaded ? ` · ${bytes(s.uploaded)} sent` : ''}
+            </div>
+            {#each s.uploading as u}<div class="faint small mono clamp">{u.user}: {u.name.split('\\').pop()} · {Math.round((100 * u.sent) / Math.max(1, u.size))}%</div>{/each}
+          {:else if !s.problem}
+            <div class="small faint">Signing in…</div>
+          {/if}
+        {/if}
+        <div><button class="btn primary">Save</button></div>
+      </fieldset>
+    </form>
+
     <form onsubmit={(e) => { e.preventDefault(); saveSites(); }}>
       <fieldset class="card">
         <legend>Signing in to sites</legend>
@@ -141,3 +188,11 @@
     <span class="hint">The read-only key can look but change nothing. Making a new one stops the old one working.</span>
   </fieldset>
 </div>
+
+<style>
+  .clamp {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+</style>

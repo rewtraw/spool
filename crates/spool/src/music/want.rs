@@ -232,6 +232,82 @@ pub fn grade(name: &str, size: u64, artist: &str, album: &str) -> Option<Grade> 
     None
 }
 
+/// Audio files' kinds that keep everything: a folder of them is graded FLAC.
+const LOSSLESS: &[&str] = &["flac", "wav", "aiff", "aif", "wv", "ape"];
+/// Lossy files' kinds, graded by their bitrate.
+const LOSSY: &[&str] = &["mp3", "m4a", "aac", "ogg", "opus"];
+
+/// What someone's folder on Soulseek would give, or None when it is not the album or not good
+/// enough. Its path names the album, as a release's name does, or as a folder of its own
+/// inside one named for the artist ("Can\1972 - Tago Mago [FLAC]"); its audio is all FLAC or
+/// all 320k; and it has as many tracks as the album, give or take a bonus track or two.
+pub fn grade_folder(f: &spool_slsk::Folder, artist: &str, album: &str, tracks: Option<(u32, u32)>) -> Option<Grade> {
+    let parts: Vec<&str> = f.path.split('\\').filter(|p| !p.is_empty()).collect();
+    let last = parts.last()?;
+    let near = parts[parts.len().saturating_sub(3)..].join(" ");
+    let n = words(&near);
+    if n.iter().any(|w| matches!(w.as_str(), "discography" | "discografia" | "anthology")) && !has_all(&words(album), "anthology") {
+        return None;
+    }
+    // "The" may be left off an artist's name.
+    let bare = |w: Vec<String>| if w.len() > 1 && w[0] == "the" { w[1..].to_vec() } else { w };
+    let artist_there = |a: &str| {
+        let a = bare(words(a));
+        !a.is_empty() && n.windows(a.len()).any(|w| w == a.as_slice())
+    };
+    // The album's own folder: its name, after any year and the artist's name, and after it
+    // nothing, or more set off by a bracket or a dash ("Tago Mago (1971) [FLAC]").
+    let own = || {
+        let (w, sep) = (words(last), crate::books::audio::separated(last));
+        let (a, by) = (words(album), bare(words(main_artist(artist))));
+        if a.is_empty() {
+            return false;
+        }
+        // Where the album's name may begin: at the start, or after a year, a "The", or the
+        // artist's name, in turn. The name as it stands is tried first, so "The Wall" and
+        // "1989" are albums, not a "The" and a year.
+        let mut starts = vec![0];
+        let mut k = 0;
+        while k < starts.len() && starts.len() < 8 {
+            let at = starts[k];
+            k += 1;
+            if w.get(at).is_some_and(|y| y.len() == 4 && y.chars().all(|c| c.is_ascii_digit())) {
+                starts.push(at + 1);
+            }
+            if w.get(at).is_some_and(|x| x == "the") {
+                starts.push(at + 1);
+            }
+            if !by.is_empty() && w[at.min(w.len())..].starts_with(&by) {
+                starts.push(at + by.len());
+            }
+        }
+        starts.into_iter().any(|at| at <= w.len() && w[at..].starts_with(&a) && (w.len() == at + a.len() || sep.get(at + a.len()).copied().unwrap_or(false)))
+    };
+    // A folder's name is plainer than a release's: whatever follows the album's name in it
+    // must be set off, or it is another album ("Tago Mago 2").
+    if !((artist_there(artist) || artist_there(main_artist(artist))) && own()) {
+        return None;
+    }
+    let audio: Vec<&spool_slsk::FileEntry> = f.files.iter().map(|(e, _)| e).filter(|e| LOSSLESS.contains(&e.extension().as_str()) || LOSSY.contains(&e.extension().as_str())).collect();
+    if audio.is_empty() || audio.iter().any(|e| e.size < 200_000) {
+        return None;
+    }
+    let count = audio.len() as u32;
+    if let Some((least, most)) = tracks {
+        if count < least || count > most + 2 {
+            return None;
+        }
+    }
+    if audio.iter().all(|e| LOSSLESS.contains(&e.extension().as_str())) {
+        return Some(Grade::Flac);
+    }
+    // A lossy file's bitrate is as its owner's client read it: 320k, perhaps a little under.
+    if audio.iter().all(|e| e.extension() == "mp3" && e.bitrate.is_some_and(|b| (315..=330).contains(&b)) && e.vbr != Some(true)) {
+        return Some(Grade::Lossy);
+    }
+    None
+}
+
 /// A name that can be a folder: no slashes, colons and the like, and not too long.
 pub(crate) fn folder_safe(s: &str) -> String {
     let s: String = s.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c }).collect();
@@ -329,7 +405,7 @@ impl App {
         let _held = self.want_lock(id).lock_owned().await;
         if let Some(w) = self.db.music_want(id)? {
             if let Some(job) = w.hunt.download() {
-                let _ = self.job_remove(job, true);
+                self.hunt_cancel(job);
             }
         }
         self.db.delete_music_want(id)
@@ -387,7 +463,7 @@ impl App {
             if !self.db.save_music_want_if(&mut w, rev)? {
                 // Changed meanwhile: a download it started would be followed by nothing.
                 if let Some(job) = w.hunt.download().filter(|j| job_before.as_deref() != Some(*j)) {
-                    let _ = self.job_remove(job, true);
+                    self.hunt_cancel(job);
                 }
                 return Ok(());
             }
@@ -404,7 +480,8 @@ impl App {
             return Ok(());
         }
         let names = album_names(&w.title);
-        let (artist, title) = (w.artist.clone(), w.title.clone());
+        let (artist, title, tracks) = (w.artist.clone(), w.title.clone(), w.tracks);
+        let by_folder = |f: &spool_slsk::Folder| names.iter().find_map(|name| grade_folder(f, &artist, name, tracks));
         let search = Search {
             what: "album",
             name: &title,
@@ -413,6 +490,7 @@ impl App {
             queries: names.iter().map(|name| Query::Music { text: words(&format!("{} {name}", main_artist(&artist))).join(" ") }).collect(),
             grade: &|r, n| grade(&r.title, r.size, &artist, &names[n]),
             none: "No FLAC or 320k release found.",
+            soulseek: Some(crate::soulseek::Look { query: words(&format!("{} {title}", main_artist(&artist))).join(" "), grade: &by_folder }),
         };
         if let Some(g) = self.hunt_search(&mut w.hunt, search).await? {
             w.grade = g;
@@ -553,6 +631,35 @@ mod tests {
         assert_eq!(grade("Herbie Hancock - 1973 - Head Hunters [2013 Reissue] [24-96] FLAC", 300 * mb, "Herbie Hancock", "Head Hunters"), Some(Grade::Flac));
         assert_eq!(grade("Herbie.Hancock-Head.Hunters-1973.FLAC", 300 * mb, "Herbie Hancock", "Head Hunters"), Some(Grade::Flac), "a dotted name is a release");
         assert_eq!(grade("Alice Coltrane - Journey In Satchidananda (1971) [FLAC]", 300 * mb, "Alice Coltrane featuring Pharoah Sanders", "Journey in Satchidananda"), Some(Grade::Flac));
+    }
+
+    fn folder(path: &str, files: &[(&str, u64, Option<u32>)]) -> spool_slsk::Folder {
+        let files = files.iter().map(|(name, size, bitrate)| (spool_slsk::FileEntry { path: format!("{path}\\{name}"), size: *size, bitrate: *bitrate, ..Default::default() }, name.to_string())).collect();
+        spool_slsk::Folder { user: "u".into(), path: path.into(), files, ..Default::default() }
+    }
+
+    #[test]
+    fn folders_on_soulseek_are_graded_by_their_path_and_files() {
+        let mb = 1 << 20;
+        let flac = [("01 Paperhouse.flac", 30 * mb, None), ("02 Mushroom.flac", 30 * mb, None), ("cover.jpg", mb, None)];
+        let g = |path: &str| grade_folder(&folder(path, &flac), "Can", "Tago Mago", Some((2, 3)));
+        assert_eq!(g("Music\\Can - Tago Mago (1971) [FLAC]"), Some(Grade::Flac));
+        assert_eq!(g("Music\\Can\\1971 - Tago Mago"), Some(Grade::Flac), "in a folder named for the artist");
+        assert_eq!(g("Music\\Can\\Albums\\Tago Mago (1971) [FLAC]"), Some(Grade::Flac), "further down");
+        assert_eq!(g("Music\\Krautrock\\Tago Mago"), None, "the artist is not named");
+        assert_eq!(g("Music\\Can\\Tago Mago 2"), None, "another album");
+        assert_eq!(g("Music\\Can - Discography\\Tago Mago"), None, "everything they made");
+        assert_eq!(grade_folder(&folder("Beatles - Abbey Road", &flac), "The Beatles", "Abbey Road", None), Some(Grade::Flac), "The left off");
+        assert_eq!(grade_folder(&folder("Pink Floyd\\The Wall", &flac), "Pink Floyd", "The Wall", None), Some(Grade::Flac), "an album that begins with The");
+        assert_eq!(grade_folder(&folder("Taylor Swift\\1989 (Deluxe)", &flac), "Taylor Swift", "1989", None), Some(Grade::Flac), "an album named for a year");
+        assert_eq!(grade_folder(&folder("Taylor Swift\\2014 - 1989", &flac), "Taylor Swift", "1989", None), Some(Grade::Flac));
+        assert_eq!(grade_folder(&folder("The Beatles\\Abbey Road [2019 Remaster]", &flac), "The Beatles", "Abbey Road", None), Some(Grade::Flac));
+        assert_eq!(grade_folder(&folder("Can - Tago Mago", &flac), "Can", "Tago Mago", Some((7, 7))), None, "too few tracks");
+        let mp3 = |rate| [("01.mp3", 9 * mb, Some(rate)), ("02.mp3", 9 * mb, Some(rate))];
+        assert_eq!(grade_folder(&folder("Can - Tago Mago", &mp3(320)), "Can", "Tago Mago", None), Some(Grade::Lossy));
+        assert_eq!(grade_folder(&folder("Can - Tago Mago", &mp3(192)), "Can", "Tago Mago", None), None, "not 320");
+        let mixed = [("01.flac", 30 * mb, None), ("02.mp3", 9 * mb, Some(320))];
+        assert_eq!(grade_folder(&folder("Can - Tago Mago", &mixed), "Can", "Tago Mago", None), None, "mixed");
     }
 
     #[test]

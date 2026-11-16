@@ -236,6 +236,7 @@ impl App {
     pub fn spawn_scheduler(&self) {
         // Downloads: react to events, and sweep periodically in case one was missed.
         self.spawn_tracker();
+        self.sync_soulseek();
         self.listen_for_spools();
         let app = self.clone();
         tokio::spawn(async move {

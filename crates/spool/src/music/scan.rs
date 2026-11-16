@@ -498,6 +498,7 @@ impl App {
         tokio::task::spawn_blocking(move || save(&db, &gathered, &read)).await??;
         let lib = self.db.music_library()?;
         *self.music.library.lock() = Arc::new(lib);
+        self.soulseek_share();
         Ok(format!("{albums} albums, {tracks} tracks; {read_count} files read"))
     }
 }

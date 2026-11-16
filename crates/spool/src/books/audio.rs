@@ -309,7 +309,7 @@ impl App {
         let mut b = self.db.book(id)?.ok_or_else(|| anyhow!("no such book"))?;
         if let Some(a) = &b.audio {
             if let Some(job) = a.hunt.download() {
-                let _ = self.job_remove(job, true);
+                self.hunt_cancel(job);
             }
         }
         b.audio = None;
@@ -362,6 +362,7 @@ impl App {
             queries: vec![Query::Audiobook { text: format!("{} {surname}", short_title(&b.title).join(" ")) }],
             grade: &|r, _| grade(&r.title, r.size, &author, &b.title).and_then(|k| rank(&r.title, k)),
             none: "No audiobook of it found.",
+            soulseek: None,
         };
         if let Some((k, _)) = self.hunt_search(&mut a.hunt, search).await? {
             a.kind = k;

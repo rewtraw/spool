@@ -6,6 +6,9 @@
 //!
 //! What differs between them is what to search for, how a release is judged, and how a
 //! download is checked and filed: each kind says that for itself.
+//!
+//! The indexers are asked first. When nothing they have would do, a kind that can be found on
+//! Soulseek is looked for there too, and a folder of someone's taken in place of a release.
 
 use crate::app::App;
 use crate::db::now;
@@ -62,7 +65,7 @@ pub struct Hunt {
 /// Not found is looked for again after this long.
 const AGAIN: i64 = 6 * 3600;
 /// After a few releases that did not do in an hour, the rest wait for the next.
-const LATER: i64 = AGAIN - 3600;
+pub(crate) const LATER: i64 = AGAIN - 3600;
 
 impl Hunt {
     /// The download under way, if there is one.
@@ -129,6 +132,8 @@ pub struct Search<'a, G> {
     pub grade: &'a (dyn Fn(&Release, usize) -> Option<G> + Sync),
     /// What is said when nothing was found at all.
     pub none: &'a str,
+    /// How to look for it on Soulseek, for a kind that can be found there.
+    pub soulseek: Option<crate::soulseek::Look<'a, G>>,
 }
 
 /// Where its download has got to.
@@ -185,7 +190,8 @@ impl App {
             return Ok(None);
         }
         let indexers: Vec<_> = self.db.indexers()?.into_iter().filter(|i| i.enable_search).collect();
-        if indexers.is_empty() {
+        let soulseek = s.soulseek.as_ref().filter(|_| self.soulseek_ready());
+        if indexers.is_empty() && soulseek.is_none() {
             h.note = "No indexer is set up to search.".into();
             return Ok(None);
         }
@@ -209,42 +215,54 @@ impl App {
                 break;
             }
         }
-        let Some((r, g)) = best(&found, &h.turned_down).cloned() else {
-            h.note = if found.is_empty() && !trouble.is_empty() {
-                format!("The indexers could not be searched: {}. It is looked for again later.", trouble.join("; "))
-            } else if !found.is_empty() {
-                "None of the releases found would do. It is looked for again every six hours.".into()
-            } else if !missed.is_empty() {
-                // What was found and passed over, so it can be seen why.
-                let some: Vec<&str> = missed.iter().take(3).map(String::as_str).collect();
-                format!("{} found, none of them this {}, such as: {}. It is looked for again every six hours.", missed.len(), s.what, some.join("; "))
-            } else {
-                format!("{} It is looked for again every six hours.", s.none)
+        if let Some((r, g)) = best(&found, &h.turned_down).cloned() {
+            return match self.grab_release(&r).await {
+                Ok(job) => {
+                    tracing::info!(name = %s.name, release = %r.title, "downloading an {}", s.what);
+                    h.state = HuntState::Downloading;
+                    h.job_id = Some(job);
+                    h.release = Some(r);
+                    h.note.clear();
+                    Ok(Some(g))
+                }
+                Err(Grab::Release(why)) => {
+                    h.turned_down.push(TurnedDown { guid: r.guid.clone(), name: r.title.clone(), why: why.clone(), at: now() });
+                    h.searched_at = 0;
+                    h.note = format!("A release would not do: {why}. Trying the next.");
+                    Ok(None)
+                }
+                // Nothing wrong with the release: it is tried again in an hour.
+                Err(Grab::Later(why)) => {
+                    h.searched_at = now() - LATER;
+                    h.note = format!("Found {}, but it could not be started: {why}. It is tried again in an hour.", r.title);
+                    Ok(None)
+                }
             };
-            return Ok(None);
-        };
-        match self.grab_release(&r).await {
-            Ok(job) => {
-                tracing::info!(name = %s.name, release = %r.title, "downloading an {}", s.what);
-                h.state = HuntState::Downloading;
-                h.job_id = Some(job);
-                h.release = Some(r);
-                h.note.clear();
-                Ok(Some(g))
-            }
-            Err(Grab::Release(why)) => {
-                h.turned_down.push(TurnedDown { guid: r.guid.clone(), name: r.title.clone(), why: why.clone(), at: now() });
-                h.searched_at = 0;
-                h.note = format!("A release would not do: {why}. Trying the next.");
-                Ok(None)
-            }
-            // Nothing wrong with the release: it is tried again in an hour.
-            Err(Grab::Later(why)) => {
-                h.searched_at = now() - LATER;
-                h.note = format!("Found {}, but it could not be started: {why}. It is tried again in an hour.", r.title);
-                Ok(None)
-            }
         }
+        let from_indexers = if indexers.is_empty() {
+            String::new()
+        } else if found.is_empty() && !trouble.is_empty() {
+            format!("The indexers could not be searched: {}.", trouble.join("; "))
+        } else if !found.is_empty() {
+            "None of the releases found would do.".into()
+        } else if !missed.is_empty() {
+            // What was found and passed over, so it can be seen why.
+            let some: Vec<&str> = missed.iter().take(3).map(String::as_str).collect();
+            format!("{} found, none of them this {}, such as: {}.", missed.len(), s.what, some.join("; "))
+        } else {
+            s.none.to_string()
+        };
+        let from_soulseek = match soulseek {
+            Some(look) => match self.soulseek_hunt(h, look, s.what, s.name).await {
+                crate::soulseek::Looked::Started(g) => return Ok(Some(g)),
+                crate::soulseek::Looked::Nothing(why) => why,
+            },
+            None => String::new(),
+        };
+        // Only the indexers' trouble, and nothing else to go on: it may pass sooner.
+        let again = if found.is_empty() && missed.is_empty() && !trouble.is_empty() && soulseek.is_none() { "It is looked for again later." } else { "It is looked for again every six hours." };
+        h.note = [from_indexers.as_str(), from_soulseek.as_str(), again].iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join(" ");
+        Ok(None)
     }
 
     /// See how its download is getting on. A failed one is taken out of the queue here.
@@ -253,6 +271,9 @@ impl App {
             h.state = HuntState::Wanted;
             return Followed::Going;
         };
+        if crate::soulseek::is_job(&job_id) {
+            return self.soulseek_follow(&job_id);
+        }
         let job = match self.job_lookup(&job_id) {
             crate::remote::Found::Job(j) => j,
             crate::remote::Found::Unknown => return Followed::Going,
@@ -273,8 +294,21 @@ impl App {
 
     /// Clear away a finished download: its job and its folder.
     pub(crate) async fn hunt_clear(&self, job: &str, out: &Path) {
+        if crate::soulseek::is_job(job) {
+            self.soulseek_drop(job);
+            return;
+        }
         let _ = self.job_remove(job, true);
         self.remove_download_folder(Some(job), out).await;
+    }
+
+    /// Stop a download that is no longer wanted, wherever it runs.
+    pub(crate) fn hunt_cancel(&self, job: &str) {
+        if crate::soulseek::is_job(job) {
+            self.soulseek_drop(job);
+        } else {
+            let _ = self.job_remove(job, true);
+        }
     }
 
     /// Fetch a release's NZB and start it downloading here.

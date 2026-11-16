@@ -485,6 +485,7 @@ fn api_routes() -> Router<App> {
         .route("/api/blocklist/{id}", delete(delete_blocklist))
         .route("/api/calendar", get(calendar))
         .route("/api/settings", get(get_settings).patch(patch_settings))
+        .route("/api/soulseek", get(soulseek))
         .route("/api/settings/mcp", get(mcp_status).post(mcp_access))
         .route("/api/setup", get(setup))
         .route("/api/settings/servers", get(get_servers).put(put_servers))

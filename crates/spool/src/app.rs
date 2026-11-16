@@ -192,6 +192,8 @@ pub struct Inner {
     pub paused_applied: std::sync::atomic::AtomicBool,
     /// Where OpenSubtitles' API is. Tests put a stand-in here.
     pub opensubtitles_api: Mutex<String>,
+    /// The Soulseek client, with the account it was started with. See [`crate::soulseek`].
+    pub soulseek: Mutex<Option<(crate::soulseek::SoulseekSettings, spool_slsk::Client)>>,
     /// How many subtitles OpenSubtitles will still hand over today, and when that starts
     /// again, as it last said.
     pub subtitle_allowance: Mutex<Option<(i64, i64)>>,
@@ -516,6 +518,7 @@ impl App {
             space_blocked: Mutex::new(HashMap::new()),
             subtitle_login: Mutex::new(None),
             opensubtitles_api: Mutex::new("https://api.opensubtitles.com/api/v1".into()),
+            soulseek: Mutex::new(None),
             paused_applied: std::sync::atomic::AtomicBool::new(settings_paused),
             subtitle_allowance: Mutex::new(None),
             dialogue: crate::dialogue::Index::open(&data_dir.join("dialogue.db"))?,

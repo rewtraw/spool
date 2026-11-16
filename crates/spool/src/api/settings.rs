@@ -5,10 +5,15 @@ use super::*;
 /// The settings' secrets, by where they are in the settings. They are sent to a browser
 /// blank, with whether each is set; a change that leaves one blank or out keeps it, and null
 /// clears it.
-const SECRETS: &[&[&str]] = &[&["tmdb_api_key"], &["plex_token"], &["opensubtitles_api_key"], &["opensubtitles_password"], &["books", "annas_key"], &["books", "florilegium_token"]];
+const SECRETS: &[&[&str]] = &[&["tmdb_api_key"], &["plex_token"], &["opensubtitles_api_key"], &["opensubtitles_password"], &["books", "annas_key"], &["books", "florilegium_token"], &["soulseek", "password"]];
 
 fn at<'a>(v: &'a mut Value, path: &[&str]) -> Option<&'a mut Value> {
     path.iter().try_fold(v, |v, k| v.get_mut(*k))
+}
+
+/// How Soulseek stands: signed in or why not, what is shared, and what is being sent.
+pub(super) async fn soulseek(State(app): State<App>) -> Json<Value> {
+    Json(app.soulseek_status())
 }
 
 /// The settings as a browser sees them.
@@ -72,6 +77,8 @@ fn merge(into: &mut Value, change: Value) -> Result<(), String> {
 /// checked as a whole and written at once.
 pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Json<Value>) -> Result<Response, ApiError> {
     let bad = |why: String| ApiError(StatusCode::BAD_REQUEST, why);
+    // Saving the account again, unchanged, signs in again after being signed out.
+    let soulseek_saved = change.get("soulseek").is_some();
     // What Spool works out for itself is not taken from a browser.
     if let Some(o) = change.as_object_mut() {
         for k in ["link_seq", "secrets"] {
@@ -122,12 +129,17 @@ pub(super) async fn patch_settings(State(app): State<App>, Json(mut change): Jso
         let _ = tokio::task::spawn_blocking(move || again.watch_locations()).await;
         app.location_changes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         app.emit(Event::Locations);
+        // A music folder taken out of the locations is no longer shared, at once.
+        app.soulseek_share();
     }
     if g.downloads_dir != old.downloads_dir {
         app.apply_engine_config();
     }
     if g.links != old.links {
         app.sync_remotes();
+    }
+    if g.soulseek != old.soulseek || soulseek_saved {
+        app.sync_soulseek();
     }
     Ok(Json(json!({"ok": true})).into_response())
 }

@@ -123,3 +123,4 @@ The routes the web app uses are open to other programs as well. A few that are u
 | `GET /api/lookup/all?q=…` | Films and series by name, together, with what AniList says of any that are anime. |
 | `GET /api/collections` | The library's collections, each with its members, their roles and order, and what is missing. |
 | `GET /api/locations` | Each location, whether it can be reached, and what is on it. |
+| `GET /api/soulseek` | Whether Soulseek is signed in, or why not; how many files and folders are shared; what is being sent and how many wait. Each album in `GET /api/music/wants` that is coming from Soulseek has `soulseek`: whose it is, the bytes and files received, and its place in their queue. |

@@ -40,6 +40,7 @@ pub mod remote;
 pub mod scheduler;
 pub mod serve;
 pub mod settings;
+pub mod soulseek;
 pub mod shape;
 pub mod shadow;
 pub mod store;

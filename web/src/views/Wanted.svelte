@@ -7,6 +7,7 @@
   let { id }: { id: number } = $props();
   let w = $state<any>(null);
   let cover = $state('');
+  let slsk = $state<any>(null);
   let failed = $state(false);
 
   async function load() {
@@ -15,6 +16,7 @@
     if (!found) return void (failed = true);
     w = found.want;
     cover = found.cover;
+    slsk = found.soulseek;
   }
   load();
   $effect(() => {
@@ -48,10 +50,16 @@
       <div class="faint small">Wanted {ago(w.added_at)}{w.tracks ? ` · ${w.tracks[0] === w.tracks[1] ? w.tracks[0] : `${w.tracks[0]}–${w.tracks[1]}`} tracks` : ''}</div>
       {#if w.note}<div class="note">{w.note}</div>{/if}
       {#if w.release}<div class="faint small mono">{w.release.title} · {w.release.indexer}{w.release.size ? ` · ${bytes(w.release.size)}` : ''}</div>{/if}
+      {#if slsk}
+        <div class="small">
+          {Math.round((100 * slsk.got) / Math.max(1, slsk.size))}% · {slsk.done} of {slsk.files} files{slsk.place ? ` · number ${slsk.place} in ${slsk.user}'s queue` : ''}
+        </div>
+        {#if slsk.note}<div class="note">{slsk.note}</div>{/if}
+      {/if}
       {#if w.state === 'have' && w.folder}<div class="faint small mono">{w.folder}</div>{/if}
       <div class="row wrap actions">
         {#if w.state === 'wanted'}<button class="btn small" onclick={again}>Look now</button>{/if}
-        {#if w.state === 'downloading'}<a class="btn small" href="#/activity">Activity</a>{/if}
+        {#if w.state === 'downloading' && !slsk}<a class="btn small" href="#/activity">Activity</a>{/if}
         <button class="btn small ghost danger" onclick={remove}>{w.state === 'have' ? 'Clear' : 'Stop wanting it'}</button>
       </div>
     </div>
