@@ -156,10 +156,12 @@ impl App {
         let turned_down = |f: &Folder| h.turned_down.iter().any(|t| t.guid == guid(f));
         let best = folders.iter().filter(|f| !turned_down(f)).filter_map(|f| (look.grade)(f).map(|g| (f, g))).max_by_key(|(f, g)| (*g, f.slot_free, std::cmp::Reverse(f.queue), f.speed));
         let Some((f, g)) = best else {
+            // Some of what was passed over, so it can be seen why.
+            let some: Vec<String> = folders.iter().take(3).map(|f| format!("{} ({} files)", f.name(2).replace('\\', " / "), f.files.len())).collect();
             return Looked::Nothing(match folders.len() {
                 0 => "Nothing on Soulseek either.".into(),
-                1 => "One folder on Soulseek, and it would not do.".into(),
-                n => format!("{n} folders on Soulseek, none of which would do."),
+                1 => format!("One folder on Soulseek, and it would not do: {}.", some.join("; ")),
+                n => format!("{n} folders on Soulseek, none of which would do, such as: {}.", some.join("; ")),
             });
         };
         let fetch: Vec<Fetch> = f
