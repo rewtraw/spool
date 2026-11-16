@@ -281,11 +281,33 @@ pub fn grade_folder(f: &spool_slsk::Folder, artist: &str, album: &str, tracks: O
                 starts.push(at + by.len());
             }
         }
-        starts.into_iter().any(|at| at <= w.len() && w[at..].starts_with(&a) && (w.len() == at + a.len() || sep.get(at + a.len()).copied().unwrap_or(false)))
+        // A self-titled album at the head of a name is only that when nothing but a year or
+        // the like follows: "Kraftwerk - Autobahn" is not their "Kraftwerk".
+        let only_tags = |rest: &[String]| rest.iter().all(|x| (x.len() == 4 && x.chars().all(|c| c.is_ascii_digit())) || matches!(x.as_str(), "flac" | "mp3" | "320" | "320k" | "320kbps" | "lossless" | "cd" | "web" | "vinyl" | "lp" | "24" | "16" | "bit" | "24bit" | "16bit" | "44" | "48" | "96" | "khz" | "remaster" | "remastered" | "reissue" | "deluxe" | "edition" | "expanded"));
+        let self_titled = a == by;
+        starts.into_iter().any(|at| {
+            at <= w.len()
+                && w[at..].starts_with(&a)
+                && (w.len() == at + a.len() || sep.get(at + a.len()).copied().unwrap_or(false))
+                && !(self_titled && at == 0 && !only_tags(&w[a.len()..]))
+        })
     };
     // A folder's name is plainer than a release's: whatever follows the album's name in it
     // must be set off, or it is another album ("Tago Mago 2").
-    if !((artist_there(artist) || artist_there(main_artist(artist))) && own()) {
+    let named = (artist_there(artist) || artist_there(main_artist(artist))) && own();
+    // Some are filed their own way, as a series is: "Ethiopiques 21. Emahoy Tsegue-Maryam
+    // Guebrou - Ethiopia Song. Piano Solo". Every word of the artist's name somewhere in the
+    // path and of the album's in its own folder's name will do, for a name of more than one
+    // word, when the tracks are exactly the album's. The tags are checked when it is filed.
+    let loosely = || {
+        let significant = words(album).iter().filter(|w| !matches!(w.as_str(), "the" | "and" | "a")).count();
+        let audio = f.files.iter().filter(|(e, _)| LOSSLESS.contains(&e.extension().as_str()) || LOSSY.contains(&e.extension().as_str())).count() as u32;
+        // The album's name whole, running straight on into more, is another album.
+        let (w, sep, a) = (words(last), crate::books::audio::separated(last), words(album));
+        let runs_on = (0..w.len()).any(|at| w[at..].starts_with(&a) && w.len() > at + a.len() && !sep.get(at + a.len()).copied().unwrap_or(false));
+        significant >= 2 && !runs_on && (has_all(&n, artist) || has_all(&n, main_artist(artist))) && has_all(&w, album) && tracks.is_some_and(|(least, most)| (least..=most).contains(&audio))
+    };
+    if !named && !loosely() {
         return None;
     }
     let audio: Vec<&spool_slsk::FileEntry> = f.files.iter().map(|(e, _)| e).filter(|e| LOSSLESS.contains(&e.extension().as_str()) || LOSSY.contains(&e.extension().as_str())).collect();
@@ -658,6 +680,18 @@ mod tests {
         let mp3 = |rate| [("01.mp3", 9 * mb, Some(rate)), ("02.mp3", 9 * mb, Some(rate))];
         assert_eq!(grade_folder(&folder("Can - Tago Mago", &mp3(320)), "Can", "Tago Mago", None), Some(Grade::Lossy));
         assert_eq!(grade_folder(&folder("Can - Tago Mago", &mp3(192)), "Can", "Tago Mago", None), None, "not 320");
+        // Filed as a series is, with the tracks the album has.
+        let two = [("01.flac", 30 * mb, None), ("02.flac", 30 * mb, None)];
+        let series = |path: &str, tracks| grade_folder(&folder(path, &two), "Emahoy Tsegué-Maryam Guèbrou", "Éthiopiques 21: Piano Solo", tracks);
+        assert_eq!(series("Ethiopiques\\Ethiopiques 21. Emahoy Tsegue-Maryam Guebrou - Ethiopia Song. Piano Solo - 2006", Some((2, 2))), Some(Grade::Flac));
+        assert_eq!(series("world\\Ethiopiques, Vol. 21- Emahoy (Piano Solo) (Tsegue-maryam Guebrou)", Some((2, 2))), Some(Grade::Flac));
+        assert_eq!(series("downloads\\[2006] Éthiopiques 21 - Ethiopia Song (Piano Solo)", Some((2, 2))), None, "the artist is not named");
+        assert_eq!(series("Ethiopiques\\Ethiopiques 21. Emahoy Tsegue-Maryam Guebrou - Piano Solo", Some((5, 5))), None, "not the album's tracks");
+        assert_eq!(series("Ethiopiques\\Ethiopiques 21. Emahoy Tsegue-Maryam Guebrou - Piano Solo", None), None, "tracks not known");
+        assert_eq!(grade_folder(&folder("Can\\Tago Mago 2", &two), "Can", "Tago Mago", Some((2, 2))), None, "another album, even with as many tracks");
+        assert_eq!(grade_folder(&folder("Kraftwerk\\Kraftwerk - Autobahn", &two), "Kraftwerk", "Kraftwerk", Some((2, 2))), None, "one word is not enough to go on");
+        assert_eq!(grade_folder(&folder("Kraftwerk\\Kraftwerk (1970) [FLAC]", &two), "Kraftwerk", "Kraftwerk", Some((2, 2))), Some(Grade::Flac), "self-titled");
+        assert_eq!(grade_folder(&folder("Kraftwerk - 1970 - Kraftwerk", &two), "Kraftwerk", "Kraftwerk", Some((2, 2))), Some(Grade::Flac));
         let mixed = [("01.flac", 30 * mb, None), ("02.mp3", 9 * mb, Some(320))];
         assert_eq!(grade_folder(&folder("Can - Tago Mago", &mixed), "Can", "Tago Mago", None), None, "mixed");
     }
