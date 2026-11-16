@@ -66,6 +66,9 @@ pub fn movie(name: &str) -> Option<ParsedMovieInfo> {
     remembered(&KEPT, name, || spool_core::parser::parse_movie_title(name, false))
 }
 
+/// Words releases use of themselves, after any title they give an episode.
+const RELEASE_WORDS: &[&str] = &["web", "webdl", "webrip", "bluray", "bdrip", "brrip", "hdtv", "dvdrip", "dvd", "remux", "proper", "repack", "real", "internal", "multi", "dual", "x264", "x265", "h264", "h265", "hevc", "avc", "aac", "aac20", "ddp", "dd", "ac3", "eac3", "flac", "hdr", "sdr", "uhd", "amzn", "nf", "dsnp", "hmax", "atvp", "cr", "hulu", "pcok", "itunes", "all4", "subbed", "dubbed", "complete", "extended", "uncut"];
+
 /// The episode a name says it is by its title, when that is not the one its number says.
 /// Some releases number a series in an order of their own and give each episode its title
 /// after the number, "Show.S01E12.Double.Dare.1080p": the title is believed. Only a title
@@ -80,7 +83,6 @@ fn after_number(name: &str) -> Option<Vec<String>> {
         w.len() >= 4 && w[0] == b's' && w.iter().skip(1).take_while(|c| c.is_ascii_digit()).count() > 0 && w.contains(&b'e')
     })?;
     // What follows the number at once is the release's own words, not a title.
-    const RELEASE_WORDS: &[&str] = &["web", "webdl", "webrip", "bluray", "bdrip", "brrip", "hdtv", "dvdrip", "dvd", "remux", "proper", "repack", "real", "internal", "multi", "dual", "x264", "x265", "h264", "h265", "hevc", "avc", "aac", "aac20", "ddp", "dd", "ac3", "eac3", "flac", "hdr", "sdr", "uhd", "amzn", "nf", "dsnp", "hmax", "atvp", "cr", "hulu", "pcok", "itunes", "all4", "subbed", "dubbed", "complete", "extended", "uncut"];
     let ours = |w: &String| RELEASE_WORDS.contains(&w.as_str()) || w.ends_with('p') && w.len() > 1 && w[..w.len() - 1].chars().all(|c| c.is_ascii_digit());
     let after = &words[at + 1..];
     // Its own words straight after the number: no title. Otherwise all that follows, title and
@@ -112,15 +114,28 @@ pub fn says_episode(name: &str, episode: &crate::models::Episode) -> Option<bool
 
 pub fn retitled<'a>(name: &str, season: u32, number: u32, episodes: &'a [crate::models::Episode]) -> Option<&'a crate::models::Episode> {
     let after = after_number(name)?;
-    // Each episode whose title the words after the number begin with, longest title first.
-    let says = |e: &crate::models::Episode| {
+    // Where the release's own words begin: a word it is known to use, or one with a digit in
+    // it ("1080p", "AAC2"). Before it, the episode's title as the release gives it.
+    let ours = |w: &String| RELEASE_WORDS.contains(&w.as_str()) || w.chars().any(|c| c.is_ascii_digit());
+    let said: String = after.iter().take_while(|w| !ours(w)).map(String::as_str).collect();
+    // An episode whose title is the release's, word for word and with the release's own words
+    // straight after; or, for a release that gives only the end of a long title ("Atlas
+    // Forever" for "Astro Boy vs. Atlas IX: Atlas Forever"), whose title ends with it. Not one
+    // whose title the release's merely begins with: "Atlas Forever" is not "Atlas".
+    let exactly = |e: &crate::models::Episode| {
         let t = plain(&e.title);
         let mut joined = String::new();
-        t.len() >= 3 && after.iter().any(|w| {
-            joined.push_str(w);
-            joined == t
-        })
+        t.len() >= 3
+            && after.iter().enumerate().any(|(i, w)| {
+                joined.push_str(w);
+                joined == t && after.get(i + 1).is_none_or(ours)
+            })
     };
+    let ends = |e: &crate::models::Episode| {
+        let t = plain(&e.title);
+        said.len() >= 6 && t.len() > said.len() && t.ends_with(&said)
+    };
+    let says = |e: &crate::models::Episode| exactly(e) || ends(e);
     let numbered = episodes.iter().find(|e| e.season == season && e.episode == number);
     // The episode numbered is believed when its title is the release's or shares a word with
     // it: "Monster.S01E30.Decision" is episode 30, "A Certain Decision", not episode 53,
@@ -129,16 +144,33 @@ pub fn retitled<'a>(name: &str, season: u32, number: u32, episodes: &'a [crate::
     if numbered.is_some_and(|e| says(e) || says_episode(name, e) == Some(true)) {
         return None;
     }
-    let mut named = episodes.iter().filter(|e| says(e));
-    match (named.next(), named.next()) {
-        (Some(e), None) => Some(e),
-        _ => None,
+    // The title word for word first; only then one that ends with it. Either must be the
+    // only one.
+    let only = |f: &dyn Fn(&crate::models::Episode) -> bool| {
+        let mut named = episodes.iter().filter(|e| f(e));
+        match (named.next(), named.next()) {
+            (Some(e), None) => Some(e),
+            _ => None,
+        }
+    };
+    if episodes.iter().any(exactly) {
+        return only(&exactly);
     }
+    only(&ends)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_title_is_the_whole_of_one_or_the_end_of_one_not_its_beginning() {
+        let ep = |s: u32, n: u32, title: &str| -> crate::models::Episode { serde_json::from_value(serde_json::json!({"title_id": 1, "season": s, "episode": n, "title": title})).unwrap() };
+        let eps = [ep(1, 26, "Atlas"), ep(1, 43, "His Highness Dead Cross"), ep(2, 43, "Astro Boy vs. Atlas IX: Atlas Forever")];
+        let moved = retitled("Astro.Boy.S01E43.Atlas.Forever.1080p.BluRay.10bit.EAC3.2.0.x265-iVy", 1, 43, &eps).map(|e| (e.season, e.episode));
+        assert_eq!(moved, Some((2, 43)));
+        assert_eq!(retitled("Astro.Boy.S01E07.Atlas.1080p.BluRay.x265-iVy", 1, 7, &eps).map(|e| e.episode), Some(26));
+    }
 
     #[test]
     fn a_title_that_is_part_of_the_numbered_episodes_does_not_move_it() {

@@ -229,7 +229,7 @@ fn series_release<'a>(tc: &'a TitleContext, release: &Release) -> Option<Named<'
     let mut p = parsed?;
     // The indexer's id covers a name the library does not know, but not a name with nothing of
     // the title in it: indexers mislabel ("De La Calle" filed under Fujiko Mine's id).
-    let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id && shares_a_name(&p.series_title, t);
+    let by_id = release.tvdb_id.is_some() && release.tvdb_id == t.tvdb_id && shares_a_name(&p.series_title, t) && !names_another(&p.series_title, t);
     // A later season posted under its own name and numbered from one.
     let named = season_named(&p.series_title, t, &tc.seasons);
     if let Some((season, offset)) = named {
@@ -442,6 +442,26 @@ fn shares_a_name(series_title: &str, t: &Title) -> bool {
         let ours = plain(n);
         (!said.is_empty() && !ours.is_empty() && (ours.contains(&said) || said.contains(&ours))) || words(n).iter().any(|w| theirs.contains(w))
     })
+}
+
+/// Whether a release's series name is one of the title's names with more after it that makes
+/// it another show: a sequel or a spin-off, "Mobile Suit Gundam 00" for "Mobile Suit Gundam",
+/// "Monster: The Jeffrey Dahmer Story" for "Monster". The indexer's id is not believed for it,
+/// since indexers file such shows under the first one's id. A year that is the show's, a
+/// country ("US", "UK"), or the show's year as its own story numbers it ("0079" for a show of
+/// 1979) is not more.
+fn names_another(series_title: &str, t: &Title) -> bool {
+    let words = |s: &str| -> Vec<String> { s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect() };
+    let said = words(series_title);
+    let year = t.year as i64;
+    let not_more = |w: &str| {
+        matches!(w, "us" | "uk" | "au" | "nz" | "ca")
+            || (w.len() == 4 && w.parse::<i64>().is_ok_and(|n| (year > 0 && (n - year).abs() <= 1) || (year > 0 && n < 1000 && n % 100 == year % 100)))
+    };
+    std::iter::once(&t.title).chain(t.alt_titles.iter()).any(|n| {
+        let name = words(n);
+        !name.is_empty() && said.len() > name.len() && said.starts_with(&name) && !said[name.len()..].iter().all(|w| not_more(w))
+    }) && !std::iter::once(&t.title).chain(t.alt_titles.iter()).any(|n| words(n) == said)
 }
 
 fn season_marker(title: &str) -> Option<(String, u32)> {
@@ -1482,7 +1502,7 @@ pub struct SearchOutcome {
 
 #[cfg(test)]
 mod tests {
-    use super::{names_an_episode, names_whole_series, season_marker, season_named, shares_a_name, SeasonName};
+    use super::{names_an_episode, names_another, names_whole_series, season_marker, season_named, shares_a_name, SeasonName};
     use crate::models::Title;
 
     #[test]
@@ -1514,6 +1534,23 @@ mod tests {
         for name in ["De La Calle", "Breaking Bad"] {
             assert!(!shares_a_name(name, &show), "{name}");
         }
+    }
+
+    #[test]
+    fn a_name_that_runs_on_past_the_title_is_another_show() {
+        let show = |title: &str, year: i32| -> Title { serde_json::from_value(serde_json::json!({"kind": "series", "title": title, "year": year})).unwrap() };
+        let gundam = show("Mobile Suit Gundam", 1979);
+        assert!(names_another("Mobile Suit Gundam 00", &gundam));
+        assert!(names_another("Mobile Suit Gundam 0080", &gundam), "another show of the same world");
+        assert!(!names_another("Mobile Suit Gundam", &gundam));
+        assert!(!names_another("Mobile Suit Gundam 0079", &gundam), "the show's year as its story numbers it");
+        assert!(!names_another("Mobile Suit Gundam 1979", &gundam));
+        let monster = show("Monster", 2004);
+        assert!(names_another("Monster The Jeffrey Dahmer Story", &monster));
+        assert!(!names_another("Monster", &monster));
+        assert!(!names_another("Naoki Urasawas Monster", &monster), "more before the title is not another show");
+        let office = show("The Office", 2005);
+        assert!(!names_another("The Office US", &office));
     }
 
     #[test]
