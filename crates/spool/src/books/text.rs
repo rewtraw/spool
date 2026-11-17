@@ -51,9 +51,30 @@ pub fn surname(a: &str) -> String {
     }
 }
 
-/// The numbers in a title, such as a volume or a part: "Goblin Slayer, Vol. 4" has 4.
+/// Words that put a number after them: "Volume Eight", "Book II".
+const NUMBERED: [&str; 6] = ["vol", "volume", "book", "part", "tome", "no"];
+const SPELLED: [&str; 20] = [
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+];
+const ROMAN: [&str; 20] = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii", "xiii", "xiv", "xv", "xvi", "xvii", "xviii", "xix", "xx"];
+
+/// A word's number: figures anywhere, and a number written out or in Roman numerals after a
+/// word such as "volume", so "Volume Eight" is 8 but "The One Thing" has none.
+fn number(w: &str, after: Option<&str>) -> Option<u32> {
+    if let Ok(n) = w.parse::<u32>() {
+        return Some(n);
+    }
+    if !after.is_some_and(|a| NUMBERED.contains(&a)) {
+        return None;
+    }
+    SPELLED.iter().chain(ROMAN.iter()).position(|s| *s == w).map(|i| i as u32 % 20 + 1)
+}
+
+/// The numbers in a title, such as a volume or a part: "Goblin Slayer, Vol. 4" has 4, and
+/// "The Zohar: Pritzker Edition, Volume Eight" has 8.
 pub fn numbers(t: &str) -> Vec<u32> {
-    words(t).iter().filter_map(|w| w.parse().ok()).filter(|n| *n < 1000).collect()
+    let ws = words(t);
+    (0..ws.len()).filter_map(|i| number(&ws[i], i.checked_sub(1).map(|j| ws[j].as_str()))).filter(|n| *n < 1000).collect()
 }
 
 /// How well the words of `a` are found in `b`: each word against its best match by
@@ -83,7 +104,18 @@ fn subtitle(t: &str) -> String {
     let core = core_title(t);
     let all = words(t);
     let skip = core.split(' ').filter(|w| !w.is_empty()).count();
-    all.into_iter().skip(skip).filter(|w| !PLAIN_SUBTITLE.contains(&w.as_str()) && w.parse::<u32>().is_err()).collect::<Vec<_>>().join(" ")
+    // Numbers are weighed apart, by `numbers`, and so are left out, with the words that
+    // number them.
+    let rest: Vec<String> = all.into_iter().skip(skip).collect();
+    (0..rest.len())
+        .filter(|&i| {
+            let w = rest[i].as_str();
+            let numbers_next = rest.get(i + 1).is_some_and(|n| number(n, Some(w)).is_some());
+            !PLAIN_SUBTITLE.contains(&w) && !numbers_next && number(w, i.checked_sub(1).map(|j| rest[j].as_str())).is_none()
+        })
+        .map(|i| rest[i].clone())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// How alike two titles are, both ways round, 0 to 1. Numbers that disagree, such as
@@ -99,8 +131,10 @@ pub fn title_alike(a: &str, b: &str) -> f64 {
     if !na.is_empty() && !nb.is_empty() && na.iter().all(|n| !nb.contains(n)) {
         s -= 0.35;
     }
+    // The same volume settles it, though one names the volume's contents and the other not.
+    let same_volume = !na.is_empty() && na == nb;
     let (sa, sb) = (subtitle(a), subtitle(b));
-    if !sa.is_empty() && !sb.is_empty() && cover(&sa, &sb).min(cover(&sb, &sa)) < 0.75 {
+    if !same_volume && !sa.is_empty() && !sb.is_empty() && cover(&sa, &sb).min(cover(&sb, &sa)) < 0.75 {
         s -= 0.35;
     }
     s.max(0.0)
@@ -156,5 +190,17 @@ mod tests {
         assert!(title_alike("Viridian Gate Online: Insurrection", "Viridian Gate Online: Vindication") < 0.7);
         assert!(title_alike("Viridian Gate Online: Insurrection", "Viridian Gate Online") > 0.9);
         assert!(title_alike("Dune: A Novel", "Dune: Deluxe Edition") > 0.9);
+    }
+
+    #[test]
+    fn a_volume_written_out_is_a_number() {
+        assert_eq!(numbers("The Zohar: Pritzker Edition, Volume Nine"), vec![9]);
+        assert_eq!(numbers("Hermetica, Book II"), vec![2]);
+        assert!(numbers("The One Thing").is_empty());
+        let nine = "The Zohar: Pritzker Edition, Volume Nine";
+        let right = title_alike(nine, "The Zohar (Zohar: The Pritzker Editions) Vol 9: Numbers-Deuteronomy");
+        let wrong = title_alike(nine, "The Zohar (The Zohar: Pritzker Edition) Vol 11: Midrash ha-Ne'lam and Zoharic Compositions");
+        assert!(right > 0.85 && wrong < 0.6, "{right} {wrong}");
+        assert!(title_alike("The Zohar: Pritzker Edition, Volume Seven", "The Zohar (The Zohar: Pritzker Edition) Vol 7: Leviticus") > 0.85);
     }
 }

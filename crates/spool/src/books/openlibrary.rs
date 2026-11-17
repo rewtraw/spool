@@ -113,6 +113,7 @@ struct Editions {
 #[serde(default)]
 struct Edition {
     key: String,
+    subtitle: Option<String>,
     isbn_13: Vec<String>,
     isbn_10: Vec<String>,
     languages: Vec<Key>,
@@ -180,6 +181,7 @@ pub async fn detail(http: &reqwest::Client, ol_work: &str, language: &str) -> Re
     let mut isbns = vec![];
     let mut ol_editions = vec![];
     let mut earliest = w.first_publish_date.as_deref().map(year_of).unwrap_or(0);
+    let mut subtitles: Vec<&str> = vec![];
     for e in &eds.entries {
         let langs: Vec<String> = e.languages.iter().map(|l| two_letter(&l.key)).collect();
         if !langs.is_empty() && !langs.iter().any(|l| l == language) {
@@ -191,7 +193,14 @@ pub async fn detail(http: &reqwest::Client, ol_work: &str, language: &str) -> Re
         }
         isbns.extend(e.isbn_13.iter().chain(&e.isbn_10).filter_map(|i| super::text::isbn13(i)));
         ol_editions.push(e.key.trim_start_matches("/books/").to_string());
+        subtitles.push(e.subtitle.as_deref().unwrap_or("").trim());
     }
+    // The books themselves say what they are: a work's record can lack the volume its
+    // editions all name ("Pritzker Edition, Volume Nine"), or name another.
+    let subtitle = match subtitles.split_first() {
+        Some((first, rest)) if !first.is_empty() && rest.iter().all(|s| s == first) => first.to_string(),
+        _ => w.subtitle.unwrap_or_default(),
+    };
     isbns.sort();
     isbns.dedup();
     let description = match w.description {
@@ -200,7 +209,7 @@ pub async fn detail(http: &reqwest::Client, ol_work: &str, language: &str) -> Re
         _ => String::new(),
     };
     Ok(Detail {
-        work: Work { ol_work: ol_work.to_string(), title: w.title, subtitle: w.subtitle.unwrap_or_default(), authors, year: earliest, cover: cover(w.covers.first().copied()), editions: eds.entries.len() as u32 },
+        work: Work { ol_work: ol_work.to_string(), title: w.title, subtitle, authors, year: earliest, cover: cover(w.covers.first().copied()), editions: eds.entries.len() as u32 },
         description,
         isbns,
         ol_editions,
