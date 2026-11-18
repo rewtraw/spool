@@ -25,7 +25,12 @@ pub(super) async fn get_book(State(app): State<App>, Path(id): Path<i64>) -> R<V
 
 #[derive(Deserialize)]
 pub(super) struct AddBook {
+    /// The Open Library work; or, for a book Open Library has no work of its own for, `md5`.
+    #[serde(default)]
     ol_work: String,
+    /// A file of Anna's Archive, wanted as a book of its own.
+    #[serde(default)]
+    md5: String,
     language: Option<String>,
     /// "epub", "audiobook" or both; the EPUB when not said.
     #[serde(default)]
@@ -33,6 +38,12 @@ pub(super) struct AddBook {
 }
 
 pub(super) async fn add_book(State(app): State<App>, who: Option<axum::Extension<Who>>, Json(a): Json<AddBook>) -> R<Value> {
+    if !a.md5.trim().is_empty() {
+        if !a.ol_work.trim().is_empty() {
+            return Err(ApiError(StatusCode::BAD_REQUEST, "a book is added by its Open Library work or by the MD5 of a file, not both".into()));
+        }
+        return Ok(Json(json!(app.add_book_file(&a.md5, Who::of(who).account).await?)));
+    }
     let work = a.ol_work.trim().trim_start_matches("/works/");
     if !work.starts_with("OL") || !work.ends_with('W') {
         return Err(ApiError(StatusCode::BAD_REQUEST, "an Open Library work is named like OL45804W".into()));

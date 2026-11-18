@@ -758,6 +758,11 @@ const MIGRATIONS: &[&str] = &[
         '$.movie_root', '$.series_root', '$.music_root', '$.audiobook_root', '$.video_root', '$.required_volume')
         WHERE key = 'general';
     "#,
+    r#"
+    -- A book is known by its Open Library work, or, when Open Library has none of its own, by
+    -- the file of Anna's Archive it was added from, as md5:<hash>.
+    ALTER TABLE books RENAME COLUMN ol_work TO key;
+    "#,
 ];
 
 impl Db {

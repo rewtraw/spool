@@ -182,6 +182,7 @@ export interface Candidate {
 export interface Book {
   id: number;
   ol_work: string;
+  added_from: string;
   title: string;
   subtitle: string;
   authors: string[];

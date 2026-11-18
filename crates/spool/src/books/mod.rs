@@ -124,7 +124,11 @@ pub struct TurnedDown {
 #[serde(default)]
 pub struct Book {
     pub id: i64,
+    /// Its work in Open Library's catalogue; empty for a book Open Library has no work of its
+    /// own for, such as one volume of several catalogued as one, added from its file.
     pub ol_work: String,
+    /// The file of Anna's Archive it was added from, by MD5, when it has no Open Library work.
+    pub added_from: String,
     pub title: String,
     pub subtitle: String,
     pub authors: Vec<String>,
@@ -172,6 +176,21 @@ fn yes() -> bool {
     true
 }
 
+impl Book {
+    /// What tells it from every other book: its Open Library work, or the file it was added from.
+    pub fn key(&self) -> String {
+        if self.ol_work.is_empty() {
+            file_key(&self.added_from)
+        } else {
+            self.ol_work.clone()
+        }
+    }
+}
+
+fn file_key(md5: &str) -> String {
+    format!("md5:{md5}")
+}
+
 impl Db {
     pub fn books(&self) -> Result<Vec<Book>> {
         self.with(|c| {
@@ -196,8 +215,9 @@ impl Db {
         })
     }
 
-    pub fn book_by_work(&self, ol_work: &str) -> Result<Option<i64>> {
-        self.with(|c| c.query_row("SELECT id FROM books WHERE ol_work = ?1", [ol_work], |r| r.get(0)).optional())
+    /// The book with this key: an Open Library work, or md5:<hash> for one added from a file.
+    pub fn book_by_key(&self, key: &str) -> Result<Option<i64>> {
+        self.with(|c| c.query_row("SELECT id FROM books WHERE key = ?1", [key], |r| r.get(0)).optional())
     }
 
     pub fn save_book(&self, b: &mut Book) -> Result<()> {
@@ -206,7 +226,7 @@ impl Db {
         let data = serde_json::to_string(b)?;
         if b.id == 0 {
             b.id = self.with(|c| {
-                c.execute("INSERT INTO books(ol_work, state, added_at, data) VALUES (?1, ?2, ?3, ?4)", params![b.ol_work, b.state.as_str(), b.added_at, data])?;
+                c.execute("INSERT INTO books(key, state, added_at, data) VALUES (?1, ?2, ?3, ?4)", params![b.key(), b.state.as_str(), b.added_at, data])?;
                 Ok(c.last_insert_rowid())
             })?;
         } else {
@@ -221,7 +241,7 @@ impl Db {
         b.updated_at = now();
         b.rev = rev + 1;
         let data = serde_json::to_string(b)?;
-        let n = self.with(|c| c.execute("UPDATE books SET state = ?2, data = ?3 WHERE id = ?1 AND ol_work = ?4 AND json_extract(data, '$.rev') = ?5", params![b.id, b.state.as_str(), data, b.ol_work, rev]))?;
+        let n = self.with(|c| c.execute("UPDATE books SET state = ?2, data = ?3 WHERE id = ?1 AND key = ?4 AND json_extract(data, '$.rev') = ?5", params![b.id, b.state.as_str(), data, b.key(), rev]))?;
         Ok(n > 0)
     }
 
@@ -376,7 +396,7 @@ impl App {
         Ok(works
             .into_iter()
             .map(|w| {
-                let have = self.db.book_by_work(&w.ol_work).ok().flatten().and_then(|id| self.db.book(id).ok().flatten());
+                let have = self.db.book_by_key(&w.ol_work).ok().flatten().and_then(|id| self.db.book(id).ok().flatten());
                 let mut v = serde_json::json!(w);
                 v["book_id"] = serde_json::json!(have.as_ref().map(|b| b.id));
                 // Which forms of it are already wanted.
@@ -399,7 +419,7 @@ impl App {
     }
 
     async fn add_book_as(&self, ol_work: &str, language: Option<&str>, account: Option<i64>, epub: bool, audiobook: bool, reading: Option<i64>) -> Result<Book> {
-        if let Some(id) = self.db.book_by_work(ol_work)? {
+        if let Some(id) = self.db.book_by_key(ol_work)? {
             let mut b = self.db.book(id)?.ok_or_else(|| anyhow::anyhow!("the book went"))?;
             let more = (epub && !b.epub) || (audiobook && b.audio.is_none()) || (reading.is_some() && b.florilegium_want.is_none());
             if more {
@@ -435,6 +455,42 @@ impl App {
         };
         self.db.save_book(&mut b)?;
         tracing::info!(book = %b.title, "added a book");
+        self.nudge_book(b.id);
+        Ok(b)
+    }
+
+    /// Want a file of Anna's Archive as a book of its own, by its MD5: for a book Open Library
+    /// has no work of its own for, such as one volume of a set it catalogues as one. The file
+    /// is taken at its word, named as the index names it, and fetched at once.
+    pub async fn add_book_file(&self, md5: &str, account: Option<i64>) -> Result<Book> {
+        let md5 = md5.trim().to_lowercase();
+        if md5.len() != 32 || !md5.chars().all(|c| c.is_ascii_hexdigit()) {
+            bail!("an MD5 is 32 hexadecimal characters");
+        }
+        if let Some(id) = self.db.book_by_key(&file_key(&md5))? {
+            return self.db.book(id)?.ok_or_else(|| anyhow::anyhow!("the book went"));
+        }
+        // A book that already has this file, or is fetching it, is this book.
+        if let Some(b) = self.db.books()?.into_iter().find(|b| b.chosen.as_ref().is_some_and(|c| c.md5 == md5)) {
+            return Ok(b);
+        }
+        let Some(c) = self.books.shelf.by_md5(&md5)? else { bail!("no file with that MD5 is in the index of Anna's Archive") };
+        let language = Some(c.lang.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| self.settings.general().books.languages()[0].clone());
+        let mut b = Book {
+            added_from: md5,
+            title: c.title.clone(),
+            authors: Some(c.author.clone()).filter(|a| !a.is_empty()).into_iter().collect(),
+            year: c.year,
+            language,
+            state: BookState::Fetching,
+            chosen: Some(c),
+            added_at: now(),
+            account_id: account,
+            epub: true,
+            ..Default::default()
+        };
+        self.db.save_book(&mut b)?;
+        tracing::info!(book = %b.title, "added a book from its file");
         self.nudge_book(b.id);
         Ok(b)
     }
@@ -984,11 +1040,16 @@ mod tests {
         let mut b = Book { ol_work: "OL1W".into(), title: "Dune".into(), added_at: 1, ..Default::default() };
         db.save_book(&mut b).unwrap();
         assert!(b.id > 0);
-        assert_eq!(db.book_by_work("OL1W").unwrap(), Some(b.id));
+        assert_eq!(db.book_by_key("OL1W").unwrap(), Some(b.id));
         b.state = BookState::Choose;
         db.save_book(&mut b).unwrap();
         assert_eq!(db.book(b.id).unwrap().unwrap().state, BookState::Choose);
-        assert_eq!(db.books().unwrap().len(), 1);
+        // Two volumes Open Library catalogues as one work are two books, by their files.
+        let mut two = Book { added_from: "98b5fd5c2f8b5451ff3c44ad0abdf209".into(), title: "The Zohar Vol 2".into(), added_at: 2, ..Default::default() };
+        db.save_book(&mut two).unwrap();
+        assert_eq!(db.book_by_key("md5:98b5fd5c2f8b5451ff3c44ad0abdf209").unwrap(), Some(two.id));
+        assert!(db.save_book_if(&mut two.clone(), two.rev).unwrap());
+        assert_eq!(db.books().unwrap().len(), 2);
         db.delete_book(b.id).unwrap();
         assert!(db.book(b.id).unwrap().is_none());
     }

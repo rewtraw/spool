@@ -230,8 +230,8 @@ const TOOLS: &[Tool] = &[
         name: "add_book",
         read: false,
         destructive: false,
-        description: "Want a book, by Open Library work id from find_book, as an EPUB, an audiobook or both (formats; the EPUB when not said). The EPUB is looked for in the Anna's Archive index, checked and sent to Florilegium; the audiobook is looked for on the indexers (M4B first, then MP3) and filed in the audiobooks folder as Author/Title (Year). Adding a format to a book already added gives it that format too.",
-        schema: || obj(json!({"ol_work": {"type": "string", "description": "Such as OL45804W."}, "language": {"type": "string", "description": "Two-letter language it is wanted in; defaults to the first in settings."}, "formats": {"type": "array", "items": {"type": "string", "enum": ["epub", "audiobook"]}}}), &["ol_work"]),
+        description: "Want a book, by Open Library work id from find_book, as an EPUB, an audiobook or both (formats; the EPUB when not said). The EPUB is looked for in the Anna's Archive index, checked and sent to Florilegium; the audiobook is looked for on the indexers (M4B first, then MP3) and filed in the audiobooks folder as Author/Title (Year). Adding a format to a book already added gives it that format too. A book Open Library has no work of its own for, such as one volume of a set it catalogues as one work, is added instead by the md5 of its file in Anna's Archive, and fetched as an EPUB at once.",
+        schema: || obj(json!({"ol_work": {"type": "string", "description": "Such as OL45804W."}, "md5": {"type": "string", "description": "Instead of ol_work: the MD5 of a file in Anna's Archive, as a book of its own."}, "language": {"type": "string", "description": "Two-letter language it is wanted in; defaults to the first in settings."}, "formats": {"type": "array", "items": {"type": "string", "enum": ["epub", "audiobook"]}}}), &[]),
     },
     Tool {
         name: "manage_book",
@@ -1066,7 +1066,10 @@ impl Mcp {
                 Ok(row)
             }
             "add_book" => {
-                let b = self.post("/api/books", json!({"ol_work": a["ol_work"].as_str().ok_or("ol_work is required")?, "language": a["language"], "formats": a["formats"].as_array().cloned().unwrap_or_default()})).await?;
+                let b = match a["md5"].as_str().filter(|m| !m.trim().is_empty()) {
+                    Some(md5) => self.post("/api/books", json!({"md5": md5})).await?,
+                    None => self.post("/api/books", json!({"ol_work": a["ol_work"].as_str().ok_or("ol_work or md5 is required")?, "language": a["language"], "formats": a["formats"].as_array().cloned().unwrap_or_default()})).await?,
+                };
                 Ok(book_row(&b))
             }
             "manage_book" => {

@@ -257,6 +257,23 @@ impl Shelf {
     }
 }
 
+impl Shelf {
+    /// The file with this MD5, as it stands in the index, if it does.
+    pub fn by_md5(&self, md5: &str) -> Result<Option<Candidate>> {
+        let open = self.open.read();
+        let Some(o) = open.as_ref() else { anyhow::bail!("the book index has not been built yet") };
+        let f = o.f;
+        let searcher = o.reader.searcher();
+        let hit = searcher.search(&TermQuery::new(Term::from_field_text(f.md5, md5), IndexRecordOption::Basic), &TopDocs::with_limit(1))?;
+        let Some((_, addr)) = hit.into_iter().next() else { return Ok(None) };
+        let d: TantivyDocument = searcher.doc(addr)?;
+        let text = |field: Field| d.get_first(field).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let num = |field: Field| d.get_first(field).and_then(|v| v.as_u64()).unwrap_or(0);
+        let format = Some(text(f.format)).filter(|s| !s.is_empty()).unwrap_or_else(|| "epub".into());
+        Ok(Some(Candidate { md5: md5.to_string(), title: text(f.show_title), author: text(f.show_author), lang: text(f.lang), size: num(f.size), year: num(f.year) as i32, score: 1.0, by_id: false, format, picked: true }))
+    }
+}
+
 /// Each word as itself, and forgiving of a typo or two once it is long enough to bear one.
 fn clauses(field: Field, text: &str, exact: f32, out: &mut Vec<(Occur, Box<dyn Query>)>) {
     let ws = words(text);
@@ -305,6 +322,9 @@ mod tests {
         let got = ask("Goblin Slayer, Vol. 4", "Kagyu", &[]);
         assert_eq!(got[0].md5, "c3");
         assert!(got[0].score - got[1].score > 0.2);
+        let one = shelf.by_md5("d4").unwrap().unwrap();
+        assert_eq!((one.title.as_str(), one.author.as_str(), one.picked), ("Goblin Slayer, Vol. 11", "Kumo Kagyu", true));
+        assert!(shelf.by_md5("ff").unwrap().is_none());
 
         // A swap cut short after the index in use was moved aside is undone on the next start.
         drop(shelf);

@@ -158,6 +158,13 @@
     }
   }
 
+  /** A file of Anna's Archive, pasted by its MD5, wanted as a book of its own: for one Open
+   *  Library has no work for, such as a volume of a set it catalogues as one. */
+  const md5 = $derived(/^[0-9a-f]{32}$/i.test(query.trim()) ? query.trim().toLowerCase() : '');
+  async function addFile() {
+    const b = await act(() => api.post<any>('/books', { md5 }), 'Added the file');
+    if (b) go(`book/${b.id}`);
+  }
 
   const WANT_LABEL: Record<string, string> = { wanted: 'Wanted', downloading: 'Downloading', have: 'Here' };
   const nothing = $derived(!found.movies.length && !found.series.length && !albums.length && !books.length);
@@ -343,7 +350,8 @@
     <div class="results">{#each albums.slice(artist ? ownAlbums : 0) as r (r.group.mbid)}{@render album(r)}{/each}</div>
   {/if}
 {:else if kind === 'books'}
-  {#if partErrors.books}<div class="card empty">{partErrors.books}</div>
+  {#if md5}<div class="card empty">That is the MD5 of a file. <button class="btn small primary" onclick={addFile}>Add the file as a book</button> Spool fetches it from Anna's Archive as it is named in the index, for a book Open Library has no entry of its own for.</div>
+  {:else if partErrors.books}<div class="card empty">{partErrors.books}</div>
   {:else if !books.length}<div class="card empty">Open Library has nothing for “{query.trim()}”.</div>
   {:else}
     <p class="faint source">Books, from Open Library. The EPUB comes from Spool's index of Anna's Archive and goes to Florilegium; the audiobook comes from the indexers and goes to the audiobooks folder.</p>
