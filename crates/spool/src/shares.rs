@@ -268,7 +268,11 @@ async fn serve(State(app): State<App>, UrlPath(name): UrlPath<String>, method: M
             r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("video/mp4"));
             r
         }
-        "jpg" => crate::serve::send_file(&still, &headers, head).await,
+        "jpg" => {
+            let mut r = crate::serve::send_file(&still, &headers, head).await;
+            r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static("image/jpeg"));
+            r
+        }
         "" => {
             if !head {
                 s.views += 1;
