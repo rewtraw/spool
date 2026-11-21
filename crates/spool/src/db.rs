@@ -763,6 +763,14 @@ const MIGRATIONS: &[&str] = &[
     -- the file of Anna's Archive it was added from, as md5:<hash>.
     ALTER TABLE books RENAME COLUMN ol_work TO key;
     "#,
+    r#"
+    -- Videos and clips given a link that plays them for anyone. See shares.rs.
+    CREATE TABLE shares (
+        id INTEGER PRIMARY KEY,
+        token TEXT NOT NULL UNIQUE,
+        data TEXT NOT NULL
+    );
+    "#,
 ];
 
 impl Db {

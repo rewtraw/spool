@@ -213,6 +213,7 @@ async fn main() -> Result<()> {
             app.resume_moves().await;
             app.resume_compacts();
             app.resume_clips();
+            app.resume_shares();
             if std::env::var_os("SPOOL_NO_SCHEDULER").is_none() {
                 app.spawn_scheduler();
                 app.spawn_dialogue();
@@ -222,6 +223,7 @@ async fn main() -> Result<()> {
             let _ = app.port.set(listener.local_addr()?.port());
             // Players get their own port, on the same interface as the web app.
             spool::jellyfin::spawn(app.clone(), bind.rsplit_once(':').map(|(host, _)| host.trim_matches(['[', ']']).to_string()).unwrap_or_else(|| "0.0.0.0".into()));
+            spool::shares::spawn(app.clone());
             tracing::info!(%bind, paused = app.paused(), data = %dir.display(), "Spool is running");
             let engine = app.engine.clone();
             let books = app.clone();

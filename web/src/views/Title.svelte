@@ -6,7 +6,7 @@
   import Poster from '../components/Poster.svelte';
   import ClipMaker from '../components/ClipMaker.svelte';
   import JobLine from '../components/JobLine.svelte';
-  import { canShareFiles, deliver, fetchFile, safeName } from '../lib/save';
+  import { canShareFiles, deliver, fetchFile, safeName, shareLink } from '../lib/save';
 
   let { id }: { id: number } = $props();
 
@@ -298,6 +298,23 @@
     }
   }
 
+  // A channel's videos shared on the internet, by file, and the address they are shared at.
+  let shared = $state<{ shares: any[]; address: string }>({ shares: [], address: '' });
+  $effect(() => {
+    if (t?.channel) api.get<typeof shared>('/shares').then((r) => (shared = r), () => {});
+  });
+  const shareOf = (f: MediaFile) => shared.shares.find((s) => s.file_id === f.id);
+
+  /** Give a video a link that plays it for anyone on the internet, and hand the link over once
+   * it is ready; one still being got ready says so. */
+  async function shareVideo(f: MediaFile) {
+    const s = shareOf(f) ?? (await act(() => api.post<any>('/shares', { file_id: f.id })));
+    if (!s) return;
+    shared = await api.get<typeof shared>('/shares').catch(() => shared);
+    if (s.state === 'ready' && s.url) await shareLink(s.url, s.name);
+    else toast('Getting it ready to share. The link is under Clips, and here, in a minute or two.');
+  }
+
   const media = (f: MediaFile) => [f.media_info?.dynamic_range_type, f.media_info?.video_codec, f.media_info ? `${f.media_info.audio_codec} ${f.media_info.audio_channels || ''}`.trim() : '', f.release_group].filter(Boolean).join(' · ');
 
   // What lies in the folder beside the film or the episodes.
@@ -585,6 +602,7 @@
                     {#if f && infuseEpisode(e, f)}<a class="btn small ghost" href={infuseEpisode(e, f)} title="Plays the episode in Infuse on this device." aria-label="Play episode {e.episode} in Infuse">Play</a>{/if}
                     {#if app.manages && aired(e) && !locked && !t.channel}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
                     {#if f && t.channel}<button class="btn small ghost" class:primary={!!readyVideo[f.id]} disabled={!!savingVideo[f.id]} title="Saves the video to this device: on a phone, Save Video in the share sheet puts it in Photos" onclick={() => saveVideo(e, f)}>{savingVideo[f.id] ? 'Fetching…' : readyVideo[f.id] ? 'Save it now' : 'Save'}</button>{/if}
+                    {#if f && t.channel && shared.address}<button class="btn small ghost" title="A link that plays it for anyone on the internet, at {shared.address}" onclick={() => shareVideo(f)}>{shareOf(f)?.state === 'making' ? 'Sharing…' : shareOf(f) ? 'Shared link' : 'Share'}</button>{/if}
                     {#if e.video?.url}<a class="btn small ghost" href={e.video.url} target="_blank" rel="noreferrer" title="The video on {t.network ?? 'its site'}">Source</a>{/if}
                     {#if f && app.manages}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f && app.manages}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}

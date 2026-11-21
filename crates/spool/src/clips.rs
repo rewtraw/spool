@@ -300,11 +300,14 @@ fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64,
     a
 }
 
-/// What to hand ffmpeg to make a whole file into an MP4 for a photo library: its picture and
-/// sound copied when a phone plays them as they are, and made again when not.
-fn save_arguments(info: &MediaInfo, src: &Path, out: &Path) -> Vec<String> {
+/// What to hand ffmpeg to make a whole file into an MP4 for a photo library, or for any
+/// browser: its picture and sound copied when they play as they are, and made again when not.
+/// Every browser plays H.264; HEVC only Apple's, so a page for anyone wants H.264 alone, no
+/// larger than 1080p.
+pub(crate) fn save_arguments(info: &MediaInfo, src: &Path, out: &Path, for_browsers: bool) -> Vec<String> {
     let codec = |kind: &str| info.streams.iter().find(|s| s.kind == kind).map(|s| s.codec.as_str()).unwrap_or("");
-    let picture_as_is = matches!(codec("video"), "h264" | "hevc") && !is_hdr(info);
+    let fits = !for_browsers || info.height <= 1080;
+    let picture_as_is = fits && !is_hdr(info) && if for_browsers { codec("video") == "h264" } else { matches!(codec("video"), "h264" | "hevc") };
     let sound_as_is = matches!(codec("audio"), "aac" | "");
     let mut a: Vec<String> = vec![];
     let mut add = |items: &[&str]| a.extend(items.iter().map(|s| s.to_string()));
@@ -316,7 +319,11 @@ fn save_arguments(info: &MediaInfo, src: &Path, out: &Path) -> Vec<String> {
             add(&["-tag:v", "hvc1"]);
         }
     } else {
-        add(&["-vf", "format=yuv420p", "-c:v", "h264_videotoolbox", "-b:v", "8M", "-profile:v", "high"]);
+        let picture = match crate::compact::fit(info.width, info.height, 1080) {
+            Some((w, h)) => format!("scale={w}:{h},format=yuv420p"),
+            None => "format=yuv420p".into(),
+        };
+        add(&["-vf", &picture, "-c:v", "h264_videotoolbox", "-b:v", "6M", "-profile:v", "high"]);
     }
     if sound_as_is {
         add(&["-c:a", "copy"]);
@@ -399,7 +406,7 @@ impl App {
             None => self.probe(&src, "").await?.ok_or_else(|| anyhow!("the file could not be read"))?,
         };
         let part = dir.join(format!(".{}.mp4.part", file.id));
-        let made = tokio::process::Command::new(&tool).args(save_arguments(&info, &src, &part)).kill_on_drop(true).output().await?;
+        let made = tokio::process::Command::new(&tool).args(save_arguments(&info, &src, &part, false)).kill_on_drop(true).output().await?;
         if !made.status.success() {
             let _ = tokio::fs::remove_file(&part).await;
             bail!("the video could not be made: {}", String::from_utf8_lossy(&made.stderr).lines().last().unwrap_or("ffmpeg failed"));
@@ -673,6 +680,7 @@ impl App {
             stop.store(true, Ordering::Relaxed);
         }
         self.db.delete_clip(id)?;
+        self.db.delete_shares_of_clip(id)?;
         for path in [self.clip_video(id), self.clip_still(id), self.clip_gif(id)] {
             match std::fs::remove_file(&path) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e).with_context(|| format!("removing {}", path.display())),
@@ -781,11 +789,14 @@ mod tests {
             let mut a = stream(1, "audio", "en", true);
             a.codec = audio.into();
             let info = spool_core::mediainfo::MediaInfo { streams: vec![v, a], ..Default::default() };
-            super::save_arguments(&info, std::path::Path::new("in.mkv"), std::path::Path::new("out.mp4")).join(" ")
+            super::save_arguments(&info, std::path::Path::new("in.mkv"), std::path::Path::new("out.mp4"), false).join(" ")
         };
         let x = with("h264", "aac");
         assert!(x.contains("-c:v copy") && x.contains("-c:a copy") && x.contains("+faststart"), "{x}");
         assert!(with("hevc", "aac").contains("-tag:v hvc1"));
+        let mut info = spool_core::mediainfo::MediaInfo { streams: vec![stream(0, "video", "", true)], ..Default::default() };
+        info.streams[0].codec = "hevc".into();
+        assert!(super::save_arguments(&info, std::path::Path::new("in.mkv"), std::path::Path::new("out.mp4"), true).join(" ").contains("h264_videotoolbox"), "HEVC is made again for browsers");
         let youtube = with("vp9", "opus");
         assert!(youtube.contains("h264_videotoolbox") && youtube.contains("-c:a aac"), "{youtube}");
     }

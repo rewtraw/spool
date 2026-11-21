@@ -1,6 +1,8 @@
 // Saving a video or picture from Spool to the device: on a phone through the share sheet,
 // where "Save Video" puts it straight into Photos, and elsewhere as a download.
 
+import { toast } from './state.svelte';
+
 /** Whether this browser can hand files to a share sheet. */
 export const canShareFiles = () => typeof navigator.canShare === 'function';
 
@@ -34,3 +36,38 @@ export async function fetchFile(url: string, name: string, type: string): Promis
 
 /** A name made safe to save a file by. */
 export const safeName = (name: string, fallback: string) => name.replace(/[/\\:"'\n\r]+/g, ' ').replace(/\s+/g, ' ').trim() || fallback;
+
+/** Put text on the clipboard. Spool is reached over plain http, where browsers keep the
+ * clipboard's own interface away from pages, so the old way is the one that works. */
+export function copy(text: string) {
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  document.body.appendChild(area);
+  area.select();
+  area.setSelectionRange(0, text.length);
+  let done = false;
+  try {
+    done = document.execCommand('copy');
+  } catch {
+    done = false;
+  }
+  area.remove();
+  return done;
+}
+
+/** Hand a link over: to the share sheet where there is one, onto the clipboard where not. */
+export async function shareLink(url: string, title: string) {
+  if (typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ url, title });
+      return;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+    }
+  }
+  if (copy(url)) toast('Link copied. Anyone with it can watch, until it is no longer shared.');
+  else toast(`The link could not be copied: ${url}`, 'error');
+}

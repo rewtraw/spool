@@ -144,6 +144,9 @@ pub struct General {
     pub opensubtitles_password: String,
     /// Serve the library to players that speak Jellyfin's protocol, such as Infuse.
     pub players_enabled: bool,
+    /// The public address shared videos are reached at, such as "https://v.example.com": a
+    /// tunnel's, carried to the door for them (see [`crate::shares`]). Empty shares nothing.
+    pub share_address: String,
     /// Spool stops starting downloads when the downloads disk would drop below this many
     /// gigabytes free once the download has finished.
     pub min_free_gb: u32,
@@ -187,6 +190,7 @@ impl Default for General {
             opensubtitles_username: String::new(),
             opensubtitles_password: String::new(),
             players_enabled: false,
+            share_address: String::new(),
             min_free_gb: 20,
             default_movie_profile: 0,
             default_series_profile: 0,

@@ -36,6 +36,9 @@
     // The players' door follows the settings within a few seconds.
     setTimeout(load, 4000);
   }
+  async function saveSharing() {
+    await saveSettings({ share_address: general.share_address.trim().replace(/\/+$/, '') });
+  }
   async function add() {
     if ((await act(() => api.post('/accounts', fresh), `${fresh.name.trim()} can sign in now`)) === undefined) return;
     fresh = { name: '', password: '' };
@@ -89,6 +92,16 @@
         <p class="muted">In the player, add a media server of the Jellyfin kind. On the same network it should appear by itself as <b>Spool</b>; otherwise give it the address <code>{location.hostname}:{(door?.port ?? 8096)}</code>, and sign in as one of the people below. A player that shows a list of people to choose from is given their names.{#if door?.status}{' '}{door.status}{/if}</p>
         <p class="muted">The same address in a browser, <a href="http://{location.hostname}:{(door?.port ?? 8096)}/" target="_blank" rel="noreferrer"><code>http://{location.hostname}:{(door?.port ?? 8096)}</code></a>, is where the people below ask for a film or a series the library has not got, and see when it is ready to play.</p>
       {/if}
+      <div><button class="btn primary" type="submit">Save</button></div>
+    </fieldset>
+  </form>
+
+  <form class="stack form" onsubmit={(e) => { e.preventDefault(); saveSharing(); }}>
+    <fieldset class="card">
+      <legend>Sharing</legend>
+      <p class="muted">A channel's video, or a clip, can be given a link that plays it for anyone on the internet, without signing in, until it is no longer shared. Spool serves shared videos alone, from a door of their own on port <code>7980</code> that only this machine can reach; a tunnel, such as Cloudflare's, carries a public address to it. Nothing else of Spool can be reached that way.</p>
+      <label>Public address <input class="input" placeholder="https://v.example.com" bind:value={general.share_address} /></label>
+      <p class="faint small">Empty, nothing is shared. Shared videos are listed under Clips.</p>
       <div><button class="btn primary" type="submit">Save</button></div>
     </fieldset>
   </form>

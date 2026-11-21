@@ -184,3 +184,34 @@ pub(super) async fn clip_still(State(app): State<App>, Path(id): Path<i64>) -> R
         Err(_) => StatusCode::NOT_FOUND.into_response(),
     }
 }
+
+/// The videos and clips shared, each with its public link.
+pub(super) async fn list_shares(State(app): State<App>) -> R<Value> {
+    let shares: Vec<Value> = app.db.shares()?.into_iter().map(|s| share_json(&app, s)).collect();
+    Ok(Json(json!({"shares": shares, "address": app.settings.general().share_address})))
+}
+
+#[derive(Deserialize)]
+pub(super) struct AddShare {
+    file_id: Option<i64>,
+    clip_id: Option<i64>,
+}
+
+pub(super) async fn add_share(State(app): State<App>, Json(b): Json<AddShare>) -> R<Value> {
+    if app.settings.general().share_address.trim().is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "sharing has no public address yet: set one under Settings, People".into()));
+    }
+    let s = app.add_share(b.file_id, b.clip_id)?;
+    Ok(Json(share_json(&app, s)))
+}
+
+pub(super) async fn remove_share(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
+    app.remove_share(id)?;
+    Ok(Json(json!({"deleted": id})))
+}
+
+fn share_json(app: &App, s: crate::shares::Share) -> Value {
+    let mut v = json!(s);
+    v["url"] = json!(app.share_url(&s));
+    v
+}

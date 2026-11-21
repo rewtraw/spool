@@ -42,6 +42,7 @@ pub mod serve;
 pub mod settings;
 pub mod soulseek;
 pub mod shape;
+pub mod shares;
 pub mod shadow;
 pub mod store;
 pub mod subs;
