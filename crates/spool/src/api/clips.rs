@@ -205,6 +205,24 @@ pub(super) async fn add_share(State(app): State<App>, Json(b): Json<AddShare>) -
     Ok(Json(share_json(&app, s)))
 }
 
+/// A shared video, or its still, for the web app's own page of shares.
+pub(super) async fn share_video(State(app): State<App>, Path(id): Path<i64>, req: axum::extract::Request) -> Response {
+    send_share(&app, id, req, false).await
+}
+
+pub(super) async fn share_still(State(app): State<App>, Path(id): Path<i64>, req: axum::extract::Request) -> Response {
+    send_share(&app, id, req, true).await
+}
+
+async fn send_share(app: &App, id: i64, req: axum::extract::Request, still: bool) -> Response {
+    let Ok(Some(s)) = app.db.share(id) else { return StatusCode::NOT_FOUND.into_response() };
+    let (video, picture) = app.share_files(&s);
+    let head = req.method() == axum::http::Method::HEAD;
+    let mut r = crate::serve::send_file(if still { &picture } else { &video }, req.headers(), head).await;
+    r.headers_mut().insert(header::CONTENT_TYPE, header::HeaderValue::from_static(if still { "image/jpeg" } else { "video/mp4" }));
+    r
+}
+
 pub(super) async fn remove_share(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
     app.remove_share(id)?;
     Ok(Json(json!({"deleted": id})))

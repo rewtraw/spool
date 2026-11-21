@@ -312,7 +312,7 @@
     if (!s) return;
     shared = await api.get<typeof shared>('/shares').catch(() => shared);
     if (s.state === 'ready' && s.url) await shareLink(s.url, s.name);
-    else toast('Getting it ready to share. The link is under Clips, and here, in a minute or two.');
+    else toast('Getting it ready to share. Its link will be under Shared in a minute or two.');
   }
 
   const media = (f: MediaFile) => [f.media_info?.dynamic_range_type, f.media_info?.video_codec, f.media_info ? `${f.media_info.audio_codec} ${f.media_info.audio_channels || ''}`.trim() : '', f.release_group].filter(Boolean).join(' · ');

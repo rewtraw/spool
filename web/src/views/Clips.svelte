@@ -101,7 +101,7 @@
     else toast('The link could not be copied; open it and copy it from the address bar.', 'error');
   }
 
-  // The videos and clips shared on the internet, and the address they are shared at.
+  // The clips shared on the internet (listed under Shared), and the address they are shared at.
   let shared = $state<{ shares: any[]; address: string }>({ shares: [], address: '' });
   async function loadShares() {
     shared = await api.get<typeof shared>('/shares').catch(() => shared);
@@ -109,11 +109,6 @@
   $effect(() => {
     app.clipTick;
     loadShares();
-  });
-  $effect(() => {
-    if (!shared.shares.some((s) => s.state === 'making')) return;
-    const timer = setInterval(loadShares, 3000);
-    return () => clearInterval(timer);
   });
   const shareOf = (c: Clip) => shared.shares.find((s) => s.clip_id === c.id);
 
@@ -123,10 +118,6 @@
     if (!s) return;
     await loadShares();
     if (s.url) await shareLink(s.url, s.name);
-  }
-  async function unshare(s: any) {
-    await act(() => api.del(`/shares/${s.id}`), 'No longer shared: the link has ended');
-    loadShares();
   }
 
   async function remove(c: Clip) {
@@ -144,23 +135,6 @@
 <p class="muted lede">Moments cut from films and episodes, made to play anywhere they are sent. Find them here by what is said in them, or make one from a film's or a series' page, under <b>Make a clip</b>.</p>
 
 <MomentFinder onmade={load} />
-
-{#if shared.shares.length}
-  <section class="card shared">
-    <div class="section-title">Shared on the internet</div>
-    <p class="faint small">Each plays for anyone with its link, at {shared.address || 'no address yet'}, until it is no longer shared.</p>
-    {#each shared.shares as s (s.id)}
-      <div class="row wrap share">
-        <div class="grow">
-          <div class="truncate"><b>{s.name}</b> <span class="faint small">{s.from}</span></div>
-          <div class="faint small">{s.state === 'making' ? 'Being got ready…' : s.state === 'failed' ? `Could not be got ready: ${s.error}` : `${bytes(s.size)} · opened ${s.views} ${s.views === 1 ? 'time' : 'times'} · shared ${ago(s.created_at)}`}</div>
-        </div>
-        {#if s.url && s.state === 'ready'}<button class="btn small" onclick={() => shareLink(s.url, s.name)}>Send link</button><a class="btn small ghost" href={s.url} target="_blank" rel="noreferrer">Open</a>{/if}
-        <button class="btn small ghost danger" onclick={() => unshare(s)}>Stop sharing</button>
-      </div>
-    {/each}
-  </section>
-{/if}
 
 {#if clips === null}
   <div class="empty">Loading…</div>

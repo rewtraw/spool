@@ -466,6 +466,8 @@ fn api_routes() -> Router<App> {
         .route("/api/files/{id}/mp4", get(saved_video))
         .route("/api/shares", get(list_shares).post(add_share))
         .route("/api/shares/{id}", delete(remove_share))
+        .route("/api/shares/{id}/video", get(share_video))
+        .route("/api/shares/{id}/still", get(share_still))
         .route("/api/compact", get(compact_state).post(compact_make))
         .route("/api/compact/cancel", post(compact_cancel))
         .route("/api/compact/hold", post(compact_hold))

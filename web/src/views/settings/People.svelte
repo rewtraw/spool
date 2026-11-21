@@ -101,7 +101,7 @@
       <legend>Sharing</legend>
       <p class="muted">A channel's video, or a clip, can be given a link that plays it for anyone on the internet, without signing in, until it is no longer shared. Spool serves shared videos alone, from a door of their own on port <code>7980</code> that only this machine can reach; a tunnel, such as Cloudflare's, carries a public address to it. Nothing else of Spool can be reached that way.</p>
       <label>Public address <input class="input" placeholder="https://v.example.com" bind:value={general.share_address} /></label>
-      <p class="faint small">Empty, nothing is shared. Shared videos are listed under Clips.</p>
+      <p class="faint small">Empty, nothing is shared. What is shared is listed under Shared.</p>
       <div><button class="btn primary" type="submit">Save</button></div>
     </fieldset>
   </form>

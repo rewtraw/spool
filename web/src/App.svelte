@@ -11,6 +11,7 @@
   import Settings from './views/Settings.svelte';
   import CollectionView from './views/Collection.svelte';
   import Clips from './views/Clips.svelte';
+  import Shared from './views/Shared.svelte';
   import Album from './views/Album.svelte';
   import BookView from './views/Book.svelte';
   import Wanted from './views/Wanted.svelte';
@@ -21,6 +22,7 @@
     { id: 'library', label: 'Library', icon: 'M4 4h4v16H4zM10 4h4v16h-4zM16.5 5.2l3.8-1 3 14.6-3.8 1z' },
     { id: 'discover', label: 'Discover', icon: 'M11 4a7 7 0 1 0 4.4 12.5L20 21l1.4-1.4-4.6-4.6A7 7 0 0 0 11 4zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10z' },
     { id: 'clips', label: 'Clips', icon: 'M9.6 7.2A3.5 3.5 0 1 0 8 8.9L10.6 12 8 15.1a3.5 3.5 0 1 0 1.6 1.7L12 14l7.5 8H22L9.6 7.2zM6.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm0 11a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM22 2h-2.5L13.4 9l1.3 1.5z' },
+    { id: 'shared', label: 'Shared', icon: 'M18 16a3 3 0 0 0-2.4 1.2l-6.7-3.4a3 3 0 0 0 0-1.6l6.7-3.4A3 3 0 1 0 15 7l-6.7 3.4a3 3 0 1 0 0 3.2L15 17a3 3 0 1 0 3-1z' },
     { id: 'activity', label: 'Activity', icon: 'M12 3v10.6l-3.3-3.3-1.4 1.4L12 16.4l4.7-4.7-1.4-1.4L12 13.6zM5 19h14v2H5z' },
     { id: 'archive', label: 'Archive', icon: 'M3 4h18v5H3zm2 7h14v9H5zm4 2.5v2h6v-2z' },
     { id: 'settings', label: 'Settings', icon: 'M4 6h10v2H4zm12 0h4v2h-4zM4 11h4v2H4zm6 0h10v2H10zM4 16h10v2H4zm12 0h4v2h-4zM14 4.5h2v5h-2zM8 9.5h2v5H8zM14 14.5h2v5h-2z' },
@@ -118,6 +120,7 @@
       {:else if route.view === 'title'}{#key route.arg}<TitleView id={Number(route.arg)} />{/key}
       {:else if route.view === 'collection'}{#key route.arg}<CollectionView id={Number(route.arg)} />{/key}
       {:else if route.view === 'clips'}<Clips />
+      {:else if route.view === 'shared'}<Shared />
       {:else if route.view === 'album'}{#key route.arg}<Album id={Number(route.arg)} />{/key}
       {:else if route.view === 'book'}{#key route.arg}<BookView id={Number(route.arg)} />{/key}
       {:else if route.view === 'wanted'}{#key route.arg}<Wanted id={Number(route.arg)} />{/key}

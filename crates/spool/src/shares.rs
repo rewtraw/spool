@@ -115,7 +115,7 @@ impl App {
     }
 
     /// The video a share plays, and its still.
-    fn share_files(&self, s: &Share) -> (PathBuf, PathBuf) {
+    pub fn share_files(&self, s: &Share) -> (PathBuf, PathBuf) {
         match s.clip_id {
             Some(c) => (self.clip_video(c), self.clip_still(c)),
             None => (self.shares_dir().join(format!("{}.mp4", s.token)), self.shares_dir().join(format!("{}.jpg", s.token))),
