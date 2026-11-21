@@ -6,6 +6,7 @@
   import Poster from '../components/Poster.svelte';
   import ClipMaker from '../components/ClipMaker.svelte';
   import JobLine from '../components/JobLine.svelte';
+  import { canShareFiles, deliver, fetchFile, safeName } from '../lib/save';
 
   let { id }: { id: number } = $props();
 
@@ -274,6 +275,29 @@
   }
 
   const seasonOf = (n: number) => t?.seasons.find((s) => s.number === n)?.monitored ?? true;
+  // A video being fetched to save, and one fetched that the share sheet would not take yet.
+  let savingVideo = $state<Record<number, boolean>>({});
+  let readyVideo = $state<Record<number, File>>({});
+
+  /** Save a channel's video to this device, made into an MP4 that Photos takes. */
+  async function saveVideo(e: Episode, f: MediaFile) {
+    const url = `/api/files/${f.id}/mp4`;
+    if (!canShareFiles()) {
+      location.href = `${url}?download`;
+      return;
+    }
+    savingVideo[f.id] = true;
+    try {
+      const file = readyVideo[f.id] ?? (await fetchFile(url, `${safeName(e.title, `Video ${e.id}`)}.mp4`, 'video/mp4'));
+      if (await deliver(file)) delete readyVideo[f.id];
+      else readyVideo[f.id] = file;
+    } catch (err: any) {
+      toast(err.message, 'error');
+    } finally {
+      delete savingVideo[f.id];
+    }
+  }
+
   const media = (f: MediaFile) => [f.media_info?.dynamic_range_type, f.media_info?.video_codec, f.media_info ? `${f.media_info.audio_codec} ${f.media_info.audio_channels || ''}`.trim() : '', f.release_group].filter(Boolean).join(' · ');
 
   // What lies in the folder beside the film or the episodes.
@@ -560,6 +584,7 @@
                     {#if app.manages && !f && aired(e) && locked}<span class="faint small" title={locked}>{t.moving ? 'being moved' : t.offline ? `${t.location ?? 'its location'} is away` : `no searching on ${t.location}`}</span>{/if}
                     {#if f && infuseEpisode(e, f)}<a class="btn small ghost" href={infuseEpisode(e, f)} title="Plays the episode in Infuse on this device." aria-label="Play episode {e.episode} in Infuse">Play</a>{/if}
                     {#if app.manages && aired(e) && !locked && !t.channel}<button class="btn small ghost" disabled={!!searching} onclick={() => search({ episode: e.id }, true, `e${e.id}`)} aria-label="Search for episode {e.episode}">{searching === `e${e.id}` ? '…' : 'Search'}</button>{/if}
+                    {#if f && t.channel}<button class="btn small ghost" class:primary={!!readyVideo[f.id]} disabled={!!savingVideo[f.id]} title="Saves the video to this device: on a phone, Save Video in the share sheet puts it in Photos" onclick={() => saveVideo(e, f)}>{savingVideo[f.id] ? 'Fetching…' : readyVideo[f.id] ? 'Save it now' : 'Save'}</button>{/if}
                     {#if e.video?.url}<a class="btn small ghost" href={e.video.url} target="_blank" rel="noreferrer" title="The video on {t.network ?? 'its site'}">Source</a>{/if}
                     {#if f && app.manages}<button class="btn small ghost" aria-expanded={!!openSubs[e.id]} onclick={() => (openSubs[e.id] = !openSubs[e.id])}>Subtitles</button>{/if}
                     {#if f && app.manages}<button class="btn small ghost danger" onclick={() => deleteFile(f)}>Delete</button>{/if}

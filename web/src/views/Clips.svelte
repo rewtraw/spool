@@ -4,6 +4,7 @@
   import { ago, bytes, clock, pct } from '../lib/format';
   import MomentFinder from '../components/MomentFinder.svelte';
   import { drawTerminalCard } from '../lib/terminal-card';
+  import { canShareFiles, deliver as handOver, fetchFile, safeName } from '../lib/save';
 
   let clips = $state<Clip[] | null>(null);
   let confirming = $state<number | null>(null);
@@ -36,47 +37,28 @@
   let ready = $state<Record<number, File>>({});
 
   /** A clip's name as a file name. */
-  const fileName = (c: Clip, kind: string) => `${c.name.replace(/[/\\:"'\n\r]+/g, ' ').replace(/\s+/g, ' ').trim() || `Clip ${c.id}`}.${kind}`;
+  const fileName = (c: Clip, kind: string) => `${safeName(c.name, `Clip ${c.id}`)}.${kind}`;
 
-  /** Hand a file to the phone's share sheet, where it can go straight to Photos; false where
-   * the browser offers no such thing. */
-  async function share(c: Clip, file: File) {
-    try {
-      await navigator.share({ files: [file] });
-      delete ready[c.id];
-    } catch (err: any) {
-      // Fetching took long enough that the tap no longer counts: the next one hands it over.
-      if (err?.name === 'NotAllowedError') ready[c.id] = file;
-      else if (err?.name !== 'AbortError') toast(err.message, 'error');
-    }
-  }
-
-  /** Hand a file over: to Photos through the share sheet where there is one, and as a
-   * download where there is not. */
+  /** Hand a file over; one the share sheet would not take yet waits for the next tap. */
   async function deliver(c: Clip, file: File) {
-    if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] })) {
-      await share(c, file);
-    } else {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(file);
-      a.download = file.name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    try {
+      if (await handOver(file)) delete ready[c.id];
+      else ready[c.id] = file;
+    } catch (err: any) {
+      toast(err.message, 'error');
     }
   }
 
   /** Save a clip, as its video or as a GIF. */
   async function save(c: Clip, kind: 'mp4' | 'gif') {
     const url = kind === 'gif' ? `/api/clips/${c.id}/gif` : `/api/clips/${c.id}/video`;
-    if (typeof navigator.canShare !== 'function' && kind === 'mp4') {
+    if (!canShareFiles() && kind === 'mp4') {
       location.href = `${url}?download`;
       return;
     }
     saving[c.id] = kind === 'gif' ? 'Making the GIF…' : 'Fetching…';
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `It could not be fetched (${res.status})`);
-      await deliver(c, new File([await res.blob()], fileName(c, kind), { type: kind === 'gif' ? 'image/gif' : 'video/mp4' }));
+      await deliver(c, await fetchFile(url, fileName(c, kind), kind === 'gif' ? 'image/gif' : 'video/mp4'));
     } catch (err: any) {
       toast(err.message, 'error');
     } finally {
@@ -215,7 +197,7 @@
                   <canvas class="card-preview" bind:this={card} aria-label="The picture of the chosen lines"></canvas>
                   <div class="row wrap tools">
                     {#if ready[c.id]?.type === 'image/png'}
-                      <button class="btn small primary" onclick={() => share(c, ready[c.id])}>Save the picture now</button>
+                      <button class="btn small primary" onclick={() => deliver(c, ready[c.id])}>Save the picture now</button>
                     {:else}
                       <button class="btn small primary" onclick={() => saveCard(c)}>Save as picture</button>
                     {/if}
@@ -234,7 +216,7 @@
             {#if saving[c.id]}
               <span class="small muted">{saving[c.id]}</span>
             {:else if ready[c.id]}
-              <button class="btn small primary" onclick={() => share(c, ready[c.id])}>Save {ready[c.id].type === 'image/gif' ? 'the GIF' : 'it'} now</button>
+              <button class="btn small primary" onclick={() => deliver(c, ready[c.id])}>Save {ready[c.id].type === 'image/gif' ? 'the GIF' : 'it'} now</button>
             {:else}
               <button class="btn small" onclick={() => save(c, 'mp4')}>Save</button>
               <button class="btn small ghost" onclick={() => save(c, 'gif')}>Save as GIF</button>

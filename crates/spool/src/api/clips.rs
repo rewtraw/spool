@@ -108,6 +108,22 @@ pub(super) async fn clip_video(State(app): State<App>, Path(id): Path<i64>, uri:
     }
 }
 
+/// A whole file of the library as an MP4 to save to a phone's photos, named for its title or
+/// episode.
+pub(super) async fn saved_video(State(app): State<App>, Path(id): Path<i64>, uri: Uri, req: axum::extract::Request) -> Response {
+    let path = match app.saved_video(id).await {
+        Ok(p) => p,
+        Err(e) => return ApiError(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()).into_response(),
+    };
+    let head = req.method() == axum::http::Method::HEAD;
+    let mut response = crate::serve::send_file(&path, req.headers(), head).await;
+    if uri.query().is_some_and(|q| q.split('&').any(|p| p == "download")) {
+        let name = app.db.file(id).ok().flatten().and_then(|f| std::path::Path::new(&f.rel_path).file_stem().map(|s| s.to_string_lossy().to_string())).unwrap_or_else(|| format!("Video {id}"));
+        to_save(&mut response, &format!("{name}.mp4"));
+    }
+    response
+}
+
 /// A clip by its link, to whoever was sent it: no sign-in, only the one clip.
 pub(super) async fn shared_clip(State(app): State<App>, Path(file): Path<String>, uri: Uri, req: axum::extract::Request) -> Response {
     let link = file.strip_suffix(".mp4").unwrap_or(&file);

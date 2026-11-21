@@ -300,6 +300,33 @@ fn arguments(info: &MediaInfo, src: &Path, out: &Path, start: f64, seconds: f64,
     a
 }
 
+/// What to hand ffmpeg to make a whole file into an MP4 for a photo library: its picture and
+/// sound copied when a phone plays them as they are, and made again when not.
+fn save_arguments(info: &MediaInfo, src: &Path, out: &Path) -> Vec<String> {
+    let codec = |kind: &str| info.streams.iter().find(|s| s.kind == kind).map(|s| s.codec.as_str()).unwrap_or("");
+    let picture_as_is = matches!(codec("video"), "h264" | "hevc") && !is_hdr(info);
+    let sound_as_is = matches!(codec("audio"), "aac" | "");
+    let mut a: Vec<String> = vec![];
+    let mut add = |items: &[&str]| a.extend(items.iter().map(|s| s.to_string()));
+    add(&["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", &src.to_string_lossy(), "-map", "0:v:0", "-map", "0:a:0?"]);
+    if picture_as_is {
+        add(&["-c:v", "copy"]);
+        // Photos plays HEVC only when it is marked as Apple marks it.
+        if codec("video") == "hevc" {
+            add(&["-tag:v", "hvc1"]);
+        }
+    } else {
+        add(&["-vf", "format=yuv420p", "-c:v", "h264_videotoolbox", "-b:v", "8M", "-profile:v", "high"]);
+    }
+    if sound_as_is {
+        add(&["-c:a", "copy"]);
+    } else {
+        add(&["-c:a", "aac", "-b:a", "192k", "-ac", "2"]);
+    }
+    add(&["-sn", "-dn", "-map_chapters", "-1", "-movflags", "+faststart", "-f", "mp4", &out.to_string_lossy()]);
+    a
+}
+
 impl App {
     fn clips_dir(&self) -> PathBuf {
         self.data_dir.join("clips")
@@ -339,6 +366,46 @@ impl App {
         }
         tokio::fs::rename(&part, &gif).await?;
         Ok(gif)
+    }
+
+    /// A whole file of the library as an MP4 that a phone's photo library takes: H.264 or
+    /// HEVC with AAC sound. A file already made of those is only put in another box, which
+    /// takes seconds; any other is made again by the video hardware. Each is kept a day, so a
+    /// second tap is quick.
+    pub async fn saved_video(&self, file_id: i64) -> Result<PathBuf> {
+        static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let file = self.db.file(file_id)?.ok_or_else(|| anyhow!("there is no such file"))?;
+        let title = self.db.title(file.title_id)?.ok_or_else(|| anyhow!("the file belongs to no title"))?;
+        let dir = self.clips_dir().join("saved");
+        let out = dir.join(format!("{}-{}.mp4", file.id, file.size));
+        let _one = ONE.lock().await;
+        if out.is_file() {
+            return Ok(out);
+        }
+        tokio::fs::create_dir_all(&dir).await?;
+        // What was kept for an earlier tap and has had its day.
+        if let Ok(mut entries) = tokio::fs::read_dir(&dir).await {
+            while let Ok(Some(e)) = entries.next_entry().await {
+                let old = e.metadata().await.ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() > 86_400);
+                if old {
+                    let _ = tokio::fs::remove_file(e.path()).await;
+                }
+            }
+        }
+        let tool = self.ffmpeg_path().ok_or_else(|| anyhow!("ffmpeg is not installed"))?;
+        let src = title.file_path(&file);
+        let info = match file.media_info.clone().filter(|i| !i.streams.is_empty()) {
+            Some(info) => info,
+            None => self.probe(&src, "").await?.ok_or_else(|| anyhow!("the file could not be read"))?,
+        };
+        let part = dir.join(format!(".{}.mp4.part", file.id));
+        let made = tokio::process::Command::new(&tool).args(save_arguments(&info, &src, &part)).kill_on_drop(true).output().await?;
+        if !made.status.success() {
+            let _ = tokio::fs::remove_file(&part).await;
+            bail!("the video could not be made: {}", String::from_utf8_lossy(&made.stderr).lines().last().unwrap_or("ffmpeg failed"));
+        }
+        tokio::fs::rename(&part, &out).await?;
+        Ok(out)
     }
 
     /// Where the still from a clip is kept.
@@ -704,6 +771,23 @@ mod tests {
         }
         assert_eq!(clock(3725.0), "1:02:05");
         assert_eq!(clock(1800.0), "30:00");
+    }
+
+    #[test]
+    fn a_video_is_copied_into_an_mp4_when_a_phone_plays_it_as_it_is() {
+        let with = |video: &str, audio: &str| {
+            let mut v = stream(0, "video", "", true);
+            v.codec = video.into();
+            let mut a = stream(1, "audio", "en", true);
+            a.codec = audio.into();
+            let info = spool_core::mediainfo::MediaInfo { streams: vec![v, a], ..Default::default() };
+            super::save_arguments(&info, std::path::Path::new("in.mkv"), std::path::Path::new("out.mp4")).join(" ")
+        };
+        let x = with("h264", "aac");
+        assert!(x.contains("-c:v copy") && x.contains("-c:a copy") && x.contains("+faststart"), "{x}");
+        assert!(with("hevc", "aac").contains("-tag:v hvc1"));
+        let youtube = with("vp9", "opus");
+        assert!(youtube.contains("h264_videotoolbox") && youtube.contains("-c:a aac"), "{youtube}");
     }
 
     fn stream(index: u32, kind: &str, language: &str, default: bool) -> spool_core::mediainfo::Stream {

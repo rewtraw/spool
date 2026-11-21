@@ -463,6 +463,7 @@ fn api_routes() -> Router<App> {
         .route("/api/decisions/{id}/grab", post(grab_decision))
         .route("/api/files/{id}", delete(delete_file).patch(patch_file))
         .route("/api/files/{id}/keep-compact", post(compact_keep))
+        .route("/api/files/{id}/mp4", get(saved_video))
         .route("/api/compact", get(compact_state).post(compact_make))
         .route("/api/compact/cancel", post(compact_cancel))
         .route("/api/compact/hold", post(compact_hold))
