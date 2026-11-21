@@ -130,6 +130,7 @@ const pages = [
   ['discover', '#/discover', ['Discover'], true],
   ['activity', '#/activity', ['Activity', ...moving], true],
   ['clips', '#/clips', ['Clips', 'Make a clip', 'Find'], true],
+  ['shared', '#/shared', ['Shared'], true],
   ['archive', '#/archive', ['Archive'], true],
   ['activity-space', '#/activity/space', ['Free', 'Compact versions'], true],
   ['activity-upkeep', '#/activity/upkeep', ['Read indexer feeds', 'Back up and tidy'], true],
