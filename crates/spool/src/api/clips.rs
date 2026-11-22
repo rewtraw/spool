@@ -223,6 +223,18 @@ async fn send_share(app: &App, id: i64, req: axum::extract::Request, still: bool
     r
 }
 
+#[derive(Deserialize)]
+pub(super) struct EditShare {
+    name: Option<String>,
+    from: Option<String>,
+    description: Option<String>,
+}
+
+pub(super) async fn edit_share(State(app): State<App>, Path(id): Path<i64>, Json(b): Json<EditShare>) -> R<Value> {
+    let s = app.edit_share(id, b.name.as_deref(), b.from.as_deref(), b.description.as_deref())?;
+    Ok(Json(share_json(&app, s)))
+}
+
 pub(super) async fn remove_share(State(app): State<App>, Path(id): Path<i64>) -> R<Value> {
     app.remove_share(id)?;
     Ok(Json(json!({"deleted": id})))

@@ -6,10 +6,23 @@
   import { ago, bytes } from '../lib/format';
   import { shareLink } from '../lib/save';
 
-  type Share = { id: number; token: string; file_id: number | null; clip_id: number | null; title_id: number | null; name: string; from: string; state: 'making' | 'ready' | 'failed'; error: string; size: number; created_at: number; views: number; url: string | null };
+  type Share = { id: number; token: string; file_id: number | null; clip_id: number | null; title_id: number | null; name: string; from: string; description: string; state: 'making' | 'ready' | 'failed'; error: string; size: number; created_at: number; views: number; url: string | null };
 
   let shared = $state<{ shares: Share[]; address: string } | null>(null);
   let confirming = $state<number | null>(null);
+  // The share being edited, and what its page is to say.
+  let editing = $state<number | null>(null);
+  let draft = $state({ name: '', from: '', description: '' });
+
+  function edit(s: Share) {
+    editing = s.id;
+    draft = { name: s.name, from: s.from, description: s.description ?? '' };
+  }
+  async function saveEdit(s: Share) {
+    if ((await act(() => api.patch(`/shares/${s.id}`, draft), 'Saved. Its page says so now.')) === undefined) return;
+    editing = null;
+    load();
+  }
 
   async function load() {
     shared = await api.get<{ shares: Share[]; address: string }>('/shares').catch(() => shared ?? { shares: [], address: '' });
@@ -57,17 +70,31 @@
             <div class="placeholder bad"><span>It could not be got ready: {s.error}</span></div>
           {/if}
         </div>
-        <div class="about">
-          <b class="name">{s.name}</b>
-          <div class="muted small">{#if s.title_id}<a class="link" href="#/title/{s.title_id}">{s.from}</a>{:else}{s.from}{/if}</div>
-          <div class="faint small">{meta(s)}</div>
-          {#if s.url}<a class="url mono small truncate" href={s.url} target="_blank" rel="noreferrer">{shortUrl(s.url)}</a>{/if}
-        </div>
+        {#if editing === s.id}
+          <form class="about edit" onsubmit={(e) => { e.preventDefault(); saveEdit(s); }}>
+            <label class="small muted">Name <input class="input" bind:value={draft.name} required /></label>
+            <label class="small muted">By <input class="input" bind:value={draft.from} placeholder="Who made it, or what it is from" /></label>
+            <label class="small muted">About <textarea class="input" rows="3" bind:value={draft.description} placeholder="A few words, shown under it and where the link is sent"></textarea></label>
+            <div class="row wrap">
+              <button class="btn small primary" type="submit" disabled={!draft.name.trim()}>Save</button>
+              <button class="btn small ghost" type="button" onclick={() => (editing = null)}>Cancel</button>
+            </div>
+          </form>
+        {:else}
+          <div class="about">
+            <b class="name">{s.name}</b>
+            <div class="muted small">{#if s.title_id}<a class="link" href="#/title/{s.title_id}">{s.from}</a>{:else}{s.from}{/if}</div>
+            {#if s.description}<p class="description small">{s.description}</p>{/if}
+            <div class="faint small">{meta(s)}</div>
+            {#if s.url}<a class="url mono small truncate" href={s.url} target="_blank" rel="noreferrer">{shortUrl(s.url)}</a>{/if}
+          </div>
+        {/if}
         <div class="row wrap actions">
           {#if s.url && s.state === 'ready'}
             <button class="btn small primary" onclick={() => shareLink(s.url!, s.name)}>Send link</button>
             <a class="btn small ghost" href={s.url} target="_blank" rel="noreferrer">Open</a>
           {/if}
+          {#if editing !== s.id}<button class="btn small ghost" onclick={() => edit(s)}>Edit</button>{/if}
           <span class="grow"></span>
           {#if confirming === s.id}
             <span class="small muted">End the link?</span>
@@ -127,6 +154,24 @@
     min-width: 0;
   }
   .name {
+    overflow-wrap: anywhere;
+  }
+  .edit {
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+  .edit label {
+    display: grid;
+    gap: 3px;
+  }
+  .edit textarea {
+    resize: vertical;
+    font: inherit;
+  }
+  .description {
+    margin: 4px 0 2px;
+    color: var(--text);
+    white-space: pre-line;
     overflow-wrap: anywhere;
   }
   .url {

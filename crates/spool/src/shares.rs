@@ -34,8 +34,11 @@ pub struct Share {
     pub title_id: Option<i64>,
     /// What it is called on its page.
     pub name: String,
-    /// What it is from, in words: a channel's name, or what a clip was cut from.
+    /// Who made it or what it is from, in words: a channel's name, or what a clip was cut
+    /// from, until it is changed.
     pub from: String,
+    /// A few words about it, shown under it and where the link is sent; empty for none.
+    pub description: String,
     /// "making", "ready" or "failed".
     pub state: String,
     pub error: String,
@@ -213,6 +216,26 @@ impl App {
         Ok(tokio::fs::metadata(&video).await?.len())
     }
 
+    /// Change what a share's page says of it: its name, who it is by, and a few words about
+    /// it. Each left out stays as it is; a name cannot be emptied.
+    pub fn edit_share(&self, id: i64, name: Option<&str>, from: Option<&str>, description: Option<&str>) -> Result<Share> {
+        let mut s = self.db.share(id)?.ok_or_else(|| anyhow!("no such share"))?;
+        if let Some(n) = name.map(str::trim) {
+            if n.is_empty() {
+                bail!("a shared video needs a name");
+            }
+            s.name = n.to_string();
+        }
+        if let Some(f) = from {
+            s.from = f.trim().to_string();
+        }
+        if let Some(d) = description {
+            s.description = d.trim().to_string();
+        }
+        self.db.save_share(&mut s)?;
+        Ok(s)
+    }
+
     /// Stop sharing: the link ends, and the MP4 made for it goes.
     pub fn remove_share(&self, id: i64) -> Result<()> {
         let Some(s) = self.db.share(id)? else { bail!("no such share") };
@@ -291,6 +314,8 @@ fn escape(s: &str) -> String {
 /// A shared video's page: the video, its name, and what a messaging app shows of the link.
 fn page(s: &Share) -> Html<String> {
     let (name, from, t) = (escape(&s.name), escape(&s.from), &s.token);
+    let about = escape(if s.description.is_empty() { &s.from } else { &s.description });
+    let description = if s.description.is_empty() { String::new() } else { format!("<p class=\"about\">{}</p>", escape(&s.description).replace('\n', "<br>")) };
     let body = match s.state.as_str() {
         "ready" => format!(r#"<video src="{t}.mp4" poster="{t}.jpg" controls playsinline preload="metadata"></video>"#),
         "making" => r#"<p class="note">This video is being got ready. Try again in a minute or two.</p>"#.to_string(),
@@ -301,7 +326,7 @@ fn page(s: &Share) -> Html<String> {
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{name}</title>
-<meta property="og:title" content="{name}"><meta property="og:description" content="{from}">
+<meta property="og:title" content="{name}"><meta property="og:description" content="{about}"><meta name="description" content="{about}">
 <meta property="og:type" content="video.other"><meta property="og:image" content="{t}.jpg">
 <meta property="og:video" content="{t}.mp4"><meta property="og:video:type" content="video/mp4">
 <meta name="twitter:card" content="summary_large_image"><meta name="robots" content="noindex">
@@ -313,8 +338,9 @@ video{{width:100%;max-height:80vh;background:#000;border-radius:6px;display:bloc
 h1{{font-size:1.25rem;margin:16px 0 2px;font-weight:600}}
 p{{margin:0;color:#9a978f}}
 .note{{padding:48px 0;text-align:center}}
+.about{{margin-top:12px;color:#c9c6bf;max-width:70ch;white-space:normal}}
 </style></head>
-<body><main>{body}<h1>{name}</h1><p>{from}</p></main></body></html>"#
+<body><main>{body}<h1>{name}</h1><p>{from}</p>{description}</main></body></html>"#
     ))
 }
 
@@ -331,6 +357,9 @@ mod tests {
         let s = Share { token: t.clone(), name: "<script>x</script>".into(), state: "ready".into(), ..Default::default() };
         let html = page(&s).0;
         assert!(!html.contains("<script>x") && html.contains(&format!("{t}.mp4")));
+        let s = Share { description: "Line one\n<b>two</b>".into(), ..s };
+        let html = page(&s).0;
+        assert!(html.contains("Line one<br>&lt;b&gt;two") && html.contains(r#"og:description" content="Line one"#));
     }
 
     #[test]
