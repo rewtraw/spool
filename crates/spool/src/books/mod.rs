@@ -13,6 +13,7 @@ pub mod annas;
 pub mod audio;
 pub mod dump;
 pub mod epub;
+pub mod fallback;
 pub mod florilegium;
 pub mod index;
 pub mod openlibrary;
@@ -803,42 +804,58 @@ impl App {
             return Ok(());
         };
         let g = self.settings.general();
-        if g.books.annas_key.is_empty() {
-            b.note = "Add an Anna's Archive key in Settings → Books to download it.".into();
-            return Ok(());
-        }
-        if let Some(a) = self.books.allowance.lock().clone() {
-            if a.downloads_left <= 0 && now() - a.at < 6 * 3600 {
-                b.note = "Today's downloads from Anna's Archive are used up; it is tried again later.".into();
-                return Ok(());
-            }
-        }
         let incoming = self.books.dir.join("incoming");
         std::fs::create_dir_all(&incoming)?;
         let ext = if c.is_pdf() { "pdf" } else { "epub" };
         let dest = incoming.join(format!("{}.{ext}", c.md5));
-        match annas::fetch(&self.http, &g.books.annas_key, &c.md5, &dest, 200_000_000).await {
-            Ok(allowance) => {
-                if let Some(a) = allowance {
-                    let _ = self.db.set_setting("book_allowance", &a);
-                    *self.books.allowance.lock() = Some(a);
+        // Why Anna's Archive's servers did not give it, if they did not.
+        let refused = if g.books.annas_key.is_empty() {
+            Some((false, "Add an Anna's Archive key in Settings → Books to download it.".to_string()))
+        } else if self.books.allowance.lock().clone().is_some_and(|a| a.downloads_left <= 0 && now() - a.at < 6 * 3600) {
+            Some((false, "Today's downloads from Anna's Archive are used up; it is tried again later.".to_string()))
+        } else {
+            match annas::fetch(&self.http, &g.books.annas_key, &c.md5, &dest, 200_000_000).await {
+                Ok(allowance) => {
+                    if let Some(a) = allowance {
+                        let _ = self.db.set_setting("book_allowance", &a);
+                        *self.books.allowance.lock() = Some(a);
+                    }
+                    None
                 }
+                // A file the servers have not got, or have wrong, is turned down unless it can
+                // be had elsewhere.
+                Err(annas::Refused::File(why)) => Some((true, why)),
+                Err(e @ annas::Refused::Spent) => {
+                    let mut a = self.books.allowance.lock().clone().unwrap_or_default();
+                    a.downloads_left = 0;
+                    a.at = now();
+                    *self.books.allowance.lock() = Some(a);
+                    Some((false, format!("{e}; it is tried again later.")))
+                }
+                Err(e) => Some((false, format!("{e}. It is tried again later."))),
             }
-            Err(annas::Refused::File(why)) => {
-                self.turn_down(b, &c.md5, why);
-                return Ok(());
-            }
-            Err(e @ annas::Refused::Spent) => {
-                let mut a = self.books.allowance.lock().clone().unwrap_or_default();
-                a.downloads_left = 0;
-                a.at = now();
-                *self.books.allowance.lock() = Some(a);
-                b.note = format!("{e}; it is tried again later.");
-                return Ok(());
-            }
-            Err(e) => {
-                b.note = format!("{e}. It is tried again later.");
-                return Ok(());
+        };
+        if let Some((turn_down, why)) = refused {
+            // Where else Anna's Archive says the file is: IPFS, or one of its torrents.
+            let elsewhere = self.books.shelf.sources(&c.md5).ok().flatten().filter(|s| s.any());
+            let got = match elsewhere {
+                None => Err(anyhow::anyhow!("Anna's Archive knows of nowhere else it is")),
+                Some(s) => {
+                    let place = fallback::Place { books_dir: &self.books.dir, stopping: &self.books.stopping };
+                    fallback::fetch(&self.http, &s, &dest, 200_000_000, &place).await
+                }
+            };
+            match got {
+                Ok(how) => tracing::info!(book = %b.title, md5 = %c.md5, how, "a book was had without Anna's Archive's servers"),
+                Err(e) => {
+                    tracing::info!(book = %b.title, md5 = %c.md5, error = %e, "a book could not be had elsewhere either");
+                    if turn_down {
+                        self.turn_down(b, &c.md5, why);
+                    } else {
+                        b.note = why;
+                    }
+                    return Ok(());
+                }
             }
         }
         let path = dest.clone();

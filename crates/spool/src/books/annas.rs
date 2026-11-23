@@ -141,7 +141,7 @@ pub async fn fetch(http: &reqwest::Client, key: &str, md5: &str, dest: &Path, mo
     }
 }
 
-enum Failed {
+pub(super) enum Failed {
     /// The file is too large to be a book: refused for good.
     TooLarge,
     /// The server failed this time.
@@ -149,7 +149,7 @@ enum Failed {
 }
 
 /// Fetch a URL into `part`, from where it left off.
-async fn download(http: &reqwest::Client, url: &str, part: &Path, most: u64) -> Result<(), Failed> {
+pub(super) async fn download(http: &reqwest::Client, url: &str, part: &Path, most: u64) -> Result<(), Failed> {
     let now = |e: String| Failed::Now(e);
     let have = tokio::fs::metadata(part).await.map(|m| m.len()).unwrap_or(0);
     let mut req = http.get(url).timeout(std::time::Duration::from_secs(600));
@@ -189,7 +189,7 @@ async fn download(http: &reqwest::Client, url: &str, part: &Path, most: u64) -> 
     Ok(())
 }
 
-async fn file_md5(p: &Path) -> std::io::Result<String> {
+pub(super) async fn file_md5(p: &Path) -> std::io::Result<String> {
     let p = p.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let mut f = std::fs::File::open(p)?;

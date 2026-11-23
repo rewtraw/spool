@@ -29,8 +29,14 @@ struct Fields {
     lang: Field,
     size: Field,
     year: Field,
-    /// "epub" or "pdf". Last, so an index built before it opens with it absent.
+    /// "epub" or "pdf". After the others, so an index built before it opens with it absent.
     format: Field,
+    /// Where else the file can be had, for when Anna's Archive cannot give it (see
+    /// [`super::fallback`]): the torrents of its that hold it, by their path in its list of
+    /// torrents; its IPFS addresses; and what else it may be named in a torrent.
+    torrent: Field,
+    ipfs: Field,
+    names: Field,
 }
 
 fn schema() -> (Schema, Fields) {
@@ -47,6 +53,9 @@ fn schema() -> (Schema, Fields) {
         size: sb.add_u64_field("size", STORED | FAST),
         year: sb.add_u64_field("year", STORED),
         format: sb.add_text_field("format", STRING | STORED),
+        torrent: sb.add_text_field("torrent", STORED),
+        ipfs: sb.add_text_field("ipfs", STORED),
+        names: sb.add_text_field("names", STORED),
     };
     (sb.build(), f)
 }
@@ -64,6 +73,26 @@ pub struct Record {
     pub ols: Vec<String>,
     /// "epub" or "pdf".
     pub format: String,
+    pub torrents: Vec<String>,
+    pub ipfs: Vec<String>,
+    pub names: Vec<String>,
+}
+
+/// Where else a file can be had than from Anna's Archive's own servers.
+#[derive(Clone, Debug, Default)]
+pub struct Sources {
+    pub md5: String,
+    pub size: u64,
+    pub format: String,
+    pub torrents: Vec<String>,
+    pub ipfs: Vec<String>,
+    pub names: Vec<String>,
+}
+
+impl Sources {
+    pub fn any(&self) -> bool {
+        !self.torrents.is_empty() || !self.ipfs.is_empty()
+    }
 }
 
 /// Writes a new index beside the one in use.
@@ -100,6 +129,11 @@ impl Builder {
         d.add_u64(f.size, r.size);
         d.add_u64(f.year, r.year);
         d.add_text(f.format, &r.format);
+        for (field, values) in [(f.torrent, &r.torrents), (f.ipfs, &r.ipfs), (f.names, &r.names)] {
+            for v in values {
+                d.add_text(field, v);
+            }
+        }
         self.writer.add_document(d)?;
         self.count += 1;
         Ok(())
@@ -258,6 +292,21 @@ impl Shelf {
 }
 
 impl Shelf {
+    /// Where else than Anna's Archive's servers the file with this MD5 can be had. An index
+    /// built before this was kept knows of nowhere.
+    pub fn sources(&self, md5: &str) -> Result<Option<Sources>> {
+        let open = self.open.read();
+        let Some(o) = open.as_ref() else { anyhow::bail!("the book index has not been built yet") };
+        let f = o.f;
+        let searcher = o.reader.searcher();
+        let hit = searcher.search(&TermQuery::new(Term::from_field_text(f.md5, md5), IndexRecordOption::Basic), &TopDocs::with_limit(1))?;
+        let Some((_, addr)) = hit.into_iter().next() else { return Ok(None) };
+        let d: TantivyDocument = searcher.doc(addr)?;
+        let all = |field: Field| d.get_all(field).filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>();
+        let format = d.get_first(f.format).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("epub").to_string();
+        Ok(Some(Sources { md5: md5.to_string(), size: d.get_first(f.size).and_then(|v| v.as_u64()).unwrap_or(0), format, torrents: all(f.torrent), ipfs: all(f.ipfs), names: all(f.names) }))
+    }
+
     /// The file with this MD5, as it stands in the index, if it does.
     pub fn by_md5(&self, md5: &str) -> Result<Option<Candidate>> {
         let open = self.open.read();
@@ -296,7 +345,7 @@ mod tests {
     use super::*;
 
     fn rec(md5: &str, title: &str, author: &str, isbn: &str) -> Record {
-        Record { md5: md5.into(), title: title.into(), author: author.into(), lang: "en".into(), size: 500_000, year: 2000, isbns: if isbn.is_empty() { vec![] } else { vec![isbn.into()] }, ols: vec![], format: "epub".into() }
+        Record { md5: md5.into(), title: title.into(), author: author.into(), lang: "en".into(), size: 500_000, year: 2000, isbns: if isbn.is_empty() { vec![] } else { vec![isbn.into()] }, ols: vec![], format: "epub".into(), torrents: vec![format!("external/libgen_rs_fic/f_{md5}.torrent")], ipfs: vec![], names: vec![] }
     }
 
     #[test]
@@ -325,6 +374,8 @@ mod tests {
         let one = shelf.by_md5("d4").unwrap().unwrap();
         assert_eq!((one.title.as_str(), one.author.as_str(), one.picked), ("Goblin Slayer, Vol. 11", "Kumo Kagyu", true));
         assert!(shelf.by_md5("ff").unwrap().is_none());
+        let s = shelf.sources("c3").unwrap().unwrap();
+        assert_eq!((s.torrents, s.size, s.format.as_str()), (vec!["external/libgen_rs_fic/f_c3.torrent".to_string()], 500_000, "epub"));
 
         // A swap cut short after the index in use was moved aside is undone on the next start.
         drop(shelf);

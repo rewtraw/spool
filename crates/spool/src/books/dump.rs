@@ -51,6 +51,10 @@ struct Row {
     #[serde(default)]
     group_name: String,
     #[serde(default)]
+    btih: String,
+    #[serde(default)]
+    magnet_link: String,
+    #[serde(default)]
     display_name: String,
     #[serde(default)]
     url: String,
@@ -60,8 +64,14 @@ struct Row {
     obsolete: bool,
 }
 
-/// The newest snapshot: its name and its torrent file.
-pub async fn latest(http: &reqwest::Client) -> Result<(String, Bytes)> {
+/// Where Anna's Archive keeps its torrents, by their path in its list: what follows this in
+/// a torrent's address.
+pub const TORRENTS_PATH: &str = "/dyn/small_file/torrents/";
+
+/// The newest snapshot: its name and its torrent file. Anna's Archive's list of torrents is
+/// kept beside the books, as each torrent's path and how to find it without Anna's Archive
+/// (its infohash, and a magnet link with a tracker), for [`super::fallback`].
+pub async fn latest(http: &reqwest::Client, keep_list: &std::path::Path) -> Result<(String, Bytes)> {
     let mut last = anyhow::anyhow!("no address of Anna's Archive answered");
     for base in MIRRORS {
         let rows: Vec<Row> = match http.get(format!("{base}/dyn/torrents.json")).timeout(std::time::Duration::from_secs(120)).send().await.and_then(|r| r.error_for_status()) {
@@ -77,6 +87,16 @@ pub async fn latest(http: &reqwest::Client) -> Result<(String, Bytes)> {
                 continue;
             }
         };
+        let list: std::collections::HashMap<&str, super::fallback::Listed> = rows
+            .iter()
+            .filter(|r| !r.btih.is_empty())
+            .filter_map(|r| Some((r.url.split_once(TORRENTS_PATH)?.1, super::fallback::Listed { btih: r.btih.clone(), magnet: r.magnet_link.clone() })))
+            .collect();
+        if !list.is_empty() {
+            if let Err(e) = super::fallback::save_list(keep_list, &list) {
+                tracing::warn!(error = %e, "the list of Anna's Archive's torrents could not be kept");
+            }
+        }
         let Some(row) = rows.into_iter().filter(|r| r.group_name == GROUP && !r.obsolete && !r.url.is_empty()).max_by(|a, b| a.added_to_torrents_list_at.cmp(&b.added_to_torrents_list_at)) else {
             bail!("Anna's Archive lists no snapshot of its metadata");
         };
@@ -196,6 +216,14 @@ struct Unified {
     most_likely_language_codes: Vec<String>,
     language_codes: Vec<String>,
     identifiers_unified: Ids,
+    classifications_unified: Classes,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Classes {
+    /// The torrents of Anna's Archive that hold the file, by their path in its list.
+    torrent: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -204,6 +232,10 @@ struct Ids {
     md5: Vec<String>,
     isbn13: Vec<String>,
     ol: Vec<String>,
+    ipfs_cid: Vec<String>,
+    /// What the file is named in a torrent of Z-Library's, or of Anna's own collections.
+    zlib: Vec<String>,
+    aacid: Vec<String>,
 }
 
 fn number(v: &Option<serde_json::Value>) -> u64 {
@@ -260,7 +292,9 @@ pub fn read_records(input: impl Read, languages: &[String], mut each: impl FnMut
         let mut isbns: Vec<String> = u.identifiers_unified.isbn13.iter().filter_map(|i| isbn13(i)).collect();
         isbns.sort();
         isbns.dedup();
-        each(Record { md5, title, author: u.author_best.unwrap_or_default(), lang, size: number(&u.filesize_best), year: number(&u.year_best), isbns, ols: u.identifiers_unified.ol, format: format.into() })?;
+        let ids = u.identifiers_unified;
+        let names = ids.zlib.into_iter().chain(ids.aacid).collect();
+        each(Record { md5, title, author: u.author_best.unwrap_or_default(), lang, size: number(&u.filesize_best), year: number(&u.year_best), isbns, ols: ids.ol, format: format.into(), torrents: u.classifications_unified.torrent, ipfs: ids.ipfs_cid, names })?;
     }
     Ok(n)
 }
@@ -305,7 +339,7 @@ impl App {
         if self.books.shelf.books().is_none() && !force {
             return Ok("skipped: the book index is first built from the Books page".into());
         }
-        let (name, torrent) = latest(&self.http).await?;
+        let (name, torrent) = latest(&self.http, &self.books.dir.join("torrents.json")).await?;
         let state = self.books.index_state.lock().clone();
         if !force && state.snapshot == name && self.books.shelf.books().is_some() {
             return Ok(format!("up to date with {name}"));
@@ -456,7 +490,7 @@ mod tests {
     #[test]
     fn epubs_and_book_pdfs_in_the_languages_read_are_kept() {
         let lines = [
-            r#"{"_id":"md5:1","_source":{"file_unified_data":{"title_best":"The Left Hand of Darkness","author_best":"Le Guin, Ursula K.","extension_best":"epub","filesize_best":523000,"year_best":"1969","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["0123456789abcdef0123456789abcdef"],"isbn13":["9780441478125"],"ol":["OL24215271M"]}}}}"#,
+            r#"{"_id":"md5:1","_source":{"file_unified_data":{"title_best":"The Left Hand of Darkness","author_best":"Le Guin, Ursula K.","extension_best":"epub","filesize_best":523000,"year_best":"1969","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["0123456789abcdef0123456789abcdef"],"isbn13":["9780441478125"],"ol":["OL24215271M"],"ipfs_cid":["bafk1"],"zlib":["1234"]},"classifications_unified":{"torrent":["external/libgen_rs_fic/f_1000.torrent"]}}}}"#,
             r#"{"_id":"md5:2","_source":{"file_unified_data":{"title_best":"A paper","extension_best":"pdf","content_type_best":"journal_article","identifiers_unified":{"md5":["11111111111111111111111111111111"]}}}}"#,
             r#"{"_id":"md5:3","_source":{"file_unified_data":{"title_best":"Le Petit Prince","extension_best":"epub","most_likely_language_codes":["fr"],"identifiers_unified":{"md5":["22222222222222222222222222222222"]}}}}"#,
             r#"{"_id":"md5:4","_source":{"file_unified_data":{"title_best":"Arktos","author_best":"Godwin, Joscelyn","extension_best":"pdf","content_type_best":"book_nonfiction","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["33333333333333333333333333333333"]}}}}"#,
@@ -476,6 +510,7 @@ mod tests {
         assert_eq!(got[0].isbns, vec!["9780441478125"]);
         assert_eq!(got[0].size, 523000);
         assert_eq!(got[0].year, 1969);
+        assert_eq!((got[0].torrents.as_slice(), got[0].ipfs.as_slice(), got[0].names.as_slice()), (&["external/libgen_rs_fic/f_1000.torrent".to_string()][..], &["bafk1".to_string()][..], &["1234".to_string()][..]));
     }
 
     #[test]
