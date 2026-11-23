@@ -177,6 +177,9 @@ export interface Candidate {
   score: number;
   by_id: boolean;
   format?: string;
+  publisher?: string;
+  edition?: string;
+  problems?: string[];
 }
 
 export interface Book {

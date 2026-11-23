@@ -37,6 +37,15 @@ struct Fields {
     torrent: Field,
     ipfs: Field,
     names: Field,
+    /// Other titles and authors it is known by, such as a translator's or an editor's name.
+    show_titles: Field,
+    show_authors: Field,
+    publisher: Field,
+    edition: Field,
+    problems: Field,
+    cover: Field,
+    description: Field,
+    filename: Field,
 }
 
 fn schema() -> (Schema, Fields) {
@@ -56,6 +65,14 @@ fn schema() -> (Schema, Fields) {
         torrent: sb.add_text_field("torrent", STORED),
         ipfs: sb.add_text_field("ipfs", STORED),
         names: sb.add_text_field("names", STORED),
+        show_titles: sb.add_text_field("show_titles", STORED),
+        show_authors: sb.add_text_field("show_authors", STORED),
+        publisher: sb.add_text_field("publisher", STORED),
+        edition: sb.add_text_field("edition", STORED),
+        problems: sb.add_text_field("problems", STORED),
+        cover: sb.add_text_field("cover", STORED),
+        description: sb.add_text_field("description", STORED),
+        filename: sb.add_text_field("filename", STORED),
     };
     (sb.build(), f)
 }
@@ -76,6 +93,14 @@ pub struct Record {
     pub torrents: Vec<String>,
     pub ipfs: Vec<String>,
     pub names: Vec<String>,
+    pub titles: Vec<String>,
+    pub authors: Vec<String>,
+    pub publisher: String,
+    pub edition: String,
+    pub problems: Vec<String>,
+    pub cover: String,
+    pub description: String,
+    pub filename: String,
 }
 
 /// Where else a file can be had than from Anna's Archive's own servers.
@@ -87,6 +112,9 @@ pub struct Sources {
     pub torrents: Vec<String>,
     pub ipfs: Vec<String>,
     pub names: Vec<String>,
+    /// What it looks like and is about, for a book added from its file.
+    pub cover: String,
+    pub description: String,
 }
 
 impl Sources {
@@ -116,6 +144,13 @@ impl Builder {
         let mut d = TantivyDocument::new();
         d.add_text(f.title, format!("{} {}", words(&r.title).join(" "), core_title(&r.title)));
         d.add_text(f.author, author_key(&r.author));
+        // Found by its other titles and authors too.
+        for t in &r.titles {
+            d.add_text(f.title, words(t).join(" "));
+        }
+        for a in &r.authors {
+            d.add_text(f.author, author_key(a));
+        }
         for i in &r.isbns {
             d.add_text(f.isbn, i);
         }
@@ -129,7 +164,12 @@ impl Builder {
         d.add_u64(f.size, r.size);
         d.add_u64(f.year, r.year);
         d.add_text(f.format, &r.format);
-        for (field, values) in [(f.torrent, &r.torrents), (f.ipfs, &r.ipfs), (f.names, &r.names)] {
+        for (field, one) in [(f.publisher, &r.publisher), (f.edition, &r.edition), (f.cover, &r.cover), (f.description, &r.description), (f.filename, &r.filename)] {
+            if !one.is_empty() {
+                d.add_text(field, one);
+            }
+        }
+        for (field, values) in [(f.torrent, &r.torrents), (f.ipfs, &r.ipfs), (f.names, &r.names), (f.show_titles, &r.titles), (f.show_authors, &r.authors), (f.problems, &r.problems)] {
             for v in values {
                 d.add_text(field, v);
             }
@@ -262,15 +302,18 @@ impl Shelf {
             }
             let md5 = text(f.md5);
             let (title, author) = (text(f.show_title), text(f.show_author));
-            let t = title_alike(ask.title, &title);
-            let a = if ask.author.is_empty() { t } else { author_alike(ask.author, &author) };
+            let all = |field: Field| d.get_all(field).filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>();
+            // Its best name for what is asked: a translation may be asked for by a title or a
+            // translator that is not the file's first.
+            let t = std::iter::once(&title).chain(all(f.show_titles).iter()).map(|x| title_alike(ask.title, x)).fold(0.0, f64::max);
+            let a = if ask.author.is_empty() { t } else { std::iter::once(&author).chain(all(f.show_authors).iter()).map(|x| author_alike(ask.author, x)).fold(0.0, f64::max) };
             // An ISBN alone is not trusted: a file's list of them sometimes holds another
             // book's. It counts when the title agrees as well.
             let by_id = by_id && t >= 0.6;
             let score = (t * 0.65 + a * 0.35 + if by_id { 0.15 } else { 0.0 }).min(1.0);
             // An index built before PDFs were kept holds EPUBs alone.
             let format = Some(text(f.format)).filter(|s| !s.is_empty()).unwrap_or_else(|| "epub".into());
-            let c = Candidate { md5: md5.clone(), title, author, lang, size: num(f.size), year: num(f.year) as i32, score: (score * 1000.0).round() / 1000.0, by_id, format, picked: false };
+            let c = Candidate { md5: md5.clone(), title, author, lang, size: num(f.size), year: num(f.year) as i32, score: (score * 1000.0).round() / 1000.0, by_id, format, picked: false, publisher: text(f.publisher), edition: text(f.edition), problems: all(f.problems) };
             match found.get(&md5) {
                 Some(old) if old.score >= c.score => {}
                 _ => {
@@ -304,7 +347,8 @@ impl Shelf {
         let d: TantivyDocument = searcher.doc(addr)?;
         let all = |field: Field| d.get_all(field).filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>();
         let format = d.get_first(f.format).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("epub").to_string();
-        Ok(Some(Sources { md5: md5.to_string(), size: d.get_first(f.size).and_then(|v| v.as_u64()).unwrap_or(0), format, torrents: all(f.torrent), ipfs: all(f.ipfs), names: all(f.names) }))
+        let one = |field: Field| d.get_first(field).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        Ok(Some(Sources { md5: md5.to_string(), size: d.get_first(f.size).and_then(|v| v.as_u64()).unwrap_or(0), format, torrents: all(f.torrent), ipfs: all(f.ipfs), names: all(f.names), cover: one(f.cover), description: one(f.description) }))
     }
 
     /// The file with this MD5, as it stands in the index, if it does.
@@ -319,7 +363,8 @@ impl Shelf {
         let text = |field: Field| d.get_first(field).and_then(|v| v.as_str()).unwrap_or("").to_string();
         let num = |field: Field| d.get_first(field).and_then(|v| v.as_u64()).unwrap_or(0);
         let format = Some(text(f.format)).filter(|s| !s.is_empty()).unwrap_or_else(|| "epub".into());
-        Ok(Some(Candidate { md5: md5.to_string(), title: text(f.show_title), author: text(f.show_author), lang: text(f.lang), size: num(f.size), year: num(f.year) as i32, score: 1.0, by_id: false, format, picked: true }))
+        let all = |field: Field| d.get_all(field).filter_map(|v| v.as_str().map(str::to_string)).collect::<Vec<_>>();
+        Ok(Some(Candidate { md5: md5.to_string(), title: text(f.show_title), author: text(f.show_author), lang: text(f.lang), size: num(f.size), year: num(f.year) as i32, score: 1.0, by_id: false, format, picked: true, publisher: text(f.publisher), edition: text(f.edition), problems: all(f.problems) }))
     }
 }
 
@@ -345,7 +390,7 @@ mod tests {
     use super::*;
 
     fn rec(md5: &str, title: &str, author: &str, isbn: &str) -> Record {
-        Record { md5: md5.into(), title: title.into(), author: author.into(), lang: "en".into(), size: 500_000, year: 2000, isbns: if isbn.is_empty() { vec![] } else { vec![isbn.into()] }, ols: vec![], format: "epub".into(), torrents: vec![format!("external/libgen_rs_fic/f_{md5}.torrent")], ipfs: vec![], names: vec![] }
+        Record { md5: md5.into(), title: title.into(), author: author.into(), lang: "en".into(), size: 500_000, year: 2000, isbns: if isbn.is_empty() { vec![] } else { vec![isbn.into()] }, ols: vec![], format: "epub".into(), torrents: vec![format!("external/libgen_rs_fic/f_{md5}.torrent")], ..Default::default() }
     }
 
     #[test]

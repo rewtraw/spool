@@ -37,7 +37,7 @@ pub struct BookSettings {
     /// Where Florilegium answers, such as `http://melchior:8790`; empty keeps books in Spool.
     pub florilegium_url: String,
     pub florilegium_token: String,
-    /// Languages books are read in, as two-letter codes: "en", or "en, fr". The index holds
+    /// Languages books are read in, as codes: "en", or "en, el, grc, la". The index holds
     /// these alone.
     pub languages: String,
 }
@@ -50,7 +50,9 @@ impl Default for BookSettings {
 
 impl BookSettings {
     pub fn languages(&self) -> Vec<String> {
-        let l: Vec<String> = self.languages.split([',', ' ']).map(|s| s.trim().to_lowercase()).filter(|s| s.len() == 2).collect();
+        // Two letters, or three for a language that has no two-letter code: "grc" is Ancient
+        // Greek, "cop" Coptic, "syc" Syriac.
+        let l: Vec<String> = self.languages.split([',', ' ']).map(|s| s.trim().to_lowercase()).filter(|s| (2..=3).contains(&s.len()) && s.chars().all(|c| c.is_ascii_lowercase())).collect();
         if l.is_empty() {
             vec!["en".into()]
         } else {
@@ -78,6 +80,12 @@ pub struct Candidate {
     /// Chosen by a person, who is taken at their word: a translation's title need not match the
     /// original's.
     pub picked: bool,
+    /// Who published it and which edition it is, as far as Anna's Archive knows.
+    pub publisher: String,
+    pub edition: String,
+    /// What Anna's Archive found wrong with the file: it is broken, mislabelled, of poor
+    /// quality, or a worse copy of another. Such a file is never taken without asking.
+    pub problems: Vec<String>,
 }
 
 impl Candidate {
@@ -349,6 +357,9 @@ pub fn pick(c: &[Candidate]) -> Option<usize> {
 /// behind it.
 fn pick_of(c: &[Candidate]) -> Option<usize> {
     let top = c.first()?;
+    if !top.problems.is_empty() {
+        return None;
+    }
     if top.by_id && top.score >= 0.8 {
         return Some(0);
     }
@@ -477,7 +488,10 @@ impl App {
         }
         let Some(c) = self.books.shelf.by_md5(&md5)? else { bail!("no file with that MD5 is in the index of Anna's Archive") };
         let language = Some(c.lang.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| self.settings.general().books.languages()[0].clone());
+        let about = self.books.shelf.sources(&md5).ok().flatten().unwrap_or_default();
         let mut b = Book {
+            cover: about.cover,
+            description: about.description,
             added_from: md5,
             title: c.title.clone(),
             authors: Some(c.author.clone()).filter(|a| !a.is_empty()).into_iter().collect(),

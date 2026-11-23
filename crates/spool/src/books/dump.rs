@@ -217,6 +217,33 @@ struct Unified {
     language_codes: Vec<String>,
     identifiers_unified: Ids,
     classifications_unified: Classes,
+    title_additional: Vec<String>,
+    author_additional: Vec<String>,
+    publisher_best: Option<String>,
+    edition_varia_best: Option<String>,
+    cover_url_best: Option<String>,
+    original_filename_best: Option<String>,
+    stripped_description_best: Option<String>,
+    problems: Vec<Problem>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Problem {
+    #[serde(rename = "type")]
+    kind: String,
+    /// A problem only while Anna's Archive's own servers have no copy: not the file's.
+    only_if_no_partner_server: bool,
+}
+
+/// At most this many characters, cut at a word.
+fn at_most(s: Option<String>, n: usize) -> String {
+    let s = s.unwrap_or_default().trim().to_string();
+    if s.chars().count() <= n {
+        return s;
+    }
+    let cut: String = s.chars().take(n).collect();
+    format!("{}…", cut.rsplit_once(' ').map_or(cut.as_str(), |(a, _)| a))
 }
 
 #[derive(Deserialize, Default)]
@@ -294,7 +321,32 @@ pub fn read_records(input: impl Read, languages: &[String], mut each: impl FnMut
         isbns.dedup();
         let ids = u.identifiers_unified;
         let names = ids.zlib.into_iter().chain(ids.aacid).collect();
-        each(Record { md5, title, author: u.author_best.unwrap_or_default(), lang, size: number(&u.filesize_best), year: number(&u.year_best), isbns, ols: ids.ol, format: format.into(), torrents: u.classifications_unified.torrent, ipfs: ids.ipfs_cid, names })?;
+        let author = u.author_best.unwrap_or_default();
+        let titles = u.title_additional.into_iter().filter(|t| !t.trim().is_empty() && *t != title).take(8).collect();
+        let authors = u.author_additional.into_iter().filter(|a| !a.trim().is_empty() && *a != author).take(8).collect();
+        let problems = u.problems.into_iter().filter(|p| !p.only_if_no_partner_server && !p.kind.is_empty()).map(|p| p.kind).collect();
+        each(Record {
+            md5,
+            title,
+            author,
+            lang,
+            size: number(&u.filesize_best),
+            year: number(&u.year_best),
+            isbns,
+            ols: ids.ol,
+            format: format.into(),
+            torrents: u.classifications_unified.torrent,
+            ipfs: ids.ipfs_cid,
+            names,
+            titles,
+            authors,
+            publisher: at_most(u.publisher_best, 200),
+            edition: at_most(u.edition_varia_best, 200),
+            problems,
+            cover: u.cover_url_best.filter(|c| c.starts_with("https://")).unwrap_or_default(),
+            description: at_most(u.stripped_description_best, 2000),
+            filename: at_most(u.original_filename_best, 300),
+        })?;
     }
     Ok(n)
 }
@@ -490,7 +542,7 @@ mod tests {
     #[test]
     fn epubs_and_book_pdfs_in_the_languages_read_are_kept() {
         let lines = [
-            r#"{"_id":"md5:1","_source":{"file_unified_data":{"title_best":"The Left Hand of Darkness","author_best":"Le Guin, Ursula K.","extension_best":"epub","filesize_best":523000,"year_best":"1969","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["0123456789abcdef0123456789abcdef"],"isbn13":["9780441478125"],"ol":["OL24215271M"],"ipfs_cid":["bafk1"],"zlib":["1234"]},"classifications_unified":{"torrent":["external/libgen_rs_fic/f_1000.torrent"]}}}}"#,
+            r#"{"_id":"md5:1","_source":{"file_unified_data":{"title_best":"The Left Hand of Darkness","author_best":"Le Guin, Ursula K.","extension_best":"epub","filesize_best":523000,"year_best":"1969","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["0123456789abcdef0123456789abcdef"],"isbn13":["9780441478125"],"ol":["OL24215271M"],"ipfs_cid":["bafk1"],"zlib":["1234"]},"classifications_unified":{"torrent":["external/libgen_rs_fic/f_1000.torrent"]},"title_additional":["La main gauche de la nuit"],"author_additional":["Le Guin, Ursula K.","Translated by Someone"],"publisher_best":"Ace","edition_varia_best":"Ace Books, 1976","problems":[{"type":"lgli_broken","descr":"","only_if_no_partner_server":false},{"type":"no_server","descr":"","only_if_no_partner_server":true}]}}}"#,
             r#"{"_id":"md5:2","_source":{"file_unified_data":{"title_best":"A paper","extension_best":"pdf","content_type_best":"journal_article","identifiers_unified":{"md5":["11111111111111111111111111111111"]}}}}"#,
             r#"{"_id":"md5:3","_source":{"file_unified_data":{"title_best":"Le Petit Prince","extension_best":"epub","most_likely_language_codes":["fr"],"identifiers_unified":{"md5":["22222222222222222222222222222222"]}}}}"#,
             r#"{"_id":"md5:4","_source":{"file_unified_data":{"title_best":"Arktos","author_best":"Godwin, Joscelyn","extension_best":"pdf","content_type_best":"book_nonfiction","most_likely_language_codes":["en"],"identifiers_unified":{"md5":["33333333333333333333333333333333"]}}}}"#,
@@ -510,6 +562,7 @@ mod tests {
         assert_eq!(got[0].isbns, vec!["9780441478125"]);
         assert_eq!(got[0].size, 523000);
         assert_eq!(got[0].year, 1969);
+        assert_eq!((got[0].titles.as_slice(), got[0].authors.as_slice(), got[0].publisher.as_str(), got[0].problems.as_slice()), (&["La main gauche de la nuit".to_string()][..], &["Translated by Someone".to_string()][..], "Ace", &["lgli_broken".to_string()][..]));
         assert_eq!((got[0].torrents.as_slice(), got[0].ipfs.as_slice(), got[0].names.as_slice()), (&["external/libgen_rs_fic/f_1000.torrent".to_string()][..], &["bafk1".to_string()][..], &["1234".to_string()][..]));
     }
 

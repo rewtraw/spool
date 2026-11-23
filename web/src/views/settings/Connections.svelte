@@ -128,7 +128,7 @@
       <fieldset class="card">
         <legend>Books</legend>
         <Secret label="Anna's Archive key" set={set('books.annas_key')} bind:value={typed['books.annas_key']} bind:cleared={cleared['books.annas_key']} hint="From your account page on Anna's Archive, once you are a member." />
-        <label class="field narrow">Languages<input class="input" bind:value={g.books.languages} placeholder="en" autocomplete="off" /><span class="hint">Two-letter codes: <code>en</code>, or <code>en, fr</code>. The book index keeps books in these alone.</span></label>
+        <label class="field narrow">Languages<input class="input" bind:value={g.books.languages} placeholder="en" autocomplete="off" /><span class="hint">Language codes: <code>en</code>, or <code>en, el, grc, la</code> (three letters where a language has no two-letter code, as Ancient Greek, <code>grc</code>, has not). The book index keeps books in these alone, from its next build.</span></label>
         <div class="cols">
           <label class="field">Florilegium<input class="input mono" bind:value={g.books.florilegium_url} placeholder="http://melchior:8790" autocomplete="off" /><span class="hint">Books go onto its shelf and into its library. Without it they are kept in Spool.</span></label>
           <Secret label="Its token" set={set('books.florilegium_token')} bind:value={typed['books.florilegium_token']} bind:cleared={cleared['books.florilegium_token']} />

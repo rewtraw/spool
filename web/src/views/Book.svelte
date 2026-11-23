@@ -165,7 +165,7 @@
           <tbody>
             {#each b.candidates as c, i (c.md5)}
               <tr>
-                <td><div class="break name">{c.title}</div><div class="faint small">{c.author || 'No author given'}{c.by_id ? ' · ISBN matches' : ''}</div></td>
+                <td><div class="break name">{c.title}</div><div class="faint small">{c.author || 'No author given'}{c.by_id ? ' · ISBN matches' : ''}</div>{#if c.publisher || c.edition}<div class="faint small break">{[c.publisher, c.edition].filter(Boolean).join(' · ')}</div>{/if}{#if c.problems?.length}<div class="small warn" title="Anna's Archive found this wrong with the file, so it is never taken without asking">Flagged: {c.problems.join(', ').replaceAll('_', ' ')}</div>{/if}</td>
                 <td style="white-space:nowrap">{c.format === 'pdf' ? 'PDF' : 'EPUB'}</td>
                 <td class="muted">{c.lang || '?'}</td>
                 <td class="muted">{c.year || '?'}</td>
