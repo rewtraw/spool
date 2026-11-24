@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spool: your movies and shows, found, filed and ready to play</title>
-<meta name="description" content="Spool is an app for your own movie and TV library. Tell it what you want to watch, and it finds it, downloads it, files it and plays it on your television.">
-<meta property="og:title" content="Spool: your movies and shows, found, filed and ready to play">
-<meta property="og:description" content="Spool is an app for your own movie and TV library. Tell it what you want to watch, and it finds it, downloads it, files it and plays it on your television.">
+<title>Spool: your movies, shows, books and music, found, filed and ready</title>
+<meta name="description" content="Spool is an app for your own media library. Tell it which movies, shows, books and albums you want, and it finds them, downloads them, files them and plays them, on your television and wherever else you are.">
+<meta property="og:title" content="Spool: your movies, shows, books and music, found, filed and ready">
+<meta property="og:description" content="Spool is an app for your own media library. Tell it which movies, shows, books and albums you want, and it finds them, downloads them, files them and plays them, on your television and wherever else you are.">
 <meta property="og:image" content="assets/library.png">
 <link rel="icon" href="assets/mark.svg">
 <link rel="stylesheet" href="assets/site.css">
@@ -26,9 +26,9 @@
     </nav>
   </header>
   <div class="hero home">
-    <p class="eyebrow">An app for your own movie and TV library</p>
+    <p class="eyebrow">An app for your own media library</p>
     <h1>Pick something to watch. Spool does the rest.</h1>
-    <p class="lede">Tell Spool which movies and shows you want. It <b>finds them, downloads them, files them and plays them on your television</b>, and keeps new episodes coming.</p>
+    <p class="lede">Tell Spool which movies, shows, books and albums you want. It <b>finds them, downloads them, files them and plays them on your television</b>, keeps new episodes coming, and does the same for the channels and lists you follow.</p>
     <div class="cta">
       <a class="btn primary" href="#start">Get started</a>
       <a class="btn" href="guide/">How it works</a>
@@ -50,12 +50,14 @@
 
   <section class="why">
     <p class="eyebrow">Why</p>
-    <h2>One app where there used to be four.</h2>
-    <p class="sub">Most people do this with one program for movies, another for shows, a third to download and a fourth to play it all. Spool is all of it, so there is one place to look when you wonder where something is.</p>
+    <h2>One app where there used to be six.</h2>
+    <p class="sub">Most people do this with one program for movies, another for shows, more for music and books, one to download and another to play it all. Spool is all of it, so there is one place to look when you wonder where something is.</p>
     <div class="merge">
       <div class="stack">
         <div class="chip"><b>Radarr</b><span>Movies</span></div>
         <div class="chip"><b>Sonarr</b><span>Series</span></div>
+        <div class="chip"><b>Lidarr</b><span>Music</span></div>
+        <div class="chip"><b>Readarr</b><span>Books</span></div>
         <div class="chip"><b>SABnzbd</b><span>Downloads</span></div>
         <div class="chip"><b>Plex, Jellyfin or Emby</b><span>Playing</span></div>
       </div>
@@ -73,6 +75,19 @@
     <div class="window shot">
       <div class="bar"><i></i><i></i><i></i></div>
       <img src="assets/library.png" alt="Spool's library view: a grid of posters, each marked as in the library or missing" width="1440" height="960" loading="lazy">
+    </div>
+  </section>
+
+  <section>
+    <p class="eyebrow">Not only films</p>
+    <h2>Books, music, channels and the moments in between.</h2>
+    <div class="grid">
+      <div><h3>Books</h3><p>Find a book by its title or author, choose the edition, and Spool fetches the EPUB, or a PDF when there is no EPUB, from its own index of Anna’s Archive.</p></div>
+      <div><h3>Music</h3><p>Ask for an album and it arrives in FLAC, checked track by track and filed. Any Subsonic app plays the whole collection.</p></div>
+      <a href="guide/videos.html"><h3>Channels and videos</h3><p>Follow a YouTube channel, or paste a link from almost any site. New videos are filed like the episodes of a show.</p></a>
+      <a href="guide/videos.html#lists-that-add-themselves"><h3>Lists that add themselves</h3><p>Follow a Letterboxd list, a watchlist or the Criterion Collection, and every film on it is added, now and later.</p></a>
+      <a href="guide/clips.html"><h3>Clips, found by what is said</h3><p>Search the whole library for a line, by its words or its meaning, and cut the moment into a short video to send.</p></a>
+      <div><h3>Your own video links</h3><p>Share a clip or a channel’s video with anyone at an address of your own. The link plays in any browser and ends when you stop sharing.</p></div>
     </div>
   </section>
 
@@ -105,7 +120,7 @@ cargo run --release -p spool -- serve</pre>
 
   <footer>
     <div>Spool is free software under the <a href="https://github.com/rewtraw/spool/blob/main/LICENSE">GNU GPL v3</a>. Its release-name parsers are ported from Radarr and Sonarr.</div>
-    <div>Movie details come from TMDB; this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from TVmaze. The titles shown are public-domain films with placeholder artwork.</div>
+    <div>Movie details come from TMDB; this product uses the TMDB API but is not endorsed or certified by TMDB. Series details come from TVmaze, books from Open Library and music from MusicBrainz. The titles shown are public-domain films with placeholder artwork.</div>
     <div>Spool is a tool for managing a media library. You are responsible for what you use it to download.</div>
   </footer>
 </div>
